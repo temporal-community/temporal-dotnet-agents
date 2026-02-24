@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/samples/BasicClientWorker/">
+    <Project Path="samples/SplitWorkerClient/Client/Client.csproj" />
+    <Project Path="samples/SplitWorkerClient/Worker/Worker.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Temporalio.Extensions.Agents/Temporalio.Extensions.Agents.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Temporalio.Extensions.Agents.Tests/Temporalio.Extensions.Agents.Tests.csproj" />
+    <Project Path="tests/Temporalio.Extensions.Agents.IntegrationTests/Temporalio.Extensions.Agents.IntegrationTests.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/BasicAgent/BasicAgent.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,74 @@
+# Auto detect text files and perform LF normalization
+*        text=auto
+
+# C# source files
+*.cs     text diff=csharp
+
+# Project files
+*.csproj text merge=union
+*.vbproj text merge=union
+*.fsproj text merge=union
+*.dbproj text merge=union
+*.sqlproj text merge=union
+
+# Solution files
+*.sln    text merge=union eol=crlf
+*.slnx   text merge=union
+
+# .NET Core / SDK-style project files
+*.props  text merge=union
+*.targets text merge=union
+
+# Configuration and markup files
+*.config text
+*.json   text
+*.xml    text
+*.html   text diff=html
+*.htm    text diff=html
+*.css    text
+*.js     text
+*.ts     text
+*.md     text
+*.yaml   text
+*.yml    text
+
+# Razor files
+*.razor  text diff=html
+*.cshtml text diff=html
+
+# Scripts
+*.sh     text eol=lf
+*.ps1    text eol=crlf
+*.psm1   text eol=crlf
+*.psd1   text eol=crlf
+*.bat    text eol=crlf
+*.cmd    text eol=crlf
+
+# Serialization
+*.resx   text merge=union
+
+# Binary files (preserve exactly)
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.bmp    binary
+*.pdf    binary
+*.zip    binary
+*.nupkg  binary
+*.snupkg binary
+*.dll    binary
+*.exe    binary
+*.pdb    binary
+
+# Fonts
+*.woff   binary
+*.woff2  binary
+*.eot    binary
+*.ttf    binary
+*.otf    binary
+
+# Certificates
+*.pfx    binary
+*.p12    binary
