@@ -4,6 +4,9 @@
     <AssemblyName>Temporalio.Extensions.Agents</AssemblyName>
     <RootNamespace>Temporalio.Extensions.Agents</RootNamespace>
     <Description>Temporal integration for Microsoft Agent Framework</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>Temporalio.Extensions.Agents</PackageId>
+    <PackageTags>temporal;ai;agents;workflow;dotnet;microsoft-agent-framework</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
