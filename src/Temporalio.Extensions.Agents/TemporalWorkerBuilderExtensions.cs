@@ -79,6 +79,33 @@ public static class TemporalWorkerBuilderExtensions
         builder.AddWorkflow<AgentWorkflow>();
         builder.AddSingletonActivities<AgentActivities>();
 
+        // ── Scheduling support ──────────────────────────────────────────────
+
+        // AgentJobWorkflow: simple fire-and-forget workflow for scheduled/deferred runs.
+        builder.AddWorkflow<AgentJobWorkflow>();
+
+        // ScheduleActivities: enables one-time deferred runs from orchestrating workflows.
+        // Pre-register with a factory so the taskQueue closure is captured correctly.
+        // AddSingletonActivities uses TryAddSingleton internally, so it respects this registration.
+        services.AddSingleton(sp => new ScheduleActivities(
+            sp.GetRequiredService<ITemporalClient>(),
+            taskQueue));
+        builder.AddSingletonActivities<ScheduleActivities>();
+
+        // ScheduleRegistrationService: creates configured schedules at worker startup.
+        // Only registered when at least one scheduled run has been declared.
+        // Uses AddHostedService (TryAddEnumerable) rather than AddSingleton<IHostedService> so
+        // that deduplication is keyed on (IHostedService, ScheduleRegistrationService) — not just
+        // IHostedService — leaving all other hosted service registrations unaffected.
+        if (agentsOptions.GetScheduledRuns().Count > 0)
+        {
+            services.AddHostedService<ScheduleRegistrationService>(sp =>
+                new ScheduleRegistrationService(
+                    sp.GetRequiredService<ITemporalAgentClient>(),
+                    agentsOptions,
+                    sp.GetService<ILogger<ScheduleRegistrationService>>()));
+        }
+
         return builder;
     }
 }

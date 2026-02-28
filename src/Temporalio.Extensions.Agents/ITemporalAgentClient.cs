@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using Temporalio.Client.Schedules;
 
 namespace Temporalio.Extensions.Agents;
 
@@ -67,4 +68,60 @@ public interface ITemporalAgentClient
         TemporalAgentSessionId sessionId,
         ApprovalDecision decision,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Starts a new agent session with a deferred start time.
+    /// The agent workflow is created immediately but does not begin executing until
+    /// <paramref name="delay"/> has elapsed.
+    /// </summary>
+    /// <param name="sessionId">The session ID that identifies the agent and session key.</param>
+    /// <param name="request">The request to send once the delay has elapsed.</param>
+    /// <param name="delay">How long to wait before the workflow begins executing.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// <b>Known limitation:</b> if a workflow with the same <paramref name="sessionId"/> is
+    /// already running (due to <c>UseExisting</c> conflict policy), the delay is ignored and
+    /// the existing workflow is reused immediately. This method only applies the delay when
+    /// starting a brand-new session.
+    /// </remarks>
+    Task RunAgentDelayedAsync(
+        TemporalAgentSessionId sessionId,
+        RunRequest request,
+        TimeSpan delay,
+        CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// Creates a Temporal Schedule that fires <see cref="AgentJobWorkflow"/> on the given spec.
+    /// Each scheduled run is fire-and-forget — results are visible in the Temporal Web UI.
+    /// </summary>
+    /// <param name="agentName">Name of the agent to invoke on each schedule tick.</param>
+    /// <param name="scheduleId">
+    /// Unique identifier for this schedule. Also used to build the workflow ID for each run:
+    /// <c>ta-{agentName}-scheduled-{scheduleId}</c>.
+    /// </param>
+    /// <param name="request">The request to send to the agent on each scheduled run.</param>
+    /// <param name="spec">When and how often the schedule fires.</param>
+    /// <param name="policy">Overlap and catchup policy. Defaults to <see cref="SchedulePolicy"/> defaults.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A <see cref="ScheduleHandle"/> for pausing, triggering, updating, or deleting the schedule.</returns>
+    /// <remarks>
+    /// <b>Schedule orphaning:</b> schedules are independent of workers. Removing an agent from
+    /// <see cref="TemporalAgentsOptions"/> does <em>not</em> delete its schedule — it will keep
+    /// firing. Use <see cref="GetAgentScheduleHandle"/> to retrieve the handle and call
+    /// <c>DeleteAsync()</c> when decommissioning an agent.
+    /// </remarks>
+    Task<ScheduleHandle> ScheduleAgentAsync(
+        string agentName,
+        string scheduleId,
+        RunRequest request,
+        ScheduleSpec spec,
+        SchedulePolicy? policy = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns a <see cref="ScheduleHandle"/> for an existing schedule by its ID.
+    /// Use the handle to pause, trigger, update, or delete the schedule.
+    /// </summary>
+    /// <param name="scheduleId">The schedule ID passed to <see cref="ScheduleAgentAsync"/>.</param>
+    ScheduleHandle GetAgentScheduleHandle(string scheduleId);
 }

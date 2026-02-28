@@ -118,4 +118,32 @@ internal static partial class Logs
         Message = "[{AgentName}/{WorkflowId}] Approval resolved (RequestId: {RequestId}, Approved: {Approved})")]
     public static partial void LogWorkflowApprovalResolved(
         this ILogger logger, string agentName, string workflowId, string requestId, bool approved);
+
+    // ── Scheduling logs ────────────────────────────────────────────────────────
+
+    [LoggerMessage(EventId = 20, Level = LogLevel.Debug,
+        Message = "[{AgentName}/{WorkflowId}] Starting delayed agent session (Delay: {Delay})")]
+    public static partial void LogClientDelayedStart(
+        this ILogger logger, string agentName, string workflowId, TimeSpan delay);
+
+    [LoggerMessage(EventId = 21, Level = LogLevel.Debug,
+        Message = "[{ScheduleId}] Creating schedule for agent '{AgentName}'")]
+    public static partial void LogScheduleAgentCreating(
+        this ILogger logger, string scheduleId, string agentName);
+
+    [LoggerMessage(EventId = 22, Level = LogLevel.Information,
+        Message = "[{ScheduleId}] Schedule created for agent '{AgentName}'")]
+    public static partial void LogScheduleCreated(
+        this ILogger logger, string scheduleId, string agentName);
+
+    [LoggerMessage(EventId = 23, Level = LogLevel.Warning,
+        Message = "[{ScheduleId}] Schedule for agent '{AgentName}' already exists — skipping creation. " +
+                  "To update the spec, delete the schedule first via GetAgentScheduleHandle().")]
+    public static partial void LogScheduleAlreadyExists(
+        this ILogger logger, string scheduleId, string agentName);
+
+    [LoggerMessage(EventId = 24, Level = LogLevel.Debug,
+        Message = "[{AgentName}/{WorkflowId}] Dispatching delayed request to agent session (Delay: {Delay})")]
+    public static partial void LogProxyDispatchingDelayedRequest(
+        this ILogger logger, string agentName, string workflowId, TimeSpan delay);
 }

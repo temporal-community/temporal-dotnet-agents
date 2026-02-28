@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
+using Temporalio.Client.Schedules;
 
 namespace Temporalio.Extensions.Agents;
 
@@ -127,7 +128,7 @@ internal class DefaultTemporalAgentClient(
 
         var routedSessionId = new TemporalAgentSessionId(chosenAgentName, sessionKey);
 
-        Logs.LogClientRouting(_logger, chosenAgentName, routedSessionId.WorkflowId);
+        _logger.LogClientRouting(chosenAgentName, routedSessionId.WorkflowId);
 
         return await RunAgentAsync(routedSessionId, request, cancellationToken).ConfigureAwait(false);
     }
@@ -155,5 +156,112 @@ internal class DefaultTemporalAgentClient(
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
         return await handle.ExecuteUpdateAsync<AgentWorkflow, ApprovalTicket>(
             wf => wf.SubmitApprovalAsync(decision));
+    }
+
+    /// <inheritdoc/>
+    public async Task RunAgentDelayedAsync(
+        TemporalAgentSessionId sessionId,
+        RunRequest request,
+        TimeSpan delay,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
+            TemporalAgentTelemetry.AgentScheduleDelayedSpanName,
+            ActivityKind.Client);
+
+        span?.SetTag(TemporalAgentTelemetry.AgentNameAttribute, sessionId.AgentName);
+        span?.SetTag(TemporalAgentTelemetry.AgentSessionIdAttribute, sessionId.WorkflowId);
+        span?.SetTag(TemporalAgentTelemetry.ScheduleDelayAttribute, delay.ToString());
+
+        _logger.LogClientDelayedStart(sessionId.AgentName, sessionId.WorkflowId, delay);
+
+        // StartDelay only applies when starting a NEW workflow. If the session workflow is
+        // already running (UseExisting policy), the delay is ignored and the existing run is
+        // reused immediately. This is documented as a known limitation.
+        var workflowOptions = new WorkflowOptions(sessionId.WorkflowId, taskQueue)
+        {
+            IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+            IdReusePolicy = WorkflowIdReusePolicy.AllowDuplicate,
+            StartDelay = delay,
+        };
+
+        try
+        {
+            await client.StartWorkflowAsync(
+                (AgentWorkflow wf) => wf.RunAsync(new AgentWorkflowInput
+                {
+                    AgentName = sessionId.AgentName,
+                    TaskQueue = taskQueue,
+                    TimeToLive = options.GetTimeToLive(sessionId.AgentName),
+                    ActivityStartToCloseTimeout = options.ActivityStartToCloseTimeout,
+                    ActivityHeartbeatTimeout = options.ActivityHeartbeatTimeout
+                }),
+                workflowOptions);
+        }
+        catch (Exception ex)
+        {
+            span?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<ScheduleHandle> ScheduleAgentAsync(
+        string agentName,
+        string scheduleId,
+        RunRequest request,
+        ScheduleSpec spec,
+        SchedulePolicy? policy = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(spec);
+
+        // Each schedule fire gets a deterministic workflow ID. Temporal appends a timestamp
+        // automatically: ta-weatheragent-scheduled-daily-2026-02-28T09:00:00Z
+        var workflowId = $"ta-{agentName.ToLowerInvariant()}-scheduled-{scheduleId}";
+
+        var action = ScheduleActionStartWorkflow.Create(
+            (AgentJobWorkflow wf) => wf.RunAsync(new AgentJobInput
+            {
+                AgentName = agentName,
+                TaskQueue = taskQueue,
+                Request = request,
+                ActivityStartToCloseTimeout = options.ActivityStartToCloseTimeout,
+                ActivityHeartbeatTimeout = options.ActivityHeartbeatTimeout,
+            }),
+            new WorkflowOptions(workflowId, taskQueue));
+
+        using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
+            TemporalAgentTelemetry.AgentScheduleCreateSpanName,
+            ActivityKind.Client);
+
+        span?.SetTag(TemporalAgentTelemetry.AgentNameAttribute, agentName);
+        span?.SetTag(TemporalAgentTelemetry.ScheduleIdAttribute, scheduleId);
+
+        _logger.LogScheduleAgentCreating(scheduleId, agentName);
+
+        try
+        {
+            return await client.CreateScheduleAsync(
+                scheduleId,
+                new Schedule(action, spec) { Policy = policy ?? new SchedulePolicy() });
+        }
+        catch (Exception ex)
+        {
+            span?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public ScheduleHandle GetAgentScheduleHandle(string scheduleId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
+        return client.GetScheduleHandle(scheduleId);
     }
 }

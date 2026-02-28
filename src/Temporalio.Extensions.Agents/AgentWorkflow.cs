@@ -37,7 +37,7 @@ internal class AgentWorkflow
 
         TimeSpan ttl = input.TimeToLive ?? TimeSpan.FromDays(14);
 
-        Logs.LogWorkflowStarted(Workflow.Logger, input.AgentName, Workflow.Info.WorkflowId, ttl);
+        Workflow.Logger.LogWorkflowStarted(input.AgentName, Workflow.Info.WorkflowId, ttl);
 
         // Wait until shutdown is requested, TTL elapses, or history is large enough to warrant continue-as-new.
         bool conditionMet = await Workflow.WaitConditionAsync(
@@ -47,11 +47,11 @@ internal class AgentWorkflow
         if (!conditionMet)
         {
             // TTL elapsed without condition being met — session complete.
-            Logs.LogWorkflowTTLExpired(Workflow.Logger, input.AgentName, Workflow.Info.WorkflowId);
+            Workflow.Logger.LogWorkflowTTLExpired(input.AgentName, Workflow.Info.WorkflowId);
         }
         else if (Workflow.ContinueAsNewSuggested && !_shutdownRequested)
         {
-            Logs.LogWorkflowContinueAsNew(Workflow.Logger, input.AgentName, Workflow.Info.WorkflowId, _history.Count);
+            Workflow.Logger.LogWorkflowContinueAsNew(input.AgentName, Workflow.Info.WorkflowId, _history.Count);
 
             // Transfer history and StateBag to a fresh workflow run.
             var carriedHistory = _history.ToList();
@@ -81,7 +81,7 @@ internal class AgentWorkflow
         await Workflow.WaitConditionAsync(() => !_isProcessing);
         _isProcessing = true;
 
-        Logs.LogWorkflowUpdateReceived(Workflow.Logger, _input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId);
+        Workflow.Logger.LogWorkflowUpdateReceived(_input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId);
 
         try
         {
@@ -107,7 +107,7 @@ internal class AgentWorkflow
 
             _history.Add(TemporalAgentStateResponse.FromResponse(request.CorrelationId, result.Response));
 
-            Logs.LogWorkflowUpdateCompleted(Workflow.Logger, _input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId);
+            Workflow.Logger.LogWorkflowUpdateCompleted(_input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId);
             return result.Response;
         }
         finally
@@ -132,7 +132,7 @@ internal class AgentWorkflow
     [WorkflowSignal("Shutdown")]
     public Task RequestShutdownAsync()
     {
-        Logs.LogWorkflowShutdownRequested(Workflow.Logger, _input?.AgentName ?? "unknown", Workflow.Info.WorkflowId);
+        Workflow.Logger.LogWorkflowShutdownRequested(_input?.AgentName ?? "unknown", Workflow.Info.WorkflowId);
         _shutdownRequested = true;
         return Task.CompletedTask;
     }
@@ -160,7 +160,7 @@ internal class AgentWorkflow
         _pendingApproval = request;
         _approvalDecision = null;
 
-        Logs.LogWorkflowApprovalRequested(Workflow.Logger, _input?.AgentName ?? "unknown",
+        Workflow.Logger.LogWorkflowApprovalRequested(_input?.AgentName ?? "unknown",
             Workflow.Info.WorkflowId, request.RequestId, request.Action);
 
         await Workflow.WaitConditionAsync(
@@ -170,7 +170,7 @@ internal class AgentWorkflow
         _pendingApproval = null;
         _approvalDecision = null;
 
-        Logs.LogWorkflowApprovalResolved(Workflow.Logger, _input?.AgentName ?? "unknown",
+        Workflow.Logger.LogWorkflowApprovalResolved(_input?.AgentName ?? "unknown",
             Workflow.Info.WorkflowId, request.RequestId, decision.Approved);
 
         return new ApprovalTicket

@@ -52,7 +52,7 @@ internal class TemporalAIAgentProxy(
     protected override ValueTask<AgentSession> CreateSessionCoreAsync(CancellationToken cancellationToken = default)
     {
         var sessionId = TemporalAgentSessionId.WithRandomKey(this.Name!);
-        Logs.LogProxySessionCreated(_logger, sessionId.AgentName, sessionId.WorkflowId);
+        _logger.LogProxySessionCreated(sessionId.AgentName, sessionId.WorkflowId);
         return new ValueTask<AgentSession>(new TemporalAgentSession(sessionId));
     }
 
@@ -96,7 +96,7 @@ internal class TemporalAIAgentProxy(
         var request = new RunRequest([.. messages], responseFormat, enableToolCalls, enableToolNames);
         var sessionId = temporalSession.SessionId;
 
-        Logs.LogProxyDispatchingRequest(_logger, sessionId.AgentName, sessionId.WorkflowId, isFireAndForget);
+        _logger.LogProxyDispatchingRequest(sessionId.AgentName, sessionId.WorkflowId, isFireAndForget);
 
         if (isFireAndForget)
         {
@@ -114,5 +114,29 @@ internal class TemporalAIAgentProxy(
         CancellationToken cancellationToken = default)
     {
         throw new NotSupportedException("Streaming is not supported for Temporal agent proxies.");
+    }
+
+    /// <summary>
+    /// Sends a deferred request to the agent session, applying <paramref name="delay"/> before
+    /// the workflow begins executing. Delegates to
+    /// <see cref="ITemporalAgentClient.RunAgentDelayedAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// The delay is only applied when starting a <em>new</em> session. If a workflow with the
+    /// same session ID is already running, it is reused immediately regardless of the delay.
+    /// </remarks>
+    internal async Task RunDelayedAsync(
+        IEnumerable<ChatMessage> messages,
+        TemporalAgentSession session,
+        TimeSpan delay,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+
+        var request = new RunRequest([.. messages]);
+        var sessionId = session.SessionId;
+
+        _logger.LogProxyDispatchingDelayedRequest(sessionId.AgentName, sessionId.WorkflowId, delay);
+        await _agentClient.RunAgentDelayedAsync(sessionId, request, delay, cancellationToken);
     }
 }

@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using Temporalio.Client.Schedules;
 
 namespace Temporalio.Extensions.Agents;
 
@@ -16,6 +17,8 @@ public sealed class TemporalAgentsOptions
 
     private readonly Dictionary<string, string> _agentDescriptors =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly List<ScheduleAgentRegistration> _scheduledRuns = [];
 
     private AIAgent? _routerAgent;
 
@@ -187,13 +190,49 @@ public sealed class TemporalAgentsOptions
         return this;
     }
 
+    /// <summary>
+    /// Registers a scheduled agent run that is created with Temporal at worker startup.
+    /// </summary>
+    /// <param name="agentName">Name of the agent to invoke on each schedule tick.</param>
+    /// <param name="scheduleId">
+    /// Unique schedule identifier. If a schedule with this ID already exists on startup,
+    /// a warning is logged and the existing schedule is left unchanged.
+    /// </param>
+    /// <param name="request">The request to send to the agent on each scheduled run.</param>
+    /// <param name="spec">When and how often the schedule fires.</param>
+    /// <param name="policy">Overlap and catchup policy. Defaults to <see cref="SchedulePolicy"/> defaults.</param>
+    /// <remarks>
+    /// <b>Config drift:</b> changing <paramref name="spec"/> in code does not update an existing
+    /// schedule on restart — the already-exists warning is logged and the old spec remains active.
+    /// To apply an updated spec, delete the schedule first via
+    /// <see cref="ITemporalAgentClient.GetAgentScheduleHandle"/> and then restart the worker.
+    /// </remarks>
+    public TemporalAgentsOptions AddScheduledAgentRun(
+        string agentName,
+        string scheduleId,
+        RunRequest request,
+        ScheduleSpec spec,
+        SchedulePolicy? policy = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(spec);
+
+        _scheduledRuns.Add(new ScheduleAgentRegistration(agentName, scheduleId, request, spec, policy));
+        return this;
+    }
+
+    /// <summary>Gets all registered scheduled runs for use by <see cref="ScheduleRegistrationService"/>.</summary>
+    internal IReadOnlyList<ScheduleAgentRegistration> GetScheduledRuns() => _scheduledRuns;
+
     /// <summary>Gets all registered agent factories.</summary>
     internal IReadOnlyDictionary<string, Func<IServiceProvider, AIAgent>> GetAgentFactories() =>
         _agentFactories.AsReadOnly();
 
     /// <summary>Gets the TTL for a specific agent, falling back to <see cref="DefaultTimeToLive"/>.</summary>
     internal TimeSpan? GetTimeToLive(string agentName) =>
-        _agentTimeToLive.TryGetValue(agentName, out TimeSpan? ttl) ? ttl : DefaultTimeToLive;
+        _agentTimeToLive.GetValueOrDefault(agentName, DefaultTimeToLive);
 
     /// <summary>Gets all registered agent descriptors for use by <see cref="IAgentRouter"/>.</summary>
     internal IReadOnlyList<AgentDescriptor> GetAgentDescriptors() =>
