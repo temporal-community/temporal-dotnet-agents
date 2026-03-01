@@ -99,7 +99,7 @@ public sealed class TemporalAIAgent : AIAgent
         // We pass null for the StateBag (no cross-activity-call state needed here).
         var activityInput = new ExecuteAgentInput(_agentName, request, [.. _history]);
 
-        Logs.LogInWorkflowAgentDispatching(Workflow.Logger, _agentName, _history.Count(e => e is TemporalAgentStateRequest));
+        Workflow.Logger.LogInWorkflowAgentDispatching(_agentName, _history.Count(e => e is TemporalAgentStateRequest));
 
         var result = await Workflow.ExecuteActivityAsync(
             (AgentActivities a) => a.ExecuteAgentAsync(activityInput),

@@ -22,6 +22,9 @@ public class TemporalAgentTelemetryTests
     {
         Assert.Equal("agent.turn", TemporalAgentTelemetry.AgentTurnSpanName);
         Assert.Equal("agent.client.send", TemporalAgentTelemetry.AgentClientSendSpanName);
+        Assert.Equal("agent.schedule.create", TemporalAgentTelemetry.AgentScheduleCreateSpanName);
+        Assert.Equal("agent.schedule.delayed", TemporalAgentTelemetry.AgentScheduleDelayedSpanName);
+        Assert.Equal("agent.schedule.one_time", TemporalAgentTelemetry.AgentScheduleOneTimeSpanName);
     }
 
     [Fact]
@@ -33,6 +36,9 @@ public class TemporalAgentTelemetryTests
         Assert.Equal("agent.input_tokens", TemporalAgentTelemetry.InputTokensAttribute);
         Assert.Equal("agent.output_tokens", TemporalAgentTelemetry.OutputTokensAttribute);
         Assert.Equal("agent.total_tokens", TemporalAgentTelemetry.TotalTokensAttribute);
+        Assert.Equal("schedule.id", TemporalAgentTelemetry.ScheduleIdAttribute);
+        Assert.Equal("schedule.delay", TemporalAgentTelemetry.ScheduleDelayAttribute);
+        Assert.Equal("schedule.job_id", TemporalAgentTelemetry.ScheduleJobIdAttribute);
     }
 
     [Fact]
