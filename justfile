@@ -3,6 +3,7 @@ set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]
 solution := "TemporalAgents.slnx"
 configuration := "Release"
 artifacts_dir := "artifacts/packages"
+coverage_dir := "artifacts/coverage"
 unit_tests_dir := "tests/Temporalio.Extensions.Agents.Tests"
 integration_tests_dir := "tests/Temporalio.Extensions.Agents.IntegrationTests"
 
@@ -18,12 +19,12 @@ info:
     @echo "Version   : {{version}}"
     @echo "Config    : {{configuration}}"
     @echo "Artifacts : {{artifacts_dir}}"
-
+    @echo "Coverage  : {{coverage_dir}}"
 # Remove all build output
-clean: clean-source clean-tests clean-samples
+clean: clean-source clean-tests
     @echo "Clean complete."
 
-# Clean source projects
+# Clean source and sample projects (all projects in solution)
 clean-source:
     dotnet clean {{solution}} --configuration {{configuration}} --nologo -v q
 
@@ -31,10 +32,6 @@ clean-source:
 clean-tests:
     dotnet clean {{unit_tests_dir}} --configuration {{configuration}} --nologo -v q
     dotnet clean {{integration_tests_dir}} --configuration {{configuration}} --nologo -v q
-
-# Clean sample projects
-clean-samples:
-    dotnet clean samples --configuration {{configuration}} --nologo -v q 2>/dev/null || true
 
 # Restore NuGet packages
 restore:
@@ -73,7 +70,7 @@ test-coverage: build
         --configuration {{configuration}} \
         --no-build \
         --collect "XPlat Code Coverage" \
-        --results-directory {{artifacts_dir}}/coverage \
+        --results-directory {{coverage_dir}} \
         --logger "console;verbosity=normal"
 
 # Run tests matching a filter expression (e.g. just test-filter "FullyQualifiedName~Router")
@@ -86,7 +83,8 @@ test-filter filter: build
 
 # Pack NuGet packages (Release, into artifacts/packages/)
 pack: clean build
-    dotnet pack {{solution}} \
+    @echo "Creating NuGet packages with version: {{ version }}"
+    @dotnet pack {{solution}} \
         --configuration {{configuration}} \
         --no-build \
         --output {{artifacts_dir}}
@@ -94,17 +92,29 @@ pack: clean build
 
 # Publish to NuGet.org (requires NUGET_API_KEY env var)
 publish-nuget: pack
-    dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
+    @echo "Publishing to NuGet.org..."
+    @if [ -z "$${NUGET_API_KEY:-}" ]; then \
+        echo "❌ NUGET_API_KEY environment variable is not set"; \
+        exit 1; \
+    fi
+    @dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
         --api-key "$NUGET_API_KEY" \
         --source "https://api.nuget.org/v3/index.json" \
         --skip-duplicate
+    @echo "✓ Packages published to NuGet.org"
 
 # Publish to GitHub Packages (requires NUGET_GITHUB_TOKEN env var)
 publish-github: pack
-    dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
+    @echo "Publishing to GitHub Package Registry..."
+    @if [ -z "$${NUGET_GITHUB_TOKEN:-}" ]; then \
+        echo "❌ NUGET_GITHUB_TOKEN environment variable is not set"; \
+        exit 1; \
+    fi
+    @dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
         --api-key "$NUGET_GITHUB_TOKEN" \
         --source "https://nuget.pkg.github.com/cecilphillip/index.json" \
         --skip-duplicate
+    @echo "✓ Packages published to GitHub"
 
 # Alias: build
 compile: build
