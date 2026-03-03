@@ -114,6 +114,41 @@ public class MyController(
 { ... }
 ```
 
+### 3. Configure API Credentials
+
+Samples and applications that use Azure OpenAI (or other LLM providers) need API credentials. Never commit real API keys to version control.
+
+#### Using appsettings.local.json (Recommended for Local Development)
+
+Create a local overrides file in your project (automatically git-ignored):
+
+```bash
+# Create appsettings.local.json with your credentials
+cat > appsettings.local.json <<EOF
+{
+  "OPENAI_API_KEY": "sk-your-key-here",
+  "OPENAI_API_BASE_URL": "https://api.openai.com/v1"
+}
+EOF
+```
+
+The application automatically loads this file (if present) and merges it with `appsettings.json`. This approach keeps API keys out of your repository while allowing different developers or environments to use their own credentials.
+
+#### Using Environment Variables (Recommended for CI/CD and Production)
+
+```bash
+export OPENAI_API_KEY=sk-your-key-here
+export OPENAI_API_BASE_URL=https://api.openai.com/v1
+
+# Then run your application
+dotnet run --project samples/BasicAgent
+```
+
+Configuration sources are resolved in this order:
+1. `appsettings.json` (committed)
+2. `appsettings.local.json` (optional, git-ignored)
+3. Environment variables (highest priority)
+
 ## Usage Examples
 
 ### Sending a Message (External Caller)
