@@ -43,6 +43,7 @@ using var tracerProvider = Sdk.CreateTracerProviderBuilder()
 
 // ── Step 2: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 // ── Step 3: Load configuration ────────────────────────────────────────────────

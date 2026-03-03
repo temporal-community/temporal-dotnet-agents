@@ -19,6 +19,7 @@ using Temporalio.Extensions.Agents;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
 builder.Logging.SetMinimumLevel(LogLevel.Warning); // suppress Temporal SDK noise in the sample
 
 // ── Step 2: Provide an IChatClient ───────────────────────────────────────────

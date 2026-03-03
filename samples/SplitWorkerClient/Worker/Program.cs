@@ -20,6 +20,7 @@ using OpenAI.Chat;
 using Temporalio.Extensions.Agents;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 // ── Step 1: Provide a real IChatClient ───────────────────────────────────────

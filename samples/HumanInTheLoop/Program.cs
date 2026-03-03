@@ -47,6 +47,7 @@ using ChatRole = Microsoft.Extensions.AI.ChatRole;
 
 // ── Configuration ──────────────────────────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
+builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 var apiKey     = builder.Configuration.GetValue<string>("OPENAI_API_KEY")
