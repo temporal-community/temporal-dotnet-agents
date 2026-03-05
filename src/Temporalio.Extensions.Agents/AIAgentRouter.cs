@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace Temporalio.Extensions.Agents;
 
@@ -16,7 +17,7 @@ namespace Temporalio.Extensions.Agents;
 /// <see cref="AIAgentRouter"/> is registered automatically when a router agent is present.
 /// </para>
 /// </remarks>
-public sealed class AIAgentRouter(AIAgent routerAgent) : IAgentRouter
+public sealed class AIAgentRouter(AIAgent routerAgent, ILogger<AIAgentRouter>? logger = null) : IAgentRouter
 {
     /// <inheritdoc/>
     public async Task<string> RouteAsync(
@@ -54,6 +55,15 @@ public sealed class AIAgentRouter(AIAgent routerAgent) : IAgentRouter
             .ConfigureAwait(false);
 
         var responseText = response.Text?.Trim() ?? string.Empty;
+
+        // Guard: if the LLM returned empty/whitespace (e.g. tool-only response), fail fast.
+        if (string.IsNullOrWhiteSpace(responseText))
+        {
+            throw new InvalidOperationException(
+                "Router agent returned an empty response. Ensure the router model is configured " +
+                "to reply with a plain agent name (no tool calls).");
+        }
+
         var validNames = descriptors
             .Select(a => a.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -64,13 +74,29 @@ public sealed class AIAgentRouter(AIAgent routerAgent) : IAgentRouter
             return responseText;
         }
 
-        // Fuzzy fallback: find any valid name contained in the response text.
-        var match = validNames
-            .FirstOrDefault(n => responseText.Contains(n, StringComparison.OrdinalIgnoreCase));
+        // Fuzzy fallback: find all valid names contained in the response text.
+        // If multiple names match (e.g. "WeatherAgent and BillingAgent could help"),
+        // this is ambiguous — reject rather than silently picking one at random.
+        var matches = descriptors
+            .Where(d => responseText.Contains(d.Name, StringComparison.OrdinalIgnoreCase))
+            .Select(d => d.Name)
+            .ToList();
 
-        if (match is not null)
+        if (matches.Count == 1)
         {
-            return match;
+            logger?.LogWarning(
+                "Router fuzzy-matched '{ResponseText}' to '{AgentName}'. " +
+                "Consider tuning the router prompt to return exact agent names.",
+                responseText, matches[0]);
+            return matches[0];
+        }
+
+        if (matches.Count > 1)
+        {
+            throw new InvalidOperationException(
+                $"Router agent response '{responseText}' is ambiguous — " +
+                $"it contains multiple agent names: {string.Join(", ", matches)}. " +
+                "Ensure the router returns exactly one agent name.");
         }
 
         throw new InvalidOperationException(

@@ -102,4 +102,46 @@ public class AIAgentRouterTests
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
             router.RouteAsync(messages, null!));
     }
+
+    [Fact]
+    public async Task RouteAsync_MultipleNamesInResponse_ThrowsAmbiguousException()
+    {
+        // LLM returns text mentioning multiple agent names — should be rejected as ambiguous.
+        var routerAgent = new StubAIAgent("__router__",
+            ResponseWithText("I think WeatherAgent and BillingAgent could help"));
+        var router = new AIAgentRouter(routerAgent);
+        var messages = new List<ChatMessage> { new(ChatRole.User, "Help me.") };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            router.RouteAsync(messages, Descriptors));
+
+        Assert.Contains("ambiguous", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RouteAsync_EmptyResponse_ThrowsInvalidOperationException()
+    {
+        // LLM returns empty text (e.g. tool-call-only response).
+        var routerAgent = new StubAIAgent("__router__", ResponseWithText(""));
+        var router = new AIAgentRouter(routerAgent);
+        var messages = new List<ChatMessage> { new(ChatRole.User, "Test") };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            router.RouteAsync(messages, Descriptors));
+
+        Assert.Contains("empty", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RouteAsync_WhitespaceOnlyResponse_ThrowsInvalidOperationException()
+    {
+        var routerAgent = new StubAIAgent("__router__", ResponseWithText("   \n  "));
+        var router = new AIAgentRouter(routerAgent);
+        var messages = new List<ChatMessage> { new(ChatRole.User, "Test") };
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            router.RouteAsync(messages, Descriptors));
+
+        Assert.Contains("empty", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

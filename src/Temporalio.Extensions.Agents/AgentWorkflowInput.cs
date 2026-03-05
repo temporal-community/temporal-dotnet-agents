@@ -42,4 +42,10 @@ internal sealed class AgentWorkflowInput
     /// When <see langword="null"/>, the workflow falls back to a 5-minute default.
     /// </summary>
     public TimeSpan? ActivityHeartbeatTimeout { get; init; }
+
+    /// <summary>
+    /// Gets the maximum time to wait for a human to respond to an approval request.
+    /// When <see langword="null"/>, the workflow falls back to a 7-day default.
+    /// </summary>
+    public TimeSpan? ApprovalTimeout { get; init; }
 }

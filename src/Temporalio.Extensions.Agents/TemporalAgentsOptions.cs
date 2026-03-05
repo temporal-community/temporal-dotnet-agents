@@ -50,6 +50,14 @@ public sealed class TemporalAgentsOptions
     /// </summary>
     public TimeSpan? ActivityHeartbeatTimeout { get; set; }
 
+    /// <summary>
+    /// Gets or sets the maximum time the workflow will wait for a human to respond
+    /// to an approval request before timing out. Defaults to 7 days.
+    /// When the timeout elapses, <see cref="AgentWorkflow.RequestApprovalAsync"/>
+    /// returns a rejected <see cref="ApprovalTicket"/> with a timeout comment.
+    /// </summary>
+    public TimeSpan ApprovalTimeout { get; set; } = TimeSpan.FromDays(7);
+
     /// <summary>Adds an agent factory with an optional per-agent TTL.</summary>
     public TemporalAgentsOptions AddAIAgentFactory(string name, Func<IServiceProvider, AIAgent> factory, TimeSpan? timeToLive = null)
     {

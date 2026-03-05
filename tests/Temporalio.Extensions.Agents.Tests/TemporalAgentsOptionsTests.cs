@@ -182,6 +182,23 @@ public class TemporalAgentsOptionsTests
         Assert.Throws<ArgumentNullException>(() => options.AddAIAgents(null!));
     }
 
+    // ─── ApprovalTimeout ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void ApprovalTimeout_DefaultIs7Days()
+    {
+        var options = new TemporalAgentsOptions();
+        Assert.Equal(TimeSpan.FromDays(7), options.ApprovalTimeout);
+    }
+
+    [Fact]
+    public void ApprovalTimeout_CanBeCustomized()
+    {
+        var options = new TemporalAgentsOptions();
+        options.ApprovalTimeout = TimeSpan.FromHours(1);
+        Assert.Equal(TimeSpan.FromHours(1), options.ApprovalTimeout);
+    }
+
     // ─── AddAgentDescriptor null guards ───────────────────────────────────────
 
     [Fact]

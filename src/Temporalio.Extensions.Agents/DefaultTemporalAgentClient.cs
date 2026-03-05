@@ -53,7 +53,8 @@ internal class DefaultTemporalAgentClient(
                 TaskQueue = taskQueue,
                 TimeToLive = options.GetTimeToLive(sessionId.AgentName),
                 ActivityStartToCloseTimeout = options.ActivityStartToCloseTimeout,
-                ActivityHeartbeatTimeout = options.ActivityHeartbeatTimeout
+                ActivityHeartbeatTimeout = options.ActivityHeartbeatTimeout,
+                ApprovalTimeout = options.ApprovalTimeout
             }),
             workflowOptions);
 
@@ -90,7 +91,8 @@ internal class DefaultTemporalAgentClient(
                 TaskQueue = taskQueue,
                 TimeToLive = options.GetTimeToLive(sessionId.AgentName),
                 ActivityStartToCloseTimeout = options.ActivityStartToCloseTimeout,
-                ActivityHeartbeatTimeout = options.ActivityHeartbeatTimeout
+                ActivityHeartbeatTimeout = options.ActivityHeartbeatTimeout,
+                ApprovalTimeout = options.ApprovalTimeout
             }),
             workflowOptions);
 

@@ -65,7 +65,8 @@ internal class AgentWorkflow
                     CarriedHistory = carriedHistory,
                     CarriedStateBag = carriedStateBag,
                     ActivityStartToCloseTimeout = input.ActivityStartToCloseTimeout,
-                    ActivityHeartbeatTimeout = input.ActivityHeartbeatTimeout
+                    ActivityHeartbeatTimeout = input.ActivityHeartbeatTimeout,
+                    ApprovalTimeout = input.ApprovalTimeout
                 }));
         }
     }
@@ -85,6 +86,9 @@ internal class AgentWorkflow
 
         try
         {
+            // Intentional: request is added before the activity executes because the activity
+            // input includes the full history (the request must be part of it). If the activity
+            // fails, this entry remains in history without a matching response.
             _history.Add(TemporalAgentStateRequest.FromRunRequest(request));
 
             // GAP 6: pass the stored StateBag so the activity can restore provider state.
@@ -119,6 +123,11 @@ internal class AgentWorkflow
     /// <summary>
     /// Queues a fire-and-forget run. The workflow does not wait for this to complete.
     /// </summary>
+    /// <remarks>
+    /// <b>Limitation:</b> If the workflow hits continue-as-new or shuts down before the
+    /// fire-and-forget task completes, the in-flight request and its history entry may be lost.
+    /// Use <see cref="RunAgentAsync"/> for requests that must not be dropped.
+    /// </remarks>
     [WorkflowSignal("RunFireAndForget")]
     public Task RunAgentFireAndForgetAsync(RunRequest request)
     {
@@ -163,8 +172,26 @@ internal class AgentWorkflow
         Workflow.Logger.LogWorkflowApprovalRequested(_input?.AgentName ?? "unknown",
             Workflow.Info.WorkflowId, request.RequestId, request.Action);
 
-        await Workflow.WaitConditionAsync(
-            () => _approvalDecision != null && _approvalDecision.RequestId == request.RequestId);
+        var timeout = _input?.ApprovalTimeout ?? TimeSpan.FromDays(7);
+        var conditionMet = await Workflow.WaitConditionAsync(
+            () => _approvalDecision != null && _approvalDecision.RequestId == request.RequestId,
+            timeout: timeout);
+
+        if (!conditionMet)
+        {
+            Workflow.Logger.LogWorkflowApprovalResolved(_input?.AgentName ?? "unknown",
+                Workflow.Info.WorkflowId, request.RequestId, approved: false);
+
+            _pendingApproval = null;
+            _approvalDecision = null;
+
+            return new ApprovalTicket
+            {
+                RequestId = request.RequestId,
+                Approved = false,
+                Comment = $"Approval timed out after {timeout.TotalHours:F0} hours with no human response."
+            };
+        }
 
         var decision = _approvalDecision!;
         _pendingApproval = null;

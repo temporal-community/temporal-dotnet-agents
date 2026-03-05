@@ -51,7 +51,8 @@ public static class TemporalWorkerBuilderExtensions
         // Register AIAgentRouter when a router agent has been configured.
         if (agentsOptions.GetRouterAgent() is { } routerAgent)
         {
-            services.TryAddSingleton<IAgentRouter>(new AIAgentRouter(routerAgent));
+            services.TryAddSingleton<IAgentRouter>(sp =>
+                new AIAgentRouter(routerAgent, sp.GetService<ILogger<AIAgentRouter>>()));
         }
 
         // ITemporalAgentClient — uses WorkflowUpdate for synchronous request/response semantics.
