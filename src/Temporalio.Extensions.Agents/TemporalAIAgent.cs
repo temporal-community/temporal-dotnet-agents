@@ -97,7 +97,10 @@ public sealed class TemporalAIAgent : AIAgent
         // TemporalAIAgent lives inside a workflow and creates sessions in-process,
         // so StateBag persistence across turns is handled by the workflow history itself.
         // We pass null for the StateBag (no cross-activity-call state needed here).
-        var activityInput = new ExecuteAgentInput(_agentName, request, [.. _history]);
+        // We pass the session ID explicitly because the orchestrating workflow's ID
+        // may not follow the ta-{agentName}-{key} convention.
+        var sessionId = session is TemporalAgentSession ts ? ts.SessionId : (TemporalAgentSessionId?)null;
+        var activityInput = new ExecuteAgentInput(_agentName, request, [.. _history], sessionId: sessionId);
 
         Workflow.Logger.LogInWorkflowAgentDispatching(_agentName, _history.Count(e => e is TemporalAgentStateRequest));
 

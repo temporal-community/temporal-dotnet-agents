@@ -13,16 +13,27 @@ internal sealed class ExecuteAgentInput
         string agentName,
         RunRequest request,
         IReadOnlyList<TemporalAgentStateEntry> conversationHistory,
-        JsonElement? serializedStateBag = null)
+        JsonElement? serializedStateBag = null,
+        TemporalAgentSessionId? sessionId = null)
     {
         AgentName = agentName;
         Request = request;
         ConversationHistory = conversationHistory;
         SerializedStateBag = serializedStateBag;
+        SessionId = sessionId;
     }
 
     /// <summary>Gets the name of the agent to invoke.</summary>
     public string AgentName { get; }
+
+    /// <summary>
+    /// Gets the explicit session ID for this agent call. When provided, the activity uses this
+    /// instead of parsing the workflow ID from the activity context. This is required when the
+    /// activity is dispatched from an orchestrating workflow whose ID does not follow the
+    /// <c>ta-{agentName}-{key}</c> convention.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TemporalAgentSessionId? SessionId { get; }
 
     /// <summary>Gets the run request (contains the new messages + options).</summary>
     public RunRequest Request { get; }

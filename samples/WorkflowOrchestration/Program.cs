@@ -67,8 +67,11 @@ var agent = openAiClient
             .UseFunctionInvocation().Build()
     );
 
-// ── Step 4: Register Temporal Agents using the NEW fluent API ────────────────
+// ── Step 4: Register Temporal Client and Agents using the NEW fluent API ────────────────
 // The fluent AddTemporalAgents() method composes with the worker setup:
+builder.Services
+    .AddTemporalClient("localhost:7233", "default");
+
 builder.Services
     .AddHostedTemporalWorker("localhost:7233", "default", "orchestration")
     .AddTemporalAgents(options =>

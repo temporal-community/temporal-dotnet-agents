@@ -33,7 +33,7 @@ internal class AgentActivities(
         }
 
         var realAgent = factory(services);
-        var sessionId = TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!);
+        var sessionId = input.SessionId ?? TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!);
 
         // Restore StateBag from the previous turn so providers skip re-initialization.
         var session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);

@@ -114,6 +114,8 @@ var emailAgent = chatClient.AsAIAgent(
 
 // ── Worker registration ────────────────────────────────────────────────────────
 builder.Services
+    .AddTemporalClient(temporalAddress, "default");
+builder.Services
     .AddHostedTemporalWorker(temporalAddress, "default", "hitl-sample")
     .AddTemporalAgents(opts =>
     {
