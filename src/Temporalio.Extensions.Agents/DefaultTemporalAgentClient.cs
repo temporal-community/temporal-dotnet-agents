@@ -69,6 +69,20 @@ internal class DefaultTemporalAgentClient(
     }
 
     /// <inheritdoc/>
+    public Task<AgentResponse> RunAgentAsync(
+        string agentName,
+        string message,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+
+        var sessionId = TemporalAgentSessionId.WithRandomKey(agentName);
+        var request = new RunRequest(message);
+        return RunAgentAsync(sessionId, request, cancellationToken);
+    }
+
+    /// <inheritdoc/>
     public async Task RunAgentFireAndForgetAsync(
         TemporalAgentSessionId sessionId,
         RunRequest request,

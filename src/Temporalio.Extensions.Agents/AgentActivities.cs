@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging;
@@ -17,6 +18,7 @@ internal class AgentActivities(
     ILoggerFactory? loggerFactory = null)
 {
     private readonly ILogger _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<AgentActivities>();
+    private readonly ConcurrentDictionary<string, AIAgent> _agentCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Executes the agent with the given input and returns the response plus updated StateBag.
@@ -27,12 +29,12 @@ internal class AgentActivities(
         var ctx = ActivityExecutionContext.Current;
         var ct = ctx.CancellationToken;
 
-        if (!factories.TryGetValue(input.AgentName, out var factory))
+        if (!factories.ContainsKey(input.AgentName))
         {
             throw new AgentNotRegisteredException(input.AgentName);
         }
 
-        var realAgent = factory(services);
+        var realAgent = _agentCache.GetOrAdd(input.AgentName, name => factories[name](services));
         var sessionId = input.SessionId ?? TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!);
 
         // Restore StateBag from the previous turn so providers skip re-initialization.
@@ -75,7 +77,15 @@ internal class AgentActivities(
             AgentResponse response;
             if (responseHandler is null)
             {
-                response = await responseStream.ToAgentResponseAsync(ct);
+                // Heartbeat on each streamed chunk even when no handler is registered,
+                // so that long-running LLM calls don't hit the heartbeat timeout.
+                List<AgentResponseUpdate> collectedUpdates = [];
+                await foreach (var update in responseStream.WithCancellation(ct))
+                {
+                    collectedUpdates.Add(update);
+                    ctx.Heartbeat(update.Text);
+                }
+                response = collectedUpdates.ToAgentResponse();
             }
             else
             {

@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.4] - 2026-03-13 
+
+### Added
+
+- **`StructuredOutputExtensions.RunAsync<T>`** — typed structured output deserialization for
+  `TemporalAIAgent`, `AIAgent`, and `ITemporalAgentClient`. Strips markdown code fences before
+  JSON parsing and retries with LLM error context when deserialization fails.
+
+- **`MarkdownCodeFenceHelper`** — internal utility that strips markdown code fences (`` ```json ... ``` ``)
+  and extracts the first balanced JSON object or array from LLM output. Handles nested braces,
+  string escaping, and escaped quotes. 
+
+- **`StructuredOutputOptions`** — configurable retry count (`MaxRetries`, default: 2), error
+  context inclusion (`IncludeErrorContext`, default: true), and custom `JsonSerializerOptions`
+  for structured output deserialization.
+
+- **`[WorkflowUpdateValidator]` methods** on `AgentWorkflow` — `ValidateRunAgent`,
+  `ValidateRequestApproval`, and `ValidateSubmitApproval` reject malformed updates before they
+  enter workflow event history, preventing wasted activity executions and polluted event logs.
+
+- **Temporal search attributes** — `AgentWorkflow` now upserts `AgentName` (keyword),
+  `SessionCreatedAt` (datetime), and `TurnCount` (long) search attributes. Enables operational
+  queries like `AgentName = "Billing" AND TurnCount > 10` in the Temporal UI.
+
+- **`ITemporalAgentClient.RunAgentAsync(string agentName, string message)`** — convenience
+  overload that resolves an agent by name and sends a single text message with an auto-generated
+  session, simplifying the most common calling pattern.
+
+### Changed
+
+- **`AgentActivities` lazy factory caching** — agent factories are now invoked once per agent
+  name and cached in a `ConcurrentDictionary`. Concurrent activity executions for the same agent
+  share a single resolved `AIAgent` instance instead of calling the factory repeatedly.
+
+- **Heartbeating on non-streaming path** — `AgentActivities` now heartbeats on every streamed
+  chunk even when no `IAgentResponseHandler` is registered. Previously, the default non-streaming
+  path could hit the heartbeat timeout during long LLM calls.
+
+### Fixed
+
+- **`SubmitApprovalAsync` validation moved to validator** — the pending-approval and request-ID
+  mismatch checks that previously ran inside the update handler (after entering history) now run
+  in `ValidateSubmitApproval` (before entering history), preventing invalid decisions from being
+  recorded in the workflow event log.
+
+---
+
 ## [0.1.0] - 2026-02-28
 
 ### Added

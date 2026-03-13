@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
+using Temporalio.Extensions.Hosting;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -41,13 +42,13 @@ public class ErrorHandlingTests : IClassFixture<IntegrationTestFixture>
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.AddAIAgent(agent);
                 options.ActivityStartToCloseTimeout = TimeSpan.FromSeconds(2);
-            },
-            taskQueue: taskQueue);
+            });
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -97,15 +98,15 @@ public class ErrorHandlingTests : IClassFixture<IntegrationTestFixture>
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.AddAIAgent(agent);
                 // Leave StartToClose at a generous value so it doesn't interfere.
                 options.ActivityStartToCloseTimeout = TimeSpan.FromMinutes(5);
                 options.ActivityHeartbeatTimeout = TimeSpan.FromSeconds(2);
-            },
-            taskQueue: taskQueue);
+            });
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -150,9 +151,9 @@ public class ErrorHandlingTests : IClassFixture<IntegrationTestFixture>
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(agent),
-            taskQueue: taskQueue);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(agent));
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -190,9 +191,9 @@ public class ErrorHandlingTests : IClassFixture<IntegrationTestFixture>
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(agent),
-            taskQueue: taskQueue);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(agent));
 
         using var host = builder.Build();
         await host.StartAsync();

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Extensions.Hosting;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -36,14 +37,14 @@ public class TimeoutConfigurationTests : IClassFixture<IntegrationTestFixture>
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
 
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.AddAIAgent(new Helpers.EchoAIAgent("TimeoutAgent"));
                 options.ActivityStartToCloseTimeout = TimeSpan.FromMinutes(2);
                 options.ActivityHeartbeatTimeout = TimeSpan.FromSeconds(30);
-            },
-            taskQueue: taskQueue);
+            });
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -79,14 +80,14 @@ public class TimeoutConfigurationTests : IClassFixture<IntegrationTestFixture>
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
 
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.AddAIAgent(new Helpers.EchoAIAgent("DefaultTimeoutAgent"));
                 // ActivityStartToCloseTimeout is null → workflow uses 30-minute default
                 // ActivityHeartbeatTimeout is null → workflow uses 5-minute default
-            },
-            taskQueue: taskQueue);
+            });
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -117,14 +118,14 @@ public class TimeoutConfigurationTests : IClassFixture<IntegrationTestFixture>
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
 
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.AddAIAgent(
                     new Helpers.EchoAIAgent("ShortTTLAgent"),
                     timeToLive: TimeSpan.FromHours(1));
-            },
-            taskQueue: taskQueue);
+            });
 
         using var host = builder.Build();
         await host.StartAsync();

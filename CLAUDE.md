@@ -26,7 +26,7 @@ TemporalAgents/
 │
 ├── src/
 │   └── Temporalio.Extensions.Agents/       # Main library
-│       ├── ServiceCollectionExtensions.cs  # [LEGACY API] ConfigureTemporalAgents
+│       ├── ServiceCollectionExtensions.cs  # GetTemporalAgentProxy, AddTemporalAgentProxies
 │       ├── TemporalWorkerBuilderExtensions.cs # [NEW API] .AddTemporalAgents() fluent builder
 │       ├── TemporalAgentsOptions.cs        # Configuration (internal ctor)
 │       ├── ITemporalAgentClient.cs         # Interface: RunAgentAsync, RouteAsync, HITL
@@ -79,24 +79,14 @@ TemporalAgents/
 
 ## Key Concepts
 
-### 1. Two Registration APIs
+### 1. Registration API
 
-#### Configure Agents
-```csharp
-services.ConfigureTemporalAgents(
-    configure: opts => opts.AddAIAgent(agent),
-    taskQueue: "agents",
-    targetHost: "localhost:7233",
-    @namespace: "default");
-```
-
-#### ✅ NEW API (Fluent Builder - Recommended)
 ```csharp
 services.AddHostedTemporalWorker("localhost:7233", "default", "agents")
     .AddTemporalAgents(opts => opts.AddAIAgent(agent));
 ```
 
-The new API composes with other worker configuration (e.g., `.ConfigureOptions(opts => opts.MaxConcurrentActivities = 20)`). The old API delegates to it internally.
+Composes with other worker configuration (e.g., `.ConfigureOptions(opts => opts.MaxConcurrentActivities = 20)`).
 
 ---
 
@@ -115,13 +105,17 @@ The new API composes with other worker configuration (e.g., `.ConfigureOptions(o
 ### 3. LLM-Powered Routing
 
 ```csharp
+// Agents carry descriptions via AsAIAgent(description: ...) — auto-extracted on AddAIAgent()
+var weatherAgent = chatClient.AsAIAgent(
+    name: "WeatherAgent",
+    description: "Handles weather questions.",
+    instructions: "You are a weather specialist...");
+
 builder.Services.AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
-        opts.AddAIAgent(weatherAgent);
+        opts.AddAIAgent(weatherAgent);   // description auto-extracted into descriptors
         opts.AddAIAgent(billingAgent);
-        opts.AddAgentDescriptor("WeatherAgent", "Handles weather questions.");
-        opts.AddAgentDescriptor("BillingAgent", "Handles billing inquiries.");
         opts.SetRouterAgent(routerAgent);  // registers AIModelAgentRouter as IAgentRouter
     });
 
@@ -129,6 +123,8 @@ builder.Services.AddHostedTemporalWorker("agents")
 var response = await client.RouteAsync(sessionKey, new RunRequest(userMessage));
 ```
 
+- `AddAIAgent()` auto-extracts `AIAgent.Description` into the descriptor registry (used by routing)
+- `AddAgentDescriptor()` is still available for factory-registered agents or explicit overrides
 - `SetRouterAgent` registers `AIModelAgentRouter` as `IAgentRouter` in DI automatically
 - `AIModelAgentRouter` uses exact match then fuzzy (case-insensitive) fallback on the response text
 - Throws `InvalidOperationException` if the LLM returns an unrecognized agent name
@@ -276,7 +272,7 @@ When a worker crashes:
 
 ### ✅ DO
 
-- **Use fluent API** — `.AddTemporalAgents()` instead of `ConfigureTemporalAgents()`
+- **Use fluent API** — `.AddTemporalAgents()` on the worker builder
 - **Use `GetAgent()`** — inside workflows for sub-agent orchestration
 - **Use `Workflow.UtcNow`** — not `DateTime.UtcNow`
 - **Use `Workflow.NewGuid()`** — not `Guid.NewGuid()` inside workflows

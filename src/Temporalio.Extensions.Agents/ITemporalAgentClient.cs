@@ -18,6 +18,19 @@ public interface ITemporalAgentClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Convenience overload that resolves the agent by name and sends a single text message.
+    /// A new session is created automatically using a random key.
+    /// </summary>
+    /// <param name="agentName">The registered agent name.</param>
+    /// <param name="message">The user message text.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The agent's response.</returns>
+    Task<AgentResponse> RunAgentAsync(
+        string agentName,
+        string message,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Runs an agent by sending a fire-and-forget signal.
     /// Starts the workflow if it is not already running.
     /// Returns immediately without waiting for the agent response.

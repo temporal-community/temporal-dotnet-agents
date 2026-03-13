@@ -30,6 +30,6 @@ public sealed class AgentNotRegisteredException : InvalidOperationException
     {
         ArgumentException.ThrowIfNullOrEmpty(agentName);
         return $"No agent named '{agentName}' was registered. Ensure the agent is registered using " +
-               $"{nameof(ServiceCollectionExtensions.ConfigureTemporalAgents)} before using it.";
+               "AddTemporalAgents() on the worker builder before using it.";
     }
 }

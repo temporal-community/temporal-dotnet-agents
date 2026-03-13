@@ -21,44 +21,6 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Configures Temporal Agents: registers agent factories, a hosted Temporal worker,
-    /// <see cref="ITemporalAgentClient"/>, and keyed proxy singletons.
-    /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <param name="configure">Delegate to configure <see cref="TemporalAgentsOptions"/>.</param>
-    /// <param name="taskQueue">The Temporal task queue for the agent worker.</param>
-    /// <param name="targetHost">Optional Temporal server address (e.g. "localhost:7233").
-    /// When provided, an <see cref="ITemporalClient"/> is registered.</param>
-    /// <param name="namespace">Optional Temporal namespace. Defaults to "default".</param>
-    /// <param name="workerBuilder">Optional delegate to further configure the worker.</param>
-    public static IServiceCollection ConfigureTemporalAgents(
-        this IServiceCollection services,
-        Action<TemporalAgentsOptions> configure,
-        string taskQueue,
-        string? targetHost = null,
-        string? @namespace = null,
-        Action<ITemporalWorkerServiceOptionsBuilder>? workerBuilder = null)
-    {
-        ArgumentNullException.ThrowIfNull(configure);
-        ArgumentException.ThrowIfNullOrWhiteSpace(taskQueue);
-
-        // Optionally register an ITemporalClient if connection info was provided.
-        if (targetHost is not null)
-        {
-            services.AddTemporalClient(targetHost, @namespace ?? "default");
-        }
-
-        // Register the hosted Temporal worker with agent infrastructure via the new extension.
-        var workerBuilder_ = services
-            .AddHostedTemporalWorker(taskQueue)
-            .AddTemporalAgents(configure);
-
-        workerBuilder?.Invoke(workerBuilder_);
-
-        return services;
-    }
-
-    /// <summary>
     /// Registers client-side Temporal Agent infrastructure only: an <see cref="ITemporalAgentClient"/>
     /// and keyed <see cref="AIAgent"/> proxy singletons. No Temporal worker is registered.
     /// </summary>
@@ -120,7 +82,7 @@ public static class ServiceCollectionExtensions
     {
         var agents = services.GetService<IReadOnlyDictionary<string, Func<IServiceProvider, AIAgent>>>()
             ?? throw new InvalidOperationException(
-                $"Temporal agents have not been configured. Call {nameof(ConfigureTemporalAgents)} first.");
+                "Temporal agents have not been configured. Call AddTemporalAgents() on the worker builder first.");
 
         if (!agents.ContainsKey(agentName))
         {

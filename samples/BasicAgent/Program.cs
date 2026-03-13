@@ -15,6 +15,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using OpenAI.Chat;
+using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Extensions.Agents;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
@@ -61,17 +62,15 @@ var agent = openAiClient
     );
 
 // ── Step 4: Register Temporal Agents ─────────────────────────────────────────
-// ConfigureTemporalAgents registers everything needed in one call:
-//   • ITemporalClient  — connection to the Temporal server
+// AddHostedTemporalWorker (from Temporalio.Extensions.Hosting, namespace Microsoft.Extensions.DependencyInjection)
+// registers the ITemporalClient and hosted worker. AddTemporalAgents registers:
 //   • AgentWorkflow    — long-lived workflow that is the durable agent session
 //   • AgentActivities  — activity that calls the real IChatClient (preserves determinism)
 //   • ITemporalAgentClient — sends messages via Temporal Update (no polling required)
 //   • Keyed AIAgent proxy — the object your code actually calls
-builder.Services.ConfigureTemporalAgents(
-    configure: options => { options.AddAIAgent(agent, timeToLive: TimeSpan.FromHours(1)); },
-    taskQueue: "agents",
-    targetHost: temporalAddress,
-    @namespace: "default");
+builder.Services
+    .AddHostedTemporalWorker(temporalAddress, "default", "agents")
+    .AddTemporalAgents(options => { options.AddAIAgent(agent, timeToLive: TimeSpan.FromHours(1)); });
 
 // ── Step 5: Start the host (worker runs as IHostedService) ────────────────────
 var host = builder.Build();

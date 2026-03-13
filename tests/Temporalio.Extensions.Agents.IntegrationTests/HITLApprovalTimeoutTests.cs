@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
+using Temporalio.Extensions.Hosting;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -33,13 +34,13 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
 
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.AddAIAgent(new EchoAIAgent("HITLAgent"));
                 options.ApprovalTimeout = TimeSpan.FromSeconds(2);
-            },
-            taskQueue: taskQueue);
+            });
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -92,13 +93,13 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
 
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.AddAIAgent(new EchoAIAgent("HITLApproveAgent"));
                 options.ApprovalTimeout = TimeSpan.FromMinutes(5);
-            },
-            taskQueue: taskQueue);
+            });
 
         using var host = builder.Build();
         await host.StartAsync();

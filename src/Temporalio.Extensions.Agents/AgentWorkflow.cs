@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Agents.AI;
+using Temporalio.Common;
 using Temporalio.Extensions.Agents.State;
 using Temporalio.Workflows;
 
@@ -12,6 +13,15 @@ namespace Temporalio.Extensions.Agents;
 [Workflow("Temporalio.Extensions.Agents.AgentWorkflow")]
 internal class AgentWorkflow
 {
+    internal static readonly SearchAttributeKey<string> AgentNameSearchAttribute =
+        SearchAttributeKey.CreateKeyword("AgentName");
+
+    internal static readonly SearchAttributeKey<DateTimeOffset> SessionCreatedAtSearchAttribute =
+        SearchAttributeKey.CreateDateTimeOffset("SessionCreatedAt");
+
+    internal static readonly SearchAttributeKey<long> TurnCountSearchAttribute =
+        SearchAttributeKey.CreateLong("TurnCount");
+
     private readonly List<TemporalAgentStateEntry> _history = [];
     private bool _isProcessing;
     private bool _shutdownRequested;
@@ -38,6 +48,12 @@ internal class AgentWorkflow
         TimeSpan ttl = input.TimeToLive ?? TimeSpan.FromDays(14);
 
         Workflow.Logger.LogWorkflowStarted(input.AgentName, Workflow.Info.WorkflowId, ttl);
+
+        // Upsert search attributes for operational queries in the Temporal UI.
+        Workflow.UpsertTypedSearchAttributes(
+            AgentNameSearchAttribute.ValueSet(input.AgentName),
+            SessionCreatedAtSearchAttribute.ValueSet(Workflow.UtcNow),
+            TurnCountSearchAttribute.ValueSet(_history.Count));
 
         // Wait until shutdown is requested, TTL elapses, or history is large enough to warrant continue-as-new.
         bool conditionMet = await Workflow.WaitConditionAsync(
@@ -69,6 +85,18 @@ internal class AgentWorkflow
                     ApprovalTimeout = input.ApprovalTimeout
                 }));
         }
+    }
+
+    /// <summary>
+    /// Validates that a <see cref="RunAgentAsync"/> request is well-formed before it enters history.
+    /// </summary>
+    [WorkflowUpdateValidator("Run")]
+    public void ValidateRunAgent(RunRequest request)
+    {
+        if (_shutdownRequested)
+            throw new InvalidOperationException("Session has been shut down.");
+        if (request?.Messages is null || request.Messages.Count == 0)
+            throw new ArgumentException("At least one message is required.");
     }
 
     /// <summary>
@@ -110,6 +138,10 @@ internal class AgentWorkflow
             _currentStateBag = result.SerializedStateBag;
 
             _history.Add(TemporalAgentStateResponse.FromResponse(request.CorrelationId, result.Response));
+
+            // Update turn count for operational queries.
+            Workflow.UpsertTypedSearchAttributes(
+                TurnCountSearchAttribute.ValueSet(_history.Count(e => e is TemporalAgentStateResponse)));
 
             Workflow.Logger.LogWorkflowUpdateCompleted(_input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId);
             return result.Response;
@@ -153,6 +185,17 @@ internal class AgentWorkflow
     public IReadOnlyList<TemporalAgentStateEntry> GetHistory() => _history;
 
     // ── GAP 3: Human-in-the-Loop ────────────────────────────────────────────
+
+    /// <summary>
+    /// Validates that a <see cref="RequestApprovalAsync"/> request is well-formed before it enters history.
+    /// </summary>
+    [WorkflowUpdateValidator("RequestApproval")]
+    public void ValidateRequestApproval(ApprovalRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrEmpty(request.RequestId))
+            throw new ArgumentException("RequestId must not be null or empty.");
+    }
 
     /// <summary>
     /// Blocks until a human submits a decision via <see cref="SubmitApprovalAsync"/>.
@@ -209,12 +252,13 @@ internal class AgentWorkflow
     }
 
     /// <summary>
-    /// Submits the human decision for the pending approval request.
-    /// Unblocks the tool that called <see cref="RequestApprovalAsync"/>.
+    /// Validates that a <see cref="SubmitApprovalAsync"/> decision is well-formed before it enters history.
     /// </summary>
-    [WorkflowUpdate("SubmitApproval")]
-    public Task<ApprovalTicket> SubmitApprovalAsync(ApprovalDecision decision)
+    [WorkflowUpdateValidator("SubmitApproval")]
+    public void ValidateSubmitApproval(ApprovalDecision decision)
     {
+        ArgumentNullException.ThrowIfNull(decision);
+
         if (_pendingApproval is null)
         {
             throw new InvalidOperationException(
@@ -226,7 +270,15 @@ internal class AgentWorkflow
             throw new InvalidOperationException(
                 $"Decision RequestId '{decision.RequestId}' does not match pending request '{_pendingApproval.RequestId}'.");
         }
+    }
 
+    /// <summary>
+    /// Submits the human decision for the pending approval request.
+    /// Unblocks the tool that called <see cref="RequestApprovalAsync"/>.
+    /// </summary>
+    [WorkflowUpdate("SubmitApproval")]
+    public Task<ApprovalTicket> SubmitApprovalAsync(ApprovalDecision decision)
+    {
         _approvalDecision = decision;
 
         return Task.FromResult(new ApprovalTicket

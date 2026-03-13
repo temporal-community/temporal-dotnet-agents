@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
+using Temporalio.Extensions.Hosting;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -40,10 +41,10 @@ public class NoLoggingTests : IClassFixture<IntegrationTestFixture>
             // Only register what's strictly necessary — no logging.
             services.AddSingleton<ITemporalClient>(_fixture.Client);
             services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
-            services.ConfigureTemporalAgents(
-                configure: options => options.AddAIAgent(
-                    new EchoAIAgent("NoLogAgent")),
-                taskQueue: taskQueue);
+            services
+                .AddHostedTemporalWorker(taskQueue)
+                .AddTemporalAgents(options => options.AddAIAgent(
+                    new EchoAIAgent("NoLogAgent")));
         });
 
         using var host = builder.Build();

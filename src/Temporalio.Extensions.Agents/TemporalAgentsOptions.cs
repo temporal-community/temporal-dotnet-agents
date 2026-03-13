@@ -105,6 +105,13 @@ public sealed class TemporalAgentsOptions
             _agentTimeToLive[agent.Name] = timeToLive;
         }
 
+        // Auto-populate descriptor from agent metadata if available.
+        // Explicit AddAgentDescriptor() calls still override this.
+        if (!string.IsNullOrWhiteSpace(agent.Description) && !_agentDescriptors.ContainsKey(agent.Name))
+        {
+            _agentDescriptors[agent.Name] = agent.Description;
+        }
+
         return this;
     }
 
@@ -233,6 +240,28 @@ public sealed class TemporalAgentsOptions
 
     /// <summary>Gets all registered scheduled runs for use by <see cref="ScheduleRegistrationService"/>.</summary>
     internal IReadOnlyList<ScheduleAgentRegistration> GetScheduledRuns() => _scheduledRuns;
+
+    // ── Agent Registry (read-only introspection) ──────────────────────────
+
+    /// <summary>
+    /// Returns the names of all registered agents (case-preserving, in registration order).
+    /// Useful for health-check endpoints, admin dashboards, and startup validation.
+    /// </summary>
+    public IReadOnlyList<string> GetRegisteredAgentNames() =>
+        _agentFactories.Keys.ToList().AsReadOnly();
+
+    /// <summary>
+    /// Returns all registered <see cref="AgentDescriptor"/>s (used by routing).
+    /// </summary>
+    public IReadOnlyList<AgentDescriptor> GetRegisteredDescriptors() =>
+        GetAgentDescriptors();
+
+    /// <summary>
+    /// Returns <see langword="true"/> if an agent with the given name is registered.
+    /// The check is case-insensitive.
+    /// </summary>
+    public bool IsAgentRegistered(string name) =>
+        !string.IsNullOrEmpty(name) && _agentFactories.ContainsKey(name);
 
     /// <summary>Gets all registered agent factories.</summary>
     internal IReadOnlyDictionary<string, Func<IServiceProvider, AIAgent>> GetAgentFactories() =>

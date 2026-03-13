@@ -8,11 +8,13 @@ namespace Temporalio.Extensions.Agents.Tests.Helpers;
 /// <summary>
 /// A minimal concrete <see cref="AIAgent"/> for use in unit tests.
 /// </summary>
-internal sealed class StubAIAgent(string? name, AgentResponse? fixedResponse = null) : AIAgent
+internal sealed class StubAIAgent(string? name, AgentResponse? fixedResponse = null, string? description = null) : AIAgent
 {
     private readonly AgentResponse _fixedResponse = fixedResponse ?? new AgentResponse();
 
     public override string? Name { get; } = name;
+
+    public override string? Description { get; } = description;
 
     protected override ValueTask<AgentSession> CreateSessionCoreAsync(CancellationToken cancellationToken = default) =>
         new(new TemporalAgentSession(TemporalAgentSessionId.WithRandomKey(Name ?? "stub")));

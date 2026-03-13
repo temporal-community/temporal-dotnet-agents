@@ -73,6 +73,7 @@ var weatherAgent = openAiClient
     .GetChatClient(model)
     .AsAIAgent(
         name: "WeatherAgent",
+        description: "Handles questions about weather conditions, forecasts, climate, and meteorology.",
         instructions:
             "You are a weather specialist. Answer questions about weather conditions, forecasts, " +
             "climate patterns, and meteorological phenomena. Keep responses concise and informative.");
@@ -81,6 +82,7 @@ var billingAgent = openAiClient
     .GetChatClient(model)
     .AsAIAgent(
         name: "BillingAgent",
+        description: "Handles questions about invoices, charges, payment methods, refunds, and account billing.",
         instructions:
             "You are a billing and payments specialist. Answer questions about invoices, charges, " +
             "payment methods, refunds, and account billing. Keep responses concise and informative.");
@@ -89,6 +91,7 @@ var techSupportAgent = openAiClient
     .GetChatClient(model)
     .AsAIAgent(
         name: "TechSupportAgent",
+        description: "Handles questions about software issues, hardware problems, troubleshooting, and technical configurations.",
         instructions:
             "You are a technical support specialist. Answer questions about software issues, " +
             "hardware problems, troubleshooting steps, and technical configurations. " +
@@ -120,18 +123,11 @@ builder.Services
     .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
-        // Register the three specialist agents
+        // Register the three specialist agents — descriptions are auto-extracted
+        // from AsAIAgent(description: ...) into the descriptor registry for routing.
         opts.AddAIAgent(weatherAgent, timeToLive: TimeSpan.FromHours(1));
         opts.AddAIAgent(billingAgent, timeToLive: TimeSpan.FromHours(1));
         opts.AddAIAgent(techSupportAgent, timeToLive: TimeSpan.FromHours(1));
-
-        // Register descriptors — used by AIAgentRouter to build the routing prompt
-        opts.AddAgentDescriptor("WeatherAgent",
-            "Handles questions about weather conditions, forecasts, climate, and meteorology.");
-        opts.AddAgentDescriptor("BillingAgent",
-            "Handles questions about invoices, charges, payment methods, refunds, and account billing.");
-        opts.AddAgentDescriptor("TechSupportAgent",
-            "Handles questions about software issues, hardware problems, troubleshooting, and technical configurations.");
 
         // SetRouterAgent registers an AIAgentRouter that automatically picks the right agent
         opts.SetRouterAgent(routerAgent);

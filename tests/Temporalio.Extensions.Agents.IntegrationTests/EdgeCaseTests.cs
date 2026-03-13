@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
 using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.Hosting;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -146,10 +147,10 @@ public class EdgeCaseTests : IClassFixture<IntegrationTestFixture>
         var taskQueue = $"dashed-name-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(
-                new EchoAIAgent("my-custom-agent")),
-            taskQueue: taskQueue);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(
+                new EchoAIAgent("my-custom-agent")));
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -180,10 +181,10 @@ public class EdgeCaseTests : IClassFixture<IntegrationTestFixture>
         var taskQueue = $"underscore-name-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(
-                new EchoAIAgent("agent_v2_beta")),
-            taskQueue: taskQueue);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(
+                new EchoAIAgent("agent_v2_beta")));
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -430,10 +431,10 @@ public class EdgeCaseTests : IClassFixture<IntegrationTestFixture>
         var taskQueue = $"empty-response-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(
-                new EmptyResponseAIAgent("EmptyAgent")),
-            taskQueue: taskQueue);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(
+                new EmptyResponseAIAgent("EmptyAgent")));
 
         using var host = builder.Build();
         await host.StartAsync();

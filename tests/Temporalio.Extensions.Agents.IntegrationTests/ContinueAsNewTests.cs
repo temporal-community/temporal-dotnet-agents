@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
+using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
 using Xunit;
 using Xunit.Abstractions;
@@ -59,11 +60,11 @@ public class ContinueAsNewTests : IAsyncLifetime
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_env.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(
+        builder.Services
+            .AddHostedTemporalWorker(_taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(
                 new Helpers.EchoAIAgent("EchoAgent"),
-                timeToLive: TimeSpan.FromMinutes(10)),
-            taskQueue: _taskQueue);
+                timeToLive: TimeSpan.FromMinutes(10)));
 
         _host = builder.Build();
         await _host.StartAsync();
@@ -181,14 +182,14 @@ public class ContinueAsNewTests : IAsyncLifetime
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_env.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.AddAIAgent(agent, timeToLive: TimeSpan.FromMinutes(10));
                 options.ActivityStartToCloseTimeout = TimeSpan.FromSeconds(3);
                 options.ActivityHeartbeatTimeout = TimeSpan.FromSeconds(2);
-            },
-            taskQueue: taskQueue);
+            });
 
         using var extraHost = builder.Build();
         await extraHost.StartAsync();

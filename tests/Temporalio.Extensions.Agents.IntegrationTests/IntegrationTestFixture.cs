@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
+using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
 using Xunit;
 
@@ -56,9 +57,9 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
         // Register the test server's ITemporalClient directly — no targetHost needed.
         builder.Services.AddSingleton<ITemporalClient>(Environment.Client);
 
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(new EchoAIAgent("EchoAgent")),
-            taskQueue: TaskQueue);
+        builder.Services
+            .AddHostedTemporalWorker(TaskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(new EchoAIAgent("EchoAgent")));
 
         return builder.Build();
     }

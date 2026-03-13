@@ -26,7 +26,8 @@ Temporal provides:
 | Deferred one-time runs              | `RunAgentDelayedAsync` (external callers) and `ScheduleOneTimeAgentRunAsync` (from workflows) defer agent execution using `StartDelay` |
 | MCP tool integration                | Async agent factory connects to a Model Context Protocol server at startup                                                             |
 | External memory (AIContextProvider) | `ChatClientAgent.ContextProviders` runs before inference; session state persists across turns                                          |
-| OpenTelemetry distributed tracing   | Two-layer span hierarchy covering SDK internals and agent turns                                                                        |
+| Typed structured output             | `RunAsync<T>` deserializes agent text into typed objects with markdown fence stripping and retry-with-error-context                     |
+| OpenTelemetry distributed tracing   | Two-layer span hierarchy covering SDK internals and agent turns; search attributes for operational queries                              |
 | Streaming responses                 | `IAgentResponseHandler` receives streaming chunks for SSE or SignalR push                                                              |
 
 ## How It Works
@@ -169,6 +170,18 @@ Console.WriteLine(response.Messages[0].Text);
 The session ID encodes the agent name and a unique key as a Temporal workflow ID (`ta-myagent-{key}`). Passing the same
 session across calls routes all messages to the same `AgentWorkflow` instance, preserving conversation history.
 
+#### Quick One-Shot Call
+
+For simple one-off requests where you don't need to manage sessions, use the string-based convenience overload on
+`ITemporalAgentClient`:
+
+```csharp
+ITemporalAgentClient client = // resolved from DI
+
+// Creates a new session automatically
+AgentResponse response = await client.RunAgentAsync("MyAgent", "What is the capital of France?");
+```
+
 ### Multi-Turn Conversation
 
 ```csharp
@@ -193,7 +206,50 @@ await agentProxy.RunAsync("Process this in the background.", session, options);
 
 ### Structured Output
 
-Request a JSON response conforming to a specific schema:
+#### Using `RunAsync<T>` (Recommended)
+
+`StructuredOutputExtensions.RunAsync<T>` deserializes the agent's text response directly into a typed object. It
+automatically strips markdown code fences (`` ```json ... ``` ``) that many models wrap around JSON output, and retries
+with error context when deserialization fails — allowing the LLM to self-correct:
+
+```csharp
+var session = await agentProxy.CreateSessionAsync();
+
+// Automatically strips code fences, deserializes, and retries on failure
+WeatherReport report = await agentProxy.RunAsync<WeatherReport>(
+    new List<ChatMessage> { new(ChatRole.User, "What's the weather in Seattle?") },
+    session);
+```
+
+Control retry behavior with `StructuredOutputOptions`:
+
+```csharp
+var report = await agentProxy.RunAsync<WeatherReport>(
+    new List<ChatMessage> { new(ChatRole.User, "What's the weather in Seattle?") },
+    session,
+    new StructuredOutputOptions
+    {
+        MaxRetries = 3,                // default: 2
+        IncludeErrorContext = true,     // default: true — appends error details to retry prompt
+        JsonSerializerOptions = myOpts  // default: null — uses JsonSerializerOptions.Default
+    });
+```
+
+`RunAsync<T>` is also available on `TemporalAIAgent` (inside workflows) and `ITemporalAgentClient`:
+
+```csharp
+// Inside a workflow
+var agent = TemporalWorkflowExtensions.GetAgent("AnalystAgent");
+var session = await agent.CreateSessionAsync();
+var analysis = await agent.RunAsync<AnalysisResult>(messages, session);
+
+// Via the client
+var result = await client.RunAgentAsync<WeatherReport>(sessionId, request);
+```
+
+#### Using `ChatResponseFormat` (Format Hint Only)
+
+To hint the response format without automatic deserialization:
 
 ```csharp
 var options = new TemporalAgentRunOptions
@@ -398,8 +454,8 @@ public class MyStreamingHandler : IAgentResponseHandler
   `GetAgentScheduleHandle`, `RunAgentDelayedAsync`
 - **`ScheduleActivities`** — Activity class for scheduling one-time deferred runs from inside orchestrating workflows
 - **`TemporalAgentSessionId`** — Encodes agent name + key
-- **`AddTemporalAgents(...)`** — Fluent worker builder registration (recommended)
-- **`ConfigureTemporalAgents(...)`** — Legacy one-shot service registration
+- **`StructuredOutputExtensions`** — `RunAsync<T>` with markdown fence stripping and retry-with-error-context
+- **`AddTemporalAgents(...)`** — Fluent worker builder registration
 
 ---
 
@@ -853,3 +909,31 @@ TemporalAgentTelemetry.ActivitySourceName    // "Temporalio.Extensions.Agents"
 TemporalAgentTelemetry.AgentTurnSpanName     // "agent.turn"
 TemporalAgentTelemetry.AgentClientSendSpanName // "agent.client.send"
 ```
+
+### Search Attributes
+
+`AgentWorkflow` automatically upserts three [custom search attributes](https://docs.temporal.io/visibility#custom-search-attributes)
+on each workflow, enabling operational queries in the Temporal Web UI and via `ListWorkflowsAsync`:
+
+| Attribute          | Type           | Description                                            |
+|--------------------|----------------|--------------------------------------------------------|
+| `AgentName`        | Keyword        | The registered agent name                              |
+| `SessionCreatedAt` | DateTimeOffset | When the workflow first started                        |
+| `TurnCount`        | Long           | Number of completed agent responses in this session    |
+
+Example queries in the Temporal UI:
+
+```
+AgentName = "BillingAgent" AND TurnCount > 10
+SessionCreatedAt > "2026-03-01T00:00:00Z"
+```
+
+> **Note:** Custom search attributes must be registered with the Temporal server before use.
+> With `temporal server start-dev` they are created automatically. For production clusters, register
+> them via the CLI:
+>
+> ```bash
+> temporal operator search-attribute create --name AgentName --type Keyword
+> temporal operator search-attribute create --name SessionCreatedAt --type Datetime
+> temporal operator search-attribute create --name TurnCount --type Int
+> ```

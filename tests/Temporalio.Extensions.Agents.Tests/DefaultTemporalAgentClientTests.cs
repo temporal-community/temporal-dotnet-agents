@@ -31,6 +31,40 @@ public class DefaultTemporalAgentClientTests
             client.RunAgentAsync(sessionId, null!));
     }
 
+    // ─── RunAgentAsync (string overload) ────────────────────────────────────
+
+    [Fact]
+    public async Task RunAgentAsync_StringOverload_NullAgentName_ThrowsArgumentException()
+    {
+        var client = CreateClient();
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            client.RunAgentAsync(agentName: null!, message: "Hello"));
+    }
+
+    [Fact]
+    public async Task RunAgentAsync_StringOverload_WhitespaceAgentName_ThrowsArgumentException()
+    {
+        var client = CreateClient();
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            client.RunAgentAsync(agentName: "   ", message: "Hello"));
+    }
+
+    [Fact]
+    public async Task RunAgentAsync_StringOverload_NullMessage_ThrowsArgumentException()
+    {
+        var client = CreateClient();
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            client.RunAgentAsync(agentName: "Agent", message: null!));
+    }
+
+    [Fact]
+    public async Task RunAgentAsync_StringOverload_WhitespaceMessage_ThrowsArgumentException()
+    {
+        var client = CreateClient();
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            client.RunAgentAsync(agentName: "Agent", message: "   "));
+    }
+
     // ─── RunAgentFireAndForgetAsync ──────────────────────────────────────────
 
     [Fact]

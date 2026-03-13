@@ -4,6 +4,7 @@ using Temporalio.Client;
 using Temporalio.Exceptions;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
 using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
 using Xunit;
 using Xunit.Abstractions;
@@ -37,9 +38,9 @@ public class ResilienceTests
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(env.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(new EchoAIAgent("EchoAgent")),
-            taskQueue: taskQueue);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(new EchoAIAgent("EchoAgent")));
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -227,9 +228,9 @@ public class ResilienceTests
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(new EchoAIAgent("EchoAgent")),
-            taskQueue: taskQueue);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(new EchoAIAgent("EchoAgent")));
         return builder.Build();
     }
 }

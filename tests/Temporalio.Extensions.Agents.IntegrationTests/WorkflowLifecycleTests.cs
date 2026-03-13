@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
+using Temporalio.Extensions.Hosting;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -297,13 +298,13 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
         var taskQueue = $"ttl-test-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.DefaultTimeToLive = TimeSpan.FromSeconds(2);
                 options.AddAIAgent(new Helpers.EchoAIAgent("TTLAgent"));
-            },
-            taskQueue: taskQueue);
+            });
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -343,13 +344,13 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
         var taskQueue = $"ttl-restart-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
                 options.DefaultTimeToLive = TimeSpan.FromSeconds(2);
                 options.AddAIAgent(new Helpers.EchoAIAgent("TTLAgent"));
-            },
-            taskQueue: taskQueue);
+            });
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -391,10 +392,10 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgent(
-                new Helpers.EchoAIAgent("EchoAgent")),
-            taskQueue: taskQueue);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgent(
+                new Helpers.EchoAIAgent("EchoAgent")));
         return builder.Build();
     }
 }

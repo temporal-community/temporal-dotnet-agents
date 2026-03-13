@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
+using Temporalio.Extensions.Hosting;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.IntegrationTests;
@@ -165,16 +166,16 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
         // Register a custom service that the agent factory will resolve.
         builder.Services.AddSingleton<IGreetingService>(new GreetingService(greeting));
 
-        builder.Services.ConfigureTemporalAgents(
-            configure: options => options.AddAIAgentFactory(
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddAIAgentFactory(
                 "DIAgent",
                 sp =>
                 {
                     // This factory runs inside AgentActivities.ExecuteAgentAsync.
                     var greetingSvc = sp.GetRequiredService<IGreetingService>();
                     return new GreetingAIAgent("DIAgent", greetingSvc);
-                }),
-            taskQueue: taskQueue);
+                }));
 
         using var host = builder.Build();
         await host.StartAsync();
