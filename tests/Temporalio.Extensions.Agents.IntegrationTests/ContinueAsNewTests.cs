@@ -46,17 +46,9 @@ public class ContinueAsNewTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _env = await WorkflowEnvironment.StartLocalAsync(new()
-        {
-            DevServerOptions = new()
-            {
-                ExtraArgs =
-                [
-                    "--dynamic-config-value",
-                    $"limit.historyCount.suggestContinueAsNew={HistoryCountThreshold}",
-                ],
-            },
-        });
+        _env = await TestEnvironmentHelper.StartLocalAsync(
+            "--dynamic-config-value",
+            $"limit.historyCount.suggestContinueAsNew={HistoryCountThreshold}");
 
         _taskQueue = $"continue-as-new-test-{Guid.NewGuid():N}";
 

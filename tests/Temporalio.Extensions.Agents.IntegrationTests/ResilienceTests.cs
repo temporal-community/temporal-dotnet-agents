@@ -35,7 +35,7 @@ public class ResilienceTests
     {
         // Start a local server and worker, do one successful turn,
         // then shut down the server and verify the next call fails.
-        var env = await WorkflowEnvironment.StartLocalAsync();
+        var env = await TestEnvironmentHelper.StartLocalAsync();
         var taskQueue = $"resilience-server-{Guid.NewGuid():N}";
 
         var builder = Host.CreateApplicationBuilder();
@@ -91,7 +91,7 @@ public class ResilienceTests
         // Start server + worker, do one turn, stop only the worker (simulating
         // a network partition), send a request (which will hang), start a new
         // worker, and verify the request completes.
-        var env = await WorkflowEnvironment.StartLocalAsync();
+        var env = await TestEnvironmentHelper.StartLocalAsync();
         var taskQueue = $"resilience-partition-{Guid.NewGuid():N}";
 
         try
@@ -150,7 +150,7 @@ public class ResilienceTests
         // Build conversation state over multiple turns, kill the worker,
         // start a fresh worker, query the workflow history, and verify
         // state consistency. Then send one more turn to prove continuity.
-        var env = await WorkflowEnvironment.StartLocalAsync();
+        var env = await TestEnvironmentHelper.StartLocalAsync();
         var taskQueue = $"resilience-state-{Guid.NewGuid():N}";
 
         try
