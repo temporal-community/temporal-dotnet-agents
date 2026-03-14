@@ -21,7 +21,15 @@ This document provides essential context for working with the TemporalAgents cod
 ```
 TemporalAgents/
 ├── CLAUDE.md                               # This file
-├── DURABILITY_AND_DETERMINISM.md           # Critical: Durability guarantees after crashes
+├── docs/
+│   ├── architecture/                       # Internal design, guarantees, patterns
+│   │   ├── durability-and-determinism.md
+│   │   ├── agent-sessions-and-workflow-loop.md
+│   │   ├── session-statebag-and-context-providers.md
+│   │   └── pub-sub-and-event-driven.md
+│   └── how-to/                             # Practical usage guides with code examples
+│       ├── usage.md
+│       └── routing.md
 ├── TemporalAgents.slnx                     # Solution file (use this, not .sln)
 │
 ├── src/
@@ -205,7 +213,7 @@ Sdk.CreateTracerProviderBuilder()
 
 ## Critical: Durability and Determinism
 
-**MUST READ**: [`DURABILITY_AND_DETERMINISM.md`](./DURABILITY_AND_DETERMINISM.md)
+**MUST READ**: [`docs/architecture/durability-and-determinism.md`](./docs/architecture/durability-and-determinism.md)
 
 When a worker crashes:
 - ✅ Completed agent calls are **not re-executed** — results are replayed from history
@@ -518,11 +526,21 @@ dotnet run --project samples/SplitWorkerClient/Client/Client.csproj
 - **Temporal Documentation**: https://docs.temporal.io/
 - **Temporal .NET SDK**: https://github.com/temporalio/sdk-dotnet
 - **Microsoft Agent Framework**: https://github.com/microsoft/agents
-- **Durability Guarantees**: `DURABILITY_AND_DETERMINISM.md`
-- **Sessions and Workflow Loop**: `docs/AGENT_SESSIONS_AND_WORKFLOW_LOOP.md`
-- **Pub/Sub Equivalents**: `docs/PUB_SUB_AND_EVENT_DRIVEN.md`
-- **StateBag and AIContextProvider**: `docs/SESSION_STATEBAG_AND_CONTEXT_PROVIDERS.md`
+- **Usage Guide**: `docs/how-to/usage.md`
+- **Routing Patterns**: `docs/how-to/routing.md`
+- **Testing Agents**: `docs/how-to/testing-agents.md`
+- **Observability**: `docs/how-to/observability.md`
+- **Scheduling**: `docs/how-to/scheduling.md`
+- **Structured Output**: `docs/how-to/structured-output.md`
+- **Human-in-the-Loop**: `docs/how-to/hitl-patterns.md`
+- **History & Token Optimization**: `docs/how-to/prompt-caching.md`
+- **Do's and Don'ts**: `docs/how-to/dos-and-donts.md`
+- **Durability Guarantees**: `docs/architecture/durability-and-determinism.md`
+- **Sessions and Workflow Loop**: `docs/architecture/agent-sessions-and-workflow-loop.md`
+- **Pub/Sub Equivalents**: `docs/architecture/pub-sub-and-event-driven.md`
+- **StateBag and AIContextProvider**: `docs/architecture/session-statebag-and-context-providers.md`
+- **Agent-to-Agent Communication**: `docs/architecture/agent-to-agent-communication.md`
 
 ---
 
-**Last Updated**: 2026-02-28
+**Last Updated**: 2026-03-13

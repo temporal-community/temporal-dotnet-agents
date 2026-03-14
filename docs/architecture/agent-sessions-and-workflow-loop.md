@@ -561,5 +561,5 @@ Activity start ─────┘                                              �
 
 ## Related Documentation
 
-- [DURABILITY_AND_DETERMINISM.md](./DURABILITY_AND_DETERMINISM.md) — Step-by-step walkthrough of deterministic replay with agent calls
-- [CLAUDE.md](../CLAUDE.md) — Project architecture overview and quick reference
+- [durability-and-determinism.md](./durability-and-determinism.md) — Step-by-step walkthrough of deterministic replay with agent calls
+- [CLAUDE.md](../../CLAUDE.md) — Project architecture overview and quick reference
