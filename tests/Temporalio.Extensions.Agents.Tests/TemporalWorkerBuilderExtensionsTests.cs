@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Extensions.Agents.Tests.Helpers;
+using Temporalio.Extensions.Agents.Workflows;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;

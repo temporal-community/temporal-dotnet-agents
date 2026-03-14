@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.State;
 
 /// <summary>
 /// Describes a registered agent for use by <see cref="IAgentRouter"/>.

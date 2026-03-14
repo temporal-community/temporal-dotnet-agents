@@ -1,4 +1,6 @@
+using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.Agents.Workflows;
 using Xunit;
 using Xunit.Abstractions;
 

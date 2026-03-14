@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Temporalio.Extensions.Agents.Session;
+using Temporalio.Extensions.Agents.Workflows;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;

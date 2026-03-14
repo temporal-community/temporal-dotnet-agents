@@ -3,7 +3,7 @@ using Temporalio.Activities;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Temporal activities for scheduling deferred, one-time agent runs from inside orchestrating workflows.

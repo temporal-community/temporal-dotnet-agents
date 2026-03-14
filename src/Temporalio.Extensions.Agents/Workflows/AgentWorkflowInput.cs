@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Temporalio.Extensions.Agents.State;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Input passed to <see cref="AgentWorkflow"/> when starting a new run.

@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.Agents.Session;
+using Temporalio.Extensions.Agents.Workflows;
 
 namespace Temporalio.Extensions.Agents;
 

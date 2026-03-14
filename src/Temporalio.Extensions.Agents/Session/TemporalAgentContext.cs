@@ -2,8 +2,10 @@ using System.Linq.Expressions;
 using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Client;
 using Temporalio.Exceptions;
+using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.Agents.Workflows;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Session;
 
 /// <summary>
 /// Provides async-local access to Temporal capabilities for agent tools executing inside

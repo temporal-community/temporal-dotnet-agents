@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.State;
 
 /// <summary>
 /// A human reviewer's decision submitted via

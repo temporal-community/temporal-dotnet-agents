@@ -1,6 +1,6 @@
 using Microsoft.Agents.AI;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Handler for processing responses from a Temporal agent. Used to stream responses to the user.

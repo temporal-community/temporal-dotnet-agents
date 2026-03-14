@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Session;
 
 /// <summary>
 /// An <see cref="AgentSession"/> implementation for Temporal agents.

@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using Temporalio.Extensions.Agents.State;
 
 namespace Temporalio.Extensions.Agents;
 

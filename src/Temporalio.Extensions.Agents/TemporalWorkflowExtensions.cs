@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.Agents.Session;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents;

@@ -1,4 +1,6 @@
-namespace Temporalio.Extensions.Agents;
+using Temporalio.Extensions.Agents.Session;
+
+namespace Temporalio.Extensions.Agents.State;
 
 /// <summary>
 /// The resolved outcome of an approval request, returned by

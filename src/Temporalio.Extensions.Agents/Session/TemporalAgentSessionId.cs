@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Session;
 
 /// <summary>
 /// Identifies a long-running Temporal agent session. The session corresponds to a Temporal workflow

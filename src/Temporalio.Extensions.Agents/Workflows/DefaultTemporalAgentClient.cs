@@ -5,8 +5,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using Temporalio.Client.Schedules;
+using Temporalio.Extensions.Agents.Session;
+using Temporalio.Extensions.Agents.State;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Default implementation of <see cref="ITemporalAgentClient"/> that communicates with

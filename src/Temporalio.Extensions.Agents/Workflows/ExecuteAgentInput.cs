@@ -1,8 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.State;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Input for the <see cref="AgentActivities.ExecuteAgentAsync"/> activity.

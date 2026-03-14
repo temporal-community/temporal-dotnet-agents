@@ -1,5 +1,7 @@
 using Microsoft.Agents.AI;
 using Temporalio.Client.Schedules;
+using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.Agents.Workflows;
 
 namespace Temporalio.Extensions.Agents;
 

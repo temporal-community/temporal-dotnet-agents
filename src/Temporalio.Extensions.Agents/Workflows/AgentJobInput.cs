@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Input passed to <see cref="AgentJobWorkflow"/> for a single, isolated agent run.

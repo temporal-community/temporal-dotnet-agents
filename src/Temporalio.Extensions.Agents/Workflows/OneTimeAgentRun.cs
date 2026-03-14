@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Describes a single deferred agent run to be scheduled from inside an orchestrating workflow

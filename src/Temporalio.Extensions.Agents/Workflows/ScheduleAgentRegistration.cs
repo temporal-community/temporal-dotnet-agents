@@ -1,6 +1,6 @@
 using Temporalio.Client.Schedules;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Represents a scheduled agent run registered via

@@ -1,10 +1,11 @@
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Temporalio.Common;
+using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.State;
 using Temporalio.Workflows;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Long-lived Temporal workflow that acts as the durable backing store for an agent session.
@@ -47,32 +48,32 @@ internal class AgentWorkflow
 
         TimeSpan ttl = input.TimeToLive ?? TimeSpan.FromDays(14);
 
-        Workflow.Logger.LogWorkflowStarted(input.AgentName, Workflow.Info.WorkflowId, ttl);
+        Temporalio.Workflows.Workflow.Logger.LogWorkflowStarted(input.AgentName, Temporalio.Workflows.Workflow.Info.WorkflowId, ttl);
 
         // Upsert search attributes for operational queries in the Temporal UI.
-        Workflow.UpsertTypedSearchAttributes(
+        Temporalio.Workflows.Workflow.UpsertTypedSearchAttributes(
             AgentNameSearchAttribute.ValueSet(input.AgentName),
-            SessionCreatedAtSearchAttribute.ValueSet(Workflow.UtcNow),
+            SessionCreatedAtSearchAttribute.ValueSet(Temporalio.Workflows.Workflow.UtcNow),
             TurnCountSearchAttribute.ValueSet(_history.Count));
 
         // Wait until shutdown is requested, TTL elapses, or history is large enough to warrant continue-as-new.
-        bool conditionMet = await Workflow.WaitConditionAsync(
-            () => _shutdownRequested || (!_isProcessing && Workflow.ContinueAsNewSuggested),
+        bool conditionMet = await Temporalio.Workflows.Workflow.WaitConditionAsync(
+            () => _shutdownRequested || (!_isProcessing && Temporalio.Workflows.Workflow.ContinueAsNewSuggested),
             timeout: ttl);
 
         if (!conditionMet)
         {
             // TTL elapsed without condition being met — session complete.
-            Workflow.Logger.LogWorkflowTTLExpired(input.AgentName, Workflow.Info.WorkflowId);
+            Temporalio.Workflows.Workflow.Logger.LogWorkflowTTLExpired(input.AgentName, Temporalio.Workflows.Workflow.Info.WorkflowId);
         }
-        else if (Workflow.ContinueAsNewSuggested && !_shutdownRequested)
+        else if (Temporalio.Workflows.Workflow.ContinueAsNewSuggested && !_shutdownRequested)
         {
-            Workflow.Logger.LogWorkflowContinueAsNew(input.AgentName, Workflow.Info.WorkflowId, _history.Count);
+            Temporalio.Workflows.Workflow.Logger.LogWorkflowContinueAsNew(input.AgentName, Temporalio.Workflows.Workflow.Info.WorkflowId, _history.Count);
 
             // Transfer history and StateBag to a fresh workflow run.
             var carriedHistory = _history.ToList();
             var carriedStateBag = _currentStateBag;
-            throw Workflow.CreateContinueAsNewException(
+            throw Temporalio.Workflows.Workflow.CreateContinueAsNewException(
                 (AgentWorkflow wf) => wf.RunAsync(new AgentWorkflowInput
                 {
                     AgentName = input.AgentName,
@@ -107,10 +108,10 @@ internal class AgentWorkflow
     public async Task<AgentResponse> RunAgentAsync(RunRequest request)
     {
         // Serialize: wait for any in-progress run to finish first.
-        await Workflow.WaitConditionAsync(() => !_isProcessing);
+        await Temporalio.Workflows.Workflow.WaitConditionAsync(() => !_isProcessing);
         _isProcessing = true;
 
-        Workflow.Logger.LogWorkflowUpdateReceived(_input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId);
+        Temporalio.Workflows.Workflow.Logger.LogWorkflowUpdateReceived(_input!.AgentName, Temporalio.Workflows.Workflow.Info.WorkflowId, request.CorrelationId);
 
         try
         {
@@ -126,7 +127,7 @@ internal class AgentWorkflow
                 [.. _history],
                 _currentStateBag);
 
-            var result = await Workflow.ExecuteActivityAsync(
+            var result = await Temporalio.Workflows.Workflow.ExecuteActivityAsync(
                 (AgentActivities a) => a.ExecuteAgentAsync(activityInput),
                 new ActivityOptions
                 {
@@ -140,10 +141,10 @@ internal class AgentWorkflow
             _history.Add(TemporalAgentStateResponse.FromResponse(request.CorrelationId, result.Response));
 
             // Update turn count for operational queries.
-            Workflow.UpsertTypedSearchAttributes(
+            Temporalio.Workflows.Workflow.UpsertTypedSearchAttributes(
                 TurnCountSearchAttribute.ValueSet(_history.Count(e => e is TemporalAgentStateResponse)));
 
-            Workflow.Logger.LogWorkflowUpdateCompleted(_input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId);
+            Temporalio.Workflows.Workflow.Logger.LogWorkflowUpdateCompleted(_input!.AgentName, Temporalio.Workflows.Workflow.Info.WorkflowId, request.CorrelationId);
             return result.Response;
         }
         finally
@@ -173,7 +174,7 @@ internal class AgentWorkflow
     [WorkflowSignal("Shutdown")]
     public Task RequestShutdownAsync()
     {
-        Workflow.Logger.LogWorkflowShutdownRequested(_input?.AgentName ?? "unknown", Workflow.Info.WorkflowId);
+        Temporalio.Workflows.Workflow.Logger.LogWorkflowShutdownRequested(_input?.AgentName ?? "unknown", Temporalio.Workflows.Workflow.Info.WorkflowId);
         _shutdownRequested = true;
         return Task.CompletedTask;
     }
@@ -212,18 +213,18 @@ internal class AgentWorkflow
         _pendingApproval = request;
         _approvalDecision = null;
 
-        Workflow.Logger.LogWorkflowApprovalRequested(_input?.AgentName ?? "unknown",
-            Workflow.Info.WorkflowId, request.RequestId, request.Action);
+        Temporalio.Workflows.Workflow.Logger.LogWorkflowApprovalRequested(_input?.AgentName ?? "unknown",
+            Temporalio.Workflows.Workflow.Info.WorkflowId, request.RequestId, request.Action);
 
         var timeout = _input?.ApprovalTimeout ?? TimeSpan.FromDays(7);
-        var conditionMet = await Workflow.WaitConditionAsync(
+        var conditionMet = await Temporalio.Workflows.Workflow.WaitConditionAsync(
             () => _approvalDecision != null && _approvalDecision.RequestId == request.RequestId,
             timeout: timeout);
 
         if (!conditionMet)
         {
-            Workflow.Logger.LogWorkflowApprovalResolved(_input?.AgentName ?? "unknown",
-                Workflow.Info.WorkflowId, request.RequestId, approved: false);
+            Temporalio.Workflows.Workflow.Logger.LogWorkflowApprovalResolved(_input?.AgentName ?? "unknown",
+                Temporalio.Workflows.Workflow.Info.WorkflowId, request.RequestId, approved: false);
 
             _pendingApproval = null;
             _approvalDecision = null;
@@ -240,8 +241,8 @@ internal class AgentWorkflow
         _pendingApproval = null;
         _approvalDecision = null;
 
-        Workflow.Logger.LogWorkflowApprovalResolved(_input?.AgentName ?? "unknown",
-            Workflow.Info.WorkflowId, request.RequestId, decision.Approved);
+        Temporalio.Workflows.Workflow.Logger.LogWorkflowApprovalResolved(_input?.AgentName ?? "unknown",
+            Temporalio.Workflows.Workflow.Info.WorkflowId, request.RequestId, decision.Approved);
 
         return new ApprovalTicket
         {
@@ -298,7 +299,7 @@ internal class AgentWorkflow
 
     private async Task ProcessFireAndForgetAsync(RunRequest request)
     {
-        await Workflow.WaitConditionAsync(() => !_isProcessing);
+        await Temporalio.Workflows.Workflow.WaitConditionAsync(() => !_isProcessing);
         _isProcessing = true;
         try
         {
@@ -310,7 +311,7 @@ internal class AgentWorkflow
                 [.. _history],
                 _currentStateBag);
 
-            var result = await Workflow.ExecuteActivityAsync(
+            var result = await Temporalio.Workflows.Workflow.ExecuteActivityAsync(
                 (AgentActivities a) => a.ExecuteAgentAsync(activityInput),
                 new ActivityOptions
                 {

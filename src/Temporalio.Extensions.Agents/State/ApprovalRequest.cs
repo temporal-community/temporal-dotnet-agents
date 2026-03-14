@@ -1,4 +1,6 @@
-namespace Temporalio.Extensions.Agents;
+using Temporalio.Extensions.Agents.Session;
+
+namespace Temporalio.Extensions.Agents.State;
 
 /// <summary>
 /// Describes a human-review request raised by an agent tool via

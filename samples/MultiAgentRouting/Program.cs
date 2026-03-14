@@ -24,6 +24,7 @@ using OpenTelemetry;
 using OpenTelemetry.Trace;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents;
+using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Extensions.OpenTelemetry;
 

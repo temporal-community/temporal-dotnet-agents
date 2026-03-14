@@ -2,6 +2,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Temporalio.Client;
+using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.Hosting;
 
 namespace Temporalio.Extensions.Agents;

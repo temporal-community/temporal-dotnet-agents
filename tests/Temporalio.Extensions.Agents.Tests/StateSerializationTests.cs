@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.Agents.Workflows;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;

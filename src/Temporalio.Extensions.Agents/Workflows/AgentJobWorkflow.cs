@@ -1,6 +1,6 @@
 using Temporalio.Workflows;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// A simple, fire-and-forget Temporal workflow for scheduled or deferred agent runs.
@@ -30,7 +30,7 @@ internal sealed class AgentJobWorkflow
             input.Request,
             []);     // empty conversation history — no prior context for jobs
 
-        await Workflow.ExecuteActivityAsync(
+        await Temporalio.Workflows.Workflow.ExecuteActivityAsync(
             (AgentActivities a) => a.ExecuteAgentAsync(activityInput),
             new ActivityOptions
             {

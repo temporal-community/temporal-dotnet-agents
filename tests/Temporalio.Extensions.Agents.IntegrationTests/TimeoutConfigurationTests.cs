@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Extensions.Agents.Session;
+using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.Hosting;
 using Xunit;
 using Xunit.Abstractions;

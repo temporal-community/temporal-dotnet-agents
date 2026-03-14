@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.Agents.State;
 
 namespace Temporalio.Extensions.Agents;
 

@@ -38,6 +38,8 @@ using Microsoft.Extensions.Logging;
 using OpenAI;
 using OpenAI.Chat;
 using Temporalio.Extensions.Agents;
+using Temporalio.Extensions.Agents.Session;
+using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Hosting;
 
 // OpenAI.Chat also defines ChatMessage and ChatRole; pin to the MEAI versions

@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.Agents.Session;
 
 namespace Temporalio.Extensions.Agents.IntegrationTests.Helpers;
 

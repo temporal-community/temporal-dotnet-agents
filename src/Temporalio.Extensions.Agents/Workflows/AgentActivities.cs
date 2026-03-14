@@ -4,8 +4,9 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
+using Temporalio.Extensions.Agents.Session;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
