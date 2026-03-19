@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
-using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Agents.Workflows;
+using Temporalio.Extensions.AI;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;
@@ -53,7 +53,7 @@ public class AgentWorkflowValidatorTests
     public void ValidateRequestApproval_EmptyRequestId_ThrowsArgumentException()
     {
         var workflow = new AgentWorkflow();
-        var request = new ApprovalRequest { RequestId = string.Empty, Action = "Delete" };
+        var request = new DurableApprovalRequest { RequestId = string.Empty };
         Assert.Throws<ArgumentException>(() => workflow.ValidateRequestApproval(request));
     }
 
@@ -61,9 +61,9 @@ public class AgentWorkflowValidatorTests
     public void ValidateRequestApproval_ValidRequest_DoesNotThrow()
     {
         var workflow = new AgentWorkflow();
-        var request = new ApprovalRequest { Action = "Delete records" };
+        var request = new DurableApprovalRequest { RequestId = "test-id", Description = "Delete records" };
 
-        // Should not throw — RequestId has a default auto-generated value.
+        // Should not throw.
         workflow.ValidateRequestApproval(request);
     }
 
@@ -78,7 +78,7 @@ public class AgentWorkflowValidatorTests
     public void ValidateSubmitApproval_NoPendingApproval_ThrowsInvalidOperationException()
     {
         var workflow = new AgentWorkflow();
-        var decision = new ApprovalDecision { RequestId = "abc123", Approved = true };
+        var decision = new DurableApprovalDecision { RequestId = "abc123", Approved = true };
         Assert.Throws<InvalidOperationException>(() => workflow.ValidateSubmitApproval(decision));
     }
 }

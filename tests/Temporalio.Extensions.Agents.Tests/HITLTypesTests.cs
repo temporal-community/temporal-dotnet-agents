@@ -1,85 +1,83 @@
 using System.Text.Json;
-using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.AI;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;
 
 /// <summary>
-/// Tests that the HITL approval types serialize/deserialize correctly and have expected defaults.
+/// Tests that the HITL approval types serialize/deserialize correctly.
+/// MAF now uses the canonical MEAI types: DurableApprovalRequest / DurableApprovalDecision.
 /// </summary>
 public class HITLTypesTests
 {
     [Fact]
-    public void ApprovalRequest_DefaultRequestId_IsNonEmpty()
+    public void DurableApprovalRequest_RequiresExplicitRequestId()
     {
-        var request = new ApprovalRequest { Action = "Test" };
-        Assert.NotEmpty(request.RequestId);
+        // required keyword means we must supply RequestId at construction time.
+        var request = new DurableApprovalRequest { RequestId = "req-123" };
+        Assert.Equal("req-123", request.RequestId);
     }
 
     [Fact]
-    public void ApprovalRequest_RoundTripsViaJson()
+    public void DurableApprovalRequest_RoundTripsViaJson()
     {
-        var original = new ApprovalRequest
+        var original = new DurableApprovalRequest
         {
             RequestId = "req-123",
-            Action = "Delete all records",
-            Details = "This is irreversible."
+            FunctionName = "send_email",
+            CallId = "call-abc",
+            Description = "Send email to alice@example.com"
         };
 
         var json = JsonSerializer.Serialize(original);
-        var deserialized = JsonSerializer.Deserialize<ApprovalRequest>(json);
+        var deserialized = JsonSerializer.Deserialize<DurableApprovalRequest>(json);
 
         Assert.NotNull(deserialized);
         Assert.Equal("req-123", deserialized.RequestId);
-        Assert.Equal("Delete all records", deserialized.Action);
-        Assert.Equal("This is irreversible.", deserialized.Details);
+        Assert.Equal("send_email", deserialized.FunctionName);
+        Assert.Equal("call-abc", deserialized.CallId);
+        Assert.Equal("Send email to alice@example.com", deserialized.Description);
     }
 
     [Fact]
-    public void ApprovalDecision_RoundTripsViaJson()
+    public void DurableApprovalDecision_RoundTripsViaJson()
     {
-        var decision = new ApprovalDecision
+        var decision = new DurableApprovalDecision
         {
             RequestId = "req-123",
             Approved = true,
-            Comment = "Looks good."
+            Reason = "Looks good."
         };
 
         var json = JsonSerializer.Serialize(decision);
-        var deserialized = JsonSerializer.Deserialize<ApprovalDecision>(json);
+        var deserialized = JsonSerializer.Deserialize<DurableApprovalDecision>(json);
 
         Assert.NotNull(deserialized);
         Assert.Equal("req-123", deserialized.RequestId);
         Assert.True(deserialized.Approved);
-        Assert.Equal("Looks good.", deserialized.Comment);
+        Assert.Equal("Looks good.", deserialized.Reason);
     }
 
     [Fact]
-    public void ApprovalTicket_RoundTripsViaJson()
+    public void DurableApprovalDecision_NullOptionalFields_SerializeCorrectly()
     {
-        var ticket = new ApprovalTicket
-        {
-            RequestId = "req-456",
-            Approved = false,
-            Comment = "Rejected: missing justification."
-        };
+        var decision = new DurableApprovalDecision { RequestId = "req-789", Approved = false };
+        var json = JsonSerializer.Serialize(decision);
+        var deserialized = JsonSerializer.Deserialize<DurableApprovalDecision>(json);
 
-        var json = JsonSerializer.Serialize(ticket);
-        var deserialized = JsonSerializer.Deserialize<ApprovalTicket>(json);
+        Assert.Null(deserialized?.Reason);
+    }
+
+    [Fact]
+    public void DurableApprovalRequest_NullOptionalFields_SerializeCorrectly()
+    {
+        var request = new DurableApprovalRequest { RequestId = "req-456" };
+        var json = JsonSerializer.Serialize(request);
+        var deserialized = JsonSerializer.Deserialize<DurableApprovalRequest>(json);
 
         Assert.NotNull(deserialized);
-        Assert.Equal("req-456", deserialized.RequestId);
-        Assert.False(deserialized.Approved);
-        Assert.Equal("Rejected: missing justification.", deserialized.Comment);
-    }
-
-    [Fact]
-    public void ApprovalDecision_RejectedWithoutComment_SerializesNullComment()
-    {
-        var decision = new ApprovalDecision { RequestId = "req-789", Approved = false };
-        var json = JsonSerializer.Serialize(decision);
-        var deserialized = JsonSerializer.Deserialize<ApprovalDecision>(json);
-
-        Assert.Null(deserialized?.Comment);
+        Assert.Null(deserialized.FunctionName);
+        Assert.Null(deserialized.CallId);
+        Assert.Null(deserialized.Description);
     }
 }
