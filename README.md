@@ -73,6 +73,26 @@ Activity  ←── calls real IChatClient / AIAgent — retried automatically o
 | [MultiAgentRouting](samples/MAF/MultiAgentRouting) | `Extensions.Agents` | LLM-powered routing, parallel execution, and OpenTelemetry |
 | [HumanInTheLoop](samples/MAF/HumanInTheLoop) | `Extensions.Agents` | HITL approval gates via `[WorkflowUpdate]` |
 
+### Sample credentials
+
+Every sample reads credentials from `appsettings.local.json` in its own directory (gitignored). Copy from the committed `appsettings.json` and fill in your values:
+
+```bash
+cp samples/MEAI/DurableChat/appsettings.json \
+   samples/MEAI/DurableChat/appsettings.local.json
+```
+
+```json
+{
+  "OPENAI_API_KEY": "sk-...",
+  "OPENAI_API_BASE_URL": "https://api.openai.com/v1",
+  "OPENAI_MODEL": "gpt-4o-mini",
+  "TEMPORAL_ADDRESS": "localhost:7233"
+}
+```
+
+Alternatively, set the values as environment variables — `OPENAI_API_KEY`, `OPENAI_API_BASE_URL`, and `OPENAI_MODEL` — and the samples will pick them up automatically via `IConfiguration`.
+
 ```bash
 # Start Temporal (separate terminal)
 temporal server start-dev --namespace default
@@ -80,39 +100,6 @@ temporal server start-dev --namespace default
 # Run a sample
 dotnet run --project samples/MEAI/DurableChat
 dotnet run --project samples/MAF/BasicAgent
-```
-
-## Repository Structure
-
-```
-TemporalAgents/
-├── src/
-│   ├── Temporalio.Extensions.AI/       # MEAI IChatClient middleware
-│   └── Temporalio.Extensions.Agents/   # Microsoft Agent Framework integration
-├── tests/
-│   ├── Temporalio.Extensions.AI.Tests/
-│   ├── Temporalio.Extensions.AI.IntegrationTests/
-│   ├── Temporalio.Extensions.Agents.Tests/
-│   └── Temporalio.Extensions.Agents.IntegrationTests/
-├── samples/
-│   ├── MEAI/                           # Microsoft.Extensions.AI samples
-│   │   ├── DurableChat/
-│   │   ├── DurableTools/
-│   │   ├── OpenTelemetry/
-│   │   ├── HumanInTheLoop/
-│   │   └── DurableEmbeddings/
-│   └── MAF/                            # Microsoft Agent Framework samples
-│       ├── BasicAgent/
-│       ├── SplitWorkerClient/
-│       ├── WorkflowOrchestration/
-│       ├── EvaluatorOptimizer/
-│       ├── MultiAgentRouting/
-│       ├── HumanInTheLoop/
-│       ├── WorkflowRouting/
-│       └── AmbientAgent/
-└── docs/
-    ├── how-to/                         # Practical guides (Agents library)
-    └── architecture/                   # Design and internals (Agents library)
 ```
 
 ## Building
