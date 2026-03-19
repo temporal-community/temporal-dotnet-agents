@@ -27,14 +27,25 @@ TemporalAgents/
 ├── CLAUDE.md                               # This file
 ├── README.md                               # Umbrella README linking to both libraries
 ├── docs/
-│   ├── architecture/                       # Internal design, guarantees, patterns (Agents library)
-│   │   ├── durability-and-determinism.md
-│   │   ├── agent-sessions-and-workflow-loop.md
-│   │   ├── session-statebag-and-context-providers.md
-│   │   └── pub-sub-and-event-driven.md
-│   └── how-to/                             # Practical usage guides with code examples (Agents library)
-│       ├── usage.md
-│       └── routing.md
+│   ├── todo-meai.md                        # Open design todos for Temporalio.Extensions.AI
+│   ├── architecture/
+│   │   ├── MAF/                            # Internal design docs (Agents library)
+│   │   │   ├── durability-and-determinism.md
+│   │   │   ├── agent-sessions-and-workflow-loop.md
+│   │   │   ├── session-statebag-and-context-providers.md
+│   │   │   └── pub-sub-and-event-driven.md
+│   │   └── MEAI/                           # Internal design docs (AI library) — stubs
+│   │       └── durable-chat-pipeline.md
+│   └── how-to/
+│       ├── MAF/                            # Practical guides (Agents library)
+│       │   ├── usage.md
+│       │   ├── routing.md
+│       │   └── ... (9 guides)
+│       └── MEAI/                           # Practical guides (AI library) — stubs
+│           ├── usage.md
+│           ├── testing.md
+│           ├── observability.md
+│           └── hitl-patterns.md
 ├── TemporalAgents.slnx                     # Solution file (use this, not .sln)
 │
 ├── src/
@@ -350,7 +361,7 @@ Sdk.CreateTracerProviderBuilder()
 
 ## Critical: Durability and Determinism
 
-**MUST READ**: [`docs/architecture/durability-and-determinism.md`](./docs/architecture/durability-and-determinism.md)
+**MUST READ**: [`docs/architecture/MAF/durability-and-determinism.md`](./docs/architecture/MAF/durability-and-determinism.md)
 
 When a worker crashes:
 - ✅ Completed agent calls are **not re-executed** — results are replayed from history
@@ -672,20 +683,32 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **Temporal Documentation**: https://docs.temporal.io/
 - **Temporal .NET SDK**: https://github.com/temporalio/sdk-dotnet
 - **Microsoft Agent Framework**: https://github.com/microsoft/agents
-- **Usage Guide**: `docs/how-to/usage.md`
-- **Routing Patterns**: `docs/how-to/routing.md`
-- **Testing Agents**: `docs/how-to/testing-agents.md`
-- **Observability**: `docs/how-to/observability.md`
-- **Scheduling**: `docs/how-to/scheduling.md`
-- **Structured Output**: `docs/how-to/structured-output.md`
-- **Human-in-the-Loop**: `docs/how-to/hitl-patterns.md`
-- **History & Token Optimization**: `docs/how-to/prompt-caching.md`
-- **Do's and Don'ts**: `docs/how-to/dos-and-donts.md`
-- **Durability Guarantees**: `docs/architecture/durability-and-determinism.md`
-- **Sessions and Workflow Loop**: `docs/architecture/agent-sessions-and-workflow-loop.md`
-- **Pub/Sub Equivalents**: `docs/architecture/pub-sub-and-event-driven.md`
-- **StateBag and AIContextProvider**: `docs/architecture/session-statebag-and-context-providers.md`
-- **Agent-to-Agent Communication**: `docs/architecture/agent-to-agent-communication.md`
+### Temporalio.Extensions.Agents (MAF)
+
+- **Usage Guide**: `docs/how-to/MAF/usage.md`
+- **Routing Patterns**: `docs/how-to/MAF/routing.md`
+- **Testing Agents**: `docs/how-to/MAF/testing-agents.md`
+- **Observability**: `docs/how-to/MAF/observability.md`
+- **Scheduling**: `docs/how-to/MAF/scheduling.md`
+- **Structured Output**: `docs/how-to/MAF/structured-output.md`
+- **Human-in-the-Loop**: `docs/how-to/MAF/hitl-patterns.md`
+- **History & Token Optimization**: `docs/how-to/MAF/prompt-caching.md`
+- **Do's and Don'ts**: `docs/how-to/MAF/dos-and-donts.md`
+- **Durability Guarantees**: `docs/architecture/MAF/durability-and-determinism.md`
+- **Sessions and Workflow Loop**: `docs/architecture/MAF/agent-sessions-and-workflow-loop.md`
+- **Pub/Sub Equivalents**: `docs/architecture/MAF/pub-sub-and-event-driven.md`
+- **StateBag and AIContextProvider**: `docs/architecture/MAF/session-statebag-and-context-providers.md`
+- **Agent-to-Agent Communication**: `docs/architecture/MAF/agent-to-agent-communication.md`
+
+### Temporalio.Extensions.AI (MEAI)
+
+- **Usage Guide**: `docs/how-to/MEAI/usage.md` _(stub)_
+- **Tool Functions**: `docs/how-to/MEAI/tool-functions.md` — Model 1 vs Model 2 explained
+- **Testing**: `docs/how-to/MEAI/testing.md` _(stub)_
+- **Observability**: `docs/how-to/MEAI/observability.md` _(stub)_
+- **Human-in-the-Loop**: `docs/how-to/MEAI/hitl-patterns.md` _(stub)_
+- **Durable Chat Pipeline**: `docs/architecture/MEAI/durable-chat-pipeline.md` _(stub)_
+- **Open Design Todos**: `docs/todo-meai.md`
 
 ---
 
