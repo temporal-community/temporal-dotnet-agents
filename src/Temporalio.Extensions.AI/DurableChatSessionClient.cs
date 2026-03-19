@@ -11,7 +11,7 @@ namespace Temporalio.Extensions.AI;
 /// External entry point for managed durable chat sessions.
 /// Each conversation maps to a Temporal workflow that persists history across turns.
 /// </summary>
-public sealed class DurableChatSessionClient
+public sealed class DurableChatSessionClient : IDurableChatSessionClient
 {
     private readonly ITemporalClient _client;
     private readonly DurableExecutionOptions _options;

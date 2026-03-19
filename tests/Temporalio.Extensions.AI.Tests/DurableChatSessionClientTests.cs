@@ -1,9 +1,13 @@
+using FakeItEasy;
+using Temporalio.Client;
 using Xunit;
 
 namespace Temporalio.Extensions.AI.Tests;
 
 public class DurableChatSessionClientTests
 {
+    // ── Construction ──────────────────────────────────────────────────────
+
     [Fact]
     public void Constructor_ThrowsOnNullClient()
     {
@@ -15,37 +19,68 @@ public class DurableChatSessionClientTests
     [Fact]
     public void Constructor_ThrowsOnNullOptions()
     {
+        var client = A.Fake<ITemporalClient>();
         Assert.Throws<ArgumentNullException>(
-            () => new DurableChatSessionClient(null!, null!));
+            () => new DurableChatSessionClient(client, null!));
     }
 
     [Fact]
-    public void Validate_ThrowsWhenTaskQueueNotSet()
+    public void Constructor_ThrowsWhenTaskQueueNotSet()
     {
-        var options = new DurableExecutionOptions();
-        Assert.Throws<InvalidOperationException>(() => options.Validate());
+        var client = A.Fake<ITemporalClient>();
+        var options = new DurableExecutionOptions(); // TaskQueue is null
+        Assert.Throws<InvalidOperationException>(
+            () => new DurableChatSessionClient(client, options));
     }
 
+    // ── Interface ─────────────────────────────────────────────────────────
+
     [Fact]
-    public void GetWorkflowId_AppliesPrefix()
+    public void ImplementsIDurableChatSessionClient()
     {
-        // We can't easily construct a DurableChatSessionClient without a real ITemporalClient,
-        // so we test the prefix logic indirectly through options.
+        var client = A.Fake<ITemporalClient>();
+        var options = new DurableExecutionOptions { TaskQueue = "test" };
+        var sessionClient = new DurableChatSessionClient(client, options);
+
+        Assert.IsAssignableFrom<IDurableChatSessionClient>(sessionClient);
+    }
+
+    // ── Workflow ID generation ─────────────────────────────────────────────
+
+    [Fact]
+    public void GetWorkflowId_AppliesCustomPrefix()
+    {
+        var client = A.Fake<ITemporalClient>();
         var options = new DurableExecutionOptions
         {
             TaskQueue = "test",
             WorkflowIdPrefix = "my-prefix-"
         };
+        var sessionClient = new DurableChatSessionClient(client, options);
 
-        var expected = "my-prefix-conversation-123";
-        Assert.Equal(expected, $"{options.WorkflowIdPrefix}conversation-123");
+        Assert.Equal("my-prefix-conversation-123", sessionClient.GetWorkflowId("conversation-123"));
     }
 
     [Fact]
-    public void GetWorkflowId_DefaultPrefix()
+    public void GetWorkflowId_UsesDefaultPrefix()
     {
+        var client = A.Fake<ITemporalClient>();
         var options = new DurableExecutionOptions { TaskQueue = "test" };
-        var expected = "chat-my-conversation";
-        Assert.Equal(expected, $"{options.WorkflowIdPrefix}my-conversation");
+        var sessionClient = new DurableChatSessionClient(client, options);
+
+        Assert.Equal("chat-my-conversation", sessionClient.GetWorkflowId("my-conversation"));
+    }
+
+    [Fact]
+    public void GetWorkflowId_SameInputAlwaysProducesSameId()
+    {
+        var client = A.Fake<ITemporalClient>();
+        var options = new DurableExecutionOptions { TaskQueue = "test" };
+        var sessionClient = new DurableChatSessionClient(client, options);
+
+        var id1 = sessionClient.GetWorkflowId("abc");
+        var id2 = sessionClient.GetWorkflowId("abc");
+
+        Assert.Equal(id1, id2);
     }
 }

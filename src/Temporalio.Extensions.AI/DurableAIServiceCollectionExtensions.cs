@@ -60,12 +60,14 @@ public static class DurableAIServiceCollectionExtensions
         services.TryAddSingleton<IReadOnlyDictionary<string, AIFunction>>(
             sp => sp.GetRequiredService<DurableFunctionRegistry>());
 
-        // Register the session client.
+        // Register the session client (concrete + interface alias share the same instance).
         services.TryAddSingleton<DurableChatSessionClient>(sp =>
             new DurableChatSessionClient(
                 sp.GetRequiredService<ITemporalClient>(),
                 options,
                 sp.GetService<ILogger<DurableChatSessionClient>>()));
+        services.TryAddSingleton<IDurableChatSessionClient>(
+            sp => sp.GetRequiredService<DurableChatSessionClient>());
 
         // Register workflow and activities on the worker.
         builder.AddWorkflow<DurableChatWorkflow>();
