@@ -2,19 +2,23 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <AssemblyName>MultiAgentRouting</AssemblyName>
     <!-- Samples don't need strict warning enforcement -->
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/Temporalio.Extensions.Agents/Temporalio.Extensions.Agents.csproj" />
+    <ProjectReference Include="../../../src/Temporalio.Extensions.Agents/Temporalio.Extensions.Agents.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Generic host: CreateApplicationBuilder, IHostedService, etc. -->
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0-rc3" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
+    <!-- OpenTelemetry: TracingInterceptor and console export -->
+    <PackageReference Include="Temporalio.Extensions.OpenTelemetry" Version="1.11.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.11.2" />
   </ItemGroup>
 
   <ItemGroup>

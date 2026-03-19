@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../src/Temporalio.Extensions.Agents/Temporalio.Extensions.Agents.csproj" />
+    <ProjectReference Include="../../../src/Temporalio.Extensions.Agents/Temporalio.Extensions.Agents.csproj" />
   </ItemGroup>
 
   <ItemGroup>
