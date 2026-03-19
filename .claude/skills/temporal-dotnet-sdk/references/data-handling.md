@@ -164,6 +164,66 @@ public class DynamicWorkflow
 }
 ```
 
+## Polymorphic Types in Workflow State
+
+When workflow history contains an abstract base type (e.g., a `List<ContentItem>` where items can be `TextContent`, `FunctionCallContent`, etc.), the default `System.Text.Json` serializer **loses the concrete type** on round-trip. It deserializes everything as the base type, silently dropping subclass fields.
+
+Use `[JsonPolymorphic]` with `[JsonDerivedType]` to preserve `$type` discriminators:
+
+```csharp
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+[JsonDerivedType(typeof(TextContent),         "text")]
+[JsonDerivedType(typeof(FunctionCallContent), "functionCall")]
+[JsonDerivedType(typeof(FunctionResultContent), "functionResult")]
+public abstract class ContentItem
+{
+    public abstract string Type { get; }
+}
+
+public sealed class TextContent : ContentItem
+{
+    public override string Type => "text";
+    public string Text { get; init; } = string.Empty;
+}
+```
+
+### Custom DataConverter for Polymorphic Types
+
+When the polymorphic type hierarchy lives in a third-party library (and you cannot add `[JsonDerivedType]` attributes), wrap a `DefaultPayloadConverter` with custom `JsonSerializerOptions` that know about the full type hierarchy:
+
+```csharp
+public sealed class PolymorphicPayloadConverter : DefaultPayloadConverter
+{
+    public PolymorphicPayloadConverter()
+        : base(MyLibrary.JsonUtilities.OptionsWithTypeDiscriminators)
+    {
+    }
+}
+
+// Register on both client and worker — must be consistent
+var client = await TemporalClient.ConnectAsync(new("localhost:7233")
+{
+    DataConverter = DataConverter.Default with
+    {
+        PayloadConverter = new PolymorphicPayloadConverter()
+    }
+});
+```
+
+**Critical**: the same `DataConverter` must be set on **every** `TemporalClient` that participates in the workflow — both workers and external callers. A mismatch means the client can start workflows but cannot deserialize update results or query responses.
+
+### Source-Generated JSON Contexts
+
+For AOT or performance-sensitive scenarios, use a source-generated `JsonSerializerContext`. Register only the types that flow through Temporal payloads (workflow input/output, activity input/output, update parameters and return values). Types used only inside the workflow in-memory do not need to be registered.
+
+```csharp
+[JsonSerializable(typeof(WorkflowInput))]
+[JsonSerializable(typeof(WorkflowOutput))]
+[JsonSerializable(typeof(MyUpdateRequest))]
+[JsonSerializable(typeof(MyUpdateResult))]
+internal partial class MyWorkflowJsonContext : JsonSerializerContext { }
+```
+
 ## Failure Converter
 
 Customize how exceptions are serialized:

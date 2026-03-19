@@ -2,7 +2,7 @@
 
 ## Workflow Updates
 
-Updates allow synchronous, validated mutations to workflow state with return values.
+Updates allow synchronous, validated mutations to workflow state with return values. Unlike Signals (fire-and-forget), `ExecuteUpdateAsync` blocks the caller until the update handler completes and returns a result — making it the right choice for request/response patterns.
 
 ```csharp
 [Workflow]
@@ -36,9 +36,125 @@ public class OrderWorkflow
     }
 }
 
-// Client usage
-var count = await handle.ExecuteUpdateAsync(wf => wf.AddItemAsync("Widget", 9.99m));
+// Client usage — typed return value
+var count = await handle.ExecuteUpdateAsync<OrderWorkflow, int>(
+    wf => wf.AddItemAsync("Widget", 9.99m));
 ```
+
+### CRITICAL: Validator Method Name vs Wire Name
+
+`[WorkflowUpdateValidator]` takes the **C# method name** via `nameof()`, NOT the wire name from `[WorkflowUpdate("WireName")]`. Using the wire name causes the worker to fail at startup with `"Cannot find update method named X"`.
+
+```csharp
+// CORRECT — nameof() references the C# method name
+[WorkflowUpdate("run")]          // wire name is "run"
+public async Task<string> RunAgentAsync(RunRequest req) { ... }
+
+[WorkflowUpdateValidator(nameof(RunAgentAsync))]  // C# method name, NOT "run"
+public void ValidateRunAgent(RunRequest req) { ... }
+
+// WRONG — using the wire name "run" causes worker startup failure
+[WorkflowUpdateValidator("run")]  // ❌ worker fails: "Cannot find update method named 'run'"
+public void ValidateRunAgent(RunRequest req) { ... }
+```
+
+### WorkflowUpdate as a Human-in-the-Loop Gate
+
+WorkflowUpdate replaces the Signal+Query+polling pattern for human approval flows. The workflow blocks on `WaitConditionAsync` while an activity holds open, and a second update from an external system unblocks it:
+
+```csharp
+[Workflow]
+public class ApprovalWorkflow
+{
+    private ApprovalRequest? _pending;
+    private ApprovalDecision? _decision;
+
+    // Called from inside an activity (tool) — blocks until human responds
+    [WorkflowUpdate("RequestApproval")]
+    public async Task<ApprovalDecision> RequestApprovalAsync(ApprovalRequest request)
+    {
+        _pending = request;
+        var timeout = TimeSpan.FromHours(24);
+
+        var met = await Workflow.WaitConditionAsync(
+            () => _decision?.RequestId == request.RequestId,
+            timeout: timeout);
+
+        var result = met ? _decision! : new ApprovalDecision
+            { RequestId = request.RequestId, Approved = false, Reason = "Timed out." };
+
+        _pending = null;
+        _decision = null;
+        return result;
+    }
+
+    // Called from external system (UI, admin tool) — unblocks the waiting update
+    [WorkflowUpdate("SubmitApproval")]
+    public Task<ApprovalDecision> SubmitApprovalAsync(ApprovalDecision decision)
+    {
+        _decision = decision;
+        return Task.FromResult(decision);
+    }
+
+    [WorkflowQuery("GetPendingApproval")]
+    public ApprovalRequest? GetPendingApproval() => _pending;
+}
+```
+
+The key insight: the activity timeout on `RequestApprovalAsync` must exceed your expected human review time. Set `ActivityStartToCloseTimeout = TimeSpan.FromHours(24)` for a 24-hour review window.
+
+## Continue-as-New for Long-Running Sessions
+
+When workflow history grows large, `Workflow.ContinueAsNewSuggested` signals it's time to start a fresh run. Carry accumulated state forward via the new run's input:
+
+```csharp
+[WorkflowRun]
+public async Task RunAsync(SessionInput input)
+{
+    // Restore carried state from prior run
+    _history.AddRange(input.CarriedHistory);
+
+    await Workflow.WaitConditionAsync(
+        () => _shutdown || (!_processing && Workflow.ContinueAsNewSuggested),
+        timeout: input.TimeToLive ?? TimeSpan.FromDays(14));
+
+    if (Workflow.ContinueAsNewSuggested && !_shutdown)
+    {
+        // IMPORTANT: do not use collection expressions ([.. list]) inside the lambda —
+        // use .ToList() or assign to a local variable first.
+        var carried = _history.ToList();
+        throw Workflow.CreateContinueAsNewException(
+            (SessionWorkflow wf) => wf.RunAsync(new SessionInput
+            {
+                CarriedHistory = carried,
+                TimeToLive = input.TimeToLive,
+            }));
+    }
+}
+```
+
+**Note**: `Workflow.CreateContinueAsNewException` takes an `Expression<Func<TWorkflow, Task>>`. Collection expression syntax (e.g., `CarriedHistory = [.. list]`) is not valid inside these lambda expressions — use `.ToList()` instead.
+
+## Session Workflow ID Policy
+
+For long-lived session workflows where the client should start the workflow if it's not running, or attach to the existing run if it is, combine `UseExisting` conflict policy with `AllowDuplicate` reuse policy:
+
+```csharp
+await client.StartWorkflowAsync(
+    (SessionWorkflow wf) => wf.RunAsync(input),
+    new WorkflowOptions(workflowId, taskQueue)
+    {
+        // If already running: attach to existing run (don't start a new one)
+        IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+        // If completed/failed: allow a new run with the same ID
+        IdReusePolicy = WorkflowIdReusePolicy.AllowDuplicate
+    });
+
+// Then get a handle WITHOUT a pinned RunId so updates follow the continue-as-new chain
+var handle = client.GetWorkflowHandle<SessionWorkflow>(workflowId);
+```
+
+This pattern means the client doesn't need to know whether the session is already running — `StartWorkflowAsync` is idempotent.
 
 ## Nexus Operations
 
