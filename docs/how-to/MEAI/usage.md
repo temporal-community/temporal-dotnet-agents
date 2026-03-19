@@ -1,12 +1,241 @@
 # Getting Started with Temporalio.Extensions.AI
 
-> **TODO** — This guide is a stub. See `docs/todo-meai.md` for the planned content.
+`Temporalio.Extensions.AI` makes any `IChatClient` (Microsoft.Extensions.AI / MEAI) durable using Temporal workflows — no Microsoft Agent Framework required. You keep your existing MEAI pipeline and conversation code; the library wraps each LLM call as a Temporal activity and stores conversation history inside a long-running workflow.
 
-Topics to cover:
-- Registration: `DurableAIDataConverter`, `AddChatClient`, `AddDurableAI`, `AddDurableTools`
-- `AddChatClient` vs `AddKeyedChatClient` and the unkeyed alias requirement
-- `DurableChatSessionClient.ChatAsync` — basic usage
-- `GetHistoryAsync` — retrieving persisted history
-- Per-request overrides: `WithActivityTimeout`, `WithMaxRetryAttempts`, `WithHeartbeatTimeout`
-- `UseDurableReduction` — sliding context window
-- For tool functions specifically, see `tool-functions.md` — covers both execution models
+The key insight is the mapping between MEAI concepts and Temporal primitives. Each **conversation** becomes a **Temporal workflow** identified by a `conversationId` string you control. Each **LLM call** (a single `GetResponseAsync` invocation) becomes a **Temporal activity** with configurable timeouts, retry policy, and crash recovery. If the worker process crashes mid-call, Temporal retries the activity automatically from where it left off — the conversation history is safe in workflow state.
+
+This is meaningfully different from a plain MEAI pipeline. A raw `IChatClient` call loses all state if the process crashes; the conversation history lives only in the caller's memory. With this library, history survives process restarts, worker redeploys, and network blips. The workflow's event history is the source of truth, and the `DurableChatSessionClient` is the external entry point for sending messages to it.
+
+---
+
+## Prerequisites
+
+- .NET 10 SDK
+- A running Temporal server (`temporal server start-dev` starts one on `localhost:7233`)
+- An LLM provider — OpenAI, Azure OpenAI, Ollama, or any provider with an MEAI adapter
+- The NuGet package:
+
+```bash
+dotnet add package Temporalio.Extensions.AI
+```
+
+---
+
+## Step 1 — Connect the Temporal Client
+
+```csharp
+var temporalClient = await TemporalClient.ConnectAsync(
+    new TemporalClientConnectOptions("localhost:7233")
+    {
+        DataConverter = DurableAIDataConverter.Instance,
+        Namespace = "default",
+    });
+
+builder.Services.AddSingleton<ITemporalClient>(temporalClient);
+```
+
+> **Note:** `DurableAIDataConverter.Instance` is required whenever you use MEAI types in workflow history. MEAI's `AIContent` hierarchy is polymorphic — `TextContent`, `FunctionCallContent`, `FunctionResultContent`, and others all serialize with a `$type` discriminator field that tells the deserializer which concrete type to construct. Temporal's default `DefaultPayloadConverter` uses plain `System.Text.Json` without that discriminator support, so `FunctionCallContent` and `FunctionResultContent` instances round-trip through workflow history as base `AIContent` objects and lose all their data. `DurableAIDataConverter` wraps the payload converter with `AIJsonUtilities.DefaultOptions`, which includes the correct polymorphic type resolvers.
+
+---
+
+## Step 2 — Register IChatClient
+
+Use the idiomatic MEAI DI pattern — `AddChatClient` returns a `ChatClientBuilder` for chaining middleware, and `Build()` registers the final `IChatClient` singleton:
+
+```csharp
+builder.Services
+    .AddChatClient(innerClient)
+    .UseFunctionInvocation()   // handles tool call loops inside the activity
+    .Build();
+```
+
+`DurableChatActivities` — the internal activity class that executes LLM calls — constructor-injects the **unkeyed** `IChatClient`. This is the instance resolved by `services.GetRequiredService<IChatClient>()`.
+
+> **Note:** If you use `AddKeyedChatClient` to manage multiple LLM clients in one application, also register an unkeyed alias so `DurableChatActivities` can resolve it:
+>
+> ```csharp
+> builder.Services
+>     .AddKeyedChatClient("gpt", gptClient)
+>     .UseFunctionInvocation()
+>     .Build();
+>
+> // Unkeyed alias — required by DurableChatActivities
+> builder.Services.AddSingleton<IChatClient>(
+>     sp => sp.GetRequiredKeyedService<IChatClient>("gpt"));
+> ```
+>
+> Without the unkeyed alias, the worker will throw a `DependencyInjection` exception at startup.
+
+---
+
+## Step 3 — Register the Worker
+
+Chain `AddDurableAI` onto the hosted worker builder:
+
+```csharp
+builder.Services
+    .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+    .AddDurableAI(opts =>
+    {
+        opts.ActivityTimeout   = TimeSpan.FromMinutes(5);
+        opts.SessionTimeToLive = TimeSpan.FromHours(24);
+    });
+```
+
+`AddDurableAI` registers everything needed on the worker:
+
+| Registered type | Role |
+|---|---|
+| `DurableChatWorkflow` | The workflow that owns conversation history and dispatches LLM calls |
+| `DurableChatActivities` | The activity that calls `IChatClient.GetResponseAsync` |
+| `DurableFunctionActivities` | The activity that resolves and invokes durable tool functions by name |
+| `DurableEmbeddingActivities` | The activity that calls `IEmbeddingGenerator.GenerateAsync` |
+| `DurableChatSessionClient` | The external entry point injected into your application code |
+
+Nothing else needs to be wired up manually. The `TaskQueue` is automatically read from the worker builder and set on `DurableExecutionOptions`.
+
+---
+
+## Step 4 — Send a Message
+
+Resolve `DurableChatSessionClient` from DI and call `ChatAsync`:
+
+```csharp
+var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+
+var conversationId = "user-42-session-1";   // any stable string you control
+
+var response = await sessionClient.ChatAsync(
+    conversationId,
+    [new ChatMessage(ChatRole.User, "What is the capital of France?")]);
+
+Console.WriteLine(response.Text);   // "Paris."
+```
+
+`ChatAsync` starts the `DurableChatWorkflow` if it is not already running (using `WorkflowIdConflictPolicy.UseExisting`), then sends the messages via a `[WorkflowUpdate]`. The update blocks until the LLM activity completes and returns the response. If the workflow is already running from a previous turn, the update is routed to the existing instance.
+
+### Multi-turn conversations
+
+Pass the same `conversationId` on every turn. The workflow accumulates history internally across calls:
+
+```csharp
+var conversationId = "user-42-session-1";
+
+var r1 = await sessionClient.ChatAsync(conversationId,
+    [new ChatMessage(ChatRole.User, "What is the capital of France?")]);
+Console.WriteLine(r1.Text);   // "Paris."
+
+// The workflow already holds the first exchange in its state.
+var r2 = await sessionClient.ChatAsync(conversationId,
+    [new ChatMessage(ChatRole.User, "What is the population of that city?")]);
+Console.WriteLine(r2.Text);   // "Approximately 2.1 million..."
+```
+
+Each `ChatAsync` call only needs to send the new message — the workflow maintains the running history and passes the full context to the LLM on every turn.
+
+### Retrieving history
+
+`GetHistoryAsync` sends a Temporal Query to the running workflow and returns every message accumulated so far — user messages, assistant responses, tool calls, and tool results:
+
+```csharp
+var history = await sessionClient.GetHistoryAsync(conversationId);
+
+foreach (var msg in history)
+{
+    var text = string.Concat(msg.Contents.OfType<TextContent>().Select(c => c.Text));
+    Console.WriteLine($"[{msg.Role}] {text}");
+}
+```
+
+---
+
+## Per-Request Overrides
+
+The extension methods on `ChatOptions` let you override the global `DurableExecutionOptions` for a single turn without changing the worker configuration:
+
+```csharp
+var options = new ChatOptions()
+    .WithActivityTimeout(TimeSpan.FromMinutes(10))
+    .WithMaxRetryAttempts(5)
+    .WithHeartbeatTimeout(TimeSpan.FromMinutes(3));
+
+var response = await sessionClient.ChatAsync(conversationId, messages, options: options);
+```
+
+These values are stored in `ChatOptions.AdditionalProperties` under well-known string keys (`temporal.activity.timeout`, `temporal.retry.max_attempts`, `temporal.heartbeat.timeout`). The workflow reads them when scheduling the activity and applies them for that invocation only.
+
+---
+
+## History Reduction
+
+For long-running sessions the full conversation history can grow large enough to make LLM calls expensive. `UseDurableReduction` chains a sliding context window into the MEAI pipeline while keeping the complete history safe in workflow state:
+
+```csharp
+builder.Services
+    .AddChatClient(innerClient)
+    .UseFunctionInvocation()
+    .UseDurableReduction(new MessageCountingChatReducer(20))
+    .Build();
+```
+
+With this configuration:
+
+- The `DurableChatWorkflow` retains every message ever exchanged in the conversation.
+- The `DurableChatReducer` passes only the most recent 20 messages to the LLM on each turn.
+- `GetHistoryAsync` still returns the full unreduced log.
+
+When running outside a Temporal workflow (for example, in a unit test or a plain console app), `DurableChatReducer` delegates directly to the inner reducer without storing anything — it is a transparent pass-through.
+
+> **Note:** `MessageCountingChatReducer` is provided by the MEAI library (`Microsoft.Extensions.AI`). Any `IChatReducer` implementation works here — token-counting reducers, summarization reducers, etc.
+
+---
+
+## Tool Functions
+
+Tools passed via `ChatOptions.Tools` are handled by the `UseFunctionInvocation()` middleware in the existing pipeline. The entire tool call loop (LLM request → tool invocation → LLM request with result) runs inside the single Temporal activity — the tool function executes on the worker process.
+
+For tool functions that need their own durability guarantees — individual retry policies, separate timeouts, or independent crash recovery — the library provides a durable tool model where each tool call becomes its own Temporal activity. See [tool-functions.md](tool-functions.md) for both execution models and guidance on choosing between them.
+
+---
+
+## Session Lifetime
+
+`SessionTimeToLive` (default: 14 days) controls how long a session workflow remains open while idle. After this period without a new `ChatAsync` call, the workflow exits cleanly. If you then call `ChatAsync` with the same `conversationId`, a new workflow starts — history from the completed workflow is not automatically carried over.
+
+When the Temporal event history for a session grows large (Temporal's per-workflow limit), the library triggers `ContinueAsNew` automatically. The conversation history is serialized into the new workflow run's input and restored before the next turn. This is transparent to callers — the same `conversationId` continues to work.
+
+---
+
+## DurableExecutionOptions Reference
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `TaskQueue` | `string?` | _(required)_ | Temporal task queue. Set automatically by `AddDurableAI` from the worker builder. |
+| `ActivityTimeout` | `TimeSpan` | 5 minutes | Start-to-close timeout for LLM call activities. |
+| `HeartbeatTimeout` | `TimeSpan` | 2 minutes | Heartbeat timeout for LLM call activities. |
+| `RetryPolicy` | `RetryPolicy?` | `null` (Temporal defaults) | Retry policy for activities. When null, Temporal's default unlimited retry applies. |
+| `SessionTimeToLive` | `TimeSpan` | 14 days | Inactivity period after which the session workflow exits. |
+| `ApprovalTimeout` | `TimeSpan` | 7 days | Maximum time to wait for a human to respond to a HITL tool approval request. |
+| `WorkflowIdPrefix` | `string` | `"chat-"` | Prefix prepended to `conversationId` when constructing the Temporal workflow ID. |
+| `EnableSessionManagement` | `bool` | `false` | When false, middleware wraps individual calls as activities only. When true, session history is managed in the workflow. |
+
+---
+
+## Runnable Example
+
+The `samples/MEAI/DurableChat/` directory contains a complete working sample that demonstrates multi-turn conversation, tool calls, and history queries against a local Temporal server. Start it with:
+
+```bash
+temporal server start-dev          # terminal 1
+dotnet run --project samples/MEAI/DurableChat/DurableChat.csproj   # terminal 2
+```
+
+Credentials go in `samples/MEAI/DurableChat/appsettings.local.json` (gitignored):
+
+```json
+{
+  "OPENAI_API_KEY": "sk-...",
+  "OPENAI_API_BASE_URL": "https://api.openai.com/v1",
+  "OPENAI_MODEL": "gpt-4o-mini"
+}
+```
