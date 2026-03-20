@@ -42,6 +42,7 @@
 // Run:  dotnet run --project samples/MEAI/DurableEmbeddings/DurableEmbeddings.csproj
 
 using System.ClientModel;
+using System.Diagnostics;
 using DurableEmbeddings;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -134,7 +135,8 @@ builder.Services
         opts.ActivityTimeout = TimeSpan.FromMinutes(2);
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
     })
-    .AddWorkflow<DocumentIndexingWorkflow>();
+    .AddWorkflow<DocumentIndexingWorkflow>()
+    .AddWorkflow<ParallelDocumentIndexingWorkflow>();
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 var host = builder.Build();
@@ -142,8 +144,9 @@ await host.StartAsync();
 
 Console.WriteLine("Worker started.\n");
 
-// ── Run demo ──────────────────────────────────────────────────────────────────
+// ── Run demos ─────────────────────────────────────────────────────────────────
 await RunDocumentIndexingDemoAsync(temporalClient, taskQueue);
+await RunParallelIndexingDemoAsync(temporalClient, taskQueue);
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
@@ -187,6 +190,8 @@ static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string ta
     Console.WriteLine($" Workflow ID: {workflowId}");
     Console.WriteLine(" Starting DocumentIndexingWorkflow...\n");
 
+    var sw = Stopwatch.StartNew();
+
     // Execute the workflow. Each chunk becomes one DurableEmbeddingActivities invocation.
     // If this process crashes mid-run, Temporal will replay completed embeddings from
     // history and only re-run the remaining chunks — no wasted API calls.
@@ -202,8 +207,11 @@ static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string ta
             TaskQueue = taskQueue,
         });
 
+    sw.Stop();
+
     Console.WriteLine(" Results:");
-    Console.WriteLine($"   Chunks indexed : {result.Chunks.Count}");
+    Console.WriteLine($"   Elapsed         : {sw.ElapsedMilliseconds} ms (sequential)");
+    Console.WriteLine($"   Chunks indexed  : {result.Chunks.Count}");
     Console.WriteLine($"   Vector dimension: {result.Dimensions}");
 
     if (result.FirstPairSimilarity.HasValue)
@@ -221,5 +229,90 @@ static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string ta
     Console.WriteLine("   • Independently retried on transient failures (rate limits, timeouts)");
     Console.WriteLine("   • Completed embeddings replay from history on worker restart");
     Console.WriteLine("   • Visible individually in the Temporal UI for progress tracking");
+    Console.WriteLine("════════════════════════════════════════════════════════\n");
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Demo: ParallelDocumentIndexingWorkflow — concurrent fan-out embedding
+//
+// All embedding activities are scheduled at the same time via Workflow.WhenAllAsync.
+// Temporal orchestrates concurrent execution: the worker dispatches every chunk
+// in a single scheduling round rather than waiting for each to complete before
+// starting the next. Contrast with the sequential demo above.
+// ═════════════════════════════════════════════════════════════════════════════
+static async Task RunParallelIndexingDemoAsync(ITemporalClient client, string taskQueue)
+{
+    Console.WriteLine("════════════════════════════════════════════════════════");
+    Console.WriteLine(" Demo: Parallel Document Indexing (fan-out embedding)");
+    Console.WriteLine("════════════════════════════════════════════════════════");
+
+    // Five thematically connected paragraphs from the same domain — used to
+    // show that all five embeddings are generated in a single parallel round,
+    // each as its own independently retried Temporal activity.
+    var chunks = new[]
+    {
+        "Temporal is a durable execution platform that automatically retries failed " +
+            "activities and replays workflow history on worker restart, providing " +
+            "fault-tolerant orchestration without manual retry logic.",
+
+        "A Temporal workflow is written as ordinary async C# code. The SDK serialises " +
+            "every completed step into an event history so the workflow can be resumed " +
+            "on any worker after a crash without losing progress.",
+
+        "Activities are the units of work in Temporal: they run outside the workflow " +
+            "sandbox, can call external APIs and databases, and are individually retried " +
+            "according to a configurable retry policy.",
+
+        "The Temporal server persists the complete event history for every workflow " +
+            "execution. Workers replay this history to reconstruct in-memory state, " +
+            "guaranteeing exactly-once semantics for completed activity results.",
+
+        "Workflow versioning lets you deploy new code alongside in-flight executions. " +
+            "The patching API inserts conditional branches so existing histories " +
+            "continue down the old path while new executions take the new path.",
+    };
+
+    Console.WriteLine($" Chunks to index: {chunks.Length}");
+    for (int i = 0; i < chunks.Length; i++)
+    {
+        Console.WriteLine($"   [{i + 1}] {chunks[i][..Math.Min(70, chunks[i].Length)]}...");
+    }
+    Console.WriteLine();
+
+    var workflowId = $"doc-index-parallel-{Guid.NewGuid():N}";
+    Console.WriteLine($" Workflow ID: {workflowId}");
+    Console.WriteLine(" Starting ParallelDocumentIndexingWorkflow...\n");
+
+    var sw = Stopwatch.StartNew();
+
+    // All N embedding activities are dispatched concurrently.
+    // Workflow.WhenAllAsync (the workflow-safe replacement for Task.WhenAll)
+    // waits for all of them before the workflow returns — preserving correct
+    // history replay behaviour on worker restart.
+    var result = await client.ExecuteWorkflowAsync(
+        (ParallelDocumentIndexingWorkflow wf) => wf.RunAsync(new DocumentIndexingInput
+        {
+            Chunks = chunks,
+            ActivityTimeout = TimeSpan.FromMinutes(2),
+        }),
+        new WorkflowOptions
+        {
+            Id = workflowId,
+            TaskQueue = taskQueue,
+        });
+
+    sw.Stop();
+
+    Console.WriteLine(" Results:");
+    Console.WriteLine($"   Elapsed          : {sw.ElapsedMilliseconds} ms (parallel)");
+    Console.WriteLine($"   Chunks processed : {result.ChunksProcessed}");
+    Console.WriteLine($"   Vector dimension : {result.Dimensions}");
+    Console.WriteLine();
+    Console.WriteLine(" All embeddings were dispatched concurrently as Temporal activities:");
+    Console.WriteLine("   • Workflow.WhenAllAsync scheduled all N activities in one round");
+    Console.WriteLine("   • Each activity is still independently retried on failure");
+    Console.WriteLine("   • Completed activities replay from history on worker restart");
+    Console.WriteLine("   • Compare elapsed time with the sequential demo above —");
+    Console.WriteLine("     wall-clock time approaches max(per-activity) rather than sum");
     Console.WriteLine("════════════════════════════════════════════════════════\n");
 }
