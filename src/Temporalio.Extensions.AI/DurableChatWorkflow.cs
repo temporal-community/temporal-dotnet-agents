@@ -31,6 +31,15 @@ internal sealed class DurableChatWorkflow
             _history.AddRange(input.CarriedHistory);
         }
 
+        // Opt-in: upsert search attributes only when explicitly requested.
+        // Guards against failure on servers where the attributes are not pre-registered.
+        if (input.SearchAttributes is not null)
+        {
+            Workflow.UpsertTypedSearchAttributes(
+                DurableSessionAttributes.SessionCreatedAt.ValueSet(Workflow.UtcNow),
+                DurableSessionAttributes.TurnCount.ValueSet(_turnCount));
+        }
+
         var ttl = input.TimeToLive;
 
         // Wait until shutdown or history grows large enough for continue-as-new.
@@ -55,6 +64,7 @@ internal sealed class DurableChatWorkflow
                     ActivityTimeout = input.ActivityTimeout,
                     HeartbeatTimeout = input.HeartbeatTimeout,
                     ApprovalTimeout = input.ApprovalTimeout,
+                    SearchAttributes = input.SearchAttributes,
                 }));
         }
     }
@@ -113,6 +123,13 @@ internal sealed class DurableChatWorkflow
             foreach (var msg in output.Response.Messages)
             {
                 _history.Add(msg);
+            }
+
+            // Update turn count search attribute if opt-in was requested.
+            if (_input!.SearchAttributes is not null)
+            {
+                Workflow.UpsertTypedSearchAttributes(
+                    DurableSessionAttributes.TurnCount.ValueSet(_turnCount));
             }
 
             return output;

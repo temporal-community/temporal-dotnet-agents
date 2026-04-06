@@ -71,6 +71,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
                 ActivityTimeout = _options.ActivityTimeout,
                 HeartbeatTimeout = _options.HeartbeatTimeout,
                 ApprovalTimeout = _options.ApprovalTimeout,
+                SearchAttributes = _options.EnableSearchAttributes ? new DurableSessionAttributes() : null,
             }),
             new WorkflowOptions(workflowId, _options.TaskQueue!)
             {

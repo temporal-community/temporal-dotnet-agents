@@ -51,6 +51,17 @@ public sealed class DurableExecutionOptions
     /// </summary>
     public TimeSpan ApprovalTimeout { get; set; } = TimeSpan.FromDays(7);
 
+    /// <summary>
+    /// Gets or sets whether <c>TurnCount</c> and <c>SessionCreatedAt</c> typed search attributes
+    /// are upserted on the workflow. Defaults to <see langword="false"/>.
+    /// </summary>
+    /// <remarks>
+    /// Requires <c>TurnCount</c> (Long) and <c>SessionCreatedAt</c> (Datetime) to be
+    /// pre-registered on the Temporal server before the first workflow start.
+    /// Use the Temporal CLI: <c>temporal operator search-attribute create</c>.
+    /// </remarks>
+    public bool EnableSearchAttributes { get; set; }
+
     internal void Validate()
     {
         if (string.IsNullOrEmpty(TaskQueue))

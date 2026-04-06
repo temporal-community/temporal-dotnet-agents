@@ -18,11 +18,13 @@ internal class AgentWorkflow
     internal static readonly SearchAttributeKey<string> AgentNameSearchAttribute =
         SearchAttributeKey.CreateKeyword("AgentName");
 
+    // Shared with DurableChatWorkflow (Temporalio.Extensions.AI) so a single Temporal
+    // list query can span both workflow types.
     internal static readonly SearchAttributeKey<DateTimeOffset> SessionCreatedAtSearchAttribute =
-        SearchAttributeKey.CreateDateTimeOffset("SessionCreatedAt");
+        DurableSessionAttributes.SessionCreatedAt;
 
     internal static readonly SearchAttributeKey<long> TurnCountSearchAttribute =
-        SearchAttributeKey.CreateLong("TurnCount");
+        DurableSessionAttributes.TurnCount;
 
     private readonly List<TemporalAgentStateEntry> _history = [];
     private bool _isProcessing;
