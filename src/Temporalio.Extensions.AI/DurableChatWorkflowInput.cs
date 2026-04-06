@@ -5,7 +5,7 @@ namespace Temporalio.Extensions.AI;
 /// <summary>
 /// Input for the <see cref="DurableChatWorkflow"/>.
 /// </summary>
-internal sealed class DurableChatWorkflowInput
+public sealed class DurableChatWorkflowInput
 {
     /// <summary>
     /// The session time-to-live. The workflow completes when idle for this duration.
@@ -32,4 +32,11 @@ internal sealed class DurableChatWorkflowInput
     /// Defaults to 7 days.
     /// </summary>
     public TimeSpan ApprovalTimeout { get; init; } = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// When non-null, enables upsert of <c>TurnCount</c> and <c>SessionCreatedAt</c>
+    /// typed search attributes after workflow start and after each completed turn.
+    /// Requires pre-registration of these attributes with the Temporal server.
+    /// </summary>
+    public DurableSessionAttributes? SearchAttributes { get; init; }
 }

@@ -6,7 +6,7 @@ namespace Temporalio.Extensions.AI;
 /// Serializable input for the durable chat activity.
 /// Carries the messages and options needed to invoke the inner <see cref="IChatClient"/>.
 /// </summary>
-internal sealed class DurableChatInput
+public sealed class DurableChatInput
 {
     /// <summary>
     /// The chat messages to send to the LLM.
