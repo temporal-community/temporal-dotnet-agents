@@ -15,6 +15,7 @@
     <Project Path="samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj" />
     <Project Path="samples/MEAI/HumanInTheLoop/HumanInTheLoop.csproj" />
     <Project Path="samples/MEAI/DurableEmbeddings/DurableEmbeddings.csproj" />
+    <Project Path="samples/MEAI/CustomWorkflow/CustomWorkflow.csproj" />
   </Folder>
   <Folder Name="/samples/MAF/">
     <Project Path="samples/MAF/BasicAgent/BasicAgent.csproj" />
