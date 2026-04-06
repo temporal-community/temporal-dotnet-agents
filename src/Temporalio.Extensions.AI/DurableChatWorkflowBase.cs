@@ -62,7 +62,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// Runs the durable session loop. Subclasses annotate their own <c>RunAsync</c>
     /// override with <c>[WorkflowRun]</c> and delegate to this method.
     /// </summary>
-    protected async Task RunAsync(DurableChatWorkflowInput input)
+    protected virtual async Task RunAsync(DurableChatWorkflowInput input)
     {
         Input = input;
 

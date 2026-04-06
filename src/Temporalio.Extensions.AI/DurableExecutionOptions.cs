@@ -62,6 +62,25 @@ public sealed class DurableExecutionOptions
     /// </remarks>
     public bool EnableSearchAttributes { get; set; }
 
+    /// <summary>
+    /// Gets or sets whether to register the default <see cref="DurableChatWorkflow"/> and
+    /// <see cref="DurableChatSessionClient"/>. Defaults to <see langword="true"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Set to <see langword="false"/> when using a custom workflow derived from
+    /// <see cref="DurableChatWorkflowBase{TOutput}"/>. The workflow and session client are
+    /// still required for most applications, so only disable if you are providing your own
+    /// workflow implementation and do not need <see cref="DurableChatSessionClient"/>.
+    /// </para>
+    /// <para>
+    /// Disabling this only skips the default workflow and session client registration.
+    /// All supporting infrastructure (options, DataConverter, activities, embeddings) is
+    /// still registered regardless of this setting.
+    /// </para>
+    /// </remarks>
+    public bool RegisterDefaultWorkflow { get; set; } = true;
+
     internal void Validate()
     {
         if (string.IsNullOrEmpty(TaskQueue))

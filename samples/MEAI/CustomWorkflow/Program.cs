@@ -80,7 +80,9 @@ builder.Services
     .Build();
 
 // ── Setup: Register worker ────────────────────────────────────────────────────
-// AddDurableAI registers DurableChatWorkflow and its activities.
+// AddDurableAI registers supporting infrastructure (options, DataConverter, activities).
+// RegisterDefaultWorkflow = false skips the default DurableChatWorkflow since we use
+// ShoppingAssistantWorkflow instead.
 // AddWorkflow<ShoppingAssistantWorkflow> registers the custom workflow type.
 // AddSingletonActivities<ShoppingActivities> registers the shopping activity class.
 builder.Services
@@ -89,6 +91,7 @@ builder.Services
     {
         opts.ActivityTimeout = TimeSpan.FromMinutes(5);
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
+        opts.RegisterDefaultWorkflow = false;  // Use custom workflow instead
     })
     .AddWorkflow<ShoppingAssistantWorkflow>()
     .AddSingletonActivities<ShoppingActivities>();

@@ -96,10 +96,16 @@ Register the workflow and its activity class with the worker, then call via the 
 // Worker registration
 builder.Services
     .AddHostedTemporalWorker(temporalAddress, "default", "my-queue")
-    .AddDurableAI(opts => opts.ActivityTimeout = TimeSpan.FromMinutes(5))
+    .AddDurableAI(opts =>
+    {
+        opts.ActivityTimeout = TimeSpan.FromMinutes(5);
+        opts.RegisterDefaultWorkflow = false;  // Skip default workflow; use custom instead
+    })
     .AddWorkflow<ShoppingAssistantWorkflow>()
     .AddSingletonActivities<ShoppingActivities>();
 ```
+
+The `RegisterDefaultWorkflow = false` setting tells `AddDurableAI()` to skip registering `DurableChatWorkflow` and `DurableChatSessionClient` since your custom workflow handles session management instead. All other supporting infrastructure (options, DataConverter, activities, embeddings) is still registered.
 
 ```csharp
 // Start the workflow

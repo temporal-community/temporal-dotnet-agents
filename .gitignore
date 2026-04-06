@@ -427,3 +427,8 @@ Desktop.ini
 *.env
 .env.*
 !.env.example
+
+# claude
+.clans/
+.claude/agents/clans-*.md
+.claude/skills/*
