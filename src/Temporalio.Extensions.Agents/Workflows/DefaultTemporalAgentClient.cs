@@ -58,13 +58,13 @@ internal class DefaultTemporalAgentClient(
                 ActivityHeartbeatTimeout = options.ActivityHeartbeatTimeout,
                 ApprovalTimeout = options.ApprovalTimeout
             }),
-            workflowOptions);
+            workflowOptions).ConfigureAwait(false);
 
         // Use a handle WITHOUT a pinned RunId so updates follow the continue-as-new chain.
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
 
         var response = await handle.ExecuteUpdateAsync<AgentWorkflow, AgentResponse>(
-            wf => wf.RunAgentAsync(request));
+            wf => wf.RunAgentAsync(request)).ConfigureAwait(false);
 
         _logger.LogClientUpdateCompleted(sessionId.AgentName, sessionId.WorkflowId);
         return response;
@@ -110,10 +110,10 @@ internal class DefaultTemporalAgentClient(
                 ActivityHeartbeatTimeout = options.ActivityHeartbeatTimeout,
                 ApprovalTimeout = options.ApprovalTimeout
             }),
-            workflowOptions);
+            workflowOptions).ConfigureAwait(false);
 
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
-        await handle.SignalAsync<AgentWorkflow>(wf => wf.RunAgentFireAndForgetAsync(request));
+        await handle.SignalAsync<AgentWorkflow>(wf => wf.RunAgentFireAndForgetAsync(request)).ConfigureAwait(false);
     }
 
     // ── GAP 2: Routing ──────────────────────────────────────────────────────
@@ -160,7 +160,7 @@ internal class DefaultTemporalAgentClient(
     {
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
         return await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
-            wf => wf.GetPendingApproval());
+            wf => wf.GetPendingApproval()).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -173,7 +173,7 @@ internal class DefaultTemporalAgentClient(
 
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
         return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
-            wf => wf.SubmitApprovalAsync(decision));
+            wf => wf.SubmitApprovalAsync(decision)).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -217,7 +217,7 @@ internal class DefaultTemporalAgentClient(
                     ActivityHeartbeatTimeout = options.ActivityHeartbeatTimeout,
                     ApprovalTimeout = options.ApprovalTimeout
                 }),
-                workflowOptions);
+                workflowOptions).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -268,7 +268,7 @@ internal class DefaultTemporalAgentClient(
         {
             return await client.CreateScheduleAsync(
                 scheduleId,
-                new Schedule(action, spec) { Policy = policy ?? new SchedulePolicy() });
+                new Schedule(action, spec) { Policy = policy ?? new SchedulePolicy() }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
