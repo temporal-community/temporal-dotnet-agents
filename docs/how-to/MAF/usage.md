@@ -1,6 +1,6 @@
 # Usage Guide
 
-Detailed usage patterns and configuration for Temporalio.Extensions.Agents. For a quick overview, see the [README](../../README.md).
+Detailed usage patterns and configuration for Temporalio.Extensions.Agents. For a quick overview, see the [README](../../../README.md).
 
 ---
 
@@ -349,7 +349,7 @@ public class MyStreamingHandler : IAgentResponseHandler
 
 ## LLM-Powered Routing
 
-When multiple agents are registered, `IAgentRouter` / `AIModelAgentRouter` can classify an incoming message and dispatch
+When multiple agents are registered, `IAgentRouter` / `AIAgentRouter` can classify an incoming message and dispatch
 it to the best-matching agent automatically.
 
 ### Configuration
@@ -358,14 +358,14 @@ Register descriptors for each routable agent, then set a lightweight router agen
 of the best match:
 
 ```csharp
-var routerChatClient = openAiClient.GetChatClient("gpt-4o-mini")
-    .AsIChatClient();
-
-var routerAgent = new ChatClientAgent(routerChatClient, "Router")
-{
-    Instructions = "You are a routing assistant. Given a list of agents and a user message, " +
-                   "respond with ONLY the name of the most appropriate agent. Nothing else."
-};
+var routerAgent = openAiClient
+    .GetChatClient("gpt-4o-mini")
+    .AsAIAgent(
+        name: "__router__",
+        instructions:
+            "You are a routing agent. Given a user query, respond with ONLY the name of the " +
+            "most appropriate specialist agent from the available options. Do not include any " +
+            "explanation or punctuation — only the agent name.");
 
 builder.Services
     .AddHostedTemporalWorker("localhost:7233", "default", "agents")
@@ -378,7 +378,7 @@ builder.Services
         opts.AddAgentDescriptor("WeatherAgent", "Handles weather queries and forecasts");
         opts.AddAgentDescriptor("BookingAgent", "Handles travel bookings and reservations");
 
-        // AIModelAgentRouter is registered automatically when a router agent is set
+        // AIAgentRouter is registered automatically when a router agent is set
         opts.SetRouterAgent(routerAgent);
     });
 ```
@@ -404,7 +404,7 @@ AgentResponse response = await client.RouteAsync(
 The `sessionKey` is used to construct a `TemporalAgentSessionId` from the chosen agent name and that key, so the same
 user always routes to the same session for a given agent.
 
-`AIModelAgentRouter` uses a fuzzy-match fallback to tolerate minor formatting variation in the model's output. To use a
+`AIAgentRouter` uses a fuzzy-match fallback to tolerate minor formatting variation in the model's output. To use a
 custom routing strategy, implement `IAgentRouter` and register it in DI before calling `AddTemporalAgents`.
 
 For advanced routing patterns (static workflow routing, dynamic routing via activity), see [Routing Patterns](./routing.md).
@@ -456,8 +456,10 @@ waits for all of them before continuing.
 
 ## Human-in-the-Loop (HITL) Approval Gates
 
-Agent tools can pause mid-turn and wait for a human decision before proceeding. The backing `AgentWorkflow` exposes a
-`[WorkflowUpdate]` for both sides of this interaction.
+Agent tools can pause mid-turn and wait for a human decision before proceeding. The backing `AgentWorkflow` exposes
+two `[WorkflowUpdate]` handlers — `RequestApprovalAsync` (called from inside a tool) and `SubmitApprovalAsync` (called
+from an external system) — and one `[WorkflowQuery]` handler, `GetPendingApproval`, for polling the current pending
+request without modifying workflow state.
 
 ### Requesting Approval (Inside a Tool)
 
@@ -737,7 +739,7 @@ Each turn the provider injects previously stored memories into the prompt; after
 The `AgentSessionStateBag` stores any state the provider needs to resume in a future turn (e.g., thread identifiers),
 and that bag is serialized inside `AgentWorkflow` so it survives worker restarts and continue-as-new transitions.
 
-For a deep dive into how StateBag persistence works, see [Session StateBag & Context Providers](../architecture/session-statebag-and-context-providers.md).
+For a deep dive into how StateBag persistence works, see [Session StateBag & Context Providers](../architecture/MAF/session-statebag-and-context-providers.md).
 
 ---
 
@@ -787,11 +789,11 @@ agent.client.send          (DefaultTemporalAgentClient — before the Update rea
         └── agent.turn     (AgentActivities.ExecuteAgentAsync — inside the activity)
 ```
 
-| Span                | Source                                      | Key Attributes                                                                                      |
-|---------------------|---------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| `agent.client.send` | `TemporalAgentTelemetry.ActivitySourceName` | `agent.name`, `agent.session_id`, `agent.correlation_id`                                            |
-| `agent.turn`        | `TemporalAgentTelemetry.ActivitySourceName` | `agent.name`, `agent.session_id`, `agent.input_tokens`, `agent.output_tokens`, `agent.total_tokens` |
-| SDK spans           | `TracingInterceptor.*Source`                | Standard Temporal attributes                                                                        |
+| Span                | Source                                      | Key Attributes                                                                                                                  |
+|---------------------|---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| `agent.client.send` | `TemporalAgentTelemetry.ActivitySourceName` | `agent.name`, `agent.session_id`                                                                                                |
+| `agent.turn`        | `TemporalAgentTelemetry.ActivitySourceName` | `agent.name`, `agent.session_id`, `agent.correlation_id`, `agent.input_tokens`, `agent.output_tokens`, `agent.total_tokens`    |
+| SDK spans           | `TracingInterceptor.*Source`                | Standard Temporal attributes                                                                                                    |
 
 The span name constants are available on `TemporalAgentTelemetry`:
 

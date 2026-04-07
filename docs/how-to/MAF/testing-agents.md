@@ -69,7 +69,7 @@ private static StubAIAgent ResponseWithText(string text) =>
 [Fact]
 public async Task RouteAsync_ExactMatch_ReturnsAgentName()
 {
-    var router = new AIModelAgentRouter(ResponseWithText("WeatherAgent"));
+    var router = new AIAgentRouter(ResponseWithText("WeatherAgent"));
 
     var result = await router.RouteAsync(
         [new ChatMessage(ChatRole.User, "What's the weather?")],
@@ -127,6 +127,8 @@ public void AddTemporalAgents_RegistersKeyedAIAgentProxies()
 
     Assert.NotNull(proxyA);
     Assert.NotNull(proxyB);
+    // TemporalAIAgentProxy is internal — this assertion only compiles because
+    // InternalsVisibleTo is configured in the test project's .csproj.
     Assert.IsType<TemporalAIAgentProxy>(proxyA);
 }
 ```
@@ -147,7 +149,7 @@ public void AddTemporalAgents_ThrowsOnNullConfigure()
 }
 ```
 
-### Testing AIModelAgentRouter
+### Testing AIAgentRouter
 
 The router has several edge cases worth testing — exact match, fuzzy match, ambiguous responses, and hallucinations:
 
@@ -163,7 +165,7 @@ private static readonly AgentDescriptor[] descriptors =
 public async Task RouteAsync_FuzzyMatch_ReturnsAgentName()
 {
     // LLM returns "I think WeatherAgent is best" — fuzzy finds it
-    var router = new AIModelAgentRouter(
+    var router = new AIAgentRouter(
         ResponseWithText("I think WeatherAgent is best"));
 
     var result = await router.RouteAsync(messages, descriptors);
@@ -174,7 +176,7 @@ public async Task RouteAsync_FuzzyMatch_ReturnsAgentName()
 public async Task RouteAsync_MultipleNamesInResponse_ThrowsAmbiguousException()
 {
     // LLM mentions two agents — ambiguous
-    var router = new AIModelAgentRouter(
+    var router = new AIAgentRouter(
         ResponseWithText("WeatherAgent or BillingAgent"));
 
     await Assert.ThrowsAsync<InvalidOperationException>(
@@ -184,7 +186,7 @@ public async Task RouteAsync_MultipleNamesInResponse_ThrowsAmbiguousException()
 [Fact]
 public async Task RouteAsync_UnknownName_ThrowsInvalidOperationException()
 {
-    var router = new AIModelAgentRouter(
+    var router = new AIAgentRouter(
         ResponseWithText("NonexistentAgent"));
 
     await Assert.ThrowsAsync<InvalidOperationException>(
@@ -218,7 +220,9 @@ public void TemporalAgentSession_SerializeStateBag_EmptyBag_ReturnsNull()
     var session = new TemporalAgentSession(
         TemporalAgentSessionId.WithRandomKey("test"));
 
-    // Empty bags serialize to null — no wasted payload
+    // SerializeStateBag() is an internal method — this test only compiles because
+    // InternalsVisibleTo is configured in the test project's .csproj.
+    // Empty bags serialize to null — no wasted payload.
     Assert.Null(session.SerializeStateBag());
 }
 ```
@@ -243,8 +247,12 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Starts an in-process Temporal server — no external process needed
-        Environment = await WorkflowEnvironment.StartLocalAsync();
+        // Use TestEnvironmentHelper instead of bare WorkflowEnvironment.StartLocalAsync().
+        // TestEnvironmentHelper pre-registers the three custom search attributes
+        // (AgentName, SessionCreatedAt, TurnCount) that AgentWorkflow upserts on every
+        // workflow run. Without them, the workflow fails at runtime with an opaque
+        // "unexpected workflow task failure" that does not surface the real cause.
+        Environment = await TestEnvironmentHelper.StartLocalAsync();
 
         _host = BuildHost();
         await _host.StartAsync();
@@ -393,8 +401,10 @@ These tests verify that conversation history, turn counts, and timeouts survive 
 public async Task ContinueAsNew_HistoryCarriedForward_ConversationContinuesSeamlessly()
 {
     // Use a custom WorkflowEnvironment with a low history count
-    // threshold (20 events) to trigger continue-as-new quickly
-    var env = await WorkflowEnvironment.StartLocalAsync();
+    // threshold (20 events) to trigger continue-as-new quickly.
+    // In the real test suite this would use TestEnvironmentHelper.StartLocalAsync()
+    // with extra args to pass a lower history threshold — shown bare here for clarity.
+    var env = await TestEnvironmentHelper.StartLocalAsync(/* extra args for low threshold */);
 
     // Send enough turns to trigger continue-as-new
     for (int i = 1; i <= 10; i++)
@@ -472,7 +482,7 @@ just test-coverage
 > ```bash
 > temporal server start-dev --namespace default
 > ```
-> Alternatively, `WorkflowEnvironment.StartLocalAsync()` in the test fixture starts an in-process server automatically — no manual setup needed for the standard integration test suite.
+> Alternatively, `TestEnvironmentHelper.StartLocalAsync()` in the test fixture starts an in-process server automatically — no manual setup needed for the standard integration test suite. Always use `TestEnvironmentHelper` (not bare `WorkflowEnvironment.StartLocalAsync()`) for Agents integration tests — it pre-registers the `AgentName`, `SessionCreatedAt`, and `TurnCount` custom search attributes that `AgentWorkflow` requires.
 
 ---
 
@@ -480,8 +490,8 @@ just test-coverage
 
 - `tests/Temporalio.Extensions.Agents.Tests/` — 214 unit tests
 - `tests/Temporalio.Extensions.Agents.IntegrationTests/` — 51 integration tests
-- [Durability & Determinism](../architecture/durability-and-determinism.md) — why activity results are cached on replay
-- [Agent Sessions & Workflow Loop](../architecture/agent-sessions-and-workflow-loop.md) — session lifecycle under test
+- [Durability & Determinism](../architecture/MAF/durability-and-determinism.md) — why activity results are cached on replay
+- [Agent Sessions & Workflow Loop](../architecture/MAF/agent-sessions-and-workflow-loop.md) — session lifecycle under test
 
 ---
 

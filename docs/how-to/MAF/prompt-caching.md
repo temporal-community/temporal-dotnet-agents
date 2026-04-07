@@ -45,10 +45,15 @@ The history is serialized as the activity input, so the Temporal event payload g
 
 ```csharp
 // Inside AgentActivities.ExecuteAgentAsync
-var allMessages = input.ConversationHistory
-    .SelectMany(e => e.Messages)
-    .Select(m => m.ToChatMessage())
-    .ToList();
+// Pre-allocate to the total message count to avoid list resizing.
+int messageCount = 0;
+foreach (var entry in input.ConversationHistory)
+    messageCount += entry.Messages.Count;
+
+var allMessages = new List<ChatMessage>(messageCount);
+foreach (var entry in input.ConversationHistory)
+    foreach (var msg in entry.Messages)
+        allMessages.Add(msg.ToChatMessage());
 ```
 
 **Token cost grows quadratically** with turn count: turn N sends all N previous exchanges plus the new message. A 20-turn conversation sends ~40 messages to the LLM on the final turn.
@@ -276,7 +281,7 @@ var options = new TemporalAgentRunOptions
 
 ## External Memory with AIContextProvider
 
-For a detailed explanation of how `AIContextProvider` and `AgentSessionStateBag` work, see [Session StateBag & Context Providers](../architecture/session-statebag-and-context-providers.md).
+For a detailed explanation of how `AIContextProvider` and `AgentSessionStateBag` work, see [Session StateBag & Context Providers](../architecture/MAF/session-statebag-and-context-providers.md).
 
 The key insight for token optimization: providers run inside `AgentActivities.ExecuteAgentAsync` (the activity, not the workflow), so they can make external I/O calls safely. The provider decides what context to inject — it could be a few relevant memories from a vector database rather than the entire conversation history.
 
@@ -309,7 +314,7 @@ Continue-as-New:
 - `src/Temporalio.Extensions.Agents/AgentWorkflow.cs` — history storage and continue-as-new
 - `src/Temporalio.Extensions.Agents/AgentActivities.cs` — history rebuild and token logging
 - `src/Temporalio.Extensions.Agents/State/` — serialization types for conversation history
-- [Session StateBag & Context Providers](../architecture/session-statebag-and-context-providers.md) — AIContextProvider deep dive
+- [Session StateBag & Context Providers](../architecture/MAF/session-statebag-and-context-providers.md) — AIContextProvider deep dive
 - [Observability](./observability.md) — token usage monitoring via OTel spans
 - [Usage Guide](./usage.md) — structured output and tool filtering
 

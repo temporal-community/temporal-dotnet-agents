@@ -378,9 +378,9 @@ Use this decision tree to pick the right routing approach:
 
 - `samples/MultiAgentRouting/` — Pattern 1 example (LLM-powered routing with `IAgentRouter`)
 - `samples/WorkflowRouting/` — Pattern 2 (static) and Pattern 3 (dynamic) examples
-- [`DURABILITY_AND_DETERMINISM.md`](../architecture/durability-and-determinism.md) — Why workflow code must be deterministic
-- [`AGENT_SESSIONS_AND_WORKFLOW_LOOP.md`](../architecture/agent-sessions-and-workflow-loop.md) — How agent calls become durable activities
-- [`SESSION_STATEBAG_AND_CONTEXT_PROVIDERS.md`](../architecture/session-statebag-and-context-providers.md) — StateBag and AIContextProvider integration
+- [`durability-and-determinism.md`](../architecture/MAF/durability-and-determinism.md) — Why workflow code must be deterministic
+- [`agent-sessions-and-workflow-loop.md`](../architecture/MAF/agent-sessions-and-workflow-loop.md) — How agent calls become durable activities
+- [`session-statebag-and-context-providers.md`](../architecture/MAF/session-statebag-and-context-providers.md) — StateBag and AIContextProvider integration
 - `src/Temporalio.Extensions.Agents/TemporalAgentsOptions.cs` — Agent registry API (`GetRegisteredAgentNames`, `IsAgentRegistered`)
 - `src/Temporalio.Extensions.Agents/AIAgentRouter.cs` — Built-in LLM router implementation
 - `src/Temporalio.Extensions.Agents/IAgentRouter.cs` — Router interface

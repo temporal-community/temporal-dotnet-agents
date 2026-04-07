@@ -176,9 +176,13 @@ var session = new TemporalAgentSession(sessionId);
 // WRONG — TemporalAgentSession is not in the source-gen JSON context
 JsonSerializer.Serialize(session, DefaultOptions);
 
-// CORRECT — use StateBag.Serialize() for state persistence
-var serializedBag = session.SerializeStateBag();
+// CORRECT — use StateBag.Serialize() directly for state persistence
+var serializedBag = session.StateBag.Serialize();
 ```
+
+> **Note:** `SerializeStateBag()` is an `internal` method on `TemporalAgentSession` used by the
+> framework itself (in `AgentActivities`). It is not part of the public API. User code should call
+> `session.StateBag.Serialize()` directly when state persistence is required.
 
 ---
 
@@ -268,13 +272,28 @@ Assert.Throws<ArgumentException>(() => Foo(""));
 
 **Why:** xUnit's `Assert.Throws<T>` matches the **exact** type, not subtypes. `ArgumentNullException` inherits from `ArgumentException`, but `Assert.Throws<ArgumentException>` will fail if `ArgumentNullException` is thrown.
 
-### Do use WorkflowEnvironment.StartLocalAsync() for integration tests
+### Do use TestEnvironmentHelper.StartLocalAsync() for Agents integration tests
 
 ```csharp
+// Temporalio.Extensions.Agents integration tests
+var env = await TestEnvironmentHelper.StartLocalAsync();
+```
+
+`AgentWorkflow` calls `UpsertTypedSearchAttributes` with three custom attributes (`AgentName`, `SessionCreatedAt`,
+`TurnCount`). These must be pre-registered when the embedded server starts, or the workflow fails with an opaque
+"unexpected workflow task failure" at runtime. `TestEnvironmentHelper.StartLocalAsync()` passes the required
+`--search-attribute` CLI args to `WorkflowEnvironment.StartLocalAsync()` automatically.
+
+Bare `WorkflowEnvironment.StartLocalAsync()` is appropriate only for `Temporalio.Extensions.AI` integration tests,
+which use `DurableChatWorkflow` and do not require any custom search attributes:
+
+```csharp
+// Temporalio.Extensions.AI integration tests only — no custom search attributes needed
 var env = await WorkflowEnvironment.StartLocalAsync();
 ```
 
-This starts an in-process Temporal server — no external process or Docker needed. See [Testing Agents](./testing-agents.md) for the full fixture pattern.
+Both approaches start an in-process Temporal server — no external process or Docker needed. See
+[Testing Agents](./testing-agents.md) for the full fixture pattern.
 
 ### Do validate eagerly with string.IsNullOrEmpty + InvalidOperationException
 
@@ -357,7 +376,7 @@ opts.AddScheduledAgentRun("Agent", "my-schedule", request, updatedSpec);
 
 ## References
 
-- [Durability & Determinism](../architecture/durability-and-determinism.md) — replay guarantees and failure scenarios
+- [Durability & Determinism](../architecture/MAF/durability-and-determinism.md) — replay guarantees and failure scenarios
 - [Routing Patterns](./routing.md) — safe vs. unsafe registry access contexts
 - [Observability](./observability.md) — OTel setup and span hierarchy
 - [Testing Agents](./testing-agents.md) — test patterns and fixtures
