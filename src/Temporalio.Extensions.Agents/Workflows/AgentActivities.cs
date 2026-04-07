@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
@@ -44,10 +45,14 @@ internal class AgentActivities(
         var wrapper = new AgentWorkflowWrapper(realAgent, input.Request, session, services);
 
         // Rebuild the full conversation from the serialized history.
-        var allMessages = input.ConversationHistory
-            .SelectMany(e => e.Messages)
-            .Select(m => m.ToChatMessage())
-            .ToList();
+        int messageCount = 0;
+        foreach (var entry in input.ConversationHistory)
+            messageCount += entry.Messages.Count;
+
+        var allMessages = new List<ChatMessage>(messageCount);
+        foreach (var entry in input.ConversationHistory)
+            foreach (var msg in entry.Messages)
+                allMessages.Add(msg.ToChatMessage());
 
         _logger.LogActivityHistoryRebuilt(input.AgentName, sessionId.WorkflowId,
             input.ConversationHistory.Count, allMessages.Count);

@@ -25,22 +25,30 @@ internal sealed class TemporalAgentStateMessage
 
     public static TemporalAgentStateMessage FromChatMessage(ChatMessage message)
     {
+        var contents = new List<TemporalAgentStateContent>(message.Contents.Count);
+        foreach (var c in message.Contents)
+            contents.Add(TemporalAgentStateContent.FromAIContent(c));
+
         return new TemporalAgentStateMessage
         {
             CreatedAt = message.CreatedAt,
             AuthorName = message.AuthorName,
             Role = message.Role.ToString(),
-            Contents = message.Contents.Select(TemporalAgentStateContent.FromAIContent).ToList()
+            Contents = contents
         };
     }
 
     public ChatMessage ToChatMessage()
     {
+        var contents = new List<AIContent>(this.Contents.Count);
+        foreach (var c in this.Contents)
+            contents.Add(c.ToAIContent());
+
         return new ChatMessage
         {
             CreatedAt = this.CreatedAt,
             AuthorName = this.AuthorName,
-            Contents = this.Contents.Select(c => c.ToAIContent()).ToList(),
+            Contents = contents,
             Role = new ChatRole(this.Role)
         };
     }
