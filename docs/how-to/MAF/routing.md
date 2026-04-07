@@ -96,7 +96,7 @@ The `DefaultTemporalAgentClient` calls `IAgentRouter.RouteAsync` to pick the age
 
 ### Reference
 
-See `samples/MultiAgentRouting/` for a complete working example.
+See `samples/MAF/MultiAgentRouting/` for a complete working example.
 
 ---
 
@@ -166,7 +166,7 @@ public class CustomerServiceWorkflow
 
 ### Reference
 
-See `samples/WorkflowOrchestration/` for workflow-based agent orchestration patterns.
+See `samples/MAF/WorkflowRouting/` for the static routing workflow (`CustomerServiceWorkflow`).
 
 ---
 
@@ -313,6 +313,8 @@ A common misconception: `AddAgentDescriptor` only works with `IAgentRouter`. In 
 | Feature flags and A/B testing are natural | Two extra activity calls (discovery + validation) |
 | Descriptors provide rich context for LLM classification | Descriptors must be kept in sync with agent registrations |
 
+See `samples/MAF/WorkflowRouting/` for the dynamic routing workflow (`DynamicRoutingWorkflow`) and activities (`RoutingActivities`).
+
 ---
 
 ## Do's and Don'ts
@@ -376,8 +378,8 @@ Use this decision tree to pick the right routing approach:
 
 ## References
 
-- `samples/MultiAgentRouting/` — Pattern 1 example (LLM-powered routing with `IAgentRouter`)
-- `samples/WorkflowRouting/` — Pattern 2 (static) and Pattern 3 (dynamic) examples
+- `samples/MAF/MultiAgentRouting/` — Pattern 1 example (LLM-powered routing with `IAgentRouter`)
+- `samples/MAF/WorkflowRouting/` — Pattern 2 (static, `CustomerServiceWorkflow`) and Pattern 3 (dynamic, `DynamicRoutingWorkflow`) examples
 - [`durability-and-determinism.md`](../architecture/MAF/durability-and-determinism.md) — Why workflow code must be deterministic
 - [`agent-sessions-and-workflow-loop.md`](../architecture/MAF/agent-sessions-and-workflow-loop.md) — How agent calls become durable activities
 - [`session-statebag-and-context-providers.md`](../architecture/MAF/session-statebag-and-context-providers.md) — StateBag and AIContextProvider integration
