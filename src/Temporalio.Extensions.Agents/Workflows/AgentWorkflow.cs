@@ -26,7 +26,8 @@ internal class AgentWorkflow
     internal static readonly SearchAttributeKey<long> TurnCountSearchAttribute =
         DurableSessionAttributes.TurnCount;
 
-    private readonly List<TemporalAgentStateEntry> _history = [];
+    private List<TemporalAgentStateEntry> _history = new(16);
+    private int _turnCount;
     private bool _isProcessing;
     private bool _shutdownRequested;
     private AgentWorkflowInput? _input;
@@ -43,7 +44,14 @@ internal class AgentWorkflow
         _input = input;
 
         // Restore history carried forward from a previous run (continue-as-new scenario).
-        _history.AddRange(input.CarriedHistory);
+        if (input.CarriedHistory is { Count: > 0 })
+        {
+            if (_history.Capacity < input.CarriedHistory.Count)
+                _history.Capacity = input.CarriedHistory.Count;
+            _history.AddRange(input.CarriedHistory);
+            foreach (var e in input.CarriedHistory)
+                if (e is TemporalAgentStateResponse) _turnCount++;
+        }
 
         // Restore StateBag carried across continue-as-new.
         _currentStateBag = input.CarriedStateBag;
@@ -141,10 +149,11 @@ internal class AgentWorkflow
             _currentStateBag = result.SerializedStateBag;
 
             _history.Add(TemporalAgentStateResponse.FromResponse(request.CorrelationId, result.Response));
+            _turnCount++;
 
             // Update turn count for operational queries.
             Workflow.UpsertTypedSearchAttributes(
-                TurnCountSearchAttribute.ValueSet(_history.Count(e => e is TemporalAgentStateResponse)));
+                TurnCountSearchAttribute.ValueSet(_turnCount));
 
             Workflow.Logger.LogWorkflowUpdateCompleted(_input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId);
             return result.Response;
