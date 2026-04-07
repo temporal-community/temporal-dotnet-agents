@@ -24,7 +24,7 @@ public static class TemporalChatOptionsExtensions
     {
         ArgumentNullException.ThrowIfNull(options);
         options.AdditionalProperties ??= [];
-        options.AdditionalProperties[ActivityTimeoutKey] = timeout;
+        options.AdditionalProperties[ActivityTimeoutKey] = timeout.ToString("c");
         return options;
     }
 
@@ -35,7 +35,7 @@ public static class TemporalChatOptionsExtensions
     {
         ArgumentNullException.ThrowIfNull(options);
         options.AdditionalProperties ??= [];
-        options.AdditionalProperties[MaxRetryAttemptsKey] = maxAttempts;
+        options.AdditionalProperties[MaxRetryAttemptsKey] = maxAttempts.ToString();
         return options;
     }
 
@@ -46,7 +46,7 @@ public static class TemporalChatOptionsExtensions
     {
         ArgumentNullException.ThrowIfNull(options);
         options.AdditionalProperties ??= [];
-        options.AdditionalProperties[HeartbeatTimeoutKey] = timeout;
+        options.AdditionalProperties[HeartbeatTimeoutKey] = timeout.ToString("c");
         return options;
     }
 
@@ -67,22 +67,26 @@ public static class TemporalChatOptionsExtensions
     /// </summary>
     internal static int? GetMaxRetryAttempts(this ChatOptions? options)
     {
-        if (options?.AdditionalProperties?.TryGetValue(MaxRetryAttemptsKey, out var value) == true
-            && value is int intVal)
-        {
-            return intVal;
-        }
+        if (options?.AdditionalProperties?.TryGetValue(MaxRetryAttemptsKey, out var value) != true)
+            return null;
+
+        if (value is string s && int.TryParse(s, out var v))
+            return v;
+        if (value is int direct) // backward compat
+            return direct;
 
         return null;
     }
 
     private static TimeSpan? GetTimeSpanProperty(ChatOptions? options, string key)
     {
-        if (options?.AdditionalProperties?.TryGetValue(key, out var value) == true
-            && value is TimeSpan ts)
-        {
+        if (options?.AdditionalProperties?.TryGetValue(key, out var value) != true)
+            return null;
+
+        if (value is string s && TimeSpan.TryParseExact(s, "c", null, out var ts))
             return ts;
-        }
+        if (value is TimeSpan direct) // backward compat
+            return direct;
 
         return null;
     }

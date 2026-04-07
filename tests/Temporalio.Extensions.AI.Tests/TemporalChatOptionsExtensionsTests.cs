@@ -12,8 +12,7 @@ public class TemporalChatOptionsExtensionsTests
         options.WithActivityTimeout(TimeSpan.FromMinutes(10));
 
         Assert.NotNull(options.AdditionalProperties);
-        Assert.Equal(TimeSpan.FromMinutes(10),
-            options.AdditionalProperties![TemporalChatOptionsExtensions.ActivityTimeoutKey]);
+        Assert.Equal(TimeSpan.FromMinutes(10), options.GetActivityTimeout());
     }
 
     [Fact]
@@ -23,8 +22,7 @@ public class TemporalChatOptionsExtensionsTests
         options.WithMaxRetryAttempts(5);
 
         Assert.NotNull(options.AdditionalProperties);
-        Assert.Equal(5,
-            options.AdditionalProperties![TemporalChatOptionsExtensions.MaxRetryAttemptsKey]);
+        Assert.Equal(5, options.GetMaxRetryAttempts());
     }
 
     [Fact]
@@ -34,8 +32,7 @@ public class TemporalChatOptionsExtensionsTests
         options.WithHeartbeatTimeout(TimeSpan.FromMinutes(3));
 
         Assert.NotNull(options.AdditionalProperties);
-        Assert.Equal(TimeSpan.FromMinutes(3),
-            options.AdditionalProperties![TemporalChatOptionsExtensions.HeartbeatTimeoutKey]);
+        Assert.Equal(TimeSpan.FromMinutes(3), options.GetHeartbeatTimeout());
     }
 
     [Fact]
