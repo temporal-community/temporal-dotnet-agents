@@ -86,7 +86,7 @@ TemporalAgents/
 │       ├── TemporalAgentSession.cs         # Session with StateBag persistence
 │       ├── TemporalAgentTelemetry.cs       # ActivitySource + span/attribute constants
 │       ├── IAgentRouter.cs                 # Routing abstraction
-│       ├── AIModelAgentRouter.cs               # LLM-backed router implementation
+│       ├── AIAgentRouter.cs                    # LLM-backed router implementation
 │       ├── AgentDescriptor.cs              # Name+description for routing
 │       │   # HITL types: DurableApprovalRequest / DurableApprovalDecision (from Temporalio.Extensions.AI)
 │       ├── ExecuteAgentResult.cs           # Internal: wraps AgentResponse + StateBag
@@ -96,7 +96,7 @@ TemporalAgents/
 ├── tests/
 │   ├── Temporalio.Extensions.Agents.Tests/       # 214 unit tests
 │   │   ├── TemporalWorkerBuilderExtensionsTests.cs
-│   │   ├── AIModelAgentRouterTests.cs
+│   │   ├── AIAgentRouterTests.cs
 │   │   ├── RoutingOptionsTests.cs
 │   │   ├── HITLTypesTests.cs
 │   │   ├── StateBagPersistenceTests.cs
@@ -299,7 +299,7 @@ builder.Services.AddHostedTemporalWorker("agents")
     {
         opts.AddAIAgent(weatherAgent);   // description auto-extracted into descriptors
         opts.AddAIAgent(billingAgent);
-        opts.SetRouterAgent(routerAgent);  // registers AIModelAgentRouter as IAgentRouter
+        opts.SetRouterAgent(routerAgent);  // registers AIAgentRouter as IAgentRouter
     });
 
 // External routing — LLM picks the specialist automatically
@@ -308,8 +308,8 @@ var response = await client.RouteAsync(sessionKey, new RunRequest(userMessage));
 
 - `AddAIAgent()` auto-extracts `AIAgent.Description` into the descriptor registry (used by routing)
 - `AddAgentDescriptor()` is still available for factory-registered agents or explicit overrides
-- `SetRouterAgent` registers `AIModelAgentRouter` as `IAgentRouter` in DI automatically
-- `AIModelAgentRouter` uses exact match then fuzzy (case-insensitive) fallback on the response text
+- `SetRouterAgent` registers `AIAgentRouter` as `IAgentRouter` in DI automatically
+- `AIAgentRouter` uses exact match then fuzzy (case-insensitive) fallback on the response text
 - Throws `InvalidOperationException` if the LLM returns an unrecognized agent name
 
 ---
