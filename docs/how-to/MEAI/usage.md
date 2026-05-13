@@ -106,7 +106,7 @@ builder.Services
 | Registered type | Role |
 |---|---|
 | `DurableChatWorkflow` | The workflow that owns conversation history and dispatches LLM calls |
-| `DurableChatActivities` | The activity that calls `IChatClient.GetResponseAsync` |
+| `DurableChatActivities` | The activity that calls `IChatClient.GetStreamingResponseAsync`, collects chunks (heartbeating after each), and returns a `ChatResponse` |
 | `DurableFunctionActivities` | The activity that resolves and invokes durable tool functions by name |
 | `DurableEmbeddingActivities` | The activity that calls `IEmbeddingGenerator.GenerateAsync` |
 | `DurableChatSessionClient` | The external entry point injected into your application code |

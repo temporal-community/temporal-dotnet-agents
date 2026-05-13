@@ -29,7 +29,7 @@ This document covers the internal architecture of the pipeline: how the componen
 |---|---|---|
 | `DurableChatSessionClient` | External entry point | Starts or reuses the session workflow; sends chat turns as `[WorkflowUpdate]`; exposes history query and HITL methods to external callers |
 | `DurableChatWorkflow` | `[Workflow]` | Long-lived durable session; accumulates `DurableSessionEntry` history (request/response entries) in workflow state; serializes concurrent turns; handles ContinueAsNew and HITL |
-| `DurableChatActivities` | `[Activity]` host | Runs on a worker; calls the real `IChatClient.GetResponseAsync` and returns a `ChatResponse`; emits OTel span |
+| `DurableChatActivities` | `[Activity]` host | Runs on a worker; calls `IChatClient.GetStreamingResponseAsync`, collects chunks (heartbeating after each one), assembles and returns a `ChatResponse`; emits OTel span |
 | `DurableSessionEntry` | Wire-format type | Abstract base for one turn's history record. Polymorphic with `ai_request`/`ai_response` discriminators on the `$type` property. |
 | `DurableSessionRequest` | `DurableSessionEntry` | The user/tool messages that initiated a turn. Carries `CorrelationId`, `CreatedAt`, `Messages`. |
 | `DurableSessionResponse` | `DurableSessionEntry` | The assistant's reply for a turn. Carries `CorrelationId`, `CreatedAt`, `Messages`, and `UsageDetails? Usage`. Exposes a `Text` convenience accessor returning the last assistant message's text. |
@@ -120,11 +120,12 @@ DurableChatWorkflow.ChatAsync   [WorkflowUpdate]
   ▼
 DurableChatActivities.GetResponseAsync   [Activity]
   │  span: durable_chat.turn  (OTel)
-  │  ctx.Heartbeat("turn-N")             ← prevents heartbeat timeout during long LLM calls
   │
-  │  chatClient.GetResponseAsync(input.Messages, input.Options, ct)
+  │  chatClient.GetStreamingResponseAsync(input.Messages, input.Options, ct)
   │      ↓ Workflow.InWorkflow == false here (inside an activity, not a workflow)
   │        → passes through to the real LLM client
+  │  foreach chunk → ctx?.Heartbeat(update.Text)   ← keeps activity alive per chunk
+  │  collected.ToChatResponse()                     ← assembles full response
   │
   ▼
 LLM (OpenAI / Azure OpenAI / Ollama / etc.)
@@ -613,7 +614,7 @@ See [docs/how-to/MEAI/tool-functions.md](../../how-to/MEAI/tool-functions.md) fo
 
 **Outside a workflow** (`Workflow.InWorkflow == false`): the inner client's `GetStreamingResponseAsync` is called directly and tokens are yielded as they arrive. True streaming works normally.
 
-**Inside a workflow** (`Workflow.InWorkflow == true`): true streaming is not possible. Temporal activities return a single result value. The activity executes to completion and returns a full `ChatResponse` payload. `DurableChatClient` then converts that buffered response to a `ChatResponseUpdate` sequence:
+**Inside a workflow** (`Workflow.InWorkflow == true`): true streaming is not possible for the *caller*. Temporal activities return a single result value. However, `DurableChatActivities` *internally* calls `GetStreamingResponseAsync` and heartbeats after every chunk — this prevents heartbeat timeouts on long LLM calls and enables fine-grained crash detection. The assembled `ChatResponse` is returned to the workflow as one payload. `DurableChatClient` then converts that buffered response to a `ChatResponseUpdate` sequence:
 
 ```csharp
 // Inside a workflow — buffer strategy
@@ -628,9 +629,7 @@ foreach (var update in output.Response.ToChatResponseUpdates())
 }
 ```
 
-Callers that use `GetStreamingResponseAsync` inside a workflow will see the full response arrive in a burst after the activity completes rather than as a true token stream.
-
-This limitation is fundamental to Temporal's activity execution model, which is request/response. Future approaches for true in-workflow streaming could include sending tokens back via workflow signals from the activity, or using an external token buffer and polling from the workflow — neither is currently implemented.
+Callers that use `GetStreamingResponseAsync` inside a workflow will see the full response arrive in a burst after the activity completes rather than as a true token stream. This is fundamental to Temporal's activity execution model: activities produce a single result. The internal use of streaming is purely for reliability (heartbeat interleaving), not for exposing incremental tokens to workflow code.
 
 ---
 
