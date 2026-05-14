@@ -49,6 +49,28 @@ internal sealed class AgentStepResult
     public UsageDetails? Usage { get; init; }
 
     /// <summary>
+    /// <see langword="true"/> when the activity-side trigger evaluator decided that compaction
+    /// should fire at the end of this step. The workflow consumes this flag and dispatches
+    /// the configured strategy (Step 6d). Defaults to <see langword="false"/> — no trigger.
+    /// </summary>
+    /// <remarks>
+    /// Q2 = B per the design log: trigger evaluation runs in the activity (where we have
+    /// access to the chat client + the freshly-completed step state) rather than in the
+    /// workflow (which is restricted to deterministic computation only).
+    /// </remarks>
+    public bool CompactionNeeded { get; init; }
+
+    /// <summary>
+    /// When <see cref="CompactionNeeded"/> is <see langword="true"/>, names the source-entry
+    /// <see cref="DurableSessionEntry.CorrelationId"/>s the trigger evaluator selected for
+    /// compaction. Handed verbatim to <see cref="Compaction.CompactionContext.TargetMessageIds"/>
+    /// when the workflow dispatches the strategy. <see langword="null"/> when no compaction
+    /// trigger fired.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? CompactionTargetMessageIds { get; init; }
+
+    /// <summary>
     /// Optional response identifier produced by the LLM provider for this step. Maps to OTel
     /// GenAI semantic convention <c>gen_ai.response.id</c>. Used for correlating Temporal-side
     /// activity execution with upstream provider observability (request logs, billing detail).
