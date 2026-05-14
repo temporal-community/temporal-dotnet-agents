@@ -26,6 +26,7 @@ namespace Temporalio.Extensions.AI;
 [JsonSerializable(typeof(DurableSessionEntry))]
 [JsonSerializable(typeof(DurableSessionRequest))]
 [JsonSerializable(typeof(DurableSessionResponse))]
+[JsonSerializable(typeof(CompactionMarkerEntry))]
 [JsonSerializable(typeof(IReadOnlyList<DurableSessionEntry>))]
 [JsonSerializable(typeof(List<DurableSessionEntry>))]
 internal partial class DurableAIJsonContext : JsonSerializerContext;

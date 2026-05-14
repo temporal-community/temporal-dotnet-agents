@@ -10,6 +10,7 @@ namespace Temporalio.Extensions.Agents.State;
 [JsonSerializable(typeof(DurableSessionEntry))]
 [JsonSerializable(typeof(DurableSessionRequest))]
 [JsonSerializable(typeof(DurableSessionResponse))]
+[JsonSerializable(typeof(CompactionMarkerEntry))]
 [JsonSerializable(typeof(AgentSessionRequest))]
 [JsonSerializable(typeof(AgentSessionResponse))]
 // Activity I/O types — workflow ↔ activity boundary

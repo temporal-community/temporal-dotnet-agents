@@ -22,6 +22,7 @@ namespace Temporalio.Extensions.AI;
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
 [JsonDerivedType(typeof(DurableSessionRequest), "ai_request")]
 [JsonDerivedType(typeof(DurableSessionResponse), "ai_response")]
+[JsonDerivedType(typeof(CompactionMarkerEntry), "compaction-marker")]
 public abstract class DurableSessionEntry
 {
     /// <summary>
