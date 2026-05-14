@@ -283,9 +283,10 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         var allTurnMessages = new List<ChatMessage>();
         UsageDetails? totalUsage = null;
 
-        var maxIterations = _input!.MaxToolCallsPerTurn;
-
-        for (var iteration = 0; iteration < maxIterations; iteration++)
+        // Note: do NOT snapshot _input.MaxToolCallsPerTurn here. The Fix-4 resolution handshake
+        // mutates _input mid-loop on proxy-started sessions, so we must re-read it each iteration
+        // (and again after the loop for the aborted-response log/message).
+        for (var iteration = 0; iteration < _input!.MaxToolCallsPerTurn; iteration++)
         {
             // Fix 4 (P1-1 + P1-2): proxy-started sessions have WorkerSettingsResolved=false.
             // On the first step of the first turn, ask the activity to resolve worker-side
@@ -317,7 +318,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                     CarriedStateBag = _currentStateBag,
                     RetryPolicy = _input!.RetryPolicy,
                     UseExternalStoreMode = stepResult.ResolvedUseExternalStoreMode.Value,
-                    MaxToolCallsPerTurn = _input!.MaxToolCallsPerTurn,
+                    MaxToolCallsPerTurn = stepResult.ResolvedMaxToolCallsPerTurn ?? _input!.MaxToolCallsPerTurn,
                     DurableAgentToolActivityOptions = stepResult.ResolvedToolActivityOptions,
                     WorkerSettingsResolved = true,
 
@@ -420,11 +421,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             allTurnMessages.Add(toolResultMessage);
         }
 
-        Workflow.Logger.LogDurableAgentTurnAborted(_input!.AgentName, maxIterations);
+        var effectiveMaxIterations = _input!.MaxToolCallsPerTurn;
+        Workflow.Logger.LogDurableAgentTurnAborted(_input!.AgentName, effectiveMaxIterations);
 
         var errorMessage = new ChatMessage(
             ChatRole.Assistant,
-            $"Maximum tool-call iterations ({maxIterations}) exceeded for agent '{_input!.AgentName}'. " +
+            $"Maximum tool-call iterations ({effectiveMaxIterations}) exceeded for agent '{_input!.AgentName}'. " +
             "The agent did not converge on a final answer.");
         allTurnMessages.Add(errorMessage);
 
