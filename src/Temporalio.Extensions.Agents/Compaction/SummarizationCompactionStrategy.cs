@@ -81,11 +81,15 @@ public sealed class SummarizationCompactionStrategy : ICompactionStrategy
             return null;
         }
 
+        // Skip IDs already referenced by a prior marker — avoids re-summarizing the same
+        // entries on every steady-state trigger.
+        var alreadyCompacted = CompactionTargetFilter.CollectAlreadyCompactedIds(history);
         var targetCount = history.Count - KeepRecentCount;
         var targets = new List<string>(targetCount);
         for (int i = 0; i < targetCount; i++)
         {
             if (history[i] is CompactionMarkerEntry) continue;
+            if (alreadyCompacted.Contains(history[i].CorrelationId)) continue;
             targets.Add(history[i].CorrelationId);
         }
 

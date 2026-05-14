@@ -337,8 +337,15 @@ internal sealed class AgentActivities(
             };
 
             var collected = new List<AgentResponseUpdate>();
+            // MAF's ChatClientAgent.PrepareSessionAndMessagesAsync requires `session is
+            // ChatClientAgentSession` and that class is sealed — our TemporalAgentSession
+            // cannot satisfy that contract. Pass null so MAF mints a fresh transient
+            // ChatClientAgentSession per turn. Our own session state (StateBag,
+            // AIContextProvider invocation) is managed outside MAF and passed explicitly
+            // via the TemporalAgentSession to context providers at the call site above
+            // (AIContextProvider.InvokingContext) and via TemporalAgentContext for tools.
             await foreach (var update in cached.Agent.RunStreamingAsync(
-                    augmentedMessages, session, runOptions, ct).WithCancellation(ct).ConfigureAwait(false))
+                    augmentedMessages, session: null, runOptions, ct).WithCancellation(ct).ConfigureAwait(false))
             {
                 collected.Add(update);
                 ctx.Heartbeat(update.Text);

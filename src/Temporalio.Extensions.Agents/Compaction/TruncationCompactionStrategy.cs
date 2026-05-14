@@ -79,15 +79,18 @@ public sealed class TruncationCompactionStrategy : ICompactionStrategy
             return null;
         }
 
-        // Compact everything older than the "keep recent" window. Exclude any pre-existing
-        // CompactionMarkerEntry entries from the target set — re-compacting a marker would
-        // produce a marker-of-markers, which the projection logic isn't designed for. Markers
-        // are immutable in this strategy.
+        // Compact everything older than the "keep recent" window. Skip:
+        //   • CompactionMarkerEntry entries — re-compacting a marker would produce a
+        //     marker-of-markers, which the projection logic isn't designed for.
+        //   • IDs already referenced by some prior marker's CompactedMessageIds — avoids
+        //     redundant marker-of-the-same-entries on every steady-state trigger.
+        var alreadyCompacted = CompactionTargetFilter.CollectAlreadyCompactedIds(history);
         var targetCount = history.Count - KeepRecentCount;
         var targets = new List<string>(targetCount);
         for (int i = 0; i < targetCount; i++)
         {
             if (history[i] is CompactionMarkerEntry) continue;
+            if (alreadyCompacted.Contains(history[i].CorrelationId)) continue;
             targets.Add(history[i].CorrelationId);
         }
 

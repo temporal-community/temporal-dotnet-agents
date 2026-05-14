@@ -124,6 +124,35 @@ public sealed record CompactionContext
 }
 
 /// <summary>
+/// Helper for strategy implementations: collects the set of source-entry correlation IDs
+/// already referenced by any <see cref="CompactionMarkerEntry"/> in the given history.
+/// Built-in strategies use this to skip already-compacted IDs when selecting new compaction
+/// targets — avoiding redundant marker-of-the-same-entries on every trigger.
+/// </summary>
+[Experimental("TA002")]
+public static class CompactionTargetFilter
+{
+    /// <summary>
+    /// Returns the set of correlation IDs that already appear in some marker's
+    /// <see cref="CompactionMarkerEntry.CompactedMessageIds"/>. Useful for strategies whose
+    /// trigger logic wants to constrain targets to "newly-uncompacted" entries.
+    /// </summary>
+    public static HashSet<string> CollectAlreadyCompactedIds(IReadOnlyList<DurableSessionEntry> history)
+    {
+        var compacted = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in history)
+        {
+            if (entry is not CompactionMarkerEntry marker) continue;
+            foreach (var id in marker.CompactedMessageIds)
+            {
+                compacted.Add(id);
+            }
+        }
+        return compacted;
+    }
+}
+
+/// <summary>
 /// Result returned by an <see cref="ICompactionStrategy"/>. The
 /// <see cref="HistoryStore.IAgentHistoryStore"/> consumer appends
 /// <see cref="Marker"/> after the strategy returns; the marker's

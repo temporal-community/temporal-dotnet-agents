@@ -66,16 +66,16 @@ public sealed class SlidingWindowCompactionStrategy : ICompactionStrategy
             return null;
         }
 
-        // Single-step compaction: pick the entries that JUST fell out of the window. For
-        // simplicity at Step 6c, we compact ALL entries beyond the window on every trigger;
-        // this is correct under steady-state (only one or two new entries per turn) and
-        // produces a fresh marker each time. Optimizations like "merge with the most recent
-        // marker if it exists" are deferred to a follow-up.
+        // Compact only entries beyond the window that aren't already referenced by a prior
+        // marker. The CompactionTargetFilter skip means steady-state sliding only emits one
+        // marker per new-entry batch, not a redundant marker-over-marker on every turn.
+        var alreadyCompacted = CompactionTargetFilter.CollectAlreadyCompactedIds(history);
         var compactCount = history.Count - WindowSize;
         var targets = new List<string>(compactCount);
         for (int i = 0; i < compactCount; i++)
         {
             if (history[i] is CompactionMarkerEntry) continue;
+            if (alreadyCompacted.Contains(history[i].CorrelationId)) continue;
             targets.Add(history[i].CorrelationId);
         }
 
