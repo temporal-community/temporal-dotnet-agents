@@ -28,6 +28,7 @@
     <Project Path="samples/MAF/ConfigurableAgent/ConfigurableAgent.csproj" />
     <Project Path="samples/MAF/ExternalHistoryStore/ExternalHistoryStore.csproj" />
     <Project Path="samples/MAF/PerToolActivities/PerToolActivities.csproj" />
+    <Project Path="samples/MAF/Compaction/Compaction.csproj" />
   </Folder>
   <Folder Name="/samples/MAF/SplitWorkerClient/">
     <Project Path="samples/MAF/SplitWorkerClient/Client/Client.csproj" />
