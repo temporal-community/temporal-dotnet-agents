@@ -45,7 +45,9 @@ internal sealed record CachedDurableAgent(
     IAgentHistoryStore? HistoryStore,
     IReadOnlyList<AIContextProvider> ContextProviders,
     TemporalAgentsOptions AgentsOptions,
-    bool SuppressAgentTurnSpan);
+    bool SuppressAgentTurnSpan,
+    string? CompactionStrategyKey,
+    Compaction.ICompactionStrategy? CompactionStrategy);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
@@ -392,8 +394,31 @@ internal sealed class AgentActivities(
                     MaxToolCallsPerTurn = resolvedMaxToolCalls ?? cached.Registration.MaxToolCallsPerTurn,
                     UseExternalStoreMode = resolvedExternalStore ?? false,
                     ToolActivityOptions = resolvedToolOpts ?? new Dictionary<string, ActivityOptions>(),
+                    CompactionStrategyKey = cached.CompactionStrategyKey,
                 }
                 : null;
+
+            // Step 6d: evaluate the compaction trigger (Q2 = B). Compaction is opt-in; if no
+            // strategy was configured, or if no external store backs the agent, skip
+            // evaluation entirely. The trigger inspects the audit canonical view of the
+            // store; populated targets flow up to the workflow which will dispatch
+            // CompactHistory after AppendAgentTurn writes the current turn.
+            bool compactionNeeded = false;
+            IReadOnlyList<string>? compactionTargets = null;
+            if (cached.CompactionStrategy is not null && cached.HistoryStore is not null && isFinal)
+            {
+                // Only evaluate at end-of-turn (isFinal) — tool-call iterations are
+                // mid-turn and not the right boundary for compaction.
+                var auditView = await cached.HistoryStore
+                    .LoadAsync(sessionId.WorkflowId, applyCompaction: false, ct)
+                    .ConfigureAwait(false);
+                var targets = cached.CompactionStrategy.EvaluateTrigger(auditView);
+                if (targets is { Count: > 0 })
+                {
+                    compactionNeeded = true;
+                    compactionTargets = targets;
+                }
+            }
 
             return new AgentStepResult
             {
@@ -404,6 +429,8 @@ internal sealed class AgentActivities(
                 Usage = response.Usage,
                 ResponseId = response.ResponseId,
                 ResolvedWorkerConfig = resolvedConfig,
+                CompactionNeeded = compactionNeeded,
+                CompactionTargetMessageIds = compactionTargets,
             };
         }
         catch (Exception ex)
@@ -568,6 +595,28 @@ internal sealed class AgentActivities(
         var storeFactory = registration.HistoryStore ?? agentsOptions.HistoryStore;
         var resolvedStore = storeFactory?.Invoke(providerServices);
 
+        // Step 6d: resolve the effective compaction-strategy key (per-agent →
+        // worker default → null) and pre-resolve the keyed strategy instance from DI.
+        // Compaction is opt-in; null strategy means "no compaction" and the per-turn path
+        // will short-circuit without consulting the strategy.
+        var effectiveCompactionKey =
+            registration.CompactionStrategyKey
+            ?? agentsOptions.DefaultCompactionStrategy;
+        Compaction.ICompactionStrategy? resolvedStrategy = null;
+        if (!string.IsNullOrEmpty(effectiveCompactionKey))
+        {
+            resolvedStrategy = providerServices
+                .GetKeyedService<Compaction.ICompactionStrategy>(effectiveCompactionKey);
+            if (resolvedStrategy is null)
+            {
+                throw new InvalidOperationException(
+                    $"Agent '{registration.Name}' is configured with compaction strategy " +
+                    $"'{effectiveCompactionKey}', but no ICompactionStrategy is registered " +
+                    $"under that keyed-DI name. Built-in keys (truncation, sliding-window, " +
+                    $"summarization) are pre-registered by AddTemporalAgents.");
+            }
+        }
+
         return new CachedDurableAgent(
             agent,
             resolvedTools,
@@ -575,7 +624,9 @@ internal sealed class AgentActivities(
             resolvedStore,
             providers,
             agentsOptions,
-            suppressAgentTurnSpan);
+            suppressAgentTurnSpan,
+            effectiveCompactionKey,
+            resolvedStrategy);
     }
 
     /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
@@ -682,6 +733,78 @@ internal sealed class AgentActivities(
         }
     }
 
+    /// <summary>
+    /// Performs an in-session history compaction. Dispatched by the workflow when the
+    /// activity-side trigger evaluator (Q2 = B) flags <c>CompactionNeeded</c> on a step
+    /// result. Loads the audit canonical view, invokes the configured strategy, appends the
+    /// resulting marker to the store.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per Q12, the workflow pre-mints <see cref="CompactHistoryInput.MarkerCorrelationId"/>
+    /// via <see cref="Workflow.NewGuid"/> so activity retries reproduce the same marker ID;
+    /// the strategy uses this ID verbatim. Without that, retries would double-write markers
+    /// and corrupt the projection contract.
+    /// </para>
+    /// <para>
+    /// LLM-using strategies (summarization) invoke the resolved <see cref="IChatClient"/>
+    /// inline within their <c>CompactAsync</c> body — this activity hosts the LLM call,
+    /// preserving Q6's "one LLM call = one activity" invariant.
+    /// </para>
+    /// </remarks>
+    [Activity("Temporalio.Extensions.Agents.CompactHistory")]
+    public async Task CompactHistoryAsync(CompactHistoryInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var ctx = ActivityExecutionContext.Current;
+        var ct = ctx.CancellationToken;
+
+        var cached = ResolveDurableAgent(input.AgentName);
+        if (cached.CompactionStrategy is null)
+        {
+            throw new InvalidOperationException(
+                $"CompactHistory was dispatched for agent '{input.AgentName}' but no " +
+                $"ICompactionStrategy was resolved at compose time. This indicates a workflow " +
+                $"dispatching compaction for an agent that does not have UseCompaction configured.");
+        }
+        if (cached.HistoryStore is null)
+        {
+            throw new InvalidOperationException(
+                $"CompactHistory was dispatched for agent '{input.AgentName}' but no " +
+                $"IAgentHistoryStore is configured. Compaction without external history " +
+                $"storage is not supported — the marker has nowhere to live.");
+        }
+
+        ctx.Heartbeat($"compacting {input.TargetMessageIds.Count} entries for agent '{input.AgentName}'");
+
+        // Resolve a chat client for strategies that need one (summarization). Truncation and
+        // sliding-window ignore the client.
+        var chatClient = cached.Registration.ChatClient(services);
+
+        var rawHistory = await cached.HistoryStore
+            .LoadAsync(input.SessionId, applyCompaction: false, ct)
+            .ConfigureAwait(false);
+
+        var context = new Compaction.CompactionContext
+        {
+            RawEntries = rawHistory,
+            TargetMessageIds = input.TargetMessageIds,
+            AgentName = input.AgentName,
+            SessionId = input.SessionId,
+            MarkerCorrelationId = input.MarkerCorrelationId,
+            ChatClient = chatClient,
+        };
+
+        var result = await cached.CompactionStrategy
+            .CompactAsync(context, ct)
+            .ConfigureAwait(false);
+
+        await cached.HistoryStore
+            .AppendAsync(input.SessionId, new DurableSessionEntry[] { result.Marker }, ct)
+            .ConfigureAwait(false);
+    }
+
     [Activity("Temporalio.Extensions.Agents.InvokeAgentTool")]
     public async Task<InvokeAgentToolResult> InvokeAgentToolAsync(InvokeAgentToolInput input)
     {
@@ -752,6 +875,33 @@ internal sealed class ReduceHistoryInStoreInput
     /// Maximum number of entries to retain in the store after reduction.
     /// </summary>
     public required int MaxEntryCount { get; init; }
+}
+
+/// <summary>
+/// Input for <see cref="AgentActivities.CompactHistoryAsync"/>.
+/// </summary>
+internal sealed class CompactHistoryInput
+{
+    /// <summary>The agent name (resolves the cached compaction strategy + history store).</summary>
+    public required string AgentName { get; init; }
+
+    /// <summary>The session ID (agent workflow ID).</summary>
+    public required string SessionId { get; init; }
+
+    /// <summary>
+    /// Source-entry correlation IDs to compact — handed verbatim to
+    /// <see cref="Compaction.CompactionContext.TargetMessageIds"/>.
+    /// </summary>
+    public required IReadOnlyList<string> TargetMessageIds { get; init; }
+
+    /// <summary>
+    /// Pre-minted marker correlation ID. Workflow generates this via
+    /// <see cref="Temporalio.Workflows.Workflow.NewGuid"/> so activity retries are idempotent
+    /// (same ID across retries → AppendAsync is at-least-once-safe without duplicate
+    /// markers — assuming the store de-duplicates on CorrelationId, which is the
+    /// implementor contract).
+    /// </summary>
+    public required string MarkerCorrelationId { get; init; }
 }
 
 /// <summary>

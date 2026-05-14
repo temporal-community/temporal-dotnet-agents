@@ -379,6 +379,32 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             Summary = AgentActivities.BuildActivitySummary(_input!.AgentName),
                             RetryPolicy = _input!.RetryPolicy,
                         }).ConfigureAwait(true);
+
+                    // Step 6d: if the activity-side trigger evaluator flagged compaction,
+                    // dispatch CompactHistory now — after the current turn has been appended
+                    // to the store. Marker correlation ID is workflow-minted (deterministic
+                    // under replay) so retries reproduce the same marker rather than
+                    // double-writing.
+                    if (stepResult.CompactionNeeded &&
+                        stepResult.CompactionTargetMessageIds is { Count: > 0 } targets)
+                    {
+                        var markerId = $"marker-{Workflow.NewGuid():N}";
+                        await Workflow.ExecuteActivityAsync(
+                            (AgentActivities a) => a.CompactHistoryAsync(new CompactHistoryInput
+                            {
+                                AgentName = _input!.AgentName,
+                                SessionId = Workflow.Info.WorkflowId,
+                                TargetMessageIds = targets,
+                                MarkerCorrelationId = markerId,
+                            }),
+                            new ActivityOptions
+                            {
+                                StartToCloseTimeout = _input!.ActivityTimeout,
+                                HeartbeatTimeout = _input!.HeartbeatTimeout,
+                                Summary = AgentActivities.BuildActivitySummary(_input!.AgentName),
+                                RetryPolicy = _input!.RetryPolicy,
+                            }).ConfigureAwait(true);
+                    }
                 }
 
                 return finalResponse;
