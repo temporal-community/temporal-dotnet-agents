@@ -156,8 +156,11 @@ namespace Temporalio.Extensions.Agents.HistoryStore;
 
 public interface IAgentHistoryStore
 {
+    // Step 5b: bool applyCompaction is REQUIRED — no default value. The choice is
+    // load-bearing (see "Projection modes" below).
     Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
         string sessionId,
+        bool applyCompaction,
         CancellationToken cancellationToken = default);
 
     Task AppendAsync(
@@ -175,9 +178,22 @@ public interface IAgentHistoryStore
 
 | Method | Called from | When |
 |---|---|---|
-| `LoadAsync` | `AgentActivities.RunDurableAgentStepAsync` | First step of every turn (`IsFirstStep == true`) — must return entries in append order |
-| `AppendAsync` | `AgentActivities.AppendAgentTurnAsync` (dispatched by `AgentWorkflow` after the turn loop exits) | After every completed turn — appends `[requestEntry, responseEntry]` |
-| `ReplaceAsync` | `AgentActivities.ReduceHistoryInStoreAsync` (dispatched by `AgentWorkflow`) | Continue-as-new — replaces store contents with a tail-trim to `MaxEntryCount` |
+| `LoadAsync` | `AgentActivities.RunDurableAgentStepAsync` (first step of every turn) + `AgentActivities.CompactHistoryAsync` (compaction dispatch) + `CompactionAwareErasureHelper` (erasure cascade) | See **Projection modes** below — callers pick `applyCompaction: true` (inference + reducer) or `false` (audit + erasure) explicitly |
+| `AppendAsync` | `AgentActivities.AppendAgentTurnAsync` (dispatched by `AgentWorkflow` after the turn loop exits) + `AgentActivities.CompactHistoryAsync` (marker append) | After every completed turn — appends `[requestEntry, responseEntry]`. Compaction also appends a single `CompactionMarkerEntry` when triggered. |
+| `ReplaceAsync` | `AgentActivities.ReduceHistoryInStoreAsync` (dispatched by `AgentWorkflow`) + `CompactionAwareErasureHelper.EraseSessionDataAsync` (GDPR cascade) | Continue-as-new (`MaxEntryCount` tail-trim) and erasure cascades (regenerate / tombstone markers when source entries are deleted) |
+
+### Projection modes — the `applyCompaction` parameter
+
+`LoadAsync` requires you to pick a projection mode at every call site. There is no default value because the choice is load-bearing: an erasure path that accidentally reads the projected view would miss the entries each marker subsumes.
+
+| `applyCompaction` value | What the store returns | Used by |
+|---|---|---|
+| `false` (audit canonical) | Raw entries in append order, including any `CompactionMarkerEntry` entries untouched | GDPR erasure cascades (`CompactionAwareErasureHelper`), compliance attestations, the `CompactHistory` activity (strategies need to see markers and sources) |
+| `true` (inference view) | Each `CompactionMarkerEntry` projected in place — the marker stays (its `Messages` field carries the rollup summary) and the source entries it references are filtered out | Inference-time load (`RunDurableAgentStep`), continue-as-new reducer (`ReduceHistoryInStore`) — per Q5α the reducer operates on the post-compact view |
+
+Implementations that don't produce compaction markers (e.g. simple recent-N truncating stores) can ignore the parameter — both modes return the same view. See `samples/MAF/ExternalHistoryStore/InMemoryHistoryStore.cs` for an example that does, and `samples/MAF/Compaction/InMemoryCompactionAwareStore.cs` for one that implements the full marker projection.
+
+> **`DurableCompactionMarkerException`**: when `applyCompaction: true` encounters a marker whose `CompactedMessageIds` reference entries no longer in the store (an out-of-band erasure that bypassed `CompactionAwareErasureHelper`), the store SHOULD throw `DurableCompactionMarkerException` rather than producing a misleading projection. The `MarkerCorrelationId` + `MissingMessageIds` properties pinpoint the failure. The reference implementation in `tests/.../FakeAgentHistoryStore` demonstrates the check.
 
 `sessionId` is `TemporalAgentSessionId.WorkflowId` (a string of the form `ta-{agentName}-{key}`). It is always provided by the library; you don't generate it.
 
@@ -218,8 +234,15 @@ public sealed class InMemoryAgentHistoryStore : IAgentHistoryStore
     private readonly ConcurrentDictionary<string, List<DurableSessionEntry>> _store = new();
 
     public Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
-        string sessionId, CancellationToken cancellationToken = default)
+        string sessionId,
+        bool applyCompaction,
+        CancellationToken cancellationToken = default)
     {
+        // This minimal store never produces CompactionMarkerEntry, so both projection
+        // modes return the same view. A real compaction-aware store branches here:
+        // applyCompaction == true filters out entries whose CorrelationId appears in
+        // some marker's CompactedMessageIds.
+        _ = applyCompaction;
         var entries = _store.GetOrAdd(sessionId, _ => new());
         lock (entries)
         {
@@ -295,9 +318,11 @@ var history = await client.GetHistoryAsync(sessionId);
 foreach (var entry in history)
     Console.WriteLine(entry.Messages[0].Text);
 
-// After opting in — query the store
+// After opting in — query the store. Pick the projection mode explicitly:
+//   applyCompaction: false → audit canonical (every entry, markers included as-is)
+//   applyCompaction: true  → inference view (markers projected, sources collapsed)
 var store = host.Services.GetRequiredService<IAgentHistoryStore>();
-var entries = await store.LoadAsync(sessionId.WorkflowId);
+var entries = await store.LoadAsync(sessionId.WorkflowId, applyCompaction: true);
 foreach (var entry in entries)
     Console.WriteLine(entry.Messages[0].Text);
 ```

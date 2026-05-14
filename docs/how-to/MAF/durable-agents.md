@@ -2,6 +2,17 @@
 
 In v0.3, every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in a separately named `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — durable agents are the only registration path.
 
+### Activities the workflow may dispatch per turn
+
+| Activity name | When | What it does |
+|---|---|---|
+| `Temporalio.Extensions.Agents.RunDurableAgentStep` | Every step of every turn (loop iterations) | One LLM call. Activity-side trigger evaluation also runs here (sets `CompactionNeeded` / target IDs on the result) |
+| `Temporalio.Extensions.Agents.InvokeAgentTool` | One per tool call the LLM emits | Dispatches a single tool. Honors per-tool `DurableToolOptions` |
+| `Temporalio.Extensions.Agents.AppendAgentTurn` | After the turn loop exits (external-store mode only) | Writes `[requestEntry, responseEntry]` to `IAgentHistoryStore` |
+| `Temporalio.Extensions.Agents.ReduceHistoryInStore` | At continue-as-new (external-store mode only) | Loads projected view, runs `HistoryReducer`, `ReplaceAsync`-es the store |
+| `Temporalio.Extensions.Agents.CompactHistory` | When `stepResult.CompactionNeeded == true` (after `AppendAgentTurn`) | Invokes the configured `ICompactionStrategy`, appends one `CompactionMarkerEntry`. See [`compaction.md`](./compaction.md) |
+| `Temporalio.Extensions.Agents.RunCompactionSummary` | *Dormant* — registered, never workflow-dispatched at v0.4.0-preview.2 | LLM call that produces a rollup summary. Reserved for custom strategies that prefer a separately-tracked summarization activity |
+
 This makes per-tool retry granularity explicit and prevents the legacy foot-guns where write-style tools could re-fire on a transient activity retry.
 
 ## When to use what

@@ -69,6 +69,7 @@ builder.Services
 | `MaxEntryCount`, `HistoryReducer` | Per-agent continue-as-new bounds and reducer. Inherit worker defaults when unset. |
 | `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetAgent()`. No worker-level fallback. |
 | `HistoryStore` | Per-agent `IAgentHistoryStore` factory. `null` inherits `opts.HistoryStore`; if both are `null`, history is carried in workflow state. |
+| `CompactionStrategyKey` | Keyed-DI name of the `ICompactionStrategy` to use for in-session compaction. `null` inherits `opts.DefaultCompactionStrategy`; both `null` disables compaction. Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"`. Requires an external history store. `[Experimental("TA002")]`. See [`compaction.md`](./compaction.md). |
 
 ### `DurableToolOptions` reference
 
@@ -94,6 +95,7 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.HistoryReducer` | `opts.DefaultHistoryReducer` |
 | `agent.HistoryStore` | `opts.HistoryStore` |
 | `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
+| `agent.CompactionStrategyKey` | `opts.DefaultCompactionStrategy` |
 
 The retry-policy hierarchy adds one more layer specifically for tools. From most to least specific:
 

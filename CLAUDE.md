@@ -28,9 +28,10 @@ TemporalAgents/
 │   └── Temporalio.Extensions.AI/       # MEAI IChatClient middleware (no Agent Framework)
 ├── tests/                     # Four projects: {Agents,AI} × {Tests, IntegrationTests}
 └── samples/
-    ├── MAF/                   # 8 samples: BasicAgent, SplitWorkerClient, WorkflowOrchestration,
+    ├── MAF/                   # 11 samples: BasicAgent, SplitWorkerClient, WorkflowOrchestration,
     │                          # EvaluatorOptimizer, MultiAgentRouting, HumanInTheLoop,
-    │                          # WorkflowRouting, AmbientAgent
+    │                          # WorkflowRouting, AmbientAgent, ConfigurableAgent,
+    │                          # ExternalHistoryStore, PerToolActivities, Compaction
     └── MEAI/                  # 6 samples: DurableChat, DurableTools, OpenTelemetry
                                # (DurableOpenTelemetry.csproj), HumanInTheLoop,
                                # DurableEmbeddings, CustomWorkflow
@@ -157,7 +158,11 @@ As of Layer 3, `AgentWorkflow : DurableChatWorkflowBase<AgentResponse>`. The sha
 - `RpcException` — `Temporalio.Exceptions` (NOT `Grpc.Core`)
 - `Workflow.CreateContinueAsNewException` — takes `Expression<Func<TWorkflow, Task>>` (no collection expressions inside)
 - `WorkflowIdConflictPolicy.UseExisting` — `Temporalio.Api.Enums.V1`
-- `IAgentHistoryStore` — `Temporalio.Extensions.Agents.HistoryStore` (opt-in via `opts.HistoryStore` or `agent.HistoryStore`); see `docs/how-to/MAF/external-history-store.md`
+- `IAgentHistoryStore` — `Temporalio.Extensions.Agents.HistoryStore` (opt-in via `opts.HistoryStore` or `agent.HistoryStore`); see `docs/how-to/MAF/external-history-store.md`. **`LoadAsync` takes `bool applyCompaction` (no default value)** — `false` = audit canonical, `true` = projected post-compact view. Erasure path uses `false`; inference + reducer paths use `true`.
+- `ICompactionStrategy`, `CompactionContext`, `CompactionResult` — `Temporalio.Extensions.Agents.Compaction` (`[Experimental("TA002")]`). Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"` pre-registered via `TryAddKeyedSingleton`. See `docs/how-to/MAF/compaction.md`.
+- `CompactionMarkerEntry` — `Temporalio.Extensions.AI.Session` (lives in the AI library so both source-gen contexts see the `"compaction-marker"` discriminator). Polymorphic subtype of `DurableSessionEntry`. `CompactedAt` is a `[JsonIgnore]` alias of `CreatedAt` (no wire duplication).
+- `CompactionAwareErasureHelper` — `Temporalio.Extensions.Agents.HistoryStore`. Static `EraseSessionDataAsync(store, sessionId, erasedIds)` — only correct GDPR-erasure path when compaction markers may exist.
+- `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException` — `Temporalio.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the other two are stable.
 
 ### DI Patterns
 - `TemporalAgentsOptions` has an **internal constructor** — always access via the `AddTemporalAgents(opts => ...)` delegate.
@@ -245,6 +250,7 @@ dotnet run --project samples/MAF/{BasicAgent,WorkflowOrchestration,EvaluatorOpti
 # Feature-specific demos
 dotnet run --project samples/MAF/ExternalHistoryStore/ExternalHistoryStore.csproj   # IAgentHistoryStore + AIContextProvider + reduction strategy
 dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj         # per-tool Temporal activities with write-tool no-retry
+dotnet run --project samples/MAF/Compaction/Compaction.csproj                       # UseCompaction("summarization") + GDPR erasure cascade demo
 
 # SplitWorkerClient — Worker first, then Client in a separate terminal
 dotnet run --project samples/MAF/SplitWorkerClient/Worker/Worker.csproj
@@ -287,6 +293,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **HITL Patterns**: `docs/how-to/MAF/hitl-patterns.md`
 - **History & Token Optimization**: `docs/how-to/MAF/prompt-caching.md`
 - **Durable Agents (per-tool activities)**: `docs/how-to/MAF/durable-agents.md`
+- **In-Session Compaction**: `docs/how-to/MAF/compaction.md`
 - **Do's and Don'ts**: `docs/how-to/MAF/dos-and-donts.md`
 - **Durability Guarantees**: `docs/architecture/MAF/durability-and-determinism.md`
 - **Sessions and Workflow Loop**: `docs/architecture/MAF/agent-sessions-and-workflow-loop.md`
