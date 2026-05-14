@@ -87,6 +87,7 @@ public class CompactionApiSurfaceTests
             TargetMessageIds = new[] { "a", "b" },
             AgentName = "agent",
             SessionId = "session",
+            MarkerCorrelationId = "marker-1",
             ChatClient = new StubChat(),
         };
         Assert.Same(rawEntries, ctx.RawEntries);
@@ -128,6 +129,9 @@ public class CompactionApiSurfaceTests
 
     private sealed class StubStrategy : ICompactionStrategy
     {
+        public IReadOnlyList<string>? EvaluateTrigger(
+            IReadOnlyList<Temporalio.Extensions.AI.DurableSessionEntry> history) => null;
+
         public Task<CompactionResult> CompactAsync(
             CompactionContext context, CancellationToken cancellationToken = default) =>
             Task.FromResult(new CompactionResult

@@ -38,6 +38,26 @@ namespace Temporalio.Extensions.Agents.Compaction;
 public interface ICompactionStrategy
 {
     /// <summary>
+    /// Decides whether the strategy should fire after the current step, and if so which
+    /// source-entry correlation IDs it wants to compact. Called from the activity (Q2 = B)
+    /// after the step's chat call completes; the result is recorded on
+    /// <c>AgentStepResult.CompactionNeeded</c> + <c>CompactionTargetMessageIds</c> and the
+    /// workflow uses those to decide whether to dispatch
+    /// <see cref="CompactAsync"/>.
+    /// </summary>
+    /// <param name="history">
+    /// The session's audit canonical history at the moment of evaluation — entries are in
+    /// append order, including any prior <see cref="CompactionMarkerEntry"/> entries
+    /// untouched.
+    /// </param>
+    /// <returns>
+    /// The set of <see cref="DurableSessionEntry.CorrelationId"/>s the strategy wants to
+    /// compact, or <see langword="null"/> when the trigger should not fire. Empty list is
+    /// permitted but semantically equivalent to <see langword="null"/>.
+    /// </returns>
+    IReadOnlyList<string>? EvaluateTrigger(IReadOnlyList<DurableSessionEntry> history);
+
+    /// <summary>
     /// Compacts the given history. Returns the marker entry to write (its
     /// <see cref="CompactionMarkerEntry.CompactedMessageIds"/> names the entries the marker
     /// subsumes; its <see cref="DurableSessionEntry.Messages"/> carries the rollup summary
@@ -87,6 +107,14 @@ public sealed record CompactionContext
 
     /// <summary>Session ID (agent workflow ID).</summary>
     public required string SessionId { get; init; }
+
+    /// <summary>
+    /// Pre-minted correlation ID the strategy MUST use as the new marker's
+    /// <see cref="CompactionMarkerEntry.CorrelationId"/>. Supplied by the workflow via
+    /// <c>Workflow.NewGuid()</c> so activity retries reproduce the same ID — preventing
+    /// duplicate marker writes when the <c>CompactHistory</c> activity is retried.
+    /// </summary>
+    public required string MarkerCorrelationId { get; init; }
 
     /// <summary>
     /// Resolved primary chat client for the agent. Summarization strategies use this to
