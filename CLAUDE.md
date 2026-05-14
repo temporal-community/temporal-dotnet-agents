@@ -216,7 +216,7 @@ just test-integration-ai # AI integration (13) — embedded server
 just pack               # clean → build → pack → artifacts/packages/*.nupkg
 ```
 
-**Versions** auto-derive from git tags via MinVer: exactly on `vX.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release with `git tag -a vX.Y.Z -m "..."` then `just pack`.
+**Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release with `git tag -a X.Y.Z -m "..."` then `just pack`. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention (`0.1.0`, `0.1.1`, ..., `0.3.0`).
 
 **Publish**: `just publish-nuget` (needs `NUGET_API_KEY`) or `just publish-github` (needs `NUGET_GITHUB_TOKEN`).
 
