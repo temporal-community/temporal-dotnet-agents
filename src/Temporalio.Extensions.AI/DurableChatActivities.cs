@@ -21,6 +21,17 @@ internal sealed class DurableChatActivities(
         .CreateLogger<DurableChatActivities>();
 
     /// <summary>
+    /// Per-instance cache of <see cref="IChatClient"/> references that already passed the
+    /// mixed-pattern B-check, keyed by object identity. The walk is cheap (small chain of
+    /// <see cref="DelegatingChatClient"/> nodes) but cached anyway so the second activity
+    /// invocation on the same resolved client is allocation-free.
+    /// </summary>
+    private readonly System.Collections.Generic.HashSet<IChatClient> _mixedPatternCheckedClients =
+        new(ReferenceEqualityComparer.Instance);
+
+    private readonly object _mixedPatternCheckLock = new();
+
+    /// <summary>
     /// Executes a chat completion by calling the inner <see cref="IChatClient"/>.
     /// </summary>
     [Activity("Temporalio.Extensions.AI.GetResponse")]
@@ -45,6 +56,13 @@ internal sealed class DurableChatActivities(
         var chatClient = string.IsNullOrEmpty(input.ClientKey)
             ? services.GetRequiredService<IChatClient>()
             : services.GetRequiredKeyedService<IChatClient>(input.ClientKey);
+
+        // Step 4d: B-check backstop for the MEAI mixed-pattern conflict. The startup A-check
+        // (DurableMixedPatternValidator) only walks the unkeyed default IChatClient. This
+        // backstop catches keyed-only setups, factory-deferred resolutions, and other paths
+        // the A-check cannot reach. Per-client cache so the walk runs at most once per
+        // resolved instance.
+        EnsureMixedPatternCheck(chatClient);
 
         // Step 4c: per-call IChatClientDecorator resolution. Per-call WithChatClientFactoryKey
         // wins; worker-level DefaultChatClientFactoryKey is the fallback. Empty-string per-call
@@ -89,6 +107,42 @@ internal sealed class DurableChatActivities(
                 "Durable chat activity failed for conversation {ConversationId}, turn {TurnNumber}",
                 input.ConversationId, input.TurnNumber);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Once-per-client backstop check for the silent A+B mixed-pattern misconfiguration:
+    /// .UseFunctionInvocation() in the IChatClient chain combined with .AsDurable()-wrapped
+    /// tools in the DurableFunctionRegistry. The startup
+    /// <see cref="Internal.DurableMixedPatternValidator"/> handles the unkeyed default; this
+    /// is the safety net for keyed and factory-deferred clients.
+    /// </summary>
+    private void EnsureMixedPatternCheck(IChatClient chatClient)
+    {
+        // Fast path: client already validated. No lock needed for the contains check because
+        // HashSet<T>.Contains is safe for single-reader concurrent observation given the
+        // surrounding lock on writes — but to keep the code obviously correct we lock once.
+        lock (_mixedPatternCheckLock)
+        {
+            if (_mixedPatternCheckedClients.Contains(chatClient))
+            {
+                return;
+            }
+
+            var registry = services.GetService<DurableFunctionRegistry>();
+            if (registry is null || registry.Count == 0)
+            {
+                // No durable tools → no conflict possible. Cache anyway so repeat calls skip.
+                _mixedPatternCheckedClients.Add(chatClient);
+                return;
+            }
+
+            if (Internal.AgentChainWalker.Contains<FunctionInvokingChatClient>(chatClient))
+            {
+                throw new DurableMixedPatternException();
+            }
+
+            _mixedPatternCheckedClients.Add(chatClient);
         }
     }
 }

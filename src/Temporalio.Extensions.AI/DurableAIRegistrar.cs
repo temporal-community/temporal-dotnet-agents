@@ -88,5 +88,14 @@ internal static class DurableAIRegistrar
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             DurableAIWorkerClientConfigurator>());
+
+        // Step 4d: A-check for the silent MEAI mixed-pattern misconfiguration.
+        // Detects DurableFunctionRegistry.Count > 0 (durable tools registered) +
+        // FunctionInvokingChatClient in the IChatClient chain (.UseFunctionInvocation()
+        // present). Both together = tool calls execute in-process inside the chat
+        // activity, silently bypassing .AsDurable() dispatch. Fails the host at startup.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<TemporalWorkerServiceOptions>,
+            Internal.DurableMixedPatternValidator>());
     }
 }
