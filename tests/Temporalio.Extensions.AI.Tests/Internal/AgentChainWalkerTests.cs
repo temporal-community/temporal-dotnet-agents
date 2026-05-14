@@ -171,6 +171,52 @@ public class AgentChainWalkerTests
     }
 
     // ====================================================================
+    // OTel detection — Step 3c.3 (2b-enriched suppression)
+    //
+    // The 2b-enriched OTel decision (artifacts/maf-feature-gap-analysis.md
+    // → Q6) suppresses our own agent.turn span when MAF's OpenTelemetryAgent
+    // (agent-pipeline level) or MEAI's OpenTelemetryChatClient (chat-client
+    // level) is present in the user's pipeline. These tests pin the
+    // detection-mechanism contract — proving Contains<T> reaches both types
+    // through their respective DelegatingAIAgent / DelegatingChatClient
+    // walks.
+    // ====================================================================
+
+    [Fact]
+    public void Contains_OpenTelemetryAgent_DetectsWhenPresent()
+    {
+        var leaf = new MarkerAIAgent();
+        var wrapped = new AIAgentBuilder(leaf).UseOpenTelemetry().Build();
+
+        Assert.True(AgentChainWalker.Contains<OpenTelemetryAgent>(wrapped));
+    }
+
+    [Fact]
+    public void Contains_OpenTelemetryAgent_AbsentForBareAgent()
+    {
+        var bare = new MarkerAIAgent();
+
+        Assert.False(AgentChainWalker.Contains<OpenTelemetryAgent>(bare));
+    }
+
+    [Fact]
+    public void Contains_OpenTelemetryChatClient_DetectsWhenPresent()
+    {
+        IChatClient leaf = new MarkerChatClient();
+        var wrapped = new ChatClientBuilder(leaf).UseOpenTelemetry().Build();
+
+        Assert.True(AgentChainWalker.Contains<OpenTelemetryChatClient>(wrapped));
+    }
+
+    [Fact]
+    public void Contains_OpenTelemetryChatClient_AbsentForBareClient()
+    {
+        var bare = new MarkerChatClient();
+
+        Assert.False(AgentChainWalker.Contains<OpenTelemetryChatClient>(bare));
+    }
+
+    // ====================================================================
     // Test fixtures
     // ====================================================================
 

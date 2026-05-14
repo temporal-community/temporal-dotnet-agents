@@ -10,6 +10,8 @@ using Temporalio.Extensions.Agents.HistoryStore;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Exceptions;
+using Temporalio.Extensions.AI.Internal;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents.Workflows;
@@ -18,13 +20,32 @@ namespace Temporalio.Extensions.Agents.Workflows;
 /// Cached state for a durable agent registered via <c>TemporalAgentsOptions.AddDurableAgent</c>.
 /// Composed once at first activity dispatch (lazy) and reused for the lifetime of the worker.
 /// </summary>
+/// <param name="Agent">
+/// The composed agent pipeline — either the bare <c>ChatClientAgent</c> (when no
+/// <c>ConfigureAgentPipeline</c> was provided) or the chain of user-supplied
+/// <c>DelegatingAIAgent</c> decorators wrapping it.
+/// </param>
+/// <param name="Tools">Resolved per-agent tool registry keyed by case-insensitive name.</param>
+/// <param name="Registration">Source-of-truth registration snapshot from the builder.</param>
+/// <param name="HistoryStore">Resolved external history store (per-agent override or worker-level default), or null.</param>
+/// <param name="ContextProviders">Resolved AIContextProvider list, invoked explicitly per-turn (not by MAF).</param>
+/// <param name="AgentsOptions">Reference to the shared agents-options snapshot.</param>
+/// <param name="SuppressAgentTurnSpan">
+/// Step 3c.3 (2b-enriched OTel): when <see langword="true"/>, the activity skips emitting its
+/// own <c>agent.turn</c> span and instead tags <c>Activity.Current</c> with the
+/// Temporal-namespaced correlation ID — deferring the canonical GenAI span to MAF's
+/// <c>OpenTelemetryAgent</c> (or MEAI's <c>OpenTelemetryChatClient</c>) if either is present in
+/// the pipeline. Computed once at compose time via <c>AgentChainWalker</c> so the per-turn
+/// dispatch path does no extra walks.
+/// </param>
 internal sealed record CachedDurableAgent(
     AIAgent Agent,
     IReadOnlyDictionary<string, AIFunction> Tools,
     DurableAgentRegistration Registration,
     IAgentHistoryStore? HistoryStore,
     IReadOnlyList<AIContextProvider> ContextProviders,
-    TemporalAgentsOptions AgentsOptions);
+    TemporalAgentsOptions AgentsOptions,
+    bool SuppressAgentTurnSpan);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
@@ -260,13 +281,34 @@ internal sealed class AgentActivities(
         var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
         TemporalAgentContext.SetCurrent(temporalContext);
 
-        using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
-            TemporalAgentTelemetry.AgentTurnSpanName,
-            ActivityKind.Client);
+        // Step 3c.3 (2b-enriched OTel): when the user's pipeline installs OpenTelemetryAgent or
+        // OpenTelemetryChatClient, suppress our own agent.turn span to avoid duplicate gen_ai.*
+        // attributes (downstream cost-aggregation queries would double-count tokens). Instead
+        // tag Activity.Current — which will be MAF's invoke_agent span when present, or the
+        // Temporal SDK's RunActivity span otherwise — with the Temporal-namespaced correlation
+        // ID so the canonical GenAI semconv data (from MAF) carries our additive context too.
+        // The `using var` keeps disposal correct: when suppressed, span is null and the using
+        // statement is a no-op; when emitted, the span is disposed at method exit.
+        using var span = cached.SuppressAgentTurnSpan
+            ? null
+            : TemporalAgentTelemetry.ActivitySource.StartActivity(
+                TemporalAgentTelemetry.AgentTurnSpanName,
+                ActivityKind.Client);
 
-        span?.SetTag(TemporalAgentTelemetry.AgentNameAttribute, input.AgentName);
-        span?.SetTag(TemporalAgentTelemetry.AgentSessionIdAttribute, sessionId.WorkflowId);
-        span?.SetTag(TemporalAgentTelemetry.AgentCorrelationIdAttribute, input.Request.CorrelationId);
+        if (span is not null)
+        {
+            span.SetTag(TemporalAgentTelemetry.AgentNameAttribute, input.AgentName);
+            span.SetTag(TemporalAgentTelemetry.AgentSessionIdAttribute, sessionId.WorkflowId);
+            span.SetTag(TemporalAgentTelemetry.AgentCorrelationIdAttribute, input.Request.CorrelationId);
+        }
+        else
+        {
+            // Survives suppression by attaching the Temporal-namespaced correlation ID to the
+            // canonical span the user's OpenTelemetryAgent / OpenTelemetryChatClient emitted.
+            Activity.Current?.SetTag(
+                TemporalAgentTelemetry.AgentCorrelationIdAttribute,
+                input.Request.CorrelationId);
+        }
 
         try
         {
@@ -477,12 +519,63 @@ internal sealed class AgentActivities(
             agent = agentBuilder.Build(providerServices);
         }
 
+        // Step 3c.3: B-check (runtime fallback to startup C-check). Walk the composed agent
+        // chain for FunctionInvocationDelegatingAgent (matched by Type.FullName because the
+        // type is internal sealed in Microsoft.Agents.AI). This catches misconfigurations the
+        // C-check at IPostConfigureOptions time couldn't reach — e.g., factory-deferred DI
+        // patterns where the chat-client factory isn't resolvable at host build time, or
+        // worker-only paths that bypass the IPostConfigureOptions hook entirely. Same exception
+        // shape, same OffendingType field as the C-check.
+        foreach (var link in AgentChainWalker.WalkAIAgent(agent))
+        {
+            if (link.GetType().FullName == FunctionInvocationDelegatingAgentFullName)
+            {
+                throw new DurableFunctionInvocationConflictException(
+                    $"Agent '{name}' has '{FunctionInvocationDelegatingAgentFullName}' in its pipeline. " +
+                    "The durable agent library handles tool invocation as separate Temporal activities " +
+                    "(InvokeAgentTool); installing agent-side function-invocation middleware would " +
+                    "conflict with this contract and silently break per-tool durability. Remove the " +
+                    ".Use(functionInvocationCallback) / UseFunctionInvocation() call from your " +
+                    "ConfigureAgentPipeline configuration.")
+                {
+                    OffendingType = FunctionInvocationDelegatingAgentFullName,
+                };
+            }
+        }
+
+        // Step 3c.3: 2b-enriched OTel suppression detection. When the user installed
+        // OpenTelemetryAgent (agent-pipeline level) OR OpenTelemetryChatClient (chat-client
+        // level), suppress our own agent.turn span — otherwise downstream consumers receive
+        // duplicate gen_ai.usage.* attributes and cost-aggregation queries double-count.
+        // Computed once here; the per-turn dispatch path just reads the cached bool.
+        var hasOTelAgent = AgentChainWalker.Contains<OpenTelemetryAgent>(agent);
+        var hasOTelChatClient = AgentChainWalker.Contains<OpenTelemetryChatClient>(chatClient);
+        var suppressAgentTurnSpan = hasOTelAgent || hasOTelChatClient;
+
         // Per-agent factory wins; worker-level factory is the fallback.
         var storeFactory = registration.HistoryStore ?? agentsOptions.HistoryStore;
         var resolvedStore = storeFactory?.Invoke(providerServices);
 
-        return new CachedDurableAgent(agent, resolvedTools, registration, resolvedStore, providers, agentsOptions);
+        return new CachedDurableAgent(
+            agent,
+            resolvedTools,
+            registration,
+            resolvedStore,
+            providers,
+            agentsOptions,
+            suppressAgentTurnSpan);
     }
+
+    /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
+    /// <remarks>
+    /// Hard-coded because the type is <see langword="internal sealed"/> in
+    /// <c>Microsoft.Agents.AI</c> and not accessible via <c>typeof()</c>. The constant is
+    /// duplicated from <see cref="Internal.DurableAgentPipelineValidator"/> deliberately —
+    /// both call sites share the same wire-format-stable contract with MAF; if MAF ever
+    /// renames the type, both constants update in lockstep.
+    /// </remarks>
+    private const string FunctionInvocationDelegatingAgentFullName =
+        "Microsoft.Agents.AI.FunctionInvocationDelegatingAgent";
 
     /// <summary>
     /// Per-tool activity used by durable agents. Looks up the named agent's local tool registry,
