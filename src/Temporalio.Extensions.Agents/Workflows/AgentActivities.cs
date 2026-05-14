@@ -215,9 +215,11 @@ internal sealed class AgentActivities(
             chatOptions.Tools = [.. chatOptions.Tools.Where(t => enabledNames.Contains(t.Name))];
         }
 
-        var chatClient = (cached.Agent as ChatClientAgent)?.ChatClient
-            ?? throw new InvalidOperationException(
-                $"Durable agent '{input.AgentName}' is not a ChatClientAgent; cannot resolve its IChatClient pipeline.");
+        // Step 3c.2: LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
+        // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire
+        // around the call. The pipeline was composed once at ComposeDurableAgent time and
+        // cached on cached.Agent — it may be the bare ChatClientAgent (no user decorators) or
+        // a chain of wrappers terminating in one. Either way the chain handles the call.
 
         var augmentedMessages = messagesForLlm;
         var providerAIContexts = cached.ContextProviders.Count == 0
@@ -270,15 +272,23 @@ internal sealed class AgentActivities(
         {
             _logger.LogAgentActivityStarted(input.AgentName, sessionId.WorkflowId);
 
-            var collected = new List<ChatResponseUpdate>();
-            await foreach (var update in chatClient.GetStreamingResponseAsync(
-                    augmentedMessages, chatOptions, ct).WithCancellation(ct).ConfigureAwait(false))
+            // Carry the turn's ChatOptions through ChatClientAgentRunOptions so the inner
+            // ChatClientAgent uses them (tools, response format, etc.). The options flow through
+            // any user-installed DelegatingAIAgent decorators unchanged.
+            var runOptions = new ChatClientAgentRunOptions
+            {
+                ChatOptions = chatOptions,
+            };
+
+            var collected = new List<AgentResponseUpdate>();
+            await foreach (var update in cached.Agent.RunStreamingAsync(
+                    augmentedMessages, session, runOptions, ct).WithCancellation(ct).ConfigureAwait(false))
             {
                 collected.Add(update);
                 ctx.Heartbeat(update.Text);
             }
 
-            var response = collected.ToChatResponse();
+            var response = collected.ToAgentResponse();
             var assistantMessage = response.Messages.Count > 0
                 ? response.Messages[response.Messages.Count - 1]
                 : new ChatMessage(ChatRole.Assistant, string.Empty);
@@ -338,6 +348,7 @@ internal sealed class AgentActivities(
                 ToolCalls = isFinal ? null : toolCalls,
                 UpdatedStateBag = serializedStateBag,
                 Usage = response.Usage,
+                ResponseId = response.ResponseId,
                 ResolvedWorkerConfig = resolvedConfig,
             };
         }
@@ -439,11 +450,32 @@ internal sealed class AgentActivities(
             Name = registration.Name,
             Description = registration.Description,
             ChatOptions = chatOptions,
-            AIContextProviders = providers.Length == 0 ? null : providers.ToList(),
+            // Q1 (β): keep our explicit AIContextProvider loop inside RunDurableAgentStepAsync
+            // rather than delegating to MAF's ChatClientAgent. Setting null here suppresses MAF's
+            // own provider lifecycle so providers fire exactly once per turn from our loop.
+            AIContextProviders = null,
             UseProvidedChatClientAsIs = true,
         };
 
-        var agent = new ChatClientAgent(chatClient, agentOptions);
+        var chatClientAgent = new ChatClientAgent(chatClient, agentOptions);
+
+        // Compose the user's ConfigureAgentPipeline around the ChatClientAgent. Per-agent
+        // callback wins; worker-level DefaultConfigureAgentPipeline is the fallback. If neither
+        // is set, the cached agent IS the bare ChatClientAgent (no decorators).
+        var configurePipeline = registration.ConfigureAgentPipeline
+            ?? agentsOptions.DefaultConfigureAgentPipeline;
+
+        AIAgent agent;
+        if (configurePipeline is null)
+        {
+            agent = chatClientAgent;
+        }
+        else
+        {
+            var agentBuilder = new AIAgentBuilder(chatClientAgent);
+            configurePipeline.Invoke(agentBuilder);
+            agent = agentBuilder.Build(providerServices);
+        }
 
         // Per-agent factory wins; worker-level factory is the fallback.
         var storeFactory = registration.HistoryStore ?? agentsOptions.HistoryStore;

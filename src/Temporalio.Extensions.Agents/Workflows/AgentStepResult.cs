@@ -49,6 +49,18 @@ internal sealed class AgentStepResult
     public UsageDetails? Usage { get; init; }
 
     /// <summary>
+    /// Optional response identifier produced by the LLM provider for this step. Maps to OTel
+    /// GenAI semantic convention <c>gen_ai.response.id</c>. Used for correlating Temporal-side
+    /// activity execution with upstream provider observability (request logs, billing detail).
+    /// Step 3c.2 carve-out from <see cref="Microsoft.Agents.AI.AgentResponse"/>'s broader surface
+    /// per the Q17 design decision (everything else from <c>AgentResponse</c>
+    /// — <c>ContinuationToken</c>, <c>RawRepresentation</c>, <c>AdditionalProperties</c> — is
+    /// dropped at the activity boundary to keep replay-critical payloads minimal).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResponseId { get; init; }
+
+    /// <summary>
     /// Worker-side settings bundle resolved from the agent's <c>DurableAgentRegistration</c>.
     /// Only populated when <see cref="AgentStepInput.NeedsWorkerSettingsResolution"/> was
     /// <see langword="true"/>; <see langword="null"/> on non-resolution steps.
