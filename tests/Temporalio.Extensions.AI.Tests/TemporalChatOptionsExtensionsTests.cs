@@ -180,6 +180,121 @@ public class TemporalChatOptionsExtensionsTests
         Assert.True(captured.AdditionalProperties.ContainsKey("user.custom"));
     }
 
+    [Fact]
+    public void WithChatClientFactoryKey_SetsProperty()
+    {
+        var options = new ChatOptions();
+        options.WithChatClientFactoryKey("tenant-logger");
+
+        Assert.NotNull(options.AdditionalProperties);
+        Assert.Equal("tenant-logger", options.GetChatClientFactoryKey());
+    }
+
+    [Fact]
+    public void WithChatClientFactoryKey_EmptyString_OverridesToOptOut()
+    {
+        // Empty string is the documented opt-out from worker-level DefaultChatClientFactoryKey.
+        var options = new ChatOptions();
+        options.WithChatClientFactoryKey(string.Empty);
+
+        Assert.NotNull(options.AdditionalProperties);
+        Assert.Equal(string.Empty, options.GetChatClientFactoryKey());
+    }
+
+    [Fact]
+    public void WithChatClientFactoryKey_NullKey_Throws()
+    {
+        var options = new ChatOptions();
+        Assert.Throws<ArgumentNullException>(() => options.WithChatClientFactoryKey(null!));
+    }
+
+    [Fact]
+    public void GetChatClientFactoryKey_ReturnsNullWhenNotSet()
+    {
+        var options = new ChatOptions();
+        Assert.Null(options.GetChatClientFactoryKey());
+    }
+
+    [Fact]
+    public void WithChatClientTag_SetsTagAtPrefixedKey()
+    {
+        var options = new ChatOptions();
+        options.WithChatClientTag("tenant", "acme-corp");
+
+        Assert.NotNull(options.AdditionalProperties);
+        Assert.True(options.AdditionalProperties.ContainsKey(
+            TemporalChatOptionsExtensions.ChatClientTagsKeyPrefix + "tenant"));
+    }
+
+    [Fact]
+    public void WithChatClientTag_MultipleCalls_AccumulateTags()
+    {
+        var options = new ChatOptions();
+        options.WithChatClientTag("tenant", "acme-corp");
+        options.WithChatClientTag("request_id", "abc-123");
+
+        var tags = options.GetChatClientTags();
+        Assert.Equal(2, tags.Count);
+        Assert.Contains(tags, t => t.Key == "tenant" && t.Value == "acme-corp");
+        Assert.Contains(tags, t => t.Key == "request_id" && t.Value == "abc-123");
+    }
+
+    [Fact]
+    public void WithChatClientTag_RepeatedName_LatestValueWins()
+    {
+        var options = new ChatOptions();
+        options.WithChatClientTag("tenant", "first");
+        options.WithChatClientTag("tenant", "second");
+
+        var tags = options.GetChatClientTags();
+        Assert.Single(tags);
+        Assert.Equal("second", tags[0].Value);
+    }
+
+    [Fact]
+    public void WithChatClientTag_NullName_Throws()
+    {
+        // ArgumentException.ThrowIfNullOrEmpty throws ArgumentNullException for null;
+        // xUnit's Assert.Throws requires exact type per the CLAUDE.md gotcha.
+        var options = new ChatOptions();
+        Assert.Throws<ArgumentNullException>(() => options.WithChatClientTag(null!, "value"));
+    }
+
+    [Fact]
+    public void WithChatClientTag_EmptyName_Throws()
+    {
+        var options = new ChatOptions();
+        Assert.Throws<ArgumentException>(() => options.WithChatClientTag(string.Empty, "value"));
+    }
+
+    [Fact]
+    public void WithChatClientTag_NullValue_Throws()
+    {
+        var options = new ChatOptions();
+        Assert.Throws<ArgumentNullException>(() => options.WithChatClientTag("name", null!));
+    }
+
+    [Fact]
+    public void GetChatClientTags_NoTags_ReturnsEmpty()
+    {
+        var options = new ChatOptions();
+        Assert.Empty(options.GetChatClientTags());
+    }
+
+    [Fact]
+    public void GetChatClientTags_IgnoresNonTagAdditionalProperties()
+    {
+        // Tag prefix discrimination — must not pick up unrelated additional-properties keys.
+        var options = new ChatOptions();
+        options.WithChatClientTag("tenant", "acme");
+        options.AdditionalProperties!["unrelated.key"] = "ignored";
+        options.WithActivityTimeout(TimeSpan.FromMinutes(5));
+
+        var tags = options.GetChatClientTags();
+        Assert.Single(tags);
+        Assert.Equal("tenant", tags[0].Key);
+    }
+
     /// <summary>Minimal IChatClient stub that captures the ChatOptions it receives.</summary>
     private sealed class CapturingChatClient(Action<ChatOptions?> capture) : IChatClient
     {

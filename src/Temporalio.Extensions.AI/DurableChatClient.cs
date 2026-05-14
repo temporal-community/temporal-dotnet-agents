@@ -221,10 +221,15 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         if (options.AdditionalProperties is not { Count: > 0 }) return options;
 
         // Only allocate a stripped copy when there are Temporal keys to remove.
-        bool hasTemporalKeys = options.AdditionalProperties.ContainsKey(TemporalChatOptionsExtensions.ActivityTimeoutKey)
-            || options.AdditionalProperties.ContainsKey(TemporalChatOptionsExtensions.HeartbeatTimeoutKey)
-            || options.AdditionalProperties.ContainsKey(TemporalChatOptionsExtensions.MaxRetryAttemptsKey)
-            || options.AdditionalProperties.ContainsKey(TemporalChatOptionsExtensions.ChatClientKeySettingKey);
+        bool hasTemporalKeys = false;
+        foreach (var kvp in options.AdditionalProperties)
+        {
+            if (IsTemporalKey(kvp.Key))
+            {
+                hasTemporalKeys = true;
+                break;
+            }
+        }
 
         if (!hasTemporalKeys) return options;
 
@@ -258,14 +263,25 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         AdditionalPropertiesDictionary? result = null;
         foreach (var kvp in props)
         {
-            if (kvp.Key is TemporalChatOptionsExtensions.ActivityTimeoutKey
-                        or TemporalChatOptionsExtensions.HeartbeatTimeoutKey
-                        or TemporalChatOptionsExtensions.MaxRetryAttemptsKey
-                        or TemporalChatOptionsExtensions.ChatClientKeySettingKey)
+            if (IsTemporalKey(kvp.Key))
                 continue;
             result ??= new AdditionalPropertiesDictionary();
             result[kvp.Key] = kvp.Value;
         }
         return result;
     }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when the key is a Temporal-internal marker that must be
+    /// stripped before passing options through to the inner <see cref="IChatClient"/>. Centralized
+    /// here so adding new keys (e.g., <c>WithChatClientFactoryKey</c> /
+    /// <c>WithChatClientTag</c> in Step 4) only requires one update site.
+    /// </summary>
+    private static bool IsTemporalKey(string key) =>
+        key is TemporalChatOptionsExtensions.ActivityTimeoutKey
+            or TemporalChatOptionsExtensions.HeartbeatTimeoutKey
+            or TemporalChatOptionsExtensions.MaxRetryAttemptsKey
+            or TemporalChatOptionsExtensions.ChatClientKeySettingKey
+            or TemporalChatOptionsExtensions.ChatClientFactoryKeySettingKey
+            || key.StartsWith(TemporalChatOptionsExtensions.ChatClientTagsKeyPrefix, StringComparison.Ordinal);
 }

@@ -93,6 +93,22 @@ public sealed class DurableExecutionOptions
     public string? DefaultChatClientKey { get; set; }
 
     /// <summary>
+    /// Default keyed DI service key used to resolve an <see cref="IChatClientDecorator"/> that
+    /// wraps the resolved <see cref="IChatClient"/> per request. When null (default), no
+    /// decoration is applied unless the per-call
+    /// <see cref="TemporalChatOptionsExtensions.WithChatClientFactoryKey(IChatClient, string)"/>
+    /// sets one.
+    /// </summary>
+    /// <remarks>
+    /// Per-call <see cref="TemporalChatOptionsExtensions.WithChatClientFactoryKey(Microsoft.Extensions.AI.ChatOptions, string)"/>
+    /// takes precedence over this worker-level default. Built-in keys (e.g. <c>"tags"</c>) are
+    /// pre-registered by <c>AddDurableAI</c> / <c>AddTemporalAgents</c>; custom decorators must
+    /// be registered with <c>services.AddKeyedSingleton&lt;IChatClientDecorator, ...&gt;(key)</c>
+    /// before the worker host starts.
+    /// </remarks>
+    public string? DefaultChatClientFactoryKey { get; set; }
+
+    /// <summary>
     /// Gets or sets a reducer applied to conversation history before a continue-as-new transition.
     /// When null (default), the full history is carried forward.
     /// </summary>
