@@ -107,6 +107,26 @@ public sealed class TemporalAgentsOptions
     public Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? DefaultHistoryReducer { get; set; }
 
     /// <summary>
+    /// Gets or sets the worker-level default compaction-strategy key. When an agent does
+    /// not set <see cref="DurableAgentBuilder.CompactionStrategyKey"/>, it inherits this
+    /// value. <see langword="null"/> at both levels disables compaction.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Step 6a — API surface. Built-in keys pre-registered in Step 6c:
+    /// <c>"truncation"</c>, <c>"sliding-window"</c>, <c>"summarization"</c>. Custom strategies
+    /// can be registered via
+    /// <c>services.AddKeyedSingleton&lt;ICompactionStrategy&gt;("my-key", impl)</c>.
+    /// </para>
+    /// <para>
+    /// Marked <c>[Experimental("TA002")]</c> at the property level — consumer assignments
+    /// surface the diagnostic until compaction ships out of preview.
+    /// </para>
+    /// </remarks>
+    [System.Diagnostics.CodeAnalysis.Experimental("TA002")]
+    public string? DefaultCompactionStrategy { get; set; }
+
+    /// <summary>
     /// Gets or sets the worker-level default agent-pipeline configuration callback. When an agent
     /// does not set <see cref="DurableAgentBuilder.ConfigureAgentPipeline"/>, it inherits this value.
     /// </summary>

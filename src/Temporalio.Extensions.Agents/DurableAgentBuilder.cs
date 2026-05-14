@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
@@ -218,6 +219,28 @@ public sealed class DurableAgentBuilder
     public Func<IServiceProvider, IAgentHistoryStore>? HistoryStore { get; set; }
 
     /// <summary>
+    /// Gets or sets the keyed-DI name of the <see cref="Compaction.ICompactionStrategy"/> to
+    /// apply when in-session compaction triggers. <see langword="null"/> inherits the
+    /// worker-level <see cref="TemporalAgentsOptions.DefaultCompactionStrategy"/>; both
+    /// <see langword="null"/> disables compaction for the agent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Step 6a — API surface. The activity-side trigger evaluator (Step 6b) decides when
+    /// compaction fires; the workflow dispatches the configured strategy as a separate
+    /// <c>CompactHistory</c> activity (Step 6d). Built-in keys pre-registered in Step 6c:
+    /// <c>"truncation"</c>, <c>"sliding-window"</c>, <c>"summarization"</c>.
+    /// </para>
+    /// <para>
+    /// Marked <c>[Experimental("TA002")]</c> at the API-surface level (consumer code that
+    /// sets this property triggers the diagnostic) — the wire shape becomes stable when
+    /// compaction ships in a non-preview release.
+    /// </para>
+    /// </remarks>
+    [Experimental("TA002")]
+    public string? CompactionStrategyKey { get; set; }
+
+    /// <summary>
     /// Registers a concrete <see cref="AIFunction"/> as a tool for this agent. The tool's
     /// <see cref="AIFunction.Name"/> must be unique within this agent.
     /// </summary>
@@ -377,7 +400,8 @@ public sealed class DurableAgentBuilder
             MaxEntryCount: MaxEntryCount,
             MaxToolCallsPerTurn: MaxToolCallsPerTurn,
             HistoryReducer: HistoryReducer,
-            ConfigureAgentPipeline: ConfigureAgentPipeline);
+            ConfigureAgentPipeline: ConfigureAgentPipeline,
+            CompactionStrategyKey: CompactionStrategyKey);
     }
 
     private void AddToolCore(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure)
