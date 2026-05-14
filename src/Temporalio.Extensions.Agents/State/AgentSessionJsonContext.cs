@@ -20,6 +20,8 @@ namespace Temporalio.Extensions.Agents.State;
 [JsonSerializable(typeof(InvokeAgentToolResult))]
 [JsonSerializable(typeof(AppendAgentTurnInput))]
 [JsonSerializable(typeof(ReduceHistoryInStoreInput))]
+[JsonSerializable(typeof(RunCompactionSummaryInput))]
+[JsonSerializable(typeof(RunCompactionSummaryResult))]
 [JsonSerializable(typeof(IReadOnlyList<DurableSessionEntry>))]
 [JsonSerializable(typeof(List<DurableSessionEntry>))]
 // Function call and result content
