@@ -157,10 +157,11 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             TaskQueue = _input.TaskQueue,
             CarriedStateBag = _currentStateBag,
             RetryPolicy = _input.RetryPolicy,
-            UseExternalStoreMode = useExternalStore,
-            MaxToolCallsPerTurn = _input.MaxToolCallsPerTurn,
-            DurableAgentToolActivityOptions = _input.DurableAgentToolActivityOptions,
-            WorkerSettingsResolved = _input.WorkerSettingsResolved,
+            // Carry forward the entire resolved-worker-config bundle (or null if proxy-started
+            // and not yet resolved). This replaces the flat MaxToolCallsPerTurn /
+            // UseExternalStoreMode / DurableAgentToolActivityOptions / WorkerSettingsResolved
+            // quartet as of the Step 3c.1 migration.
+            ResolvedWorkerConfig = _input.ResolvedWorkerConfig,
 
             TimeToLive = input.TimeToLive,
             CarriedHistory = useExternalStore ? null : input.CarriedHistory,
@@ -308,8 +309,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 stepActivityOptions).ConfigureAwait(true);
 
-            // Fix 4: apply resolved worker-side settings once and carry forward via CAN.
-            if (needsResolution && stepResult.ResolvedUseExternalStoreMode.HasValue)
+            // Fix 4: apply resolved worker-side settings once and carry forward via CAN. As of
+            // the Step 3c.1 migration, the entire resolved bundle travels as
+            // ProxyResolvedWorkerConfig — the flat MaxToolCallsPerTurn / UseExternalStoreMode /
+            // DurableAgentToolActivityOptions fields are now forwarding computed properties
+            // on AgentWorkflowInput.
+            if (needsResolution && stepResult.ResolvedWorkerConfig is not null)
             {
                 _input = new AgentWorkflowInput
                 {
@@ -317,10 +322,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                     TaskQueue = _input!.TaskQueue,
                     CarriedStateBag = _currentStateBag,
                     RetryPolicy = _input!.RetryPolicy,
-                    UseExternalStoreMode = stepResult.ResolvedUseExternalStoreMode.Value,
-                    MaxToolCallsPerTurn = stepResult.ResolvedMaxToolCallsPerTurn ?? _input!.MaxToolCallsPerTurn,
-                    DurableAgentToolActivityOptions = stepResult.ResolvedToolActivityOptions,
-                    WorkerSettingsResolved = true,
+                    ResolvedWorkerConfig = stepResult.ResolvedWorkerConfig,
 
                     TimeToLive = _input!.TimeToLive,
                     CarriedHistory = _input!.CarriedHistory,

@@ -15,6 +15,13 @@ namespace Temporalio.Extensions.Agents.Workflows;
 /// MAF-specific fields (<see cref="AgentName"/>, <see cref="TaskQueue"/>,
 /// <see cref="CarriedStateBag"/>, etc.) live on this subclass.
 /// </summary>
+/// <remarks>
+/// Worker-side resolved settings (<see cref="MaxToolCallsPerTurn"/>,
+/// <see cref="UseExternalStoreMode"/>, <see cref="DurableAgentToolActivityOptions"/>) are stored
+/// in <see cref="ResolvedWorkerConfig"/> as of the maf-gap Step 3c.1 migration. The legacy
+/// flat-field names remain as forwarding computed properties so consumers don't need updating;
+/// only construction sites assign to <see cref="ResolvedWorkerConfig"/> directly.
+/// </remarks>
 internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
 {
     /// <summary>Gets the name of the agent that this workflow manages.</summary>
@@ -39,27 +46,40 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     public RetryPolicy? RetryPolicy { get; init; }
 
     /// <summary>
+    /// Gets the bundle of worker-side settings resolved either eagerly at workflow start
+    /// (when <c>AddDurableAgent</c> registered this worker) or lazily on the first step of the
+    /// first turn (proxy-started workflows). <see langword="null"/> means proxy-started and not
+    /// yet resolved — the workflow must request resolution via
+    /// <see cref="AgentStepInput.NeedsWorkerSettingsResolution"/>.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProxyResolvedWorkerConfig? ResolvedWorkerConfig { get; init; }
+
+    // ── Forwarding properties — preserve consumer call sites across the Step 3c.1 migration ──
+
+    /// <summary>
     /// Maximum number of LLM-step iterations within a single agent turn. Each iteration may
     /// dispatch a parallel batch of tool activities. When the cap is exceeded the workflow
-    /// returns a structured error response. Resolved per-agent at workflow start.
+    /// returns a structured error response. Forwards to
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.MaxToolCallsPerTurn"/>;
+    /// defaults to <c>20</c> when the config has not yet been resolved (proxy-started, pre-handshake).
     /// </summary>
-    public int MaxToolCallsPerTurn { get; init; } = 20;
+    [JsonIgnore]
+    public int MaxToolCallsPerTurn => ResolvedWorkerConfig?.MaxToolCallsPerTurn ?? 20;
 
     /// <summary>
     /// When <see langword="true"/>, the agent has an <see cref="HistoryStore.IAgentHistoryStore"/>
-    /// configured (per-agent or worker-level). The workflow strips message payloads from history
-    /// entries (PII / O(n²) protection) and the activity loads/appends conversation history via
-    /// the store. Resolved at workflow start by <c>DefaultTemporalAgentClient</c>.
+    /// configured (per-agent or worker-level). Forwards to
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.UseExternalStoreMode"/>;
+    /// defaults to <see langword="false"/> when the config has not yet been resolved.
     /// </summary>
-    public bool UseExternalStoreMode { get; init; }
+    [JsonIgnore]
+    public bool UseExternalStoreMode => ResolvedWorkerConfig?.UseExternalStoreMode ?? false;
 
     /// <summary>
     /// Pre-computed per-tool <see cref="ActivityOptions"/> indexed by tool name (case-insensitive).
-    /// Populated by <c>DefaultTemporalAgentClient</c> from the agent's
-    /// <see cref="DurableAgentRegistration.Tools"/> at workflow start. When a tool name is
-    /// present, the workflow uses these options for the per-tool activity dispatch
-    /// (<c>Temporalio.Extensions.Agents.InvokeAgentTool</c>); otherwise it falls back to a default
-    /// built from <see cref="DurableChatWorkflowInput.ActivityTimeout"/> and <see cref="RetryPolicy"/>.
+    /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.ToolActivityOptions"/>;
+    /// <see langword="null"/> when the config has not yet been resolved.
     /// </summary>
     /// <remarks>
     /// The dictionary is built at workflow start (not at first activity dispatch) so retry
@@ -67,15 +87,15 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     /// time the workflow began running. Continue-as-new carries the same dictionary forward so
     /// retry semantics survive across CAN transitions.
     /// </remarks>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Dictionary<string, ActivityOptions>? DurableAgentToolActivityOptions { get; init; }
+    [JsonIgnore]
+    public IReadOnlyDictionary<string, ActivityOptions>? DurableAgentToolActivityOptions =>
+        ResolvedWorkerConfig?.ToolActivityOptions;
 
     /// <summary>
-    /// <see langword="true"/> when the workflow was started by a full <c>AddDurableAgent</c>
-    /// registration and worker-side settings (external-store mode, per-tool activity options)
-    /// are already baked into this input. <see langword="false"/> when started by
-    /// <c>AddAgentProxy</c> only — the workflow must resolve these settings from the worker on
-    /// the first step of the first turn.
+    /// <see langword="true"/> when worker-side settings are already baked into this input (i.e.,
+    /// <see cref="ResolvedWorkerConfig"/> is non-<see langword="null"/>). <see langword="false"/>
+    /// for proxy-started workflows that must resolve settings via the first-step handshake.
     /// </summary>
-    public bool WorkerSettingsResolved { get; init; }
+    [JsonIgnore]
+    public bool WorkerSettingsResolved => ResolvedWorkerConfig is not null;
 }

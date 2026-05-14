@@ -312,10 +312,14 @@ internal sealed class DefaultTemporalAgentClient(
             MaxEntryCount = perAgentMaxEntryCount,
             HistoryReducer = perAgentHistoryReducer,
             EnableSearchAttributes = options.EnableSearchAttributes,
-            UseExternalStoreMode = hasExternalStore,
-            MaxToolCallsPerTurn = registration.MaxToolCallsPerTurn,
-            DurableAgentToolActivityOptions = toolActivityOptions,
-            WorkerSettingsResolved = true,
+            // Worker-side settings are baked in — non-null ResolvedWorkerConfig also serves as
+            // the "WorkerSettingsResolved = true" signal under the Step 3c.1 migration.
+            ResolvedWorkerConfig = new ProxyResolvedWorkerConfig
+            {
+                MaxToolCallsPerTurn = registration.MaxToolCallsPerTurn,
+                UseExternalStoreMode = hasExternalStore,
+                ToolActivityOptions = toolActivityOptions,
+            },
         };
     }
 
@@ -348,12 +352,11 @@ internal sealed class DefaultTemporalAgentClient(
             MaxEntryCount = options.DefaultMaxEntryCount,
             HistoryReducer = options.DefaultHistoryReducer,
             EnableSearchAttributes = options.EnableSearchAttributes,
-            // No per-tool activity options — the worker resolves these from its own
-            // DurableAgentRegistration. The proxy client doesn't know the agent's tools.
-            DurableAgentToolActivityOptions = null,
-            // No external-history flag from the client side — the worker decides based on its
-            // own HistoryStore configuration when the workflow runs.
-            UseExternalStoreMode = false,
+            // Proxy-only construction: leave ResolvedWorkerConfig null. The worker resolves
+            // settings (per-tool activity options, external-store mode, max iterations) from its
+            // own DurableAgentRegistration on the first step via the NeedsWorkerSettingsResolution
+            // handshake.
+            ResolvedWorkerConfig = null,
         };
     }
 

@@ -319,6 +319,18 @@ internal sealed class AgentActivities(
                 : null;
 
 
+            // Bundle resolved settings into ProxyResolvedWorkerConfig only when this was a
+            // resolution-request step (NeedsWorkerSettingsResolution). Non-resolution steps return
+            // null for the config; consumer forwarding properties handle the null safely.
+            ProxyResolvedWorkerConfig? resolvedConfig = input.NeedsWorkerSettingsResolution
+                ? new ProxyResolvedWorkerConfig
+                {
+                    MaxToolCallsPerTurn = resolvedMaxToolCalls ?? cached.Registration.MaxToolCallsPerTurn,
+                    UseExternalStoreMode = resolvedExternalStore ?? false,
+                    ToolActivityOptions = resolvedToolOpts ?? new Dictionary<string, ActivityOptions>(),
+                }
+                : null;
+
             return new AgentStepResult
             {
                 IsFinal = isFinal,
@@ -326,9 +338,7 @@ internal sealed class AgentActivities(
                 ToolCalls = isFinal ? null : toolCalls,
                 UpdatedStateBag = serializedStateBag,
                 Usage = response.Usage,
-                ResolvedUseExternalStoreMode = resolvedExternalStore,
-                ResolvedToolActivityOptions = resolvedToolOpts,
-                ResolvedMaxToolCallsPerTurn = resolvedMaxToolCalls,
+                ResolvedWorkerConfig = resolvedConfig,
             };
         }
         catch (Exception ex)

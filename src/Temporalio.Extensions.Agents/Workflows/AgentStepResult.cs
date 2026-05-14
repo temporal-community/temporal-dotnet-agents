@@ -49,27 +49,44 @@ internal sealed class AgentStepResult
     public UsageDetails? Usage { get; init; }
 
     /// <summary>
-    /// Resolved worker-side external-store mode flag. Only populated when
-    /// <see cref="AgentStepInput.NeedsWorkerSettingsResolution"/> was <see langword="true"/>.
-    /// <see langword="true"/> when the agent has an <c>IAgentHistoryStore</c> configured on
-    /// the worker; <see langword="null"/> otherwise (not a resolution-request step).
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public bool? ResolvedUseExternalStoreMode { get; init; }
-
-    /// <summary>
-    /// Resolved per-tool <see cref="ActivityOptions"/> dictionary from the worker's
-    /// <c>DurableAgentRegistration</c>. Only populated when
-    /// <see cref="AgentStepInput.NeedsWorkerSettingsResolution"/> was <see langword="true"/>.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public Dictionary<string, ActivityOptions>? ResolvedToolActivityOptions { get; init; }
-
-    /// <summary>
-    /// Resolved <c>MaxToolCallsPerTurn</c> from the worker's <c>DurableAgentRegistration</c>.
+    /// Worker-side settings bundle resolved from the agent's <c>DurableAgentRegistration</c>.
     /// Only populated when <see cref="AgentStepInput.NeedsWorkerSettingsResolution"/> was
-    /// <see langword="true"/>.
+    /// <see langword="true"/>; <see langword="null"/> on non-resolution steps.
     /// </summary>
+    /// <remarks>
+    /// Replaces the prior <c>ResolvedUseExternalStoreMode</c> / <c>ResolvedToolActivityOptions</c> /
+    /// <c>ResolvedMaxToolCallsPerTurn</c> trio (Step 3c.1 migration). The legacy field names are
+    /// preserved as forwarding computed properties below so consumers don't need updating; new
+    /// fields added in Steps 4 + 6 (<c>DefaultChatClientFactoryKey</c>,
+    /// <c>CompactionStrategyKey</c>) flow through the same record without further schema thrashing.
+    /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? ResolvedMaxToolCallsPerTurn { get; init; }
+    public ProxyResolvedWorkerConfig? ResolvedWorkerConfig { get; init; }
+
+    // ── Forwarding properties — preserve consumer call sites across the Step 3c.1 migration ──
+
+    /// <summary>
+    /// Resolved worker-side external-store mode flag. Forwards to
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.UseExternalStoreMode"/>;
+    /// <see langword="null"/> on non-resolution steps.
+    /// </summary>
+    [JsonIgnore]
+    public bool? ResolvedUseExternalStoreMode => ResolvedWorkerConfig?.UseExternalStoreMode;
+
+    /// <summary>
+    /// Resolved per-tool <see cref="ActivityOptions"/> dictionary. Forwards to
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.ToolActivityOptions"/>;
+    /// <see langword="null"/> on non-resolution steps.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyDictionary<string, ActivityOptions>? ResolvedToolActivityOptions =>
+        ResolvedWorkerConfig?.ToolActivityOptions;
+
+    /// <summary>
+    /// Resolved <c>MaxToolCallsPerTurn</c>. Forwards to
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.MaxToolCallsPerTurn"/>;
+    /// <see langword="null"/> on non-resolution steps.
+    /// </summary>
+    [JsonIgnore]
+    public int? ResolvedMaxToolCallsPerTurn => ResolvedWorkerConfig?.MaxToolCallsPerTurn;
 }
