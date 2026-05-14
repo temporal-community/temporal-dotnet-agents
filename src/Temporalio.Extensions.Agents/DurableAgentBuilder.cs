@@ -176,6 +176,35 @@ public sealed class DurableAgentBuilder
     public Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer { get; set; }
 
     /// <summary>
+    /// Gets or sets a callback that configures an <see cref="AIAgentBuilder"/> middleware pipeline
+    /// wrapping the library-constructed <see cref="ChatClientAgent"/>. Inherits the worker-level
+    /// <c>TemporalAgentsOptions.DefaultConfigureAgentPipeline</c> when <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The callback runs at activity dispatch time and lets users compose middleware such as
+    /// <c>UseOpenTelemetry()</c>, <c>UseLogging()</c>, or custom <see cref="DelegatingAIAgent"/>
+    /// decorators. The library composes the inner <see cref="ChatClientAgent"/>; user code only
+    /// adds decorators around it via the supplied <see cref="AIAgentBuilder"/>.
+    /// </para>
+    /// <para>
+    /// <b>Construction-idempotency contract.</b> Decorators added through this callback are
+    /// constructed twice per agent registration per worker-process lifetime — once at startup
+    /// validation (C-check dry-run) and once at first activity dispatch. Decorators with
+    /// side-effect-bearing constructors (file handles, listeners, network connections) must
+    /// defer those side effects to <c>RunAsync</c> or use lazy initialization patterns.
+    /// </para>
+    /// <para>
+    /// <b>Forbidden middleware.</b> Calling <c>.Use(funcInvocationCallback)</c> (the agent-side
+    /// equivalent of <c>FunctionInvokingChatClient</c>) inside this callback is rejected at
+    /// worker startup with <see cref="Temporalio.Extensions.AI.Exceptions.DurableFunctionInvocationConflictException"/>
+    /// — the durable libraries handle tool invocation as separate Temporal activities, and
+    /// in-pipeline function-invocation middleware would conflict with that contract.
+    /// </para>
+    /// </remarks>
+    public Action<AIAgentBuilder>? ConfigureAgentPipeline { get; set; }
+
+    /// <summary>
     /// Gets or sets a per-agent <see cref="IAgentHistoryStore"/> factory. When <see langword="null"/>,
     /// inherits the worker-level <c>TemporalAgentsOptions.HistoryStore</c> (which itself may be
     /// <see langword="null"/>, meaning no external history is used). The factory is invoked once at
@@ -347,7 +376,8 @@ public sealed class DurableAgentBuilder
             RetryPolicy: RetryPolicy,
             MaxEntryCount: MaxEntryCount,
             MaxToolCallsPerTurn: MaxToolCallsPerTurn,
-            HistoryReducer: HistoryReducer);
+            HistoryReducer: HistoryReducer,
+            ConfigureAgentPipeline: ConfigureAgentPipeline);
     }
 
     private void AddToolCore(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure)

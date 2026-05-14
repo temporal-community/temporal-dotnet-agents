@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Temporalio.Client;
+using Temporalio.Extensions.Agents.Internal;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Hosting;
@@ -90,5 +91,13 @@ internal static class TemporalAgentsRegistrar
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             TemporalAgentWorkerClientConfigurator>());
+
+        // Startup C-check: validates user-supplied ConfigureAgentPipeline callbacks against the
+        // function-invocation conflict before any workflow can dispatch an activity. Skipped when
+        // TemporalAgentsOptions.SkipDryRunCCheck = true. See artifacts/maf-gap-implementation-plan-v2.md
+        // Step 3b for the design rationale.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<TemporalWorkerServiceOptions>,
+            DurableAgentPipelineValidator>());
     }
 }

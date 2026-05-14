@@ -107,6 +107,50 @@ public sealed class TemporalAgentsOptions
     public Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? DefaultHistoryReducer { get; set; }
 
     /// <summary>
+    /// Gets or sets the worker-level default agent-pipeline configuration callback. When an agent
+    /// does not set <see cref="DurableAgentBuilder.ConfigureAgentPipeline"/>, it inherits this value.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The callback receives an <see cref="AIAgentBuilder"/> the user can compose with
+    /// <c>UseOpenTelemetry()</c>, <c>UseLogging()</c>, or custom <see cref="DelegatingAIAgent"/>
+    /// decorators. The pipeline is materialized at activity dispatch time and wraps the
+    /// <see cref="ChatClientAgent"/> the library constructs internally.
+    /// </para>
+    /// <para>
+    /// Decorators added through this callback must be construction-idempotent — they may be
+    /// constructed twice per agent registration per worker process lifetime (once for startup
+    /// validation via the C-check, once on first activity dispatch). Defer side-effect-bearing
+    /// initialization to <c>RunAsync</c> rather than the constructor.
+    /// </para>
+    /// </remarks>
+    public Action<AIAgentBuilder>? DefaultConfigureAgentPipeline { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/>, the startup C-check that validates user-supplied agent
+    /// pipelines (via <see cref="DurableAgentBuilder.ConfigureAgentPipeline"/>) is skipped.
+    /// Configuration failures are then deferred to the first-invocation B-check.
+    /// </summary>
+    /// <remarks>
+    /// This flag is internal — intended for test scenarios that need to bypass the dry-run
+    /// validation (for example, to exercise the B-check fallback path). Production users should
+    /// not need to set this; the C-check is designed to fail loudly only when the configuration
+    /// is genuinely invalid.
+    /// </remarks>
+    internal bool SkipDryRunCCheck { get; set; }
+
+    /// <summary>
+    /// Returns the internal durable-agent registration for the given name, or <see langword="null"/>
+    /// if no agent with that name is registered (or it's a proxy-only declaration). Internal to
+    /// the library — exposed for validator and registrar plumbing.
+    /// </summary>
+    internal DurableAgentRegistration? TryGetDurableRegistration(string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        return _durableAgentRegistrations.TryGetValue(name, out var registration) ? registration : null;
+    }
+
+    /// <summary>
     /// Registers a durable agent and returns this options instance for chaining. The configure
     /// delegate populates a <see cref="DurableAgentBuilder"/> whose <c>ChatClient</c>, tools, and
     /// context providers are evaluated lazily at first activity dispatch (cached for the lifetime

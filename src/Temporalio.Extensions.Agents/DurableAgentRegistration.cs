@@ -28,4 +28,5 @@ internal sealed record DurableAgentRegistration(
     RetryPolicy? RetryPolicy,
     int? MaxEntryCount,
     int MaxToolCallsPerTurn,
-    Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer);
+    Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer,
+    Action<AIAgentBuilder>? ConfigureAgentPipeline);
