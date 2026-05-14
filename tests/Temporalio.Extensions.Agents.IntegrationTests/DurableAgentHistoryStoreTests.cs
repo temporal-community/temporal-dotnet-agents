@@ -494,8 +494,11 @@ public class DurableAgentHistoryStoreTests
         public int ReplaceCount => Volatile.Read(ref _replaceCount);
 
         public Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
-            string sessionId, CancellationToken cancellationToken = default)
+            string sessionId,
+            bool applyCompaction,
+            CancellationToken cancellationToken = default)
         {
+            _ = applyCompaction; // Test double doesn't produce markers — both modes equivalent.
             Interlocked.Increment(ref _loadCount);
             lock (_gate)
             {

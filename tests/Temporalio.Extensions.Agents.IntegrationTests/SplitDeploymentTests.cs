@@ -233,8 +233,11 @@ public class SplitDeploymentTests
         private readonly object _gate = new();
 
         public Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
-            string sessionId, CancellationToken cancellationToken = default)
+            string sessionId,
+            bool applyCompaction,
+            CancellationToken cancellationToken = default)
         {
+            _ = applyCompaction; // Test double doesn't produce markers — both modes equivalent.
             lock (_gate)
             {
                 return Task.FromResult<IReadOnlyList<DurableSessionEntry>>(

@@ -29,17 +29,48 @@ namespace Temporalio.Extensions.Agents.HistoryStore;
 public interface IAgentHistoryStore
 {
     /// <summary>
-    /// Loads all session entries for the given session, in append order
+    /// Loads session entries for the given session, in append order
     /// (request entry, response entry, request entry, response entry, ...).
     /// </summary>
     /// <param name="sessionId">
     /// The agent workflow ID. Always passed from the activity context — never resolved
     /// from DI. Use <see cref="Session.TemporalAgentSessionId.WorkflowId"/>.
     /// </param>
+    /// <param name="applyCompaction">
+    /// <para>
+    /// When <see langword="false"/>, returns the raw entries as they were appended —
+    /// including any <see cref="CompactionMarkerEntry"/> entries (Step 5+) untouched. This
+    /// is the <b>audit canonical</b> view: it is the input shape for GDPR erasure cascades,
+    /// for migration tooling, and for compliance attestations that must see exactly what
+    /// the store holds.
+    /// </para>
+    /// <para>
+    /// When <see langword="true"/>, the store projects the post-compact view by collapsing
+    /// each <see cref="CompactionMarkerEntry"/> in place — the marker is replaced by its
+    /// rollup summary entry / removed entirely (strategy-dependent), and the source entries
+    /// the marker references are filtered out. This is the inference-time view: the input
+    /// shape callers should hand to an LLM when the store is the system of record for
+    /// conversation context.
+    /// </para>
+    /// <para>
+    /// <b>No default value</b> — the choice is load-bearing. Implementations and callers
+    /// must each pick a side at every site to prevent accidental cross-contamination
+    /// (e.g., an erasure path operating on a projected view would miss the entries the
+    /// marker subsumed).
+    /// </para>
+    /// </param>
     /// <param name="cancellationToken">Activity cancellation token.</param>
     /// <returns>The session entries, oldest first. Empty when the session has no prior turns.</returns>
+    /// <exception cref="Temporalio.Extensions.AI.Exceptions.DurableCompactionMarkerException">
+    /// Thrown when <paramref name="applyCompaction"/> is <see langword="true"/> and the store
+    /// detects a structurally inconsistent marker (e.g. the marker references source IDs
+    /// the store can no longer resolve). Surfacing this loudly is Cypher mitigation #3 — the
+    /// alternative (silent miss in the projection) would produce a misleading reduced view.
+    /// </exception>
     Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
-        string sessionId, CancellationToken cancellationToken = default);
+        string sessionId,
+        bool applyCompaction,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Appends new entries for the given session. Called once per turn with the

@@ -1,5 +1,7 @@
+#pragma warning disable TA002 // test helper consumes the experimental compaction surface
 using System.Collections.Concurrent;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Exceptions;
 using Temporalio.Extensions.Agents.HistoryStore;
 
 namespace Temporalio.Extensions.Agents.Tests.HistoryStore;
@@ -47,6 +49,7 @@ internal sealed class FakeAgentHistoryStore : IAgentHistoryStore
 
     public async Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
         string sessionId,
+        bool applyCompaction,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(sessionId);
@@ -61,10 +64,86 @@ internal sealed class FakeAgentHistoryStore : IAgentHistoryStore
         if (!_store.TryGetValue(sessionId, out var list))
             return [];
 
+        DurableSessionEntry[] raw;
         lock (GetLock(sessionId))
         {
-            return list.ToArray();
+            raw = list.ToArray();
         }
+
+        return applyCompaction ? ProjectCompaction(raw) : raw;
+    }
+
+    /// <summary>
+    /// Step 5b minimal projection: for each <see cref="CompactionMarkerEntry"/>, drop the
+    /// source entries it references from the output stream. The marker itself stays in the
+    /// stream (its <c>Messages</c> field carries the rollup summary). Cypher mitigation #3
+    /// — if any referenced source ID is missing from the store, surface
+    /// <see cref="DurableCompactionMarkerException"/> rather than silently producing a
+    /// misleading projection.
+    /// </summary>
+    private static IReadOnlyList<DurableSessionEntry> ProjectCompaction(
+        IReadOnlyList<DurableSessionEntry> raw)
+    {
+        // Pass 1: collect the union of all CompactedMessageIds + validate each marker's
+        // references exist somewhere in the stream.
+        HashSet<string>? compacted = null;
+        var presentIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in raw)
+        {
+            presentIds.Add(entry.CorrelationId);
+        }
+
+        foreach (var entry in raw)
+        {
+            if (entry is not CompactionMarkerEntry marker)
+                continue;
+
+            compacted ??= new HashSet<string>(StringComparer.Ordinal);
+
+            List<string>? missing = null;
+            foreach (var id in marker.CompactedMessageIds)
+            {
+                if (!presentIds.Contains(id))
+                {
+                    (missing ??= new List<string>()).Add(id);
+                }
+                compacted.Add(id);
+            }
+
+            if (missing is not null)
+            {
+                throw new DurableCompactionMarkerException(
+                    marker.CorrelationId,
+                    $"Marker '{marker.CorrelationId}' (strategy={marker.Strategy}) references " +
+                    $"source entry IDs that are not present in the store. This usually means an " +
+                    $"out-of-band erasure removed entries without going through " +
+                    $"CompactionAwareErasureHelper. Run the erasure helper to tombstone or " +
+                    $"regenerate the marker.",
+                    missing);
+            }
+        }
+
+        if (compacted is null)
+            return raw;
+
+        var projected = new List<DurableSessionEntry>(raw.Count);
+        foreach (var entry in raw)
+        {
+            if (entry is CompactionMarkerEntry)
+            {
+                // Markers always stay in the projected stream — their Messages field holds
+                // the rollup summary that replaces the collapsed source entries.
+                projected.Add(entry);
+                continue;
+            }
+
+            if (compacted.Contains(entry.CorrelationId))
+                continue;
+
+            projected.Add(entry);
+        }
+
+        return projected;
     }
 
     public async Task AppendAsync(

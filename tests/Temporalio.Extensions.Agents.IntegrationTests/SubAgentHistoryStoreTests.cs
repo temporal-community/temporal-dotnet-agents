@@ -398,8 +398,11 @@ public class SubAgentHistoryStoreTests
         }
 
         public Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
-            string sessionId, CancellationToken cancellationToken = default)
+            string sessionId,
+            bool applyCompaction,
+            CancellationToken cancellationToken = default)
         {
+            _ = applyCompaction; // Test double doesn't produce markers — both modes equivalent.
             Interlocked.Increment(ref _loadCount);
             lock (_gate)
             {

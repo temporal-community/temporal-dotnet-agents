@@ -93,7 +93,13 @@ internal sealed class AgentActivities(
         }
 
         var ct = ActivityExecutionContext.Current.CancellationToken;
-        var prior = await cached.HistoryStore.LoadAsync(input.SessionId, ct).ConfigureAwait(false);
+        // Reducer runs against the post-compact projection (Q5α) so it operates on the
+        // view the LLM actually saw. Compaction markers (Step 5+) are pre-collapsed by the
+        // store; the reducer never sees a marker, only the rolled-up summary or filtered
+        // entries the strategy chose.
+        var prior = await cached.HistoryStore
+            .LoadAsync(input.SessionId, applyCompaction: true, ct)
+            .ConfigureAwait(false);
 
         // Resolve effective reducer: per-agent first, then worker default.
         var reducer = cached.Registration.HistoryReducer
@@ -198,7 +204,13 @@ internal sealed class AgentActivities(
         IReadOnlyList<ChatMessage> messagesForLlm = input.AccumulatedMessages;
         if (cached.HistoryStore is not null && input.IsFirstStep)
         {
-            var prior = await cached.HistoryStore.LoadAsync(sessionId.WorkflowId, ct).ConfigureAwait(false);
+            // Inference-time load — feed the LLM the post-compact view. Compaction markers
+            // are collapsed in place; the LLM sees rolled-up summaries instead of the full
+            // pre-compact run. The audit-canonical raw history is reachable separately via
+            // applyCompaction: false (used by the erasure helper added in Step 5c).
+            var prior = await cached.HistoryStore
+                .LoadAsync(sessionId.WorkflowId, applyCompaction: true, ct)
+                .ConfigureAwait(false);
             if (prior.Count > 0)
             {
                 var priorMessageCount = 0;

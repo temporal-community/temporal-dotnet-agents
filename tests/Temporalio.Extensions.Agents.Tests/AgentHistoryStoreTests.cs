@@ -109,7 +109,9 @@ public class AgentHistoryStoreTests
     private sealed class FakeHistoryStore : IAgentHistoryStore
     {
         public Task<IReadOnlyList<Temporalio.Extensions.AI.DurableSessionEntry>> LoadAsync(
-            string sessionId, CancellationToken cancellationToken = default) =>
+            string sessionId,
+            bool applyCompaction,
+            CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<Temporalio.Extensions.AI.DurableSessionEntry>>([]);
 
         public Task AppendAsync(

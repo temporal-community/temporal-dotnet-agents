@@ -51,9 +51,22 @@ public sealed class InMemoryHistoryStore : IAgentHistoryStore
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// This sample predates the Step 5 compaction-marker feature and never produces
+    /// <see cref="Temporalio.Extensions.AI.CompactionMarkerEntry"/> entries, so the
+    /// recent-N trimming runs identically in both projection modes. A
+    /// real-world store that writes compaction markers would branch on
+    /// <paramref name="applyCompaction"/>: <see langword="true"/> projects markers in
+    /// place; <see langword="false"/> returns the raw history (audit canonical, used by
+    /// erasure helpers).
+    /// </remarks>
     public Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
-        string sessionId, CancellationToken cancellationToken = default)
+        string sessionId,
+        bool applyCompaction,
+        CancellationToken cancellationToken = default)
     {
+        _ = applyCompaction; // No markers in this sample — both modes return the same view.
+
         Interlocked.Increment(ref _loadCalls);
 
         if (!_full.TryGetValue(sessionId, out var all))
