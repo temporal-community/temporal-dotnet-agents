@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Temporalio.Extensions.AI.Exceptions;
 
 /// <summary>
@@ -33,6 +35,7 @@ public sealed class DurableChatClientFactoryNotFoundException : DurableConfigura
     /// Initializes a new instance of the <see cref="DurableChatClientFactoryNotFoundException"/>
     /// class with a default message derived from <paramref name="factoryKey"/>.
     /// </summary>
+    [SetsRequiredMembers]
     public DurableChatClientFactoryNotFoundException(string factoryKey)
         : base(BuildMessage(factoryKey))
     {
@@ -43,6 +46,7 @@ public sealed class DurableChatClientFactoryNotFoundException : DurableConfigura
     /// Initializes a new instance of the <see cref="DurableChatClientFactoryNotFoundException"/>
     /// class with a specified error message.
     /// </summary>
+    [SetsRequiredMembers]
     public DurableChatClientFactoryNotFoundException(string factoryKey, string message)
         : base(message)
     {

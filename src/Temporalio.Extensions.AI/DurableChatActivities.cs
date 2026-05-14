@@ -2,7 +2,9 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Temporalio.Activities;
+using Temporalio.Extensions.AI.Exceptions;
 
 namespace Temporalio.Extensions.AI;
 
@@ -43,6 +45,19 @@ internal sealed class DurableChatActivities(
         var chatClient = string.IsNullOrEmpty(input.ClientKey)
             ? services.GetRequiredService<IChatClient>()
             : services.GetRequiredKeyedService<IChatClient>(input.ClientKey);
+
+        // Step 4c: per-call IChatClientDecorator resolution. Per-call WithChatClientFactoryKey
+        // wins; worker-level DefaultChatClientFactoryKey is the fallback. Empty-string per-call
+        // value is the documented opt-out (overrides the worker default with "no decoration").
+        var factoryKey = input.Options.GetChatClientFactoryKey()
+            ?? services.GetService<DurableExecutionOptions>()?.DefaultChatClientFactoryKey;
+
+        if (!string.IsNullOrEmpty(factoryKey))
+        {
+            var decorator = services.GetKeyedService<IChatClientDecorator>(factoryKey)
+                ?? throw new DurableChatClientFactoryNotFoundException(factoryKey);
+            chatClient = decorator.Decorate(chatClient, input.Options);
+        }
 
         try
         {
