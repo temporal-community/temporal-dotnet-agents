@@ -70,6 +70,15 @@ internal static class DurableAIRegistrar
             builder.AddSingletonActivities<DurableEmbeddingActivities>();
         }
 
+        // Pre-register the built-in "tags" IChatClientDecorator (Step 4b of the maf-gap plan).
+        // Per Q-ChatClientFactory-shape, this is the "80% case" path — users can call
+        // WithChatClientTag(name, value) + WithChatClientFactoryKey("tags") without registering
+        // a custom decorator. TryAddKeyedSingleton makes this idempotent across both registration
+        // paths (AddDurableAI directly + transitively via AddTemporalAgents).
+        services.TryAddKeyedSingleton<IChatClientDecorator>(
+            "tags",
+            (sp, _) => new Internal.TagsChatClientDecorator(sp.GetService<ILoggerFactory>()));
+
         // Auto-wire DurableAIDataConverter for both client registration patterns.
         // TryAddEnumerable deduplicates if registration happens more than once.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
