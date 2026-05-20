@@ -42,6 +42,12 @@ internal static class DurableAIRegistrar
         // Register the function registry (populated by AddDurableTools calls).
         services.TryAddSingleton<DurableFunctionRegistry>();
 
+        // Register the per-tool options registry (populated by AddDurableTools calls).
+        // Every tool registered via AddDurableTools has an entry here, even if the caller
+        // didn't supply an explicit configure callback — this guarantees the session client
+        // sees a complete picture when it builds the workflow's ToolActivityOptions dict.
+        services.TryAddSingleton<DurableChatToolOptionsRegistry>();
+
         // Register the function registry as IReadOnlyDictionary for activity resolution.
         services.TryAddSingleton<IReadOnlyDictionary<string, AIFunction>>(
             sp => sp.GetRequiredService<DurableFunctionRegistry>());
@@ -50,11 +56,15 @@ internal static class DurableAIRegistrar
         if (options.RegisterDefaultWorkflow)
         {
             // Register the session client (concrete + interface alias share the same instance).
+            // Inject both registries so the client can build Pattern 3 ToolActivityOptions at
+            // session start when durable tools are present.
             services.TryAddSingleton<DurableChatSessionClient>(sp =>
                 new DurableChatSessionClient(
                     sp.GetRequiredService<ITemporalClient>(),
                     options,
-                    sp.GetService<ILogger<DurableChatSessionClient>>()));
+                    sp.GetService<ILogger<DurableChatSessionClient>>(),
+                    sp.GetService<DurableFunctionRegistry>(),
+                    sp.GetService<DurableChatToolOptionsRegistry>()));
             services.TryAddSingleton<IDurableChatSessionClient>(
                 sp => sp.GetRequiredService<DurableChatSessionClient>());
 

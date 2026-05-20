@@ -64,8 +64,14 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.MaxToolCallsPerTurn"/>;
     /// defaults to <c>20</c> when the config has not yet been resolved (proxy-started, pre-handshake).
     /// </summary>
+    /// <remarks>
+    /// Shadows <see cref="DurableChatWorkflowInput.MaxToolCallsPerTurn"/>. The base property
+    /// belongs to MEAI's Pattern 3 dispatch loop and is irrelevant for the MAF agent workflow
+    /// (which forwards through <see cref="ResolvedWorkerConfig"/>). The <c>new</c> keyword
+    /// preserves the existing MAF forwarding semantics.
+    /// </remarks>
     [JsonIgnore]
-    public int MaxToolCallsPerTurn => ResolvedWorkerConfig?.MaxToolCallsPerTurn ?? 20;
+    public new int MaxToolCallsPerTurn => ResolvedWorkerConfig?.MaxToolCallsPerTurn ?? 20;
 
     /// <summary>
     /// When <see langword="true"/>, the agent has an <see cref="HistoryStore.IAgentHistoryStore"/>

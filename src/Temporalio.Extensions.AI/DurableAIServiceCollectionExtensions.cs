@@ -60,26 +60,63 @@ public static class DurableAIServiceCollectionExtensions
     /// <summary>
     /// Registers one or more <see cref="AIFunction"/> tools for durable execution.
     /// Each tool can be resolved by name inside <see cref="DurableFunctionActivities"/>
-    /// when invoked via <see cref="DurableAIFunctionExtensions.AsDurable"/> inside a workflow.
+    /// when invoked via <see cref="DurableAIFunctionExtensions.AsDurable"/> inside a workflow,
+    /// or dispatched automatically by <see cref="DurableChatWorkflow"/> under Pattern 3.
     /// </summary>
     /// <param name="builder">The worker options builder returned by <see cref="AddDurableAI"/>.</param>
-    /// <param name="tools">The tools to register.</param>
+    /// <param name="tools">The tools to register. Each receives a default
+    /// <see cref="DurableChatToolOptions"/> entry. Use the single-tool overload to attach
+    /// per-tool options.</param>
     /// <returns>The same builder for further chaining.</returns>
-    /// <remarks>
-    /// Call this after <see cref="AddDurableAI"/> to register tools that will be dispatched
-    /// as individual Temporal activities when wrapped with <c>AsDurable()</c> inside a workflow:
-    /// <code>
-    /// builder.Services
-    ///     .AddHostedTemporalWorker("my-task-queue")
-    ///     .AddDurableAI()
-    ///     .AddDurableTools(weatherTool, stockTool);
-    /// </code>
-    /// </remarks>
     public static ITemporalWorkerServiceOptionsBuilder AddDurableTools(
         this ITemporalWorkerServiceOptionsBuilder builder,
         params AIFunction[] tools)
     {
         ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(tools);
+
+        foreach (var tool in tools)
+        {
+            AddDurableTools(builder, tool, configure: null);
+        }
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers a single <see cref="AIFunction"/> tool for durable execution with optional
+    /// per-tool retry / timeout overrides applied when the tool is dispatched as a Temporal
+    /// activity under Pattern 3.
+    /// </summary>
+    /// <param name="builder">The worker options builder returned by <see cref="AddDurableAI"/>.</param>
+    /// <param name="tool">The tool to register.</param>
+    /// <param name="configure">
+    /// Optional callback that receives a <see cref="DurableChatToolOptions"/> instance for
+    /// configuring per-tool <c>StartToCloseTimeout</c>, <c>HeartbeatTimeout</c>, or
+    /// <c>RetryPolicy</c>. Pass <see langword="null"/> for defaults.
+    /// </param>
+    /// <returns>The same builder for further chaining.</returns>
+    /// <remarks>
+    /// Call this after <see cref="AddDurableAI"/>. Tools registered via this method always
+    /// receive an entry in the per-tool options registry — a default
+    /// <see cref="DurableChatToolOptions"/> when <paramref name="configure"/> is
+    /// <see langword="null"/>, otherwise the configured instance. This guarantees the
+    /// <see cref="DurableChatSessionClient"/> sees every registered tool when it resolves
+    /// Pattern 3 activation at session start.
+    ///
+    /// <para>
+    /// Write-style tools (send email, persist a record, charge a card) should call
+    /// <see cref="DurableChatToolOptions.NoRetry"/> to prevent double-execution on activity
+    /// retry.
+    /// </para>
+    /// </remarks>
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableTools(
+        this ITemporalWorkerServiceOptionsBuilder builder,
+        AIFunction tool,
+        Action<DurableChatToolOptions>? configure)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(tool);
 
         if (!builder.Services.Any(d => d.ServiceType == typeof(DurableExecutionOptions)))
         {
@@ -89,13 +126,16 @@ public static class DurableAIServiceCollectionExtensions
 
         var services = builder.Services;
 
-        // Register each tool in the registry via a configure callback.
-        foreach (var tool in tools)
-        {
-            ArgumentNullException.ThrowIfNull(tool);
-            services.AddSingleton<Action<DurableFunctionRegistry>>(
-                registry => registry.Register(tool));
-        }
+        // Capture the registration as a Func<DurableChatToolOptions> so the registry can
+        // materialize options lazily — this avoids running user-supplied configure delegates
+        // at registration time and keeps DI state idempotent across plugin/extension paths.
+        var perToolOptions = new DurableChatToolOptions();
+        configure?.Invoke(perToolOptions);
+
+        services.AddSingleton<Action<DurableFunctionRegistry>>(
+            registry => registry.Register(tool));
+        services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
+            registry => registry[tool.Name] = perToolOptions);
 
         return builder;
     }
@@ -121,5 +161,35 @@ internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>, 
     {
         ArgumentNullException.ThrowIfNull(function);
         this[function.Name] = function;
+    }
+}
+
+/// <summary>
+/// Registry of per-tool <see cref="DurableChatToolOptions"/> overrides. Populated by
+/// <see cref="DurableAIServiceCollectionExtensions.AddDurableTools(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction, System.Action{DurableChatToolOptions}?)"/>
+/// — every registered tool gets an entry, even if the caller passed
+/// <see langword="null"/> for <c>configure</c>. The <see cref="DurableChatSessionClient"/>
+/// consumes this registry to build the per-tool <c>ActivityOptions</c> dictionary that
+/// drives Pattern 3 dispatch.
+/// </summary>
+public sealed class DurableChatToolOptionsRegistry
+    : Dictionary<string, DurableChatToolOptions>, IReadOnlyDictionary<string, DurableChatToolOptions>
+{
+    /// <summary>
+    /// Initializes a new <see cref="DurableChatToolOptionsRegistry"/> by invoking each of
+    /// the supplied configurators against the empty registry. Configurators are registered
+    /// by <see cref="DurableAIServiceCollectionExtensions.AddDurableTools(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction, System.Action{DurableChatToolOptions}?)"/>
+    /// and resolved as a service-collection enumerable.
+    /// </summary>
+    public DurableChatToolOptionsRegistry(
+        IEnumerable<Action<DurableChatToolOptionsRegistry>>? configurators = null)
+        : base(StringComparer.OrdinalIgnoreCase)
+    {
+        if (configurators is null) return;
+
+        foreach (var configure in configurators)
+        {
+            configure(this);
+        }
     }
 }

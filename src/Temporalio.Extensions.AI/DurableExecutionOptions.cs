@@ -144,6 +144,32 @@ public sealed class DurableExecutionOptions
     public bool RegisterDefaultWorkflow { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets the maximum number of LLM iterations the Pattern 3 dispatch loop will
+    /// execute before synthesizing an "iterations exceeded" sentinel response and aborting
+    /// the turn. Defaults to <c>20</c>.
+    /// </summary>
+    /// <remarks>
+    /// Only relevant when Pattern 3 is active (durable tools registered via
+    /// <see cref="DurableAIServiceCollectionExtensions.AddDurableTools(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction[])"/>).
+    /// </remarks>
+    public int MaxToolCallsPerTurn { get; set; } = 20;
+
+    /// <summary>
+    /// Gets or sets the maximum number of consecutive iterations in which one or more tools
+    /// may fail before the Pattern 3 dispatch loop surfaces a non-retryable
+    /// <c>ApplicationFailureException</c>. Defaults to <c>3</c>. Set to <c>0</c> for
+    /// immediate propagation (MAF-style behavior where the first tool failure aborts the turn).
+    /// </summary>
+    public int MaximumConsecutiveErrorsPerRequest { get; set; } = 3;
+
+    /// <summary>
+    /// Gets or sets whether synthesized tool-error <c>FunctionResultContent</c> messages
+    /// include the underlying exception type and message. When <see langword="false"/>
+    /// (default), only a generic "Tool invocation failed." message is fed back to the LLM.
+    /// </summary>
+    public bool IncludeDetailedErrors { get; set; }
+
+    /// <summary>
     /// Gets or sets the maximum number of <see cref="DurableSessionEntry"/> instances retained
     /// in the conversation history before a continue-as-new transition is triggered.
     /// Defaults to 1000.
