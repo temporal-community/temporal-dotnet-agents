@@ -43,7 +43,14 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     /// dispatch a parallel batch of tool activities. When the cap is exceeded the workflow
     /// returns a structured error response. Resolved per-agent at workflow start.
     /// </summary>
-    public int MaxToolCallsPerTurn { get; init; } = 20;
+    /// <remarks>
+    /// Shadows <see cref="DurableChatWorkflowInput.MaxToolCallsPerTurn"/>. The base property
+    /// belongs to MEAI's Pattern 3 dispatch loop and is irrelevant for the MAF agent workflow
+    /// (which has always had its own per-turn cap). The <c>new</c> keyword preserves the
+    /// existing MAF default and consumers while keeping the base property reserved for the
+    /// MEAI loop.
+    /// </remarks>
+    public new int MaxToolCallsPerTurn { get; init; } = 20;
 
     /// <summary>
     /// When <see langword="true"/>, the agent has an <see cref="HistoryStore.IAgentHistoryStore"/>
