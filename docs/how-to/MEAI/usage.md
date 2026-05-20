@@ -106,7 +106,7 @@ builder.Services
 | Registered type | Role |
 |---|---|
 | `DurableChatWorkflow` | The workflow that owns conversation history and dispatches LLM calls |
-| `DurableChatActivities` | The activity that calls `IChatClient.GetStreamingResponseAsync`, collects chunks (heartbeating after each), and returns a `ChatResponse` |
+| `DurableChatActivities` | The activity that calls `IChatClient.GetResponseAsync` |
 | `DurableFunctionActivities` | The activity that resolves and invokes durable tool functions by name |
 | `DurableEmbeddingActivities` | The activity that calls `IEmbeddingGenerator.GenerateAsync` |
 | `DurableChatSessionClient` | The external entry point injected into your application code |
@@ -269,7 +269,126 @@ var history = await sessionClient.GetHistoryAsync("conversation-123");
 
 Tools passed via `ChatOptions.Tools` are handled by the `UseFunctionInvocation()` middleware in the existing pipeline. The entire tool call loop (LLM request → tool invocation → LLM request with result) runs inside the single Temporal activity — the tool function executes on the worker process.
 
-For tool functions that need their own durability guarantees — individual retry policies, separate timeouts, or independent crash recovery — the library provides a durable tool model where each tool call becomes its own Temporal activity. See [tool-functions.md](tool-functions.md) for both execution models and guidance on choosing between them.
+For tool functions that need their own durability guarantees — individual retry policies, separate timeouts, or independent crash recovery — the library provides two further models:
+
+- **Model 2** — wrap tools with `.AsDurable()` inside a custom `[Workflow]`. Each tool call becomes its own Temporal activity, dispatched by your workflow code.
+- **Model 3** — register tools with `AddDurableTools()` and **omit** `UseFunctionInvocation()`. `DurableChatSessionClient` automatically runs a per-tool dispatch loop inside its own workflow — no custom workflow code required.
+
+See [tool-functions.md](tool-functions.md) for all three execution models and guidance on choosing between them.
+
+---
+
+## Per-Tool Activity Options
+
+When using Model 3 (`AddDurableTools` without `UseFunctionInvocation`), each tool call becomes its own Temporal activity. The library exposes three worker-level knobs on `DurableExecutionOptions` and a per-tool builder for fine-grained overrides.
+
+### Worker-level defaults
+
+```csharp
+// Worker
+builder.Services
+    .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+    .AddDurableAI(opts =>
+    {
+        opts.MaxToolCallsPerTurn               = 20;   // cap loop iterations per turn (default 20)
+        opts.MaximumConsecutiveErrorsPerRequest = 3;   // tool-failure threshold (default 3)
+        opts.IncludeDetailedErrors             = false; // include exception detail in synthesized errors
+    });
+```
+
+| Option | Type | Default | Purpose |
+|---|---|---|---|
+| `MaxToolCallsPerTurn` | `int` | 20 | Maximum LLM↔tool iterations within a single turn. When exceeded, the workflow synthesizes an "iteration limit exceeded" assistant message and returns — it does not throw. |
+| `MaximumConsecutiveErrorsPerRequest` | `int` | 3 | Number of consecutive failed tool steps tolerated before a non-retryable `ApplicationFailureException` surfaces to the caller. Resets to 0 after any all-success step. Set to **`0`** to propagate the first tool failure immediately (MAF-style behavior). |
+| `IncludeDetailedErrors` | `bool` | `false` | When `true`, synthesized `FunctionResultContent` error messages include the exception type and message (`"Error: {message} ({errorType})"`). When `false`, callers see a generic `"Error: Tool invocation failed."`. |
+
+### Per-tool overrides (`DurableChatToolOptions`)
+
+`AddDurableTools` has a single-tool overload that accepts a configuration callback:
+
+```csharp
+// Worker
+builder.Services
+    .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+    .AddDurableAI()
+    .AddDurableTools(weatherTool)                                                // default options
+    .AddDurableTools(stockTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30)))
+    .AddDurableTools(sendEmail, opts => opts.NoRetry());                         // non-idempotent write tool
+```
+
+`DurableChatToolOptions` mirrors the Agents library's `DurableToolOptions` for cross-library symmetry:
+
+| Member | Type | Notes |
+|---|---|---|
+| `StartToCloseTimeout` | `TimeSpan?` | Activity start-to-close timeout. Falls back to `DurableExecutionOptions.ActivityTimeout` when null. |
+| `HeartbeatTimeout` | `TimeSpan?` | Activity heartbeat timeout. Falls back to `DurableExecutionOptions.HeartbeatTimeout` when null. |
+| `RetryPolicy` | `RetryPolicy?` | Full retry policy. Falls back to `DurableExecutionOptions.RetryPolicy` when null. |
+| `NoRetry()` | fluent | Sets `RetryPolicy = new RetryPolicy { MaximumAttempts = 1 }`. Use for non-idempotent write tools to prevent double-execution on transient failure. |
+| `WithMaxAttempts(int)` | fluent | Sets `MaximumAttempts` on the retry policy. |
+| `WithTimeout(TimeSpan)` | fluent | Sets `StartToCloseTimeout`. |
+
+Power users assign `RetryPolicy` directly for custom backoff or non-retryable error types:
+
+```csharp
+.AddDurableTools(myTool, opts =>
+{
+    opts.RetryPolicy = new RetryPolicy
+    {
+        MaximumAttempts        = 5,
+        InitialInterval        = TimeSpan.FromSeconds(1),
+        BackoffCoefficient     = 2.0,
+        NonRetryableErrorTypes = new[] { typeof(InvalidOperationException).FullName! },
+    };
+});
+```
+
+### Resolution chain
+
+For each registered tool the effective `ActivityOptions` is:
+
+- `StartToCloseTimeout` = per-tool `StartToCloseTimeout` ?? `DurableExecutionOptions.ActivityTimeout`
+- `HeartbeatTimeout` = per-tool `HeartbeatTimeout` ?? `DurableExecutionOptions.HeartbeatTimeout`
+- `RetryPolicy` = per-tool `RetryPolicy` ?? `DurableExecutionOptions.RetryPolicy`
+- `Summary` = tool name (auto-populated for the Temporal Web UI)
+
+The resolved dict is captured into workflow history at session start, so per-tool options are **frozen for the lifetime of a session** — a new `AddDurableTools` registered after a session begins will not affect the in-flight session. See [tool-functions.md — Mid-session drift warning](tool-functions.md#mid-session-drift-warning).
+
+---
+
+## Pattern 3 Observability
+
+Model 3 turns naturally emit **multiple existing spans per turn** — no new OpenTelemetry surface to learn:
+
+- One `chat {modelId}` span per LLM iteration (inside `GetChatStepAsync`)
+- One `execute_tool {toolName}` span per tool invocation (inside `InvokeFunctionAsync`)
+- All correlated by the `conversation.id` span attribute and per-turn `correlationId`
+
+Filter by `conversation.id` in your tracing backend to see every span for a single Model 3 turn. The existing search attributes (`TurnCount`, `SessionCreatedAt`) continue to work at the session level — no new attributes are introduced for Model 3.
+
+The workflow itself emits no diagnostic spans. Spans inside `[Workflow]` code are non-deterministic on replay, so all Model 3 telemetry lives on the activity side.
+
+---
+
+## Long-Running Turns
+
+Temporal's update RPC has a default **~60-second** timeout. A Model 3 turn that iterates through several tool calls can legitimately exceed this — the workflow is healthy, the LLM just needs more wall-clock time to converge.
+
+The canonical recovery pattern uses `WorkflowUpdateStage.Accepted` to decouple update acceptance from update completion:
+
+```csharp
+// Client — start the update without waiting for the result
+var handle = await workflowHandle.StartUpdateAsync(
+    wf => wf.ChatAsync(input),
+    new WorkflowUpdateOptions { WaitForStage = WorkflowUpdateStage.Accepted });
+// returns as soon as the update is accepted into workflow history
+
+// Poll for the result on its own RPC timeout, retry the wait freely
+var response = await handle.GetResultAsync();
+```
+
+> **Critical gotcha — RPC timeout ≠ update cancellation.** If `GetResultAsync()` times out, the workflow is **still running** and the update is **still executing**. The client has lost only its return channel. Treat an RPC timeout as "unknown outcome, reconcile via the handle" — not as "failed, retry the update." A naive retry would issue a second `ChatAsync` for the same logical turn and produce duplicate work.
+
+The same pattern exists in the Agents library; see [docs/how-to/MAF/durable-agents.md](../MAF/durable-agents.md) for cross-library symmetry.
 
 ---
 
@@ -296,6 +415,9 @@ When the Temporal event history for a session grows large (Temporal's per-workfl
 | `MaxEntryCount` | `int` | `1000` | Maximum number of `DurableSessionEntry` records the workflow holds before triggering `ContinueAsNew`. Each turn adds two entries (request + response), so the default retains roughly 500 turns. Renamed from `MaxHistorySize` in 0.2.0. |
 | `HistoryReducer` | `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>?` | `null` | Optional synchronous, deterministic delegate that trims the workflow's entry log when rolling over via `ContinueAsNew`. Operates on entries (not flat messages), preserving per-turn `Usage` / `CorrelationId` metadata. |
 | `RegisterDefaultWorkflow` | `bool` | `true` | When `true`, the registrar registers the built-in `DurableChatWorkflow` and `DurableChatSessionClient`. Set to `false` when supplying your own `DurableChatWorkflowBase<TOutput>` subclass — see [Custom Workflow Output](./custom-workflow-output.md). All other infrastructure (DI options, `DurableAIDataConverter`, activities, embeddings) is registered regardless. |
+| `MaxToolCallsPerTurn` | `int` | `20` | **Model 3 only.** Maximum LLM↔tool iterations per turn before the workflow synthesizes an "iteration limit exceeded" assistant message. Does not throw — see [tool-functions.md](tool-functions.md#maxtoolcallsperturn-exhaustion). |
+| `MaximumConsecutiveErrorsPerRequest` | `int` | `3` | **Model 3 only.** Number of consecutive failed tool steps tolerated before a non-retryable `ApplicationFailureException` surfaces. Set to `0` for immediate propagation (MAF-style behavior). |
+| `IncludeDetailedErrors` | `bool` | `false` | **Model 3 only.** When `true`, synthesized tool-error `FunctionResultContent` includes exception type and message; when `false`, a generic `"Error: Tool invocation failed."` is used. |
 
 ---
 

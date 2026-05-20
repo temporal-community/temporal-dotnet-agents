@@ -17,6 +17,7 @@ This document covers the internal architecture of the pipeline: how the componen
 6. [Turn Serialization](#6-turn-serialization)
 7. [`DurableAIDataConverter` — Why It's Required](#7-durableaidataconverter--why-its-required)
 8. [`DurableFunctionRegistry` — How Tools Are Resolved](#8-durablefunctionregistry--how-tools-are-resolved)
+8b. [Pattern 3 — Durable Tool Dispatch](#8b-pattern-3--durable-tool-dispatch)
 9. [Streaming Strategy](#9-streaming-strategy)
 10. [Observability](#10-observability)
 11. [Configuration Reference](#11-configuration-reference)
@@ -29,7 +30,7 @@ This document covers the internal architecture of the pipeline: how the componen
 |---|---|---|
 | `DurableChatSessionClient` | External entry point | Starts or reuses the session workflow; sends chat turns as `[WorkflowUpdate]`; exposes history query and HITL methods to external callers |
 | `DurableChatWorkflow` | `[Workflow]` | Long-lived durable session; accumulates `DurableSessionEntry` history (request/response entries) in workflow state; serializes concurrent turns; handles ContinueAsNew and HITL |
-| `DurableChatActivities` | `[Activity]` host | Runs on a worker; calls `IChatClient.GetStreamingResponseAsync`, collects chunks (heartbeating after each one), assembles and returns a `ChatResponse`; emits OTel span |
+| `DurableChatActivities` | `[Activity]` host | Runs on a worker; calls the real `IChatClient.GetResponseAsync` and returns a `ChatResponse`; emits OTel span |
 | `DurableSessionEntry` | Wire-format type | Abstract base for one turn's history record. Polymorphic with `ai_request`/`ai_response` discriminators on the `$type` property. |
 | `DurableSessionRequest` | `DurableSessionEntry` | The user/tool messages that initiated a turn. Carries `CorrelationId`, `CreatedAt`, `Messages`. |
 | `DurableSessionResponse` | `DurableSessionEntry` | The assistant's reply for a turn. Carries `CorrelationId`, `CreatedAt`, `Messages`, and `UsageDetails? Usage`. Exposes a `Text` convenience accessor returning the last assistant message's text. |
@@ -39,8 +40,10 @@ This document covers the internal architecture of the pipeline: how the componen
 | `DurableEmbeddingGenerator` | `DelegatingEmbeddingGenerator` | Same dispatch guard for `IEmbeddingGenerator.GenerateAsync` |
 | `DurableEmbeddingActivities` | `[Activity]` host | Calls the real `IEmbeddingGenerator` on the worker side |
 | `DurableFunctionRegistry` | Internal singleton dictionary | Populated at startup by `AddDurableTools`; maps function name to `AIFunction` (case-insensitive) |
+| `DurableChatToolOptionsRegistry` | Internal singleton dictionary | Populated at startup by `AddDurableTools`; maps function name to `DurableChatToolOptions` (case-insensitive). Drives Pattern 3 per-tool `ActivityOptions` resolution. |
+| `DurableChatStepResult` | Internal sealed activity-return type | Returned from `GetChatStepAsync` in Pattern 3 — carries `IsFinal`, `AssistantMessage`, optional `ToolCalls` and `Usage` |
 | `DurableAIDataConverter` | `DataConverter` | Wraps Temporal's `DefaultPayloadConverter` with `AIJsonUtilities.DefaultOptions` to handle `AIContent` polymorphism |
-| `DurableExecutionOptions` | Configuration | `TaskQueue`, `ActivityTimeout`, `HeartbeatTimeout`, `ApprovalTimeout`, `SessionTimeToLive`, `RetryPolicy`, `WorkflowIdPrefix` |
+| `DurableExecutionOptions` | Configuration | `TaskQueue`, `ActivityTimeout`, `HeartbeatTimeout`, `ApprovalTimeout`, `SessionTimeToLive`, `RetryPolicy`, `WorkflowIdPrefix`, `MaxToolCallsPerTurn`, `MaximumConsecutiveErrorsPerRequest`, `IncludeDetailedErrors` |
 
 ### Middleware Chain (MEAI Builder Pattern)
 
@@ -120,12 +123,11 @@ DurableChatWorkflow.ChatAsync   [WorkflowUpdate]
   ▼
 DurableChatActivities.GetResponseAsync   [Activity]
   │  span: durable_chat.turn  (OTel)
+  │  ctx.Heartbeat("turn-N")             ← prevents heartbeat timeout during long LLM calls
   │
-  │  chatClient.GetStreamingResponseAsync(input.Messages, input.Options, ct)
+  │  chatClient.GetResponseAsync(input.Messages, input.Options, ct)
   │      ↓ Workflow.InWorkflow == false here (inside an activity, not a workflow)
   │        → passes through to the real LLM client
-  │  foreach chunk → ctx?.Heartbeat(update.Text)   ← keeps activity alive per chunk
-  │  collected.ToChatResponse()                     ← assembles full response
   │
   ▼
 LLM (OpenAI / Azure OpenAI / Ollama / etc.)
@@ -156,6 +158,24 @@ External Caller
 ### Crash Recovery
 
 If the worker crashes at any point after `ExecuteActivityAsync` has started, Temporal replays the workflow from history. If the activity completed before the crash, Temporal returns the stored result from history — the LLM is not called again. If the activity had not yet completed, Temporal schedules it on a healthy worker and retries according to the `RetryPolicy`.
+
+### Two Dispatch Paths Inside `ExecuteTurnAsync`
+
+The diagram above shows the **single-activity path** (Pattern 1) where the entire turn — including any tool execution via `UseFunctionInvocation` middleware — runs inside one `GetResponseAsync` activity. This is the default when no tools are registered via `AddDurableTools`.
+
+When `AddDurableTools` registers at least one tool **and** the chat client chain omits `UseFunctionInvocation`, `DurableChatSessionClient` ships a populated `DurableChatWorkflowInput.ToolActivityOptions` dictionary at session start. `ExecuteTurnAsync` detects this and switches to the **dispatch-loop path** (Pattern 3):
+
+```
+ExecuteTurnAsync
+  └─► [loop until IsFinal or MaxToolCallsPerTurn exceeded]
+        ├─► GetChatStepAsync activity          ← one LLM call per iteration
+        │     ← FunctionCallContent items (if any)
+        ├─► InvokeFunctionAsync × N activities ← parallel tool dispatch via Workflow.WhenAllAsync
+        │     ← FunctionResultContent items
+        └─► accumulate tool results into the message list; loop back
+```
+
+The workflow orchestrates the loop; each activity is a leaf worker. See [section 8b](#8b-pattern-3--durable-tool-dispatch).
 
 ---
 
@@ -608,13 +628,181 @@ See [docs/how-to/MEAI/tool-functions.md](../../how-to/MEAI/tool-functions.md) fo
 
 ---
 
+## 8b. Pattern 3 — Durable Tool Dispatch
+
+Pattern 3 is the third tool-execution model (alongside Pattern 1 — `UseFunctionInvocation` inline — and Pattern 2 — `.AsDurable()` inside a custom workflow). It gives the per-tool observability and retry semantics of Pattern 2 **without requiring a custom workflow**: the library's own `DurableChatWorkflow` runs the dispatch loop.
+
+### Activation — registry-based, frozen at session start
+
+Pattern 3 is **intent-based**. `DurableChatSessionClient.ChatAsync` checks `DurableFunctionRegistry.Count > 0` at workflow-start time. If at least one tool is registered via `AddDurableTools`, the client eagerly resolves per-tool `ActivityOptions` for **every** registered tool (filling defaults from `DurableExecutionOptions.ActivityTimeout`, `HeartbeatTimeout`, and `RetryPolicy`) and ships the complete dict into `DurableChatWorkflowInput.ToolActivityOptions`.
+
+The workflow then detects Pattern 3 by checking `Input.ToolActivityOptions is { Count: > 0 }`. This **freezes** the activation decision and the resolved options in workflow history, making replay deterministic regardless of which worker process picks up the activation. A worker that joins after a session has begun cannot accidentally see a different tool list or different options.
+
+```
+DurableChatSessionClient.ChatAsync
+  │
+  │  if functionRegistry.Count > 0:
+  │      toolActivityOptions = BuildToolActivityOptions()   ← eager resolution from registry
+  │  else:
+  │      toolActivityOptions = null                          ← Pattern 1 path
+  │
+  ├─► StartWorkflowAsync(input { ToolActivityOptions = toolActivityOptions, ... })
+  │
+  ▼
+DurableChatWorkflow.ExecuteTurnAsync
+  │
+  │  if Input.ToolActivityOptions is { Count: > 0 }:
+  │      → dispatch-loop path (Pattern 3, this section)
+  │  else:
+  │      → single-activity path (Pattern 1, section 2)
+```
+
+### Per-tool option resolution
+
+The eager resolution in `DurableChatSessionClient` walks the registry, looks up each tool's `DurableChatToolOptions` (default if none was set via `AddDurableTools(tool, opts => ...)`), and produces an `ActivityOptions` value:
+
+| Field | Source |
+|---|---|
+| `StartToCloseTimeout` | per-tool `StartToCloseTimeout` ?? `DurableExecutionOptions.ActivityTimeout` |
+| `HeartbeatTimeout` | per-tool `HeartbeatTimeout` ?? `DurableExecutionOptions.HeartbeatTimeout` |
+| `RetryPolicy` | per-tool `RetryPolicy` ?? `DurableExecutionOptions.RetryPolicy` |
+| `Summary` | tool name (for the Temporal Web UI) |
+
+The result — `IReadOnlyDictionary<string, ActivityOptions>` — is carried in `DurableChatWorkflowInput.ToolActivityOptions` and serialized via `DurableAIDataConverter`. `ActivityOptions` round-trips directly through the converter (same pattern as the Agents library's `ProxyResolvedWorkerConfig.ToolActivityOptions`).
+
+### The dispatch loop
+
+`DurableChatWorkflow.ExecuteTurnAsync` (Pattern 3 branch) replaces the single `GetResponseAsync` call with a workflow-orchestrated loop:
+
+```csharp
+// Inside ExecuteTurnAsync, Pattern 3 branch
+var accumulated = new List<ChatMessage>(flattenedHistory);
+var totalUsage = new UsageDetails();
+var consecutiveErrors = 0;
+
+for (var iteration = 0; iteration < Input.MaxToolCallsPerTurn; iteration++)
+{
+    var step = await Workflow.ExecuteActivityAsync(
+        (DurableChatActivities a) => a.GetChatStepAsync(BuildStepInput(accumulated, chatOptions)),
+        activityOptions);
+
+    accumulated.Add(step.AssistantMessage);
+    if (step.Usage is not null) totalUsage = Merge(totalUsage, step.Usage);
+
+    if (step.IsFinal) return AssembleChatResponse(accumulated, totalUsage);
+
+    // Fan out tool calls in parallel.
+    var toolTasks = step.ToolCalls!.Select(tc =>
+        Workflow.ExecuteActivityAsync(
+            (DurableFunctionActivities a) => a.InvokeFunctionAsync(BuildInvokeInput(tc)),
+            ResolveToolActivityOptions(tc.Name))).ToList();
+
+    try { await Workflow.WhenAllAsync(toolTasks); } catch { /* inspected per-task below */ }
+
+    // Synthesize one FunctionResultContent per CallId in original order — including failures.
+    // OpenAI/Anthropic reject tool turns with missing call IDs.
+    var (toolResultMessage, hadError) = AssembleToolResultMessage(step.ToolCalls!, toolTasks);
+    accumulated.Add(toolResultMessage);
+
+    consecutiveErrors = hadError ? consecutiveErrors + 1 : 0;
+    if (consecutiveErrors > Input.MaximumConsecutiveErrorsPerRequest)
+        throw new ApplicationFailureException(
+            $"Exceeded MaximumConsecutiveErrorsPerRequest ({Input.MaximumConsecutiveErrorsPerRequest}).",
+            nonRetryable: true);
+}
+
+// Iteration cap exceeded — synthesize an error sentinel, do not throw.
+return AssembleSentinelResponse(accumulated, totalUsage, Input.MaxToolCallsPerTurn);
+```
+
+Three load-bearing invariants:
+
+1. **Workflow orchestrates, activities are leaf workers.** All loop state — accumulator, iteration counter, consecutive-error counter — lives in workflow code, replay-safe via Temporal event history. Activities (`GetChatStepAsync`, `InvokeFunctionAsync`) are pure leaf workers that take an input, do work, and return a result.
+2. **Parallel fan-out preserves call-ID order.** Per-task inspection (no `ContinueWith`) synthesizes a `FunctionResultContent` for every `CallId` in the original order, even when some tool tasks faulted. Missing call IDs break the OpenAI/Anthropic tool protocol.
+3. **`GetChatStepAsync` does not invoke tools.** It calls the inner `IChatClient.GetStreamingResponseAsync` and returns `DurableChatStepResult { IsFinal, AssistantMessage, ToolCalls?, Usage? }`. The workflow does the dispatch; the activity stays simple.
+
+### Auto-population of `ChatOptions.Tools`
+
+`GetChatStepAsync` auto-populates `chatOptions.Tools` from `DurableFunctionRegistry` when the caller did **not** supply tools explicitly:
+
+```csharp
+// Inside GetChatStepAsync activity
+if (input.Options?.Tools is null or { Count: 0 })
+{
+    var registry = services.GetService<DurableFunctionRegistry>();
+    if (registry?.Count > 0)
+    {
+        input.Options ??= new ChatOptions();
+        input.Options.Tools = registry.Values.Cast<AITool>().ToList();   // AIFunction : AITool
+    }
+}
+// else: caller passed Tools explicitly — respect that choice
+```
+
+This mirrors MAF agent behavior: callers can let the activity auto-discover the full tool surface, or pass a specific subset via `ChatOptions.Tools` to narrow the LLM's options for one turn.
+
+### `DurableToolsNotWrappedException` — silent-failure safety net
+
+Pattern 3 is exclusive to `DurableChatSessionClient`. The `DurableChatClient` middleware path cannot host a tool-dispatch loop — by contract, middleware sees one `GetResponseAsync` call at a time and dispatches one activity.
+
+This creates a footgun: a custom workflow user could register tools via `AddDurableTools()` (expecting per-tool activities), use `DurableChatClient` middleware in their workflow, forget to wrap tools with `.AsDurable()`, and have the LLM return `FunctionCallContent` that no handler dispatches.
+
+`DurableChatActivities.GetResponseAsync` catches this at runtime — after receiving the LLM response, before returning:
+
+```csharp
+var registry = services.GetService<DurableFunctionRegistry>();
+var hasFIC = AgentChainWalker.Contains<FunctionInvokingChatClient>(chatClient);
+var responseHasToolCalls = response.Messages
+    .Any(m => m.Contents.OfType<FunctionCallContent>().Any());
+
+if (registry?.Count > 0 && responseHasToolCalls && !hasFIC)
+{
+    throw new DurableToolsNotWrappedException(
+        "LLM returned tool calls but no dispatch handler is configured. " +
+        "Either (1) use DurableChatSessionClient instead of DurableChatClient middleware, " +
+        "(2) wrap tools with .AsDurable() in your custom workflow code (Pattern 2), " +
+        "or (3) use UseFunctionInvocation() in the chat client chain (Pattern 1).");
+}
+```
+
+`DurableToolsNotWrappedException` extends `DurableConfigurationException` and lives in `Temporalio.Extensions.AI.Exceptions`. It fires only when the LLM actually returned tool calls and no dispatch path exists — not at startup, not on healthy paths.
+
+### Pattern 3 + ContinueAsNew
+
+When a Pattern-3 session rolls over via `ContinueAsNew`, `DurableChatWorkflow.CreateContinueAsNewException` carries **both** `ToolActivityOptions` and `MaxToolCallsPerTurn` forward into the next run's input. Without this, the next run would fall back to Pattern 1 mid-session, violating the activation-freeze guarantee.
+
+```csharp
+throw Workflow.CreateContinueAsNewException(
+    (DurableChatWorkflow wf) => wf.RunAsync(new DurableChatWorkflowInput
+    {
+        // ... existing fields ...
+        ToolActivityOptions             = Input!.ToolActivityOptions,
+        MaxToolCallsPerTurn             = Input!.MaxToolCallsPerTurn,
+        MaximumConsecutiveErrorsPerRequest = Input!.MaximumConsecutiveErrorsPerRequest,
+        IncludeDetailedErrors           = Input!.IncludeDetailedErrors,
+    }));
+```
+
+### Error handling — catch and feed back to LLM (default)
+
+When a tool activity fails inside the dispatch loop, the workflow's default behavior is to **catch the exception**, synthesize a `FunctionResultContent` with an error message, append it to the accumulator, and continue the loop. The LLM gets a chance to recover.
+
+- `IncludeDetailedErrors = false` (default) → generic `"Error: Tool invocation failed."` message
+- `IncludeDetailedErrors = true` → `"Error: {Message} ({ErrorType})"` from the `ApplicationFailureException`
+- `MaximumConsecutiveErrorsPerRequest` (default 3) caps how many consecutive failed steps are tolerated; exceeding it throws a non-retryable `ApplicationFailureException`
+- Setting `MaximumConsecutiveErrorsPerRequest = 0` propagates the first tool failure immediately (MAF-style)
+
+This is asymmetric with the Agents library, which currently propagates tool failures immediately. The Agents library is expected to adopt this catch-and-feed-back behavior as a follow-up for cross-library consistency.
+
+---
+
 ## 9. Streaming Strategy
 
 `DurableChatClient.GetStreamingResponseAsync` has a behavioral split based on execution context:
 
 **Outside a workflow** (`Workflow.InWorkflow == false`): the inner client's `GetStreamingResponseAsync` is called directly and tokens are yielded as they arrive. True streaming works normally.
 
-**Inside a workflow** (`Workflow.InWorkflow == true`): true streaming is not possible for the *caller*. Temporal activities return a single result value. However, `DurableChatActivities` *internally* calls `GetStreamingResponseAsync` and heartbeats after every chunk — this prevents heartbeat timeouts on long LLM calls and enables fine-grained crash detection. The assembled `ChatResponse` is returned to the workflow as one payload. `DurableChatClient` then converts that buffered response to a `ChatResponseUpdate` sequence:
+**Inside a workflow** (`Workflow.InWorkflow == true`): true streaming is not possible. Temporal activities return a single result value. The activity executes to completion and returns a full `ChatResponse` payload. `DurableChatClient` then converts that buffered response to a `ChatResponseUpdate` sequence:
 
 ```csharp
 // Inside a workflow — buffer strategy
@@ -629,7 +817,9 @@ foreach (var update in output.Response.ToChatResponseUpdates())
 }
 ```
 
-Callers that use `GetStreamingResponseAsync` inside a workflow will see the full response arrive in a burst after the activity completes rather than as a true token stream. This is fundamental to Temporal's activity execution model: activities produce a single result. The internal use of streaming is purely for reliability (heartbeat interleaving), not for exposing incremental tokens to workflow code.
+Callers that use `GetStreamingResponseAsync` inside a workflow will see the full response arrive in a burst after the activity completes rather than as a true token stream.
+
+This limitation is fundamental to Temporal's activity execution model, which is request/response. Future approaches for true in-workflow streaming could include sending tokens back via workflow signals from the activity, or using an external token buffer and polling from the workflow — neither is currently implemented.
 
 ---
 

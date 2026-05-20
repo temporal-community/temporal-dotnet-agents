@@ -1,5 +1,5 @@
 // DurableChat — demonstrates multi-turn durable chat via DurableChatSessionClient,
-// including tool calls (UseFunctionInvocation) and history retrieval (GetHistoryAsync).
+// including durable tool dispatch (Pattern 3) and history retrieval.
 //
 // Run:  dotnet run --project samples/MEAI/DurableChat/DurableChat.csproj
 
@@ -22,6 +22,7 @@ var apiKey = builder.Configuration.GetValue<string>("OPENAI_API_KEY");
 var apiBaseUrl = builder.Configuration.GetValue<string>("OPENAI_API_BASE_URL");
 var model = builder.Configuration.GetValue<string>("OPENAI_MODEL") ?? "gpt-4o-mini";
 var temporalAddress = builder.Configuration.GetValue<string>("TEMPORAL_ADDRESS") ?? "localhost:7233";
+const string TaskQueue = "durable-chat";
 
 if (string.IsNullOrEmpty(apiBaseUrl))
     throw new InvalidOperationException("OPENAI_API_BASE_URL is not configured in appsettings.json.");
@@ -40,7 +41,10 @@ var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnect
 });
 builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 
-// ── Setup: Weather tool (used in Demo 2) ─────────────────────────────────────
+// ── Setup: Weather tool ──────────────────────────────────────────────────────
+// This is a normal AIFunction. Pattern 3 (registering it via AddDurableTools)
+// is what makes it run as a separate Temporal activity per call — there is no
+// special wrapping required on the tool itself.
 static string GetCurrentWeather(string city)
     => Random.Shared.NextDouble() > 0.5
         ? $"It's sunny and 22 °C in {city}."
@@ -55,6 +59,12 @@ var weatherTool = AIFunctionFactory.Create(
 // AddChatClient is the idiomatic MEAI pattern — it returns a ChatClientBuilder
 // for chaining middleware, then Build() registers the final IChatClient singleton.
 // DurableChatActivities constructor-injects this on the worker side.
+//
+// NOTE: we deliberately do NOT call .UseFunctionInvocation() here. With tools
+// registered via AddDurableTools() below, DurableChatWorkflow auto-detects
+// Pattern 3 and runs a dispatch loop where each tool call becomes its own
+// Temporal activity. Adding UseFunctionInvocation() while tools are registered
+// via AddDurableTools() is blocked at worker startup by DurableMixedPatternValidator.
 IChatClient openAiChatClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) }
@@ -62,20 +72,29 @@ IChatClient openAiChatClient = new OpenAIClient(
 
 builder.Services
     .AddChatClient(openAiChatClient)
-    .UseFunctionInvocation()   // handles tool call loops inside the activity
     .Build();
 
 // ── Setup: Register worker + durable AI ──────────────────────────────────────
 // AddDurableAI registers DurableChatWorkflow, DurableChatActivities, and
 // DurableChatSessionClient on the worker. The session client is resolved from
 // DI after the host starts.
+//
+// AddDurableTools registers the weather tool in the DurableFunctionRegistry.
+// Because at least one tool is registered, Pattern 3 activates: the workflow
+// dispatches each tool invocation as a separate InvokeFunction activity, and
+// per-tool retry/timeout can be configured via the DurableChatToolOptions
+// callback.
 builder.Services
-    .AddHostedTemporalWorker("durable-chat")
+    .AddHostedTemporalWorker(TaskQueue)
     .AddDurableAI(opts =>
     {
         opts.ActivityTimeout = TimeSpan.FromMinutes(5);
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
-    });
+        opts.MaxToolCallsPerTurn = 10;   // [Pattern 3] cap the LLM↔tool loop per turn
+    })
+    .AddDurableTools(
+        weatherTool,
+        opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));   // per-tool timeout
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 var host = builder.Build();
@@ -89,6 +108,7 @@ var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>()
 await RunMultiTurnDemoAsync(sessionClient);
 await RunToolCallDemoAsync(sessionClient, weatherTool);
 await RunHistoryQueryDemoAsync(sessionClient);
+await DurableToolDemo.RunDurableToolDemoAsync(sessionClient, weatherTool);
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
@@ -128,17 +148,19 @@ static async Task RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Demo 2: Tool call
+// Demo 2: Tool call via explicit ChatOptions.Tools
 //
-// Shows how to expose tools to the LLM via ChatOptions.Tools. The
-// UseFunctionInvocation() middleware in the pipeline handles the tool call
-// loop automatically inside the Temporal activity — the whole round-trip
-// (LLM request → tool call → LLM request with result) runs as one activity.
+// Shows how to expose tools to the LLM via ChatOptions.Tools. Because the tool
+// is also registered with AddDurableTools(), the workflow dispatches it as a
+// separate InvokeFunction activity instead of running it inline — this is
+// Pattern 3 (durable tool dispatch). The single activity round-trip you would
+// have seen with UseFunctionInvocation() is now two activities: one
+// GetChatStep for the LLM call, one InvokeFunction for the tool call.
 // ═════════════════════════════════════════════════════════════════════════════
 static async Task RunToolCallDemoAsync(DurableChatSessionClient sessionClient, AIFunction weatherTool)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
-    Console.WriteLine(" Demo 2: Tool Call");
+    Console.WriteLine(" Demo 2: Tool Call (explicit ChatOptions.Tools)");
     Console.WriteLine("════════════════════════════════════════════════════════");
 
     var conversationId = $"tool-call-{Guid.NewGuid():N}";
@@ -147,9 +169,8 @@ static async Task RunToolCallDemoAsync(DurableChatSessionClient sessionClient, A
     var q = "What is the weather like in Seattle right now?";
     Console.WriteLine($" User : {q}");
 
-    // Pass tools via ChatOptions. The LLM will request a call to
-    // get_current_weather; UseFunctionInvocation() executes it and sends
-    // the result back in the same activity invocation.
+    // Pass tools via ChatOptions. The caller's explicit list is respected
+    // (the auto-populate-from-registry step only fires when Options.Tools is null).
     var options = new ChatOptions { Tools = [weatherTool] };
     var response = await sessionClient.ChatAsync(
         conversationId,

@@ -55,7 +55,9 @@ Use `Glob` / `ls` to discover specific files. Notable types and their locations 
 - `.WithActivityTimeout(TimeSpan)` / `.WithMaxRetryAttempts(int)` / `.WithHeartbeatTimeout(TimeSpan)` / `.WithChatClientKey(string)`
 - Keys are `public const string` constants on `TemporalChatOptionsExtensions`.
 
-**Durable tools**: `AddDurableTools(workerBuilder, params aiFunctions)` registers tools in `DurableFunctionRegistry` (resolved by name in `DurableFunctionActivities`). Or `aiFunction.AsDurable()` wraps as `DurableAIFunction` — passes through when `Workflow.InWorkflow == false`.
+**Durable tools**: `AddDurableTools(workerBuilder, params aiFunctions)` registers tools in `DurableFunctionRegistry` (resolved by name in `DurableFunctionActivities`). Or `aiFunction.AsDurable()` wraps as `DurableAIFunction` — passes through when `Workflow.InWorkflow == false`. A per-tool overload — `AddDurableTools(tool, opts => opts.NoRetry().WithTimeout(...))` — accepts a `DurableChatToolOptions` configuration callback that mirrors MAF's `DurableToolOptions` (`StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` properties + `NoRetry()` / `WithMaxAttempts(int)` / `WithTimeout(TimeSpan)` fluent methods).
+
+**Pattern 3 — Durable Tools in Chat Pipeline (v0.4+)**: Register tools via `AddDurableTools()` **without** `UseFunctionInvocation()`. `DurableChatWorkflow` automatically runs a per-tool dispatch loop: call LLM via `GetChatStepAsync` activity, fan out tool calls in parallel as `InvokeFunctionAsync` activities (via `Workflow.WhenAllAsync`), feed results back to the LLM, loop until `IsFinal` or `MaxToolCallsPerTurn` exceeded. Gives per-tool observability and retry without requiring a custom workflow. Activation is intent-based: `DurableFunctionRegistry.Count > 0` at session start → `DurableChatSessionClient` eagerly resolves per-tool `ActivityOptions` and freezes them in `DurableChatWorkflowInput.ToolActivityOptions` (replay-deterministic). Tool failures default to catch-and-feed-back to LLM (Pattern 1's `FunctionInvokingChatClient` behavior); set `DurableExecutionOptions.MaximumConsecutiveErrorsPerRequest = 0` for MAF-style immediate propagation. `MaxToolCallsPerTurn` (default 20), `MaximumConsecutiveErrorsPerRequest` (default 3), `IncludeDetailedErrors` (default false) all live on `DurableExecutionOptions`. Pattern 3 is exclusive to `DurableChatSessionClient` — middleware (`DurableChatClient`) cannot host a loop; custom workflows use Pattern 2 (`.AsDurable()`). Silent-failure footgun (custom workflow + `AddDurableTools` + no `.AsDurable()`) is caught at runtime by `DurableToolsNotWrappedException` in `GetResponseAsync`. See `docs/how-to/MEAI/tool-functions.md` for Models 1/2/3.
 
 **Context detection**: All middleware (`DurableChatClient`, `DurableAIFunction`, `DurableEmbeddingGenerator`) uses `Workflow.InWorkflow` as the dispatch guard. `false` = pass through; `true` = dispatch as Temporal activity.
 
@@ -162,7 +164,9 @@ As of Layer 3, `AgentWorkflow : DurableChatWorkflowBase<AgentResponse>`. The sha
 - `ICompactionStrategy`, `CompactionContext`, `CompactionResult` — `Temporalio.Extensions.Agents.Compaction` (`[Experimental("TA002")]`). Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"` pre-registered via `TryAddKeyedSingleton`. See `docs/how-to/MAF/compaction.md`.
 - `CompactionMarkerEntry` — `Temporalio.Extensions.AI.Session` (lives in the AI library so both source-gen contexts see the `"compaction-marker"` discriminator). Polymorphic subtype of `DurableSessionEntry`. `CompactedAt` is a `[JsonIgnore]` alias of `CreatedAt` (no wire duplication).
 - `CompactionAwareErasureHelper` — `Temporalio.Extensions.Agents.HistoryStore`. Static `EraseSessionDataAsync(store, sessionId, erasedIds)` — only correct GDPR-erasure path when compaction markers may exist.
-- `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException` — `Temporalio.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the other two are stable.
+- `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException`, `DurableToolsNotWrappedException` — `Temporalio.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the others are stable.
+- `DurableChatStepResult` — `Temporalio.Extensions.AI` (internal sealed) — Pattern 3 activity return type from `GetChatStepAsync`; carries `IsFinal`, `AssistantMessage`, optional `ToolCalls` and `Usage`.
+- `DurableChatToolOptions` — `Temporalio.Extensions.AI` (public sealed) — per-tool options builder for Pattern 3; mirrors MAF's `DurableToolOptions` verbatim.
 
 ### DI Patterns
 - `TemporalAgentsOptions` has an **internal constructor** — always access via the `AddTemporalAgents(opts => ...)` delegate.
@@ -304,7 +308,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 ### Temporalio.Extensions.AI (MEAI)
 
 - **Usage Guide**: `docs/how-to/MEAI/usage.md`
-- **Tool Functions**: `docs/how-to/MEAI/tool-functions.md` (Model 1 vs Model 2)
+- **Tool Functions**: `docs/how-to/MEAI/tool-functions.md` (Model 1 inline / Model 2 custom workflow / Model 3 durable dispatch loop)
 - **Embeddings**: `docs/how-to/MEAI/embeddings.md`
 - **Testing**: `docs/how-to/MEAI/testing.md`
 - **Observability**: `docs/how-to/MEAI/observability.md`
