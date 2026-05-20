@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.AI;
 
@@ -28,6 +29,10 @@ namespace Temporalio.Extensions.AI;
 [JsonSerializable(typeof(DurableSessionResponse))]
 [JsonSerializable(typeof(IReadOnlyList<DurableSessionEntry>))]
 [JsonSerializable(typeof(List<DurableSessionEntry>))]
+[JsonSerializable(typeof(DurableChatStepResult))]
+[JsonSerializable(typeof(ActivityOptions))]
+[JsonSerializable(typeof(IReadOnlyDictionary<string, ActivityOptions>))]
+[JsonSerializable(typeof(Dictionary<string, ActivityOptions>))]
 internal partial class DurableAIJsonContext : JsonSerializerContext;
 
 /// <summary>
