@@ -46,7 +46,7 @@ public sealed class ScriptedToolHarness
     {
         ArgumentNullException.ThrowIfNull(resultForInvocation);
         return AIFunctionFactory.Create(
-            (string? input) =>
+            (string? input = null) =>
             {
                 var n = RecordInvocation(toolName, input);
                 return resultForInvocation(n);
@@ -61,7 +61,7 @@ public sealed class ScriptedToolHarness
     public AIFunction BuildAlwaysThrows(string toolName, string description, string errorMessage)
     {
         return AIFunctionFactory.Create(
-            (string? input) =>
+            (string? input = null) =>
             {
                 RecordInvocation(toolName, input);
                 throw new InvalidOperationException(errorMessage);
@@ -84,7 +84,7 @@ public sealed class ScriptedToolHarness
     {
         if (failCount < 0) throw new ArgumentOutOfRangeException(nameof(failCount));
         return AIFunctionFactory.Create(
-            (string? input) =>
+            (string? input = null) =>
             {
                 var n = RecordInvocation(toolName, input);
                 if (n <= failCount)
