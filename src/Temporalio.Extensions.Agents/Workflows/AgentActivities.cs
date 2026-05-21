@@ -840,6 +840,33 @@ internal sealed class AgentActivities(
             span?.SetTag(TemporalAgentTelemetry.AgentToolCallIdAttribute, input.CallId);
         }
 
+        // Set up TemporalAgentContext for the tool invocation so tools that call
+        // TemporalAgentContext.Current (e.g. for RequestApprovalAsync) work in the
+        // per-tool activity path. Mirrors the SetCurrent/clear-in-finally pattern at
+        // RunDurableAgentStepAsync line ~296. Without this, HITL tools and any tool
+        // that needs the agent context are broken when dispatched as InvokeAgentTool
+        // activities (which is the default since v0.3).
+        //
+        // SessionId parse is wrapped in try/catch: in tests, ActivityEnvironment uses
+        // arbitrary workflow IDs (e.g. "test") that don't match the agent session
+        // prefix. When parsing fails, we skip context setup — a tool that needs the
+        // context will throw the same "No TemporalAgentContext is available" error
+        // as before this fix, but tools that don't need it continue to work.
+        var contextSetUp = false;
+        try
+        {
+            var sessionId = TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!);
+            var session = TemporalAgentSession.FromStateBag(sessionId, null);
+            var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
+            TemporalAgentContext.SetCurrent(temporalContext);
+            contextSetUp = true;
+        }
+        catch (FormatException)
+        {
+            // Workflow ID isn't a valid agent session ID — likely a test environment.
+            // Tools that need TemporalAgentContext.Current will throw on access.
+        }
+
         try
         {
             _logger.LogAgentToolInvocationStarted(input.AgentName, input.ToolName);
@@ -863,6 +890,13 @@ internal sealed class AgentActivities(
             span?.SetStatus(ActivityStatusCode.Error, ex.Message);
             _logger.LogAgentToolInvocationFailed(input.AgentName, input.ToolName, ex);
             throw;
+        }
+        finally
+        {
+            if (contextSetUp)
+            {
+                TemporalAgentContext.SetCurrent(null);
+            }
         }
     }
 }
