@@ -67,7 +67,9 @@ builder.Services
     });
 ```
 
-No `BuildServiceProvider()` bootstrap, no opt-in flag, no string-keyed retry dictionary, no separate tool registry, and no "don't use `UseFunctionInvocation()`" caveat — the library composes the chat pipeline internally. The agent is accessed via `TemporalWorkflowExtensions.GetAgent("RefundAgent")` inside a workflow or `services.GetTemporalAgentProxy("RefundAgent")` from external code (see [`usage.md`](./usage.md)).
+The library composes the chat pipeline internally — the registration above is the whole story, with no extra bootstrap or wiring on your side.
+
+To use the agent, call `TemporalWorkflowExtensions.GetAgent("RefundAgent")` inside a workflow (see [`usage.md`](./usage.md)), or `services.GetTemporalAgentProxy("RefundAgent")` from external code.
 
 ## Fluent sugar on `DurableToolOptions`
 
