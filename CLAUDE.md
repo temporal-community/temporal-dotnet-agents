@@ -216,14 +216,54 @@ For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how
 
 Build automation uses [`just`](https://just.systems). All recipes in `justfile`. .NET SDK pinned via `global.json` (10.0.x). Versioning via `minver-cli` (local `dotnet tool restore`).
 
+### Core recipes
+
 ```bash
 just --list             # All recipes
 just build              # Restore + Release build (default)
-just test-unit-all      # All unit tests (415) — no server required
-just test-integration   # Agents integration (53) — embedded server
-just test-integration-ai # AI integration (13) — embedded server
+just test-unit-all      # All unit tests (619) — no server required
+just test-integration   # Agents integration (77) — embedded server
+just test-integration-ai # AI integration (25 + 2 skipped) — embedded server
 just pack               # clean → build → pack → artifacts/packages/*.nupkg
 ```
+
+### Diagnostic + hang recovery (Tank + Trinity, reviewed by Cypher)
+
+```bash
+# When an integration suite hangs and you can't tell which test:
+just test-individual tests/Temporalio.Extensions.AI.IntegrationTests       # per-test loop, 180s default cap, reports PASS/FAIL/HANG
+just test-individual tests/Temporalio.Extensions.AI.IntegrationTests Pattern3 300  # filter + custom cap
+
+# When a single test command hangs (pipe-buffering hides output):
+just test-logged tests/Temporalio.Extensions.Agents.IntegrationTests       # writes to /tmp log, 600s default cap
+
+# Orphaned embedded Temporal servers (.NET SDK extracts a CLI to /var/folders/.../T/):
+just list-orphans                                                          # read-only — show, don't kill
+just kill-orphans                                                          # narrow — temporal-sdk-dotnet only (safe across projects)
+just kill-test-hosts                                                       # opt-in — path-scoped to TemporalAgents (Rider/sibling repos untouched)
+just test-clean                                                            # alias: pre-test cleanup
+
+# Worktree cleanup after parallel agent work:
+just cleanup-stale-worktrees                                               # SAFE — checks dirty state, single -f only
+```
+
+### Sample-canary (verify samples still run end-to-end)
+
+```bash
+just test-samples-meai     # 5 MEAI samples, per-sample timeout budget, preflight checks OPENAI_API_KEY + Temporal server
+just test-samples-maf      # 10 MAF samples, same
+just test-samples          # both
+just verify-sample-coverage # drift detector — fails if a new sample dir isn't in the recipe lists
+just clean-test-artifacts  # remove artifacts/{test-individual,sample-runs}/
+```
+
+**Skipped from sample-canary** (must run manually):
+- `samples/{MEAI,MAF}/HumanInTheLoop` — interactive (Console.ReadLine)
+- `samples/MAF/SplitWorkerClient` — two processes (Worker + Client)
+
+**Pre-requisites for sample-canary:** GNU coreutils `timeout` (macOS: `brew install coreutils`), `nc` (netcat), `OPENAI_API_KEY` in env or user-secrets, `temporal server start-dev` running on `localhost:7233`. The `_sample-preflight` recipe checks all four and fails with actionable messages.
+
+### Versioning
 
 **Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release with `git tag -a X.Y.Z -m "..."` then `just pack`. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention (`0.1.0`, `0.1.1`, ..., `0.3.0`).
 
@@ -276,6 +316,12 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 | Worker won't start | `temporal server start-dev` running on `localhost:7233`? |
 | Search attributes missing in UI | `opts.EnableSearchAttributes = true` (opt-in, default `false`); pre-register on production clusters |
 | Integration test "Unexpected workflow task failure" | Either set `EnableSearchAttributes = true` AND use `TestEnvironmentHelper.StartLocalAsync()`, or leave search attributes disabled |
+| Integration test suite hangs; can't tell which test | `just test-individual <project>` — per-test loop, reports PASS/FAIL/HANG. Default 180s cap, parameterizable. |
+| Test command hangs and pipe-buffering hides output | `just test-logged <project>` — writes to `/tmp/temporalagents-test-*.log`; `tail -f` separately. 600s default cap. |
+| Orphaned `temporal-sdk-dotnet` processes after `pkill` | `just list-orphans` + `just kill-orphans` — narrow to .NET SDK's extracted binary; safe across projects. |
+| Cross-project test hosts being killed | Use `just kill-test-hosts` (path-scoped) not unscoped `pkill`. Documented in `justfile` Process hygiene block. |
+| Locked agent worktrees won't remove | `just cleanup-stale-worktrees` — checks dirty state first, single `-f` only. Never use `-f -f` directly. |
+| New sample added but `test-samples-*` doesn't pick it up | Hardcoded list is intentional (skips interactive/multi-process). Run `just verify-sample-coverage` to catch drift. |
 
 ---
 
@@ -319,4 +365,4 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 
 ---
 
-**Last Updated**: 2026-04-30
+**Last Updated**: 2026-05-21
