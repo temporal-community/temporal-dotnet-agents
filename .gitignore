@@ -350,6 +350,7 @@ MigrationBackup/
 .ionide/
 
 .idea/
+.junie/
 
 .tmp/
 
@@ -400,6 +401,10 @@ Generated/
 # Entity Framework migrations (bundles only)
 *.efbundle
 
+# azure
+__azurite_db_*
+AzuriteConfig
+
 # Windows Installer files
 *.cab
 *.msi
@@ -435,5 +440,4 @@ Desktop.ini
 #.claude/skills/*
 
 # agent session memory — volatile per-session logs, not source
-.clans/agents/*/history.md
 .claude/agent-memory/
