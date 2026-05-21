@@ -247,26 +247,43 @@ kill-test-hosts:
 test-clean: kill-orphans
     @echo "Environment cleaned. Safe to run integration tests."
 
-# Run a test command writing to a log file (NOT piped through tail/grep).
-# Usage: just test-logged tests/Temporalio.Extensions.AI.IntegrationTests
+# Run a test project writing output to a log file (NOT piped through tail).
+# Wraps `dotnet test` with a `timeout` so a hang is surfaced as exit 124/143
+# rather than blocking the recipe forever.
+#
+# Usage:
+#   just test-logged tests/Temporalio.Extensions.AI.IntegrationTests
+#   just test-logged tests/Temporalio.Extensions.AI.IntegrationTests 900
+#
+# project: test project directory (relative to repo root)
+# limit:   per-process wall-clock timeout in seconds (default 600)
 #
 # Why: `dotnet test ... | tail -60` buffers all output until the test command
 # exits. If the test hangs, you see ZERO output until you kill it. Writing to
-# a file lets you `tail -f` the log in another shell to watch progress.
-# Run a test project, redirecting output to a /tmp log file (NOT piped tail)
-test-logged project: build
+# a file + a hard timeout gives you (a) tail -f the log in another shell,
+# (b) a guaranteed exit when a test hangs. (Cypher review, 2026-05-21.)
+test-logged project limit="600": build
+    @if ! command -v timeout >/dev/null 2>&1; then \
+        echo "ERROR: GNU coreutils 'timeout' is required. On macOS: brew install coreutils"; \
+        exit 127; \
+    fi
     @LOG=$$(mktemp /tmp/temporalagents-test-XXXXXX.log); \
     echo "Logging to $$LOG"; \
     echo "Watch with:  tail -f $$LOG"; \
+    echo "Wall-clock cap: {{limit}}s"; \
     echo ""; \
-    dotnet test {{project}} \
+    timeout {{limit}} dotnet test {{project}} \
         --configuration {{configuration}} \
         --no-build \
         --logger "console;verbosity=normal" \
         > "$$LOG" 2>&1; \
     EXIT=$$?; \
     echo ""; \
-    echo "Test exited with status $$EXIT. Log: $$LOG"; \
+    if [ "$$EXIT" -eq 124 ] || [ "$$EXIT" -eq 143 ]; then \
+        echo "HANG — test exceeded {{limit}}s and was killed. Log: $$LOG"; \
+    else \
+        echo "Test exited with status $$EXIT. Log: $$LOG"; \
+    fi; \
     exit $$EXIT
 
 # Remove stale agent worktrees under .claude/worktrees/ — SAFE EDITION.
@@ -318,82 +335,121 @@ cleanup-stale-worktrees:
 # integration test suite hangs and you cannot tell which test is responsible.
 #
 #   just test-individual tests/Temporalio.Extensions.AI.IntegrationTests Pattern3
-#   just test-individual tests/Temporalio.Extensions.Agents.IntegrationTests ""
+#   just test-individual tests/Temporalio.Extensions.AI.IntegrationTests "" 300
 #
 # project: test project directory (relative to repo root)
 # filter:  substring matched via FullyQualifiedName~ — empty matches all
-test-individual project filter="": build
+# limit:   per-test wall-clock timeout in seconds (default 180).
+#          120s was too tight for MAF compaction tests (8 LLM turns each).
+#
+# Tested against .NET SDK 10.0.x. If a future SDK changes the `--list-tests`
+# output format the awk discovery step may need updating. (Trinity review 2026-05-21.)
+test-individual project filter="" limit="180": build
     #!/usr/bin/env bash
     set -uo pipefail
+    if ! command -v timeout >/dev/null 2>&1; then
+        echo "ERROR: GNU coreutils 'timeout' is required. On macOS: brew install coreutils"
+        exit 127
+    fi
     LOGDIR="artifacts/test-individual/$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$LOGDIR"
-    echo "Logs: $LOGDIR"
+    echo "Logs:  $LOGDIR"
+    echo "Cap:   {{limit}}s per test"
     LIST_FILTER=""
     if [ -n "{{filter}}" ]; then
         LIST_FILTER="--filter FullyQualifiedName~{{filter}}"
     fi
     # Discover tests. --list-tests prints test method names indented after a
-    # header. Strip headers and noise; keep one FQN per line.
+    # header line ("The following Tests are available:"). Strip headers
+    # (anchored to start-of-line so a legitimately Microsoft.* test FQN is
+    # NOT swallowed). Keep one FQN per line.
     dotnet test {{project}} \
         --configuration {{configuration}} --no-build \
         $LIST_FILTER --list-tests 2>&1 \
         | awk '/^[ \t]+[A-Za-z]/ {gsub(/^[ \t]+/,""); print}' \
-        | grep -v "^Test run for\|^Microsoft\|^Copyright\|^The following Tests\|^Build" \
+        | grep -Ev "^(Test run for|Microsoft \(R\)|Copyright |The following Tests|Build |MinVer:)" \
         | sort -u > "$LOGDIR/tests.txt" || true
     COUNT=$(wc -l < "$LOGDIR/tests.txt" | tr -d ' ')
     echo "Discovered $COUNT test(s)"
+    echo ""
     PASS=0; FAIL=0; HANG=0
     while IFS= read -r test; do
         [ -z "$test" ] && continue
         SHORT=$(echo "$test" | awk -F'.' '{print $NF}')
         start=$(date +%s)
-        timeout 120 dotnet test {{project}} \
+        # Exact match (=) not substring (~) — `~SHORT` collides when two
+        # test classes share a method name.
+        timeout {{limit}} dotnet test {{project}} \
             --configuration {{configuration}} --no-build \
-            --filter "FullyQualifiedName~$SHORT" \
+            --filter "FullyQualifiedName=$test" \
             --logger "console;verbosity=minimal" \
             > "$LOGDIR/$SHORT.log" 2>&1
         status=$?
         elapsed=$(($(date +%s)-start))
-        if [ $status -eq 124 ]; then
+        if [ $status -eq 124 ] || [ $status -eq 143 ]; then
             HANG=$((HANG+1)); printf "[%4ds] HANG  %s\n" "$elapsed" "$SHORT"
         elif [ $status -eq 0 ]; then
             PASS=$((PASS+1)); printf "[%4ds] PASS  %s\n" "$elapsed" "$SHORT"
         else
-            FAIL=$((FAIL+1)); printf "[%4ds] FAIL  %s\n" "$elapsed" "$SHORT"
+            FAIL=$((FAIL+1)); printf "[%4ds] FAIL  %s (exit %d)\n" "$elapsed" "$SHORT" "$status"
         fi
     done < "$LOGDIR/tests.txt"
+    echo ""
     echo "----- Summary: $PASS pass / $FAIL fail / $HANG hang -----"
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
 
-# Run all non-interactive MEAI samples end-to-end. Each sample gets a 90-second
-# budget; per-sample stdout/stderr lands in artifacts/sample-runs/. Reports
-# PASS / FAIL / HANG. Requires OPENAI_API_KEY and a running temporal server
-# (temporal server start-dev). Skips HumanInTheLoop (interactive).
-test-samples-meai: build
+# Shared preflight for sample-canary recipes: verify GNU timeout, OPENAI_API_KEY,
+# and that a Temporal server is reachable. Exits non-zero with an actionable
+# message rather than letting every sample fail identically with a confusing
+# error. (Trinity review, 2026-05-21.)
+_sample-preflight:
+    @if ! command -v timeout >/dev/null 2>&1; then \
+        echo "ERROR: GNU coreutils 'timeout' is required. On macOS: brew install coreutils"; \
+        exit 127; \
+    fi
+    @if ! command -v nc >/dev/null 2>&1; then \
+        echo "ERROR: 'nc' (netcat) is required for the Temporal-server reachability probe."; \
+        exit 127; \
+    fi
+    @if [ -z "$${OPENAI_API_KEY:-}" ]; then \
+        echo "ERROR: OPENAI_API_KEY is not set."; \
+        echo "  Set in your shell, or:  dotnet user-secrets set OPENAI_API_KEY sk-... --project samples/MEAI/DurableChat"; \
+        exit 2; \
+    fi
+    @if ! nc -z localhost 7233 2>/dev/null; then \
+        echo "ERROR: No Temporal server listening on localhost:7233."; \
+        echo "  Start one with:  temporal server start-dev --namespace default"; \
+        exit 2; \
+    fi
+
+# Run all non-interactive MEAI samples end-to-end. Per-sample timeouts:
+# default 90s, with overrides for samples that legitimately take longer
+# (DurableEmbeddings parallel-indexes a corpus). Reports PASS / FAIL / HANG.
+# Requires OPENAI_API_KEY and a running Temporal server. Skips HumanInTheLoop.
+test-samples-meai: build _sample-preflight
     #!/usr/bin/env bash
     set -uo pipefail
     LOGDIR="artifacts/sample-runs/meai-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$LOGDIR"
     echo "Logs: $LOGDIR"
     PASS=0; FAIL=0; HANG=0
-    # Each sample is run from its own directory so Host.CreateApplicationBuilder
-    # finds appsettings.json. `dotnet run` picks the only .csproj in the dir
-    # (OpenTelemetry uses DurableOpenTelemetry.csproj — still the only one).
+    # Format: name:dir:timeout_seconds. Each sample runs from its own dir so
+    # Host.CreateApplicationBuilder finds appsettings.json. OpenTelemetry uses
+    # DurableOpenTelemetry.csproj — still the only .csproj in that directory.
     for entry in \
-        "DurableChat:samples/MEAI/DurableChat" \
-        "DurableTools:samples/MEAI/DurableTools" \
-        "DurableEmbeddings:samples/MEAI/DurableEmbeddings" \
-        "CustomWorkflow:samples/MEAI/CustomWorkflow" \
-        "OpenTelemetry:samples/MEAI/OpenTelemetry" ; do
-        name="${entry%%:*}"
-        dir="${entry##*:}"
-        echo "═══ MEAI/$name ═══"
+        "DurableChat:samples/MEAI/DurableChat:120" \
+        "DurableTools:samples/MEAI/DurableTools:90" \
+        "DurableEmbeddings:samples/MEAI/DurableEmbeddings:180" \
+        "CustomWorkflow:samples/MEAI/CustomWorkflow:90" \
+        "OpenTelemetry:samples/MEAI/OpenTelemetry:90" ; do
+        IFS=':' read -r name dir cap <<< "$entry"
+        echo "═══ MEAI/$name (cap ${cap}s) ═══"
         start=$(date +%s)
-        ( cd "$dir" && timeout 90 dotnet run --configuration {{configuration}} --no-build ) \
+        ( cd "$dir" && timeout "$cap" dotnet run --configuration {{configuration}} --no-build ) \
             > "$LOGDIR/$name.log" 2>&1
         status=$?
         elapsed=$(($(date +%s)-start))
-        if [ $status -eq 124 ]; then
+        if [ $status -eq 124 ] || [ $status -eq 143 ]; then
             HANG=$((HANG+1)); printf "[%4ds] HANG  MEAI/%s\n" "$elapsed" "$name"
         elif [ $status -eq 0 ]; then
             PASS=$((PASS+1)); printf "[%4ds] PASS  MEAI/%s\n" "$elapsed" "$name"
@@ -405,11 +461,11 @@ test-samples-meai: build
     echo "----- MEAI Summary: $PASS pass / $FAIL fail / $HANG hang -----"
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
 
-# Run all non-interactive MAF samples end-to-end. Skips HumanInTheLoop
-# (interactive) and SplitWorkerClient (two processes — run manually). Each
-# sample gets a 90-second budget. Requires OPENAI_API_KEY and a running
-# temporal server.
-test-samples-maf: build
+# Run all non-interactive MAF samples end-to-end. Per-sample timeouts override
+# the 90s default where needed (Compaction walks 8 turns with summarization;
+# ConfigurableAgent has multi-agent handoff). Skips HumanInTheLoop (interactive)
+# and SplitWorkerClient (two processes — run manually).
+test-samples-maf: build _sample-preflight
     #!/usr/bin/env bash
     set -uo pipefail
     LOGDIR="artifacts/sample-runs/maf-$(date +%Y%m%d-%H%M%S)"
@@ -417,25 +473,24 @@ test-samples-maf: build
     echo "Logs: $LOGDIR"
     PASS=0; FAIL=0; HANG=0
     for entry in \
-        "BasicAgent:samples/MAF/BasicAgent" \
-        "WorkflowOrchestration:samples/MAF/WorkflowOrchestration" \
-        "EvaluatorOptimizer:samples/MAF/EvaluatorOptimizer" \
-        "MultiAgentRouting:samples/MAF/MultiAgentRouting" \
-        "WorkflowRouting:samples/MAF/WorkflowRouting" \
-        "AmbientAgent:samples/MAF/AmbientAgent" \
-        "ConfigurableAgent:samples/MAF/ConfigurableAgent" \
-        "ExternalHistoryStore:samples/MAF/ExternalHistoryStore" \
-        "PerToolActivities:samples/MAF/PerToolActivities" \
-        "Compaction:samples/MAF/Compaction" ; do
-        name="${entry%%:*}"
-        dir="${entry##*:}"
-        echo "═══ MAF/$name ═══"
+        "BasicAgent:samples/MAF/BasicAgent:90" \
+        "WorkflowOrchestration:samples/MAF/WorkflowOrchestration:90" \
+        "EvaluatorOptimizer:samples/MAF/EvaluatorOptimizer:120" \
+        "MultiAgentRouting:samples/MAF/MultiAgentRouting:90" \
+        "WorkflowRouting:samples/MAF/WorkflowRouting:120" \
+        "AmbientAgent:samples/MAF/AmbientAgent:90" \
+        "ConfigurableAgent:samples/MAF/ConfigurableAgent:150" \
+        "ExternalHistoryStore:samples/MAF/ExternalHistoryStore:120" \
+        "PerToolActivities:samples/MAF/PerToolActivities:90" \
+        "Compaction:samples/MAF/Compaction:180" ; do
+        IFS=':' read -r name dir cap <<< "$entry"
+        echo "═══ MAF/$name (cap ${cap}s) ═══"
         start=$(date +%s)
-        ( cd "$dir" && timeout 90 dotnet run --configuration {{configuration}} --no-build ) \
+        ( cd "$dir" && timeout "$cap" dotnet run --configuration {{configuration}} --no-build ) \
             > "$LOGDIR/$name.log" 2>&1
         status=$?
         elapsed=$(($(date +%s)-start))
-        if [ $status -eq 124 ]; then
+        if [ $status -eq 124 ] || [ $status -eq 143 ]; then
             HANG=$((HANG+1)); printf "[%4ds] HANG  MAF/%s\n" "$elapsed" "$name"
         elif [ $status -eq 0 ]; then
             PASS=$((PASS+1)); printf "[%4ds] PASS  MAF/%s\n" "$elapsed" "$name"
@@ -450,3 +505,51 @@ test-samples-maf: build
 
 # Run the full sample canary (MEAI + MAF non-interactive).
 test-samples: test-samples-meai test-samples-maf
+
+# Helper: drift detection for sample-canary recipes. Diffs `ls samples/{MEAI,MAF}`
+# against the hardcoded recipe lists; fails if a new sample directory appears
+# uncategorized (so adding a sample without updating test-samples-* surfaces).
+#
+# Intentional exclusions (interactive or multi-process — must run manually):
+#   - samples/MEAI/HumanInTheLoop  (interactive Console.ReadLine)
+#   - samples/MAF/HumanInTheLoop   (interactive Console.ReadLine)
+#   - samples/MAF/SplitWorkerClient (two-process — Worker + Client)
+verify-sample-coverage:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    EXIT=0
+    declared_meai=$(awk '/^test-samples-meai:/,/^test-samples-maf:/' justfile \
+        | grep -oE 'samples/MEAI/[A-Za-z]+' | sort -u)
+    actual_meai=$(find samples/MEAI -mindepth 1 -maxdepth 1 -type d \
+        -not -name 'bin' -not -name 'obj' \
+        -not -name 'HumanInTheLoop' \
+        | sort -u)
+    missing_meai=$(comm -23 <(echo "$actual_meai") <(echo "$declared_meai"))
+    if [ -n "$missing_meai" ]; then
+        echo "WARN: MEAI samples missing from test-samples-meai:"
+        echo "$missing_meai" | sed 's/^/  /'
+        EXIT=1
+    fi
+    declared_maf=$(awk '/^test-samples-maf:/,/^test-samples:/' justfile \
+        | grep -oE 'samples/MAF/[A-Za-z]+' | sort -u)
+    actual_maf=$(find samples/MAF -mindepth 1 -maxdepth 1 -type d \
+        -not -name 'bin' -not -name 'obj' \
+        -not -name 'HumanInTheLoop' \
+        -not -name 'SplitWorkerClient' \
+        | sort -u)
+    missing_maf=$(comm -23 <(echo "$actual_maf") <(echo "$declared_maf"))
+    if [ -n "$missing_maf" ]; then
+        echo "WARN: MAF samples missing from test-samples-maf:"
+        echo "$missing_maf" | sed 's/^/  /'
+        EXIT=1
+    fi
+    if [ $EXIT -eq 0 ]; then
+        echo "OK: sample-canary recipes cover all sample directories (modulo documented interactive/multi-process exclusions)."
+    fi
+    exit $EXIT
+
+# Remove timestamped artifact directories from prior diagnostic / sample-canary
+# runs. Safe across-the-board; logs are not load-bearing.
+clean-test-artifacts:
+    rm -rf artifacts/test-individual artifacts/sample-runs
+    @echo "Removed artifacts/test-individual and artifacts/sample-runs."
