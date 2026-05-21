@@ -179,3 +179,228 @@ validate: build test-unit-all
 
 # Full local CI pipeline: clean → build → test-unit-all → pack
 ci: clean build test-unit-all pack
+
+# ---------------------------------------------------------------------------
+# Process hygiene — orphan cleanup + safe logging
+#
+# WorkflowEnvironment.StartLocalAsync() spawns a child `temporal-sdk-dotnet`
+# process per integration-test fixture. If the test host is killed (e.g. via
+# `pkill -9` to recover from a hang) before DisposeAsync runs, the embedded
+# server is left listening on its port indefinitely. These recipes detect and
+# clean up those orphans, and provide a hang-safe way to run long test runs.
+# ---------------------------------------------------------------------------
+
+# Show orphaned Temporal embedded servers + dotnet test hosts (does NOT kill)
+list-orphans:
+    @echo "== temporal-sdk-dotnet processes =="
+    @pgrep -af "temporal-sdk-dotnet" 2>/dev/null || echo "(none)"
+    @echo ""
+    @echo "== dotnet testhost.dll processes =="
+    @pgrep -af "testhost.dll" 2>/dev/null || echo "(none)"
+    @echo ""
+    @echo "== dotnet test processes =="
+    @pgrep -af "dotnet test" 2>/dev/null | grep -v "just " || echo "(none)"
+
+# Safe to run between integration-test sessions; never run while a test you
+# care about is in flight.
+# Kill orphaned Temporal embedded servers + any hung dotnet test hosts
+kill-orphans:
+    @echo "Killing orphaned temporal-sdk-dotnet processes..."
+    -@pkill -9 -f "temporal-sdk-dotnet" 2>/dev/null; true
+    @echo "Killing orphaned dotnet test hosts (testhost.dll)..."
+    -@pkill -9 -f "testhost.dll" 2>/dev/null; true
+    @echo "Killing orphaned 'dotnet test' driver processes..."
+    -@pkill -9 -f "dotnet test" 2>/dev/null; true
+    @echo ""
+    @echo "Remaining matching processes:"
+    @pgrep -af "temporal-sdk-dotnet|testhost.dll" 2>/dev/null || echo "(none)"
+
+# Pre-test cleanup: kill orphans, then a clean integration run can start fresh.
+test-clean: kill-orphans
+    @echo "Environment cleaned. Safe to run integration tests."
+
+# Run a test command writing to a log file (NOT piped through tail/grep).
+# Usage: just test-logged tests/Temporalio.Extensions.AI.IntegrationTests
+#
+# Why: `dotnet test ... | tail -60` buffers all output until the test command
+# exits. If the test hangs, you see ZERO output until you kill it. Writing to
+# a file lets you `tail -f` the log in another shell to watch progress.
+# Run a test project, redirecting output to a /tmp log file (NOT piped tail)
+test-logged project: build
+    @LOG=$$(mktemp /tmp/temporalagents-test-XXXXXX.log); \
+    echo "Logging to $$LOG"; \
+    echo "Watch with:  tail -f $$LOG"; \
+    echo ""; \
+    dotnet test {{project}} \
+        --configuration {{configuration}} \
+        --no-build \
+        --logger "console;verbosity=normal" \
+        > "$$LOG" 2>&1; \
+    EXIT=$$?; \
+    echo ""; \
+    echo "Test exited with status $$EXIT. Log: $$LOG"; \
+    exit $$EXIT
+
+# Agent worktrees are locked (`lock reason: claude agent agent-XXX`); a plain
+# `git worktree remove` will refuse. Use this only after confirming the owning
+# agents are no longer active.
+# Force-remove stale agent worktrees under .claude/worktrees/ (uses -f -f)
+cleanup-stale-worktrees:
+    @echo "Current worktrees:"
+    @git worktree list
+    @echo ""
+    @echo "Force-removing entries under .claude/worktrees/ ..."
+    @for wt in $$(git worktree list --porcelain | awk '/^worktree / {print $$2}' | grep "/.claude/worktrees/" || true); do \
+        echo "  removing $$wt"; \
+        git worktree remove -f -f "$$wt" || echo "  (failed: $$wt — may need manual cleanup)"; \
+    done
+    @echo ""
+    @echo "Pruning administrative leftovers..."
+    @git worktree prune -v
+    @echo "Done."
+
+# ---------------------------------------------------------------------------
+# Diagnostic + sample-canary recipes (trinity)
+#
+# See .clans/patterns/per-test-diagnostic-loop/PATTERN.md
+# See .clans/patterns/sample-as-canary/PATTERN.md
+# See .claude/skills/sample-canary/SKILL.md
+# ---------------------------------------------------------------------------
+
+# Per-test diagnostic loop: run each matching test in its own process with a
+# wall-clock timeout, report PASS / FAIL / HANG per test. Use when an
+# integration test suite hangs and you cannot tell which test is responsible.
+#
+#   just test-individual tests/Temporalio.Extensions.AI.IntegrationTests Pattern3
+#   just test-individual tests/Temporalio.Extensions.Agents.IntegrationTests ""
+#
+# project: test project directory (relative to repo root)
+# filter:  substring matched via FullyQualifiedName~ — empty matches all
+test-individual project filter="": build
+    #!/usr/bin/env bash
+    set -uo pipefail
+    LOGDIR="artifacts/test-individual/$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$LOGDIR"
+    echo "Logs: $LOGDIR"
+    LIST_FILTER=""
+    if [ -n "{{filter}}" ]; then
+        LIST_FILTER="--filter FullyQualifiedName~{{filter}}"
+    fi
+    # Discover tests. --list-tests prints test method names indented after a
+    # header. Strip headers and noise; keep one FQN per line.
+    dotnet test {{project}} \
+        --configuration {{configuration}} --no-build \
+        $LIST_FILTER --list-tests 2>&1 \
+        | awk '/^[ \t]+[A-Za-z]/ {gsub(/^[ \t]+/,""); print}' \
+        | grep -v "^Test run for\|^Microsoft\|^Copyright\|^The following Tests\|^Build" \
+        | sort -u > "$LOGDIR/tests.txt" || true
+    COUNT=$(wc -l < "$LOGDIR/tests.txt" | tr -d ' ')
+    echo "Discovered $COUNT test(s)"
+    PASS=0; FAIL=0; HANG=0
+    while IFS= read -r test; do
+        [ -z "$test" ] && continue
+        SHORT=$(echo "$test" | awk -F'.' '{print $NF}')
+        start=$(date +%s)
+        timeout 120 dotnet test {{project}} \
+            --configuration {{configuration}} --no-build \
+            --filter "FullyQualifiedName~$SHORT" \
+            --logger "console;verbosity=minimal" \
+            > "$LOGDIR/$SHORT.log" 2>&1
+        status=$?
+        elapsed=$(($(date +%s)-start))
+        if [ $status -eq 124 ]; then
+            HANG=$((HANG+1)); printf "[%4ds] HANG  %s\n" "$elapsed" "$SHORT"
+        elif [ $status -eq 0 ]; then
+            PASS=$((PASS+1)); printf "[%4ds] PASS  %s\n" "$elapsed" "$SHORT"
+        else
+            FAIL=$((FAIL+1)); printf "[%4ds] FAIL  %s\n" "$elapsed" "$SHORT"
+        fi
+    done < "$LOGDIR/tests.txt"
+    echo "----- Summary: $PASS pass / $FAIL fail / $HANG hang -----"
+    [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
+
+# Run all non-interactive MEAI samples end-to-end. Each sample gets a 90-second
+# budget; per-sample stdout/stderr lands in artifacts/sample-runs/. Reports
+# PASS / FAIL / HANG. Requires OPENAI_API_KEY and a running temporal server
+# (temporal server start-dev). Skips HumanInTheLoop (interactive).
+test-samples-meai: build
+    #!/usr/bin/env bash
+    set -uo pipefail
+    LOGDIR="artifacts/sample-runs/meai-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$LOGDIR"
+    echo "Logs: $LOGDIR"
+    PASS=0; FAIL=0; HANG=0
+    # Each sample is run from its own directory so Host.CreateApplicationBuilder
+    # finds appsettings.json. `dotnet run` picks the only .csproj in the dir
+    # (OpenTelemetry uses DurableOpenTelemetry.csproj — still the only one).
+    for entry in \
+        "DurableChat:samples/MEAI/DurableChat" \
+        "DurableTools:samples/MEAI/DurableTools" \
+        "DurableEmbeddings:samples/MEAI/DurableEmbeddings" \
+        "CustomWorkflow:samples/MEAI/CustomWorkflow" \
+        "OpenTelemetry:samples/MEAI/OpenTelemetry" ; do
+        name="${entry%%:*}"
+        dir="${entry##*:}"
+        echo "═══ MEAI/$name ═══"
+        start=$(date +%s)
+        ( cd "$dir" && timeout 90 dotnet run --configuration {{configuration}} --no-build ) \
+            > "$LOGDIR/$name.log" 2>&1
+        status=$?
+        elapsed=$(($(date +%s)-start))
+        if [ $status -eq 124 ]; then
+            HANG=$((HANG+1)); printf "[%4ds] HANG  MEAI/%s\n" "$elapsed" "$name"
+        elif [ $status -eq 0 ]; then
+            PASS=$((PASS+1)); printf "[%4ds] PASS  MEAI/%s\n" "$elapsed" "$name"
+        else
+            FAIL=$((FAIL+1)); printf "[%4ds] FAIL  MEAI/%s (exit %d)\n" "$elapsed" "$name" "$status"
+        fi
+    done
+    echo "Skipped (interactive): MEAI/HumanInTheLoop — run manually."
+    echo "----- MEAI Summary: $PASS pass / $FAIL fail / $HANG hang -----"
+    [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
+
+# Run all non-interactive MAF samples end-to-end. Skips HumanInTheLoop
+# (interactive) and SplitWorkerClient (two processes — run manually). Each
+# sample gets a 90-second budget. Requires OPENAI_API_KEY and a running
+# temporal server.
+test-samples-maf: build
+    #!/usr/bin/env bash
+    set -uo pipefail
+    LOGDIR="artifacts/sample-runs/maf-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$LOGDIR"
+    echo "Logs: $LOGDIR"
+    PASS=0; FAIL=0; HANG=0
+    for entry in \
+        "BasicAgent:samples/MAF/BasicAgent" \
+        "WorkflowOrchestration:samples/MAF/WorkflowOrchestration" \
+        "EvaluatorOptimizer:samples/MAF/EvaluatorOptimizer" \
+        "MultiAgentRouting:samples/MAF/MultiAgentRouting" \
+        "WorkflowRouting:samples/MAF/WorkflowRouting" \
+        "AmbientAgent:samples/MAF/AmbientAgent" \
+        "ConfigurableAgent:samples/MAF/ConfigurableAgent" \
+        "ExternalHistoryStore:samples/MAF/ExternalHistoryStore" \
+        "PerToolActivities:samples/MAF/PerToolActivities" \
+        "Compaction:samples/MAF/Compaction" ; do
+        name="${entry%%:*}"
+        dir="${entry##*:}"
+        echo "═══ MAF/$name ═══"
+        start=$(date +%s)
+        ( cd "$dir" && timeout 90 dotnet run --configuration {{configuration}} --no-build ) \
+            > "$LOGDIR/$name.log" 2>&1
+        status=$?
+        elapsed=$(($(date +%s)-start))
+        if [ $status -eq 124 ]; then
+            HANG=$((HANG+1)); printf "[%4ds] HANG  MAF/%s\n" "$elapsed" "$name"
+        elif [ $status -eq 0 ]; then
+            PASS=$((PASS+1)); printf "[%4ds] PASS  MAF/%s\n" "$elapsed" "$name"
+        else
+            FAIL=$((FAIL+1)); printf "[%4ds] FAIL  MAF/%s (exit %d)\n" "$elapsed" "$name" "$status"
+        fi
+    done
+    echo "Skipped (interactive):    MAF/HumanInTheLoop — run manually."
+    echo "Skipped (two-process):    MAF/SplitWorkerClient — run Worker then Client."
+    echo "----- MAF Summary: $PASS pass / $FAIL fail / $HANG hang -----"
+    [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
+
+# Run the full sample canary (MEAI + MAF non-interactive).
+test-samples: test-samples-meai test-samples-maf
