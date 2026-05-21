@@ -6,7 +6,7 @@ Detailed usage patterns and configuration for Temporalio.Extensions.Agents. For 
 
 ## Durable Agents (`AddDurableAgent`)
 
-> **v0.3 surface.** `AddDurableAgent` is the only registration path. The v0.2 entry points were removed without `[Obsolete]` aliases — see [`MIGRATION-v0.3.md`](../../../MIGRATION-v0.3.md) for before/after migration snippets covering every removed API.
+`AddDurableAgent` is the only registration path. The design rationale for this consolidation is in [`docs/design-decisions.md`](../../design-decisions.md#why-the-v03-consolidation-removed-the-v02-surface).
 
 `AddDurableAgent(string name, Action<DurableAgentBuilder> configure)` is a single registration entry point that consolidates everything an agent needs — chat client, instructions, tools (with per-tool retry overrides), context providers, per-agent timeouts, and external-history opt-in — onto one fluent builder. DI access is provided via per-slot factories on the builder, so you do not need to call `BuildServiceProvider()` to wire dependencies.
 

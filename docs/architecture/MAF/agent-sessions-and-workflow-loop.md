@@ -812,7 +812,7 @@ The durable loop in `AgentWorkflow.cs` follows all of these rules: every `await`
 
 `AgentWorkflowInput.DurableAgentToolActivityOptions` is built once by the client at workflow start (from the agent's per-tool `DurableToolOptions`) and carried through `CreateContinueAsNewException` so the per-tool retry constraints survive CAN transitions. A write tool registered with `opts.NoRetry()` keeps `MaximumAttempts = 1` across every continue-as-new boundary — the options dictionary is never re-read from the registration, so registration-time changes do not bleed into running workflows. Continue-as-new is settings-frozen.
 
-For the user-facing how-to, see [the durable-agents how-to](../../how-to/MAF/durable-agents.md) and the [v0.3 migration guide](../../../MIGRATION-v0.3.md).
+For the user-facing how-to, see [the durable-agents how-to](../../how-to/MAF/durable-agents.md).
 
 ---
 

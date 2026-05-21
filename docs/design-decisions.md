@@ -84,7 +84,7 @@ These are deliberately scoped to the subclass and are not candidates for further
 
 ### Compatibility with non-`ChatClientAgent` `AIAgent` subtypes
 
-`Temporalio.Extensions.Agents` registers durable agents via `opts.AddDurableAgent(name, configure)`. The agent type produced by the library is `ChatClientAgent` (composed internally with `UseProvidedChatClientAsIs = true` and the user-supplied `IChatClient`). Direct registration of an arbitrary `AIAgent` subtype — `A2AAgent` from `Microsoft.Agents.AI.A2A`, graph-workflow agents from `Microsoft.Agents.AI.Workflows`, or a user-built custom `AIAgent` subclass — is not supported through `AddDurableAgent`. The v0.2 surface that allowed it was removed as part of the v0.3 API consolidation; see [`MIGRATION-v0.3.md`](../MIGRATION-v0.3.md) for the before/after.
+`Temporalio.Extensions.Agents` registers durable agents via `opts.AddDurableAgent(name, configure)`. The agent type produced by the library is `ChatClientAgent` (composed internally with `UseProvidedChatClientAsIs = true` and the user-supplied `IChatClient`). Direct registration of an arbitrary `AIAgent` subtype — `A2AAgent` from `Microsoft.Agents.AI.A2A`, graph-workflow agents from `Microsoft.Agents.AI.Workflows`, or a user-built custom `AIAgent` subclass — is not supported through `AddDurableAgent`. The v0.2 surface that allowed it was removed as part of the v0.3 API consolidation (see *Why the v0.3 consolidation removed the v0.2 surface* below).
 
 v0.3 narrows registration to `ChatClientAgent` shape — `agent.ChatClient` is a required `Func<IServiceProvider, IChatClient>` slot, and the library composes the agent internally with `UseProvidedChatClientAsIs = true`. Users who need to plug in non-`ChatClientAgent` MAF agents (`A2AAgent`, graph-workflow agents from `Microsoft.Agents.AI.Workflows`, custom `AIAgent` subclasses) cannot do so through `AddDurableAgent` today. The legacy AIAgent-instance-shaped registration was the previous escape hatch; restoring direct support is tracked as a possible follow-on once the new surface stabilises.
 
@@ -101,6 +101,18 @@ The compatibility matrix below describes the v0.3 dispatch behavior. The same pe
 | **Granular tool dispatch** | Built in. The workflow dispatches one `InvokeAgentTool` activity per pending `FunctionCallContent`, with per-tool `DurableToolOptions` for retry/timeout. | ✅ Default behavior in v0.3 for every `AddDurableAgent` registration. |
 
 **No `DelegatingAIAgent` interposition in v0.3.** The v0.2 `AgentWorkflowWrapper` (a `DelegatingAIAgent` subclass) is removed. Per-request tool filtering, response-format selection, and identity propagation are now handled by directly mutating the per-step `ChatOptions` inside `RunDurableAgentStepAsync`. There is no run-options upgrade path that would need updating if MAF introduced an A2A- or graph-specific run-options subclass.
+
+### Why the v0.3 consolidation removed the v0.2 surface
+
+The v0.3 API consolidation is a clean break (no `[Obsolete]` aliases, no compat shims) because the v0.2 surface had three specific design flaws that compounded at call sites:
+
+1. **String-keyed configuration foot-guns.** `PerToolActivityOptions["apply_refund"]` had to match `AIFunctionFactory.Create(name: "apply_refund")` exactly. A typo silently fell back to the default retry policy, and a non-idempotent write tool would re-fire on transient activity retry. v0.3 binds the retry policy to the `AIFunction` reference at registration time via `agent.AddTool(t, opts => opts.NoRetry())` — typos are now compile errors.
+
+2. **Tools registered in three places.** v0.2 required `AddDurableTools(...)` for the registry, `tools:` on `AsAIAgent(...)` for the schema, and `PerToolActivityOptions[name]` for retry policy. Adding a tool required edits in three files. v0.3 collapses all three onto the per-agent builder: `agent.AddTool(...)` is the single registration point.
+
+3. **Implicit constraints with no compile-time enforcement.** Per-tool activity dispatch silently degraded if `UseFunctionInvocation()` was on the chat pipeline. There was no compile-time check and no runtime guard. v0.3 sets `UseProvidedChatClientAsIs = true` internally and constructs the agent pipeline itself, so the user's chat client is never wrapped in `FunctionInvocationDelegatingAgent` — the silent-degradation case structurally cannot occur.
+
+The pre-1.0 phase is the right window for this kind of consolidation: breaking changes ship cleanly between minor versions rather than accreting `[Obsolete]` aliases that drag forward into the 1.0 surface.
 
 ### Rejected directions (preserved for future maintainers)
 

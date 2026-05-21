@@ -1,19 +1,26 @@
 # Durable Agents
 
-In v0.3, every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in a separately named `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — durable agents are the only registration path.
+Every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in a separately named `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — durable agents are the only registration path. This makes per-tool retry granularity explicit and prevents the foot-gun where write-style tools could re-fire on a transient activity retry.
 
 ### Activities the workflow may dispatch per turn
+
+The first two activities always run; the remainder are mode-gated by configuration (external history store, compaction strategy).
+
+**Core (always):**
 
 | Activity name | When | What it does |
 |---|---|---|
 | `Temporalio.Extensions.Agents.RunDurableAgentStep` | Every step of every turn (loop iterations) | One LLM call. Activity-side trigger evaluation also runs here (sets `CompactionNeeded` / target IDs on the result) |
 | `Temporalio.Extensions.Agents.InvokeAgentTool` | One per tool call the LLM emits | Dispatches a single tool. Honors per-tool `DurableToolOptions` |
+
+**Opt-in (gated by configuration):**
+
+| Activity name | When | What it does |
+|---|---|---|
 | `Temporalio.Extensions.Agents.AppendAgentTurn` | After the turn loop exits (external-store mode only) | Writes `[requestEntry, responseEntry]` to `IAgentHistoryStore` |
 | `Temporalio.Extensions.Agents.ReduceHistoryInStore` | At continue-as-new (external-store mode only) | Loads projected view, runs `HistoryReducer`, `ReplaceAsync`-es the store |
 | `Temporalio.Extensions.Agents.CompactHistory` | When `stepResult.CompactionNeeded == true` (after `AppendAgentTurn`) | Invokes the configured `ICompactionStrategy`, appends one `CompactionMarkerEntry`. See [`compaction.md`](./compaction.md) |
-| `Temporalio.Extensions.Agents.RunCompactionSummary` | *Dormant* — registered, never workflow-dispatched at v0.4.0-preview.2 | LLM call that produces a rollup summary. Reserved for custom strategies that prefer a separately-tracked summarization activity |
-
-This makes per-tool retry granularity explicit and prevents the legacy foot-guns where write-style tools could re-fire on a transient activity retry.
+| `Temporalio.Extensions.Agents.RunCompactionSummary` | Reserved — registered but not currently workflow-dispatched | LLM call that produces a rollup summary. Held for custom strategies that prefer a separately-tracked summarization activity |
 
 ## When to use what
 
@@ -37,7 +44,7 @@ builder.Services
         {
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
             agent.Instructions = "You are a refund specialist...";
-            agent.MaxToolCallsPerTurn = 10;
+            agent.MaxToolCallsPerTurn = 10;  // caps the per-turn LLM↔tool loop; default 20 — see usage.md
 
             // Read tool — retries on transient failure (default unbounded).
             agent.AddTool(sp => AIFunctionFactory.Create(
@@ -60,7 +67,7 @@ builder.Services
     });
 ```
 
-No `BuildServiceProvider()` bootstrap, no opt-in flag, no string-keyed retry dictionary, no separate tool registry, and no "don't use `UseFunctionInvocation()`" caveat — the library composes the chat pipeline correctly internally. See [the v0.3 migration guide](../../../MIGRATION-v0.3.md) if you are coming from v0.2.
+No `BuildServiceProvider()` bootstrap, no opt-in flag, no string-keyed retry dictionary, no separate tool registry, and no "don't use `UseFunctionInvocation()`" caveat — the library composes the chat pipeline internally. The agent is accessed via `TemporalWorkflowExtensions.GetAgent("RefundAgent")` inside a workflow or `services.GetTemporalAgentProxy("RefundAgent")` from external code (see [`usage.md`](./usage.md)).
 
 ## Fluent sugar on `DurableToolOptions`
 
@@ -79,9 +86,9 @@ For every tool dispatched as a Temporal activity (`InvokeAgentTool`), the effect
 3. Else the worker's `TemporalAgentsOptions.DefaultRetryPolicy`
 4. Else Temporal SDK defaults (unbounded retries)
 
-The per-LLM-call activity (`RunDurableAgentStep`) follows the same chain, minus step 1.
+The per-LLM-call activity (`RunDurableAgentStep`) uses the same chain starting at step 2 (agent → worker → SDK defaults), since the per-tool override in step 1 only applies to tool dispatch.
 
-## Split-Deployment Behavior
+## Split-deployment behavior
 
 In a split-deployment setup — where a client process uses `GetTemporalAgentProxy` without a full `AddDurableAgent` registration and the worker process hosts the agent via `AddDurableAgent` — the workflow starts without access to the worker's per-tool configuration. On the first `RunDurableAgentStep` call of each turn, the activity detects this state and resolves per-tool retry and timeout options from the worker's `DurableAgentRegistration` in memory, returning them as part of the step result. The workflow then uses these resolved options for all subsequent tool dispatches in that turn.
 
