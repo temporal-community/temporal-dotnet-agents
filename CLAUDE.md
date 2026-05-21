@@ -221,9 +221,9 @@ Build automation uses [`just`](https://just.systems). All recipes in `justfile`.
 ```bash
 just --list             # All recipes
 just build              # Restore + Release build (default)
-just test-unit-all      # All unit tests (619) — no server required
-just test-integration   # Agents integration (77) — embedded server
-just test-integration-ai # AI integration (25 + 2 skipped) — embedded server
+just test-unit-all      # All unit tests — no server required
+just test-integration   # Agents integration — embedded server
+just test-integration-ai # AI integration — embedded server
 just pack               # clean → build → pack → artifacts/packages/*.nupkg
 ```
 
