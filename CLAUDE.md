@@ -363,6 +363,3 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **Durable Chat Pipeline**: `docs/architecture/MEAI/durable-chat-pipeline.md`
 - **Cross-Library Integration**: `docs/architecture/MEAI/cross-library-integration.md`
 
----
-
-**Last Updated**: 2026-05-21
