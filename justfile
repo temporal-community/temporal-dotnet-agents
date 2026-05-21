@@ -186,36 +186,64 @@ ci: clean build test-unit-all pack
 # WorkflowEnvironment.StartLocalAsync() spawns a child `temporal-sdk-dotnet`
 # process per integration-test fixture. If the test host is killed (e.g. via
 # `pkill -9` to recover from a hang) before DisposeAsync runs, the embedded
-# server is left listening on its port indefinitely. These recipes detect and
-# clean up those orphans, and provide a hang-safe way to run long test runs.
+# server is left listening on its port indefinitely.
+#
+# Scoping:
+#   `temporal-sdk-dotnet` is the .NET SDK's extracted CLI binary
+#   (`/var/folders/.../T/temporal-sdk-dotnet-X.Y.Z`); the name is unique to
+#   .NET SDK test fixtures and cannot collide with the user's installed
+#   `temporal` Homebrew CLI. The `kill-orphans` recipe targets only this
+#   binary by name.
+#
+#   `testhost.dll` and `dotnet test` are GENERIC .NET test-runner patterns.
+#   Killing them unscoped would terminate tests in OTHER projects on the
+#   same machine (Rider runs, background CI shells, sibling repos). The
+#   `kill-test-hosts` recipe path-filters to TemporalAgents only — opt-in,
+#   not bundled into `kill-orphans`. (Tank + Cypher review, 2026-05-20.)
 # ---------------------------------------------------------------------------
 
-# Show orphaned Temporal embedded servers + dotnet test hosts (does NOT kill)
+# Show orphaned Temporal embedded servers + dotnet test hosts scoped to this repo
 list-orphans:
     @echo "== temporal-sdk-dotnet processes =="
     @pgrep -af "temporal-sdk-dotnet" 2>/dev/null || echo "(none)"
     @echo ""
-    @echo "== dotnet testhost.dll processes =="
-    @pgrep -af "testhost.dll" 2>/dev/null || echo "(none)"
+    @echo "== TemporalAgents testhost.dll processes =="
+    @pgrep -af "testhost.dll" 2>/dev/null | grep -i "TemporalAgents" || echo "(none)"
     @echo ""
-    @echo "== dotnet test processes =="
-    @pgrep -af "dotnet test" 2>/dev/null | grep -v "just " || echo "(none)"
+    @echo "== TemporalAgents 'dotnet test' processes =="
+    @pgrep -af "dotnet test" 2>/dev/null | grep -i "TemporalAgents" | grep -v "just " || echo "(none)"
 
-# Safe to run between integration-test sessions; never run while a test you
-# care about is in flight.
-# Kill orphaned Temporal embedded servers + any hung dotnet test hosts
+# Kill orphaned Temporal embedded servers (.NET SDK's extracted CLI binary only).
+# Safe across multi-project machines — the binary name is unique to .NET SDK
+# integration test fixtures. Uses SIGTERM first, then SIGKILL for stragglers.
+# Does NOT touch testhost.dll or `dotnet test` — see `kill-test-hosts` for that.
 kill-orphans:
-    @echo "Killing orphaned temporal-sdk-dotnet processes..."
+    @echo "Sending SIGTERM to orphaned temporal-sdk-dotnet processes..."
+    -@pkill -TERM -f "temporal-sdk-dotnet" 2>/dev/null; true
+    @sleep 2
+    @echo "Sending SIGKILL to any stragglers..."
     -@pkill -9 -f "temporal-sdk-dotnet" 2>/dev/null; true
-    @echo "Killing orphaned dotnet test hosts (testhost.dll)..."
-    -@pkill -9 -f "testhost.dll" 2>/dev/null; true
-    @echo "Killing orphaned 'dotnet test' driver processes..."
-    -@pkill -9 -f "dotnet test" 2>/dev/null; true
     @echo ""
-    @echo "Remaining matching processes:"
-    @pgrep -af "temporal-sdk-dotnet|testhost.dll" 2>/dev/null || echo "(none)"
+    @echo "Remaining temporal-sdk-dotnet processes:"
+    @pgrep -af "temporal-sdk-dotnet" 2>/dev/null || echo "(none)"
 
-# Pre-test cleanup: kill orphans, then a clean integration run can start fresh.
+# Kill TemporalAgents-scoped test hosts (opt-in; risk of cross-project blast
+# without the path filter). Use this when `dotnet test` for THIS repo is hung
+# and `kill-orphans` alone didn't clean up its parent processes.
+kill-test-hosts:
+    @echo "Killing TemporalAgents testhost.dll processes (path-scoped)..."
+    -@pgrep -af "testhost.dll" 2>/dev/null | grep -i "TemporalAgents" | awk '{print $$1}' | xargs -r kill -TERM 2>/dev/null; true
+    @sleep 2
+    -@pgrep -af "testhost.dll" 2>/dev/null | grep -i "TemporalAgents" | awk '{print $$1}' | xargs -r kill -9 2>/dev/null; true
+    @echo "Killing TemporalAgents 'dotnet test' driver processes (path-scoped)..."
+    -@pgrep -af "dotnet test" 2>/dev/null | grep -i "TemporalAgents" | grep -v "just " | awk '{print $$1}' | xargs -r kill -TERM 2>/dev/null; true
+    @sleep 2
+    -@pgrep -af "dotnet test" 2>/dev/null | grep -i "TemporalAgents" | grep -v "just " | awk '{print $$1}' | xargs -r kill -9 2>/dev/null; true
+    @echo ""
+    @echo "Remaining (scoped):"
+    @pgrep -af "testhost.dll|dotnet test" 2>/dev/null | grep -i "TemporalAgents" || echo "(none)"
+
+# Pre-test cleanup: kill embedded-server orphans only (safe across projects).
 test-clean: kill-orphans
     @echo "Environment cleaned. Safe to run integration tests."
 
@@ -241,18 +269,36 @@ test-logged project: build
     echo "Test exited with status $$EXIT. Log: $$LOG"; \
     exit $$EXIT
 
+# Remove stale agent worktrees under .claude/worktrees/ — SAFE EDITION.
+#
 # Agent worktrees are locked (`lock reason: claude agent agent-XXX`); a plain
-# `git worktree remove` will refuse. Use this only after confirming the owning
-# agents are no longer active.
-# Force-remove stale agent worktrees under .claude/worktrees/ (uses -f -f)
+# `git worktree remove` refuses. The naive fix is `-f -f` (force twice), but
+# that ALSO overrides dirty-tree protection and silently discards uncommitted
+# work in the worktree. (Cypher review, 2026-05-20.)
+#
+# This recipe:
+#   1. For each worktree under .claude/worktrees/, runs `git status --porcelain`
+#      inside it. If non-empty → skip + warn (don't force).
+#   2. For clean worktrees, uses single `-f` (sufficient to override the lock;
+#      the second -f is what's dangerous).
+#   3. Echoes the HEAD ref + dirty state before any removal.
 cleanup-stale-worktrees:
     @echo "Current worktrees:"
     @git worktree list
     @echo ""
-    @echo "Force-removing entries under .claude/worktrees/ ..."
     @for wt in $$(git worktree list --porcelain | awk '/^worktree / {print $$2}' | grep "/.claude/worktrees/" || true); do \
-        echo "  removing $$wt"; \
-        git worktree remove -f -f "$$wt" || echo "  (failed: $$wt — may need manual cleanup)"; \
+        echo "── $$wt"; \
+        head=$$(git -C "$$wt" rev-parse --short HEAD 2>/dev/null || echo "(unreachable)"); \
+        dirty=$$(git -C "$$wt" status --porcelain 2>/dev/null); \
+        if [ -n "$$dirty" ]; then \
+            echo "    HEAD: $$head"; \
+            echo "    SKIP — worktree has uncommitted changes:"; \
+            echo "$$dirty" | sed 's/^/      /'; \
+            echo "    (commit / stash / push these before re-running, or remove the worktree manually)"; \
+        else \
+            echo "    HEAD: $$head  (clean — removing with single -f)"; \
+            git worktree remove -f "$$wt" || echo "    FAILED — may need manual cleanup"; \
+        fi; \
     done
     @echo ""
     @echo "Pruning administrative leftovers..."
