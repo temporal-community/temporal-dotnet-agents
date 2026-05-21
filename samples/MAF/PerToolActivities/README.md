@@ -198,5 +198,4 @@ retry granularity benefit.
 
 - Conceptual guide: [`docs/how-to/MAF/durable-agents.md`](../../../docs/how-to/MAF/durable-agents.md)
 - Workflow loop architecture: [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../../docs/architecture/MAF/agent-sessions-and-workflow-loop.md)
-- v0.2 → v0.3 migration: [`MIGRATION-v0.3.md`](../../../MIGRATION-v0.3.md)
 - The MEAI counterpart for tool durability: [`samples/MEAI/DurableTools/`](../../MEAI/DurableTools/)

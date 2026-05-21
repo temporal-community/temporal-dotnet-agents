@@ -16,9 +16,10 @@ _No unreleased changes._
 ## [0.3.0] - 2026-05-07
 
 This release consolidates the MAF-side public API around a single fluent registration path and
-moves agent dispatch onto a workflow-managed durable loop with per-tool Temporal activities. See
-[`MIGRATION-v0.3.md`](./MIGRATION-v0.3.md) for upgrade instructions, including the in-flight
-workflow drain requirement.
+moves agent dispatch onto a workflow-managed durable loop with per-tool Temporal activities.
+Upgrade from v0.2 required an in-flight-workflow drain — the v0.2 activity input shapes were
+not replay-compatible. The historical rationale for the API consolidation is in
+[`docs/design-decisions.md`](./docs/design-decisions.md#why-the-v03-consolidation-removed-the-v02-surface).
 
 ### Added
 
@@ -167,10 +168,9 @@ workflow drain requirement.
 
 ### Migration
 
-See [MIGRATION-v0.3.md](./MIGRATION-v0.3.md) for upgrade instructions, including the
-in-flight-workflow drain requirement. Workflows started on v0.2 cannot replay on v0.3 because
-the activity-input shapes (`ExecuteAgentInput` → `AgentStepInput`) are incompatible — drain
-in-flight `AgentWorkflow` runs before deploying.
+Workflows started on v0.2 cannot replay on v0.3 because the activity-input shapes
+(`ExecuteAgentInput` → `AgentStepInput`) are incompatible — drain in-flight `AgentWorkflow`
+runs before deploying.
 
 ### Fixed
 
