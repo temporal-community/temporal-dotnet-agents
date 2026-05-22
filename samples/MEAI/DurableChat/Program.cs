@@ -24,10 +24,21 @@ var model = builder.Configuration.GetValue<string>("OPENAI_MODEL") ?? "gpt-4o-mi
 var temporalAddress = builder.Configuration.GetValue<string>("TEMPORAL_ADDRESS") ?? "localhost:7233";
 const string TaskQueue = "durable-chat";
 
+// Configuration values may come from any of:
+//   - appsettings.json (committed defaults — fine for OPENAI_API_BASE_URL, OPENAI_MODEL, TEMPORAL_ADDRESS)
+//   - environment variables (always loaded by Host.CreateApplicationBuilder)
+//   - user secrets (loaded only in Development environment; csproj declares <UserSecretsId>)
+// OPENAI_API_KEY is sensitive — keep it in user secrets or env vars, never in appsettings.json.
 if (string.IsNullOrEmpty(apiBaseUrl))
-    throw new InvalidOperationException("OPENAI_API_BASE_URL is not configured in appsettings.json.");
+    throw new InvalidOperationException(
+        "OPENAI_API_BASE_URL is not configured. Set it in appsettings.json, " +
+        "as an environment variable, or via " +
+        "`dotnet user-secrets set OPENAI_API_BASE_URL https://api.openai.com/v1 --project samples/MEAI/DurableChat`.");
 if (string.IsNullOrEmpty(apiKey))
-    throw new InvalidOperationException("OPENAI_API_KEY is not configured. Set it with: dotnet user-secrets set \"OPENAI_API_KEY\" \"sk-...\" --project samples/MEAI/DurableChat");
+    throw new InvalidOperationException(
+        "OPENAI_API_KEY is not configured. Set it as an environment variable or via " +
+        "`dotnet user-secrets set OPENAI_API_KEY sk-... --project samples/MEAI/DurableChat`. " +
+        "Note: user secrets only load in the Development environment (DOTNET_ENVIRONMENT unset or set to 'Development').");
 
 // ── Setup: Connect Temporal client with DurableAIDataConverter ────────────────
 // DurableAIDataConverter.Instance wraps Temporal's payload converter with

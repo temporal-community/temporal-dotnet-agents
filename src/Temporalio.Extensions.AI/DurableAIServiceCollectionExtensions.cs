@@ -178,7 +178,7 @@ internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>
 /// consumes this registry to build the per-tool <c>ActivityOptions</c> dictionary that
 /// drives Pattern 3 dispatch.
 /// </summary>
-// Same CS8644 caveat as DurableFunctionRegistry above — Dictionary<TKey, TValue> already
+// The same CS8644 caveat as DurableFunctionRegistry above — Dictionary<TKey, TValue> already
 // implements IReadOnlyDictionary<TKey, TValue>; re-declaring it would trigger the nullability
 // mismatch warning. Don't add the interface back to this class declaration.
 public sealed class DurableChatToolOptionsRegistry
