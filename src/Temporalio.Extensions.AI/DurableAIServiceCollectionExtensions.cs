@@ -144,7 +144,13 @@ public static class DurableAIServiceCollectionExtensions
 /// <summary>
 /// Registry for <see cref="AIFunction"/> instances that can be invoked durably.
 /// </summary>
-internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>, IReadOnlyDictionary<string, AIFunction>
+// Note: do NOT re-declare `IReadOnlyDictionary<string, AIFunction>` here — `Dictionary<TKey, TValue>`
+// already implements it, and explicitly re-declaring the interface triggers CS8644 ("nullability
+// of reference types in interface implemented by the base type does not match") because the
+// compiler tries to re-implement Values/Keys with annotations that differ from the base's.
+// Consumers that want the interface (see DurableAIRegistrar.cs:52-53) still get it via the
+// concrete-to-interface DI registration.
+internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>
 {
     public DurableFunctionRegistry(IEnumerable<Action<DurableFunctionRegistry>>? configurators = null)
         : base(StringComparer.OrdinalIgnoreCase)
@@ -172,8 +178,11 @@ internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>, 
 /// consumes this registry to build the per-tool <c>ActivityOptions</c> dictionary that
 /// drives Pattern 3 dispatch.
 /// </summary>
+// Same CS8644 caveat as DurableFunctionRegistry above — Dictionary<TKey, TValue> already
+// implements IReadOnlyDictionary<TKey, TValue>; re-declaring it would trigger the nullability
+// mismatch warning. Don't add the interface back to this class declaration.
 public sealed class DurableChatToolOptionsRegistry
-    : Dictionary<string, DurableChatToolOptions>, IReadOnlyDictionary<string, DurableChatToolOptions>
+    : Dictionary<string, DurableChatToolOptions>
 {
     /// <summary>
     /// Initializes a new <see cref="DurableChatToolOptionsRegistry"/> by invoking each of
