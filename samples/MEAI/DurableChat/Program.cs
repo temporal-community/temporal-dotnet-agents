@@ -117,7 +117,7 @@ var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>()
 
 // ── Run demos ─────────────────────────────────────────────────────────────────
 await RunMultiTurnDemoAsync(sessionClient);
-await RunToolCallDemoAsync(sessionClient, weatherTool);
+await RunToolCallDemoAsync(sessionClient);
 await RunHistoryQueryDemoAsync(sessionClient);
 await DurableToolDemo.RunDurableToolDemoAsync(sessionClient, weatherTool);
 
@@ -159,19 +159,38 @@ static async Task RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Demo 2: Tool call via explicit ChatOptions.Tools
+// Demo 2: Tool call — minimal happy path (no ChatOptions.Tools needed)
 //
-// Shows how to expose tools to the LLM via ChatOptions.Tools. Because the tool
-// is also registered with AddDurableTools(), the workflow dispatches it as a
-// separate InvokeFunction activity instead of running it inline — this is
-// Pattern 3 (durable tool dispatch). The single activity round-trip you would
-// have seen with UseFunctionInvocation() is now two activities: one
-// GetChatStep for the LLM call, one InvokeFunction for the tool call.
+// Background: tool registration is split across two concerns.
+//
+//   - `AddDurableTools(weatherTool, ...)` (Program.cs line ~106) registers the
+//     tool IMPLEMENTATION on the worker so a Temporal activity exists that can
+//     dispatch the function when the LLM requests it.
+//
+//   - `ChatOptions.Tools` advertises the tool SCHEMA (name, description, args)
+//     to the LLM so it knows the tool is available to call.
+//
+// In Pattern 3, the `GetChatStepAsync` activity auto-populates `Options.Tools`
+// from the DurableFunctionRegistry when the caller didn't supply any. So once
+// you've called AddDurableTools, you do NOT need to repeat the tool in
+// ChatOptions.Tools — the activity fills it in for you. That's what this demo
+// shows: register once, just chat.
+//
+// Demo 4 Scenario 1 is the counterpart for cases where you DO want to control
+// the per-call tool set explicitly (e.g., "this call should only see a subset
+// of my registered tools" — useful when you've registered many tools but want
+// to narrow what the LLM considers for a given user request).
+//
+// Either way, because the tool is registered with AddDurableTools(), the
+// workflow dispatches it as a separate InvokeFunction activity instead of
+// running it inline. One GetChatStep activity for the LLM call, one
+// InvokeFunction activity for the tool call — visible side-by-side in the
+// Temporal Web UI.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunToolCallDemoAsync(DurableChatSessionClient sessionClient, AIFunction weatherTool)
+static async Task RunToolCallDemoAsync(DurableChatSessionClient sessionClient)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
-    Console.WriteLine(" Demo 2: Tool Call (explicit ChatOptions.Tools)");
+    Console.WriteLine(" Demo 2: Tool Call (auto-populated from registry)");
     Console.WriteLine("════════════════════════════════════════════════════════");
 
     var conversationId = $"tool-call-{Guid.NewGuid():N}";
@@ -180,13 +199,12 @@ static async Task RunToolCallDemoAsync(DurableChatSessionClient sessionClient, A
     var q = "What is the weather like in Seattle right now?";
     Console.WriteLine($" User : {q}");
 
-    // Pass tools via ChatOptions. The caller's explicit list is respected
-    // (the auto-populate-from-registry step only fires when Options.Tools is null).
-    var options = new ChatOptions { Tools = [weatherTool] };
+    // No ChatOptions passed — the GetChatStepAsync activity auto-populates
+    // Options.Tools from the DurableFunctionRegistry (populated above by
+    // AddDurableTools). See Demo 4 Scenario 1 for the explicit-pass path.
     var response = await sessionClient.ChatAsync(
         conversationId,
-        [new ChatMessage(ChatRole.User, q)],
-        options: options);
+        [new ChatMessage(ChatRole.User, q)]);
 
     Console.WriteLine($" Agent: {response.Text}");
     Console.WriteLine("════════════════════════════════════════════════════════\n");

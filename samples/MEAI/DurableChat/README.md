@@ -60,8 +60,8 @@ Worker started.
  Agent: Paris has a population of approximately 2.1 million ...
 ════════════════════════════════════════════════════════
 
-(Demo 2 — Pattern 1 tool call — output omitted for brevity; shows the model invoking
- get_current_weather inline within a single GetResponseAsync activity.)
+(Demo 2 — Tool call with auto-populated registry — output omitted for brevity; shows the model
+ invoking get_current_weather via a separate InvokeFunction activity dispatched by the workflow.)
 
 ════════════════════════════════════════════════════════
  Demo 3: History Query
@@ -81,14 +81,18 @@ Worker started.
 
 Plain text chat. Each `ChatAsync` call reuses the same `conversationId`, so the workflow retains history and the second turn can answer a pronoun reference ("that city") without the caller resending context.
 
-## Demo 2 — Tool Call (Pattern 1, `UseFunctionInvocation()`)
+## Demo 2 — Tool Call (minimal happy path)
 
-The chat client pipeline includes `UseFunctionInvocation()`. When the LLM requests a tool call, MEAI's middleware runs the tool synchronously, sends the result back to the LLM, and returns the final assistant message — **all inside one `GetResponseAsync` activity**. The whole tool round-trip is invisible at the Temporal activity level: you see one chat activity, not one per tool.
+Calls `ChatAsync` **without passing `ChatOptions.Tools`**. Because `weatherTool` is already registered with `AddDurableTools(...)` on the worker, the `GetChatStepAsync` activity auto-populates `Options.Tools` from the `DurableFunctionRegistry` before calling the LLM — the caller doesn't need to repeat the tool list per call.
 
 This is the right choice when:
-- Tools are fast and idempotent
-- You don't need per-tool retry policies
-- You want the simplest possible setup
+- Every chat call should expose all registered tools to the LLM
+- You don't need to narrow the per-call tool set
+- You want the simplest possible setup (register once, just chat)
+
+Behaviorally identical to Demo 4 Scenario 1 below — both end up with the same `ChatOptions.Tools` reaching the LLM. The difference is **who fills the list**: Demo 2 lets the activity auto-populate; Demo 4 Scenario 1 demonstrates the explicit-control path for cases where you want a subset.
+
+> **Two distinct registrations.** `AddDurableTools(...)` registers the tool *implementation* on the worker. `ChatOptions.Tools` advertises the tool *schema* to the LLM. Both are required for a tool call to work — the worker needs to dispatch the function; the LLM needs to know the function exists. Auto-population just means the caller can skip the latter when they want every registered tool exposed.
 
 ## Demo 3 — History Query
 
@@ -108,8 +112,8 @@ loop back to next LLM call until IsFinal
 
 **Two sub-scenarios demonstrated:**
 
-1. **Explicit `ChatOptions.Tools`** — the caller passes a specific subset of registered tools. The workflow respects the explicit list.
-2. **Auto-populated tools** — caller passes `null` (or no `ChatOptions.Tools`). The activity auto-populates from `DurableFunctionRegistry`, so all registered tools are available to the LLM.
+1. **Explicit `ChatOptions.Tools`** — the caller passes a specific subset of registered tools (e.g., `Tools = [weatherTool]` when many tools are registered but only one should be considered for this call). The workflow respects the explicit list and does NOT auto-populate.
+2. **Auto-populated tools** — caller omits `ChatOptions` entirely. The activity auto-populates `Tools` from `DurableFunctionRegistry`, so all registered tools are available to the LLM. Same behavior as Demo 2 above.
 
 **Verification in Temporal Web UI:**
 
@@ -118,7 +122,7 @@ loop back to next LLM call until IsFinal
 3. Open the workflow history. You should see:
    - `Temporalio.Extensions.AI.GetChatStep` activities (one per LLM iteration)
    - `Temporalio.Extensions.AI.InvokeFunction` activities (one per tool call) — each with its Summary set to the tool name
-4. Contrast with Demo 2's workflow history, which shows a single `Temporalio.Extensions.AI.GetResponse` activity per turn — the tool call is invisible at the activity level because it ran inline.
+4. Demos 2 and 4 both follow this structure since both use Pattern 3 (durable tool dispatch). The difference is *how* `ChatOptions.Tools` is populated, not whether the tool runs inside its own activity.
 
 **Per-tool retry and timeout via `DurableChatToolOptions`:**
 
