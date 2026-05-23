@@ -1,5 +1,6 @@
 using FakeItEasy;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Temporalio.Extensions.AI.Tests;
@@ -93,8 +94,12 @@ public class DurableEmbeddingGeneratorTests
     [Fact]
     public void DurableEmbeddingActivities_Constructor_AcceptsNullLogger()
     {
-        var generator = A.Fake<IEmbeddingGenerator<string, Embedding<float>>>();
-        var activities = new DurableEmbeddingActivities(generator, null);
+        // DurableEmbeddingActivities resolves the IEmbeddingGenerator lazily from IServiceProvider
+        // at activity invocation time (so the type can be DI-registered unconditionally without
+        // requiring the caller to register an embedding generator). Constructor only needs an
+        // IServiceProvider — empty one is fine for this construction test.
+        var services = new ServiceCollection().BuildServiceProvider();
+        var activities = new DurableEmbeddingActivities(services, null);
         Assert.NotNull(activities);
     }
 }
