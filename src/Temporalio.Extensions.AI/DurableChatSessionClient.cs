@@ -208,9 +208,13 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     }
 
     /// <summary>
-    /// Generates the workflow ID from a conversation ID.
+    /// Generates the workflow ID from a conversation ID using the configured
+    /// <see cref="DurableExecutionOptions.WorkflowIdPrefix"/>. Use this in tool
+    /// closures or external code that needs to address the workflow directly (e.g.,
+    /// <c>temporalClient.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId))</c>)
+    /// so the prefix stays in sync with the worker configuration.
     /// </summary>
-    internal string GetWorkflowId(string conversationId) =>
+    public string GetWorkflowId(string conversationId) =>
         $"{_options.WorkflowIdPrefix}{conversationId}";
 
     /// <summary>
