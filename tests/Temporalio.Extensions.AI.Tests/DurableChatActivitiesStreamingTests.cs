@@ -123,7 +123,9 @@ public class DurableChatActivitiesStreamingTests
         {
             await Task.Yield();
             throw new OperationCanceledException("simulated cancellation");
-            yield break; // satisfies compiler — unreachable
+#pragma warning disable CS0162 // yield break required for iterator-method shape; unreachable due to throw above
+            yield break;
+#pragma warning restore CS0162
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
