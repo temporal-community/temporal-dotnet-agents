@@ -860,9 +860,12 @@ public sealed class MiddlewareChatWorkflow
             {
                 StartToCloseTimeout = TimeSpan.FromSeconds(30),
                 HeartbeatTimeout = TimeSpan.FromSeconds(10),
-                // DurableToolsNotWrappedException is a misconfiguration; retrying does not
-                // recover. Bound to one attempt so the failure surfaces fast.
-                RetryPolicy = new RetryPolicy { MaximumAttempts = 1 },
+                // No RetryPolicy override — the activity throws
+                // DurableToolsNotWrappedException as a non-retryable
+                // ApplicationFailureException, so Temporal's default policy
+                // (unlimited retries) is short-circuited by the nonRetryable flag.
+                // If the library ever loses that nonRetryable: true, this test will
+                // hang as a regression signal.
             });
 
         return response.Messages.Count > 0 ? response.Messages[0].Text ?? string.Empty : string.Empty;

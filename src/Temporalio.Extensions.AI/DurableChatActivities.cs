@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
+using Temporalio.Exceptions;
 using Temporalio.Extensions.AI.Exceptions;
 
 namespace Temporalio.Extensions.AI;
@@ -330,14 +331,24 @@ internal sealed class DurableChatActivities(
             : services.GetRequiredKeyedService<IChatClient>(clientKey);
 
     /// <summary>
-    /// Throws <see cref="DurableToolsNotWrappedException"/> when the LLM returned
-    /// <see cref="FunctionCallContent"/> items but no <c>FunctionInvokingChatClient</c>
-    /// is in the chat-client chain to handle them inline, AND durable tools are registered
-    /// (meaning the user expects per-tool dispatch). Pattern 3 routes through
-    /// <see cref="GetChatStepAsync"/> rather than this activity, so a tool call landing here
-    /// with no FIC and a populated registry means the workflow is the middleware path
-    /// (<c>DurableChatClient</c>) — which cannot host a tool-dispatch loop by contract.
+    /// Throws when the LLM returned <see cref="FunctionCallContent"/> items but no
+    /// <c>FunctionInvokingChatClient</c> is in the chat-client chain to handle them inline,
+    /// AND durable tools are registered (meaning the user expects per-tool dispatch).
+    /// Pattern 3 routes through <see cref="GetChatStepAsync"/> rather than this activity,
+    /// so a tool call landing here with no FIC and a populated registry means the workflow
+    /// is the middleware path (<c>DurableChatClient</c>) — which cannot host a tool-dispatch
+    /// loop by contract.
     /// </summary>
+    /// <remarks>
+    /// Thrown as a non-retryable <see cref="ApplicationFailureException"/> rather than a
+    /// plain <see cref="DurableToolsNotWrappedException"/> because the underlying error is a
+    /// configuration bug, not a transient failure — retrying the activity will produce the
+    /// same result every time. Without <c>nonRetryable: true</c>, Temporal's default retry
+    /// policy (unlimited attempts with exponential backoff) would burn ~80 retries before
+    /// surfacing the misconfiguration to the workflow caller. <c>ErrorType</c> is set to
+    /// <c>nameof(DurableToolsNotWrappedException)</c> so catch blocks can still match on
+    /// the typed name via <see cref="ApplicationFailureException.ErrorType"/>.
+    /// </remarks>
     private void EnsureToolDispatchHandlerWired(IChatClient chatClient, ChatResponse response)
     {
         var registry = services.GetService<DurableFunctionRegistry>();
@@ -372,6 +383,9 @@ internal sealed class DurableChatActivities(
             return;
         }
 
-        throw new DurableToolsNotWrappedException();
+        throw new ApplicationFailureException(
+            DurableToolsNotWrappedException.DefaultMessage,
+            errorType: nameof(DurableToolsNotWrappedException),
+            nonRetryable: true);
     }
 }
