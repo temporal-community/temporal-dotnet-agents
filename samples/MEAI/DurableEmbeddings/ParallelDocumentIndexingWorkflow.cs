@@ -2,6 +2,7 @@
 // using Workflow.WhenAllAsync rather than awaiting each one in sequence.
 
 using Microsoft.Extensions.AI;
+using Temporalio.Common;
 using Temporalio.Extensions.AI;
 using Temporalio.Workflows;
 
@@ -45,15 +46,24 @@ public sealed class ParallelDocumentIndexingWorkflow
     [WorkflowRun]
     public async Task<ParallelIndexingResult> RunAsync(DocumentIndexingInput input)
     {
-        var embeddingOptions = new DurableExecutionOptions
+        // RetryPolicy: DurableEmbeddingGenerator only forwards the policy when non-null;
+        // without it Temporal applies the server default (retry forever). Cap at 3 attempts
+        // — embeddings are idempotent so retries are safe, but unbounded retries are not.
+        var durableOptions = new DurableExecutionOptions
         {
             ActivityTimeout = input.ActivityTimeout,
+            RetryPolicy = new RetryPolicy { MaximumAttempts = 3 },
         };
 
         // The NullEmbeddingGenerator is never invoked: Workflow.InWorkflow == true
         // causes DurableEmbeddingGenerator to dispatch to DurableEmbeddingActivities
         // on every GenerateAsync call.
-        var generator = new DurableEmbeddingGenerator(new NullEmbeddingGenerator(), embeddingOptions);
+        var generator = new DurableEmbeddingGenerator(new NullEmbeddingGenerator(), durableOptions);
+
+        // EmbeddingGenerationOptions.ModelId drives the Temporal Web UI activity summary
+        // (see DurableEmbeddingGenerator.BuildActivitySummary). Plain MEAI DTO — safe inside
+        // a workflow.
+        var embeddingOptions = new EmbeddingGenerationOptions { ModelId = input.ModelId };
 
         // ── Fan-out: start all embedding activities at the same time ────────────
         //
@@ -63,7 +73,7 @@ public sealed class ParallelDocumentIndexingWorkflow
         // so Temporal sees all N activity commands at once and schedules them
         // in parallel rather than sequentially.
         var tasks = input.Chunks
-            .Select(chunk => generator.GenerateAsync([chunk]))
+            .Select(chunk => generator.GenerateAsync([chunk], embeddingOptions))
             .ToList();
 
         // ── Fan-in: wait for all activities using the workflow-safe combinator ──

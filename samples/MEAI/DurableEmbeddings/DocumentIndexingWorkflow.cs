@@ -2,6 +2,7 @@
 // where each GenerateAsync call becomes an independently retried Temporal activity.
 
 using Microsoft.Extensions.AI;
+using Temporalio.Common;
 using Temporalio.Extensions.AI;
 using Temporalio.Workflows;
 
@@ -21,6 +22,13 @@ public sealed class DocumentIndexingInput
     /// Activity start-to-close timeout forwarded to DurableEmbeddingGenerator.
     /// </summary>
     public TimeSpan ActivityTimeout { get; init; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// The embedding model id. Forwarded into <see cref="EmbeddingGenerationOptions.ModelId"/>
+    /// on every <c>GenerateAsync</c> call so the Temporal Web UI activity summary
+    /// (populated by <c>DurableEmbeddingGenerator</c> from <c>options.ModelId</c>) is non-empty.
+    /// </summary>
+    public required string ModelId { get; init; }
 }
 
 /// <summary>
@@ -73,15 +81,30 @@ public sealed class DocumentIndexingWorkflow
         // from the workflow input.  The stub inner generator is never called inside
         // a workflow — Workflow.InWorkflow == true causes GenerateAsync to dispatch
         // to DurableEmbeddingActivities instead.
+        //
+        // RetryPolicy: DurableEmbeddingGenerator only forwards the policy when non-null;
+        // without it Temporal applies the server default (retry forever). Embeddings are
+        // idempotent so retries are safe, but a bounded cap of 3 attempts is appropriate
+        // — persistent failure should fail the workflow rather than spin indefinitely.
         var options = new DurableExecutionOptions
         {
             ActivityTimeout = input.ActivityTimeout,
-            // HeartbeatTimeout defaults to 2 minutes — sufficient for embedding calls.
+            // HeartbeatTimeout defaults to 2 minutes. The activity heartbeats once before
+            // GenerateAsync (see DurableEmbeddingActivities.cs:47) — fine for short calls,
+            // but for slow self-hosted models or large batches consider raising
+            // HeartbeatTimeout or adding a background heartbeat (see HumanInTheLoop sample).
+            RetryPolicy = new RetryPolicy { MaximumAttempts = 3 },
         };
 
-        // NullEmbeddingGenerator is a pass-through stub used only so the
-        // DurableEmbeddingGenerator constructor is satisfied. It is never reached
-        // during workflow execution.
+        // EmbeddingGenerationOptions.ModelId drives the Temporal Web UI activity summary
+        // (see DurableEmbeddingGenerator.BuildActivitySummary). EmbeddingGenerationOptions
+        // is a plain MEAI DTO, safe to construct inside a workflow.
+        var embeddingOptions = new EmbeddingGenerationOptions { ModelId = input.ModelId };
+
+        // NullEmbeddingGenerator is a throw-stub: never invoked at runtime because
+        // DurableEmbeddingGenerator short-circuits to activity dispatch when
+        // Workflow.InWorkflow == true. The constructor argument is required to
+        // satisfy the wrapper's signature.
         var generator = new DurableEmbeddingGenerator(
             new NullEmbeddingGenerator(),
             options);
@@ -107,7 +130,7 @@ public sealed class DocumentIndexingWorkflow
             // because Workflow.InWorkflow == true.  On the worker side, the
             // activity resolves IEmbeddingGenerator<string, Embedding<float>>
             // from DI and calls the real OpenAI embeddings endpoint.
-            var result = await generator.GenerateAsync([chunk]);
+            var result = await generator.GenerateAsync([chunk], embeddingOptions);
             embeddings.Add(result[0]);
         }
 

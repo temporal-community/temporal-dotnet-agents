@@ -11,7 +11,7 @@ mid-batch, completed embeddings replay from workflow history — no API calls ar
 - `DocumentIndexingWorkflow` — sequential per-chunk embedding; one activity per chunk
 - `ParallelDocumentIndexingWorkflow` — concurrent fan-out via `Workflow.WhenAllAsync`
 - Crash recovery: completed activities replay from history; only remaining chunks are re-run
-- `DurableEmbeddingActivities` is included in `AddDurableAI()` — no extra registration required
+- `DurableEmbeddingActivities` is registered automatically by `AddDurableAI()` (when used with `AddHostedTemporalWorker(...)`)
 
 ## Architecture
 
@@ -39,7 +39,8 @@ DocumentIndexingWorkflow             ParallelDocumentIndexingWorkflow
 
 - [.NET 10 SDK](https://dot.net) or later
 - A local Temporal server: `temporal server start-dev`
-- An OpenAI-compatible API key
+- An OpenAI-compatible API key (`OPENAI_API_KEY`)
+- Optional: `OPENAI_API_BASE_URL` (defaults to `https://api.openai.com/v1`) and `OPENAI_EMBEDDING_MODEL` (defaults to `text-embedding-3-small`)
 
 ### Configure API credentials
 
@@ -60,14 +61,14 @@ dotnet run --project samples/MEAI/DurableEmbeddings/DurableEmbeddings.csproj
 ```
  Demo: Durable Document Indexing (RAG embedding pipeline)
    Chunks to index: 3
-   Elapsed         : 1842 ms (sequential)
+   Elapsed         : ~Nms (sequential, varies)
    Chunks indexed  : 3
    Vector dimension: 1536
-   Similarity (chunk 1 vs 2): 0.3241
+   Similarity (chunk 1 vs 2): 0.3241  (varies; lower = more distinct)
 
  Demo: Parallel Document Indexing (fan-out embedding)
    Chunks to index: 5
-   Elapsed          : 743 ms (parallel)
+   Elapsed          : ~Nms (parallel, varies; approaches max(per-activity))
    Chunks processed : 5
    Vector dimension : 1536
 ```

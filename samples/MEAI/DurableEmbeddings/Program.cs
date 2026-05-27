@@ -1,6 +1,9 @@
-// DurableEmbeddings — demonstrates IEmbeddingGenerator wrapped with UseDurableExecution(),
-// dispatching each GenerateAsync call as an independent Temporal activity for fault-tolerant
-// RAG indexing. Includes sequential and parallel fan-out workflow variants.
+// DurableEmbeddings — demonstrates wrapping each GenerateAsync call as an independent
+// Temporal activity for fault-tolerant RAG indexing. The workflows construct
+// DurableEmbeddingGenerator directly (the durable-wrapper short-circuit fires on
+// Workflow.InWorkflow == true, so the inner generator is never invoked inside a workflow);
+// on the worker side, DurableEmbeddingActivities resolves the real IEmbeddingGenerator
+// from DI. Includes sequential and parallel fan-out workflow variants.
 //
 // Run:  dotnet run --project samples/MEAI/DurableEmbeddings/DurableEmbeddings.csproj
 
@@ -16,7 +19,6 @@ using OpenAI;
 using Temporalio.Client;
 using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Hosting;
-using Temporalio.Workflows;
 
 // ── Setup: Build the application host ────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -35,8 +37,10 @@ const string taskQueue = "durable-embeddings";
 // ── Setup: Connect Temporal client with DurableAIDataConverter ────────────────
 // DurableAIDataConverter.Instance wraps Temporal's payload converter with
 // AIJsonUtilities.DefaultOptions, which correctly handles MEAI's $type discriminator
-// for polymorphic AIContent subclasses. This is required whenever MEAI types
-// (ChatMessage, AIContent, etc.) pass through Temporal workflow history.
+// for polymorphic AIContent subclasses. Required whenever MEAI AIContent polymorphism
+// crosses Temporal serialization boundaries. Strictly speaking, an embeddings-only
+// sample doesn't need it (Embedding<float> isn't polymorphic), but setting it is
+// harmless and matches the recommended pattern for any MEAI + Temporal app.
 var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions(temporalAddress)
 {
     DataConverter = DurableAIDataConverter.Instance,
@@ -49,53 +53,40 @@ var openAiClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) });
 
-// ── Setup: Register IEmbeddingGenerator with UseDurableExecution ─────────────
+// ── Setup: Register IEmbeddingGenerator ──────────────────────────────────────
 // AddEmbeddingGenerator is the idiomatic MEAI DI pattern — it returns an
-// EmbeddingGeneratorBuilder for chaining middleware, then Build() registers the
-// final IEmbeddingGenerator<string, Embedding<float>> singleton.
+// EmbeddingGeneratorBuilder, and Build() registers the final
+// IEmbeddingGenerator<string, Embedding<float>> singleton.
 //
-// UseDurableExecution() wraps the pipeline with DurableEmbeddingGenerator middleware.
-// When GenerateAsync is called inside a workflow, the middleware dispatches to
-// DurableEmbeddingActivities instead of calling the inner generator directly.
-// When called outside a workflow, it passes through to the inner generator unchanged.
-//
-// On the worker side, DurableEmbeddingActivities resolves this same
-// IEmbeddingGenerator<string, Embedding<float>> from DI and calls GenerateAsync —
-// that is what actually reaches the OpenAI API.
+// We do NOT chain .UseDurableExecution() here. The workflows in this sample
+// construct DurableEmbeddingGenerator directly (the durable-wrapper short-circuits
+// on Workflow.InWorkflow == true, so wrapping the DI pipeline as well would be
+// dead code). On the worker side, DurableEmbeddingActivities resolves this
+// inner IEmbeddingGenerator from DI and calls GenerateAsync — that is what
+// actually reaches the OpenAI API.
 builder.Services
     .AddEmbeddingGenerator(
         openAiClient.GetEmbeddingClient(embeddingModel).AsIEmbeddingGenerator())
-    .UseDurableExecution(opts =>
-    {
-        // How long each individual embedding activity may run before Temporal
-        // considers it timed out and schedules a retry.
-        opts.ActivityTimeout = TimeSpan.FromMinutes(2);
-    })
     .Build();
 
-// ── Setup: Register IChatClient ───────────────────────────────────────────────
-// AddDurableAI registers DurableChatActivities, which constructor-injects IChatClient.
-// Even though this sample is about embeddings and does not use the chat workflow,
-// we must provide an IChatClient so the activities can be resolved without error.
-IChatClient openAiChatClient = openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient();
-builder.Services.AddChatClient(openAiChatClient).Build();
-
 // ── Setup: Register worker + durable AI ──────────────────────────────────────
-// AddDurableAI registers:
-//   • DurableChatWorkflow      — durable chat session workflow (not used in this sample)
-//   • DurableChatActivities    — activity wrapping IChatClient.GetResponseAsync
-//   • DurableFunctionActivities — activity wrapping durable tool calls
-//   • DurableEmbeddingActivities — activity wrapping IEmbeddingGenerator.GenerateAsync
-//   • DurableChatSessionClient — external entry point for chat sessions
+// AddDurableAI registers options, the DurableAIDataConverter auto-wire, internal
+// activities (DurableChatActivities, DurableEmbeddingActivities, DurableFunctionActivities),
+// and the tool/function registry. Only DurableEmbeddingActivities is exercised here.
 //
-// DurableEmbeddingActivities is already included — no extra registration required.
+// RegisterDefaultWorkflow = false suppresses the DurableChatWorkflow + DurableChatSessionClient
+// registrations (we don't need chat-session machinery for an embeddings-only sample). With
+// the default workflow disabled, we also do not need to register a dummy IChatClient — the
+// DurableMixedPatternValidator tolerates a missing unkeyed IChatClient when no durable tools
+// are registered, and DurableChatActivities resolves IChatClient lazily (never invoked here).
+//
 // AddWorkflow<DocumentIndexingWorkflow>() registers our custom workflow on the worker.
 builder.Services
     .AddHostedTemporalWorker(taskQueue)
     .AddDurableAI(opts =>
     {
         opts.ActivityTimeout = TimeSpan.FromMinutes(2);
-        opts.SessionTimeToLive = TimeSpan.FromHours(1);
+        opts.RegisterDefaultWorkflow = false;
     })
     .AddWorkflow<DocumentIndexingWorkflow>()
     .AddWorkflow<ParallelDocumentIndexingWorkflow>();
@@ -107,8 +98,8 @@ await host.StartAsync();
 Console.WriteLine("Worker started.\n");
 
 // ── Run demos ─────────────────────────────────────────────────────────────────
-await RunDocumentIndexingDemoAsync(temporalClient, taskQueue);
-await RunParallelIndexingDemoAsync(temporalClient, taskQueue);
+await RunDocumentIndexingDemoAsync(temporalClient, taskQueue, embeddingModel);
+await RunParallelIndexingDemoAsync(temporalClient, taskQueue, embeddingModel);
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
@@ -121,7 +112,7 @@ Console.WriteLine("Done.");
 // returns the vector dimension and the dot-product similarity between the
 // first two chunks, proving they have distinct semantic representations.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string taskQueue)
+static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string taskQueue, string modelId)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
     Console.WriteLine(" Demo: Durable Document Indexing (RAG embedding pipeline)");
@@ -162,6 +153,7 @@ static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string ta
         {
             Chunks = chunks,
             ActivityTimeout = TimeSpan.FromMinutes(2),
+            ModelId = modelId,
         }),
         new WorkflowOptions
         {
@@ -202,7 +194,7 @@ static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string ta
 // in a single scheduling round rather than waiting for each to complete before
 // starting the next. Contrast with the sequential demo above.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunParallelIndexingDemoAsync(ITemporalClient client, string taskQueue)
+static async Task RunParallelIndexingDemoAsync(ITemporalClient client, string taskQueue, string modelId)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
     Console.WriteLine(" Demo: Parallel Document Indexing (fan-out embedding)");
@@ -256,6 +248,7 @@ static async Task RunParallelIndexingDemoAsync(ITemporalClient client, string ta
         {
             Chunks = chunks,
             ActivityTimeout = TimeSpan.FromMinutes(2),
+            ModelId = modelId,
         }),
         new WorkflowOptions
         {
