@@ -293,34 +293,101 @@ test-logged project limit="600": build
 # that ALSO overrides dirty-tree protection and silently discards uncommitted
 # work in the worktree. (Cypher review, 2026-05-20.)
 #
-# This recipe:
-#   1. For each worktree under .claude/worktrees/, runs `git status --porcelain`
-#      inside it. If non-empty → skip + warn (don't force).
-#   2. For clean worktrees, uses single `-f` (sufficient to override the lock;
-#      the second -f is what's dangerous).
-#   3. Echoes the HEAD ref + dirty state before any removal.
+# This recipe runs TWO safety checks before removing each worktree:
+#   1. Dirty-state check: `git status --porcelain` inside the worktree. If
+#      non-empty → skip + warn. Catches uncommitted work.
+#   2. Unique-commits check: `git merge-base --is-ancestor <worktree-HEAD> HEAD`.
+#      If the worktree branch has commits NOT reachable from the current branch
+#      → skip + warn. Catches the trap where an agent committed work that never
+#      got merged back to the parent — `git worktree remove` would orphan those
+#      commits, leaving them recoverable only via the branch ref. The original
+#      recipe missed this and silently orphaned committed work on at least three
+#      occasions before this check was added. (Chief review, 2026-05-27.)
+#
+# Only when BOTH checks pass:
+#   - Unlock the worktree (locks persist after agent process dies)
+#   - Remove with single `-f` (overrides the now-released lock; the second -f
+#     would override dirty-tree protection which we don't want)
+#   - Delete the underlying branch if it matches `worktree-agent-*` AND has no
+#     commits unique to it. Prevents the orphaned-branch accumulation we saw
+#     before this was added.
+#
+# Recipe uses the bash-shebang block style (mirrors test-individual) rather
+# than the `@cmd; \` line-continuation style. The latter is Makefile-idiom and
+# DOES NOT work in just — `$$VAR` is not transformed to `$VAR`, so bash sees
+# literal `$$` and treats it as the shell PID, producing syntax errors when
+# adjacent to `(`. (Chief review, 2026-05-27.)
 cleanup-stale-worktrees:
-    @echo "Current worktrees:"
-    @git worktree list
-    @echo ""
-    @for wt in $$(git worktree list --porcelain | awk '/^worktree / {print $$2}' | grep "/.claude/worktrees/" || true); do \
-        echo "── $$wt"; \
-        head=$$(git -C "$$wt" rev-parse --short HEAD 2>/dev/null || echo "(unreachable)"); \
-        dirty=$$(git -C "$$wt" status --porcelain 2>/dev/null); \
-        if [ -n "$$dirty" ]; then \
-            echo "    HEAD: $$head"; \
-            echo "    SKIP — worktree has uncommitted changes:"; \
-            echo "$$dirty" | sed 's/^/      /'; \
-            echo "    (commit / stash / push these before re-running, or remove the worktree manually)"; \
-        else \
-            echo "    HEAD: $$head  (clean — removing with single -f)"; \
-            git worktree remove -f "$$wt" || echo "    FAILED — may need manual cleanup"; \
-        fi; \
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    echo "Current worktrees:"
+    git worktree list
+    echo ""
+
+    removed=0
+    skipped_dirty=0
+    skipped_unique=0
+
+    for wt in $(git worktree list --porcelain | awk '/^worktree / {print $2}' | grep "/.claude/worktrees/" || true); do
+        name="${wt##*/}"
+        echo "── $name"
+        head=$(git -C "$wt" rev-parse --short HEAD 2>/dev/null || echo "(unreachable)")
+
+        # Check 1: uncommitted changes in the worktree
+        if [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; then
+            echo "    HEAD: $head"
+            echo "    SKIP — worktree has uncommitted changes:"
+            git -C "$wt" status --porcelain | sed 's/^/      /'
+            echo "    (commit / stash / push these before re-running, or remove the worktree manually)"
+            skipped_dirty=$((skipped_dirty + 1))
+            continue
+        fi
+
+        # Check 2: commits unique to the worktree's branch (not reachable from current HEAD)
+        if ! git merge-base --is-ancestor "$head" HEAD 2>/dev/null; then
+            unique_count=$(git rev-list "HEAD..$head" --count 2>/dev/null || echo "?")
+            echo "    HEAD: $head"
+            echo "    SKIP — worktree has $unique_count commit(s) NOT on current branch:"
+            git log "HEAD..$head" --oneline 2>/dev/null | head -5 | sed 's/^/      /'
+            echo "    (cherry-pick / merge these into the current branch before re-running,"
+            echo "     or remove the worktree manually after verifying the commits are dispensable)"
+            skipped_unique=$((skipped_unique + 1))
+            continue
+        fi
+
+        # Both checks pass — safe to remove the worktree
+        echo "    HEAD: $head  (clean + already merged — removing)"
+        git worktree unlock "$wt" 2>/dev/null || true
+        if git worktree remove -f "$wt" 2>&1 | sed 's/^/      /'; then
+            removed=$((removed + 1))
+        else
+            echo "      FAILED — may need manual cleanup"
+            continue
+        fi
+
+        # Worktree removed — clean up the orphaned branch if it matches the agent pattern
+        branch="worktree-${name}"
+        if git show-ref --verify --quiet "refs/heads/$branch"; then
+            # Branch should have no unique commits (we just verified head was ancestor of HEAD)
+            if git branch -d "$branch" 2>&1 | sed 's/^/      /'; then
+                echo "      branch '$branch' deleted"
+            else
+                echo "      branch '$branch' kept (refused safe delete — inspect manually)"
+            fi
+        fi
     done
-    @echo ""
-    @echo "Pruning administrative leftovers..."
-    @git worktree prune -v
-    @echo "Done."
+
+    echo ""
+    echo "Pruning administrative leftovers..."
+    git worktree prune -v
+
+    echo ""
+    echo "Summary: $removed removed, $skipped_dirty skipped (dirty), $skipped_unique skipped (unique commits)"
+    if [ "$skipped_dirty" -gt 0 ] || [ "$skipped_unique" -gt 0 ]; then
+        echo ""
+        echo "Worktrees were skipped — see messages above. Run \`git worktree list\` to confirm state."
+    fi
 
 # ---------------------------------------------------------------------------
 # Diagnostic + sample-canary recipes (trinity)
