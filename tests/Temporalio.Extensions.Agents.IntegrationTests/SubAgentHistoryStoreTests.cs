@@ -6,11 +6,9 @@ using Temporalio.Client;
 using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Agents.HistoryStore;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
-using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Agents.Tests.StepMode; // shared scaffolding (linked via .csproj)
 using Temporalio.Extensions.Hosting;
-using Temporalio.Testing;
 using Temporalio.Workflows;
 using Xunit;
 using static Temporalio.Extensions.Agents.TemporalWorkflowExtensions;

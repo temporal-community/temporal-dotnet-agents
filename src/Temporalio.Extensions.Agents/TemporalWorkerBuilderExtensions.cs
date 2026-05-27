@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Extensions.Hosting;
 
 namespace Temporalio.Extensions.Agents;

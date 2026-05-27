@@ -1,11 +1,7 @@
-using System.Runtime.CompilerServices;
-using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Temporalio.Extensions.Agents.Internal;
-using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.AI.Exceptions;
 using Temporalio.Extensions.Hosting;
 using Xunit;

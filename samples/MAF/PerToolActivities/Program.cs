@@ -22,7 +22,6 @@ using PerToolActivities;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
-using Temporalio.Workflows;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

@@ -9,7 +9,6 @@ using Temporalio.Client;
 using Temporalio.Extensions.Agents.Compaction;
 using Temporalio.Extensions.Agents.Internal;
 using Temporalio.Extensions.Agents.Workflows;
-using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Hosting;
 
 namespace Temporalio.Extensions.Agents;

@@ -2,13 +2,9 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
-using Temporalio.Common;
-using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.Tests.StepMode; // shared scaffolding (linked via .csproj)
-using Temporalio.Extensions.Hosting;
-using Temporalio.Testing;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.IntegrationTests;

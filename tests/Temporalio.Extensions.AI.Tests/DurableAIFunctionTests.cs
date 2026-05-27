@@ -1,4 +1,3 @@
-using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Xunit;
 

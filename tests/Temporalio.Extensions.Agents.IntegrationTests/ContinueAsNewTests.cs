@@ -5,7 +5,6 @@ using Temporalio.Client;
 using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.Workflows;
-using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
 using Xunit;
 using Xunit.Abstractions;

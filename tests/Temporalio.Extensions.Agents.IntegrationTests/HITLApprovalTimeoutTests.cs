@@ -1,12 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
-using Temporalio.Extensions.Agents.IntegrationTests.Helpers;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.AI;
-using Temporalio.Extensions.Hosting;
 using Xunit;
 using Xunit.Abstractions;
 

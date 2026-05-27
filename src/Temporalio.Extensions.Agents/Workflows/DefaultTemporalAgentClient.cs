@@ -7,7 +7,6 @@ using Temporalio.Client;
 using Temporalio.Client.Schedules;
 using Temporalio.Common;
 using Temporalio.Extensions.Agents.Session;
-using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.AI;
 using Temporalio.Workflows;
 

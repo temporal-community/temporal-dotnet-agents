@@ -1,12 +1,10 @@
 #pragma warning disable TAI001
 
-using FakeItEasy;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Worker;
-using Temporalio.Workflows;
 using Xunit;
 
 namespace Temporalio.Extensions.AI.Tests;

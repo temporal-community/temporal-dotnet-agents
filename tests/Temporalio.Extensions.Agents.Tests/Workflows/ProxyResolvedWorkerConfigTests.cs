@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Workflows;
 using Xunit;

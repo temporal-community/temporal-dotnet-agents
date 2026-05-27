@@ -23,7 +23,6 @@ using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Agents;
 using Temporalio.Extensions.Agents.Compaction;
 using Temporalio.Extensions.Agents.HistoryStore;
-using Temporalio.Extensions.Hosting;
 
 // ── Step 1: Build the host ───────────────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

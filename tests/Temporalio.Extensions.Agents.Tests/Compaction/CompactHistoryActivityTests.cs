@@ -4,7 +4,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Agents.Compaction;
-using Temporalio.Extensions.Agents.HistoryStore;
 using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Agents.Tests.HistoryStore;
 using Temporalio.Extensions.Agents.Workflows;

@@ -3,9 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.HistoryStore;
-using Temporalio.Extensions.Agents.Tests.Helpers;
 using Temporalio.Extensions.Agents.Workflows;
-using Temporalio.Extensions.Hosting;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;

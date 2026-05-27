@@ -1,8 +1,6 @@
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
 using Temporalio.Extensions.AI;
-using Temporalio.Extensions.Agents.HistoryStore;
-using Temporalio.Extensions.Agents.Tests.Helpers;
 using Temporalio.Extensions.Agents.Tests.HistoryStore;
 using Temporalio.Extensions.Agents.Workflows;
 using Xunit;

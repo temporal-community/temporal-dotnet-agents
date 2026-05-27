@@ -1,6 +1,5 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
-using Temporalio.Extensions.Hosting;
 using Xunit;
 
 namespace Temporalio.Extensions.AI.Tests;

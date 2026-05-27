@@ -5,8 +5,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.Workflows;
-using Temporalio.Extensions.AI;
-using Temporalio.Extensions.Hosting;
 
 namespace Temporalio.Extensions.Agents;
 

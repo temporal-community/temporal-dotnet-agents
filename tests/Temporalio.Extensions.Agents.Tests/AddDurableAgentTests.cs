@@ -1,5 +1,4 @@
 using Microsoft.Extensions.AI;
-using Temporalio.Extensions.Agents.Tests.Helpers;
 using Temporalio.Extensions.Agents.Workflows;
 using Xunit;
 

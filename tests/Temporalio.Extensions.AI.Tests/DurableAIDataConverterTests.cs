@@ -1,6 +1,4 @@
-using System.Collections.Generic;
 using Microsoft.Extensions.AI;
-using Temporalio.Converters;
 using Xunit;
 
 namespace Temporalio.Extensions.AI.Tests;

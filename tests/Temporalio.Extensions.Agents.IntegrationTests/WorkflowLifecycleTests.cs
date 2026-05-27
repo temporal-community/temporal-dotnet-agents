@@ -4,7 +4,6 @@ using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.Workflows;
-using Temporalio.Extensions.Hosting;
 using Xunit;
 using Xunit.Abstractions;
 

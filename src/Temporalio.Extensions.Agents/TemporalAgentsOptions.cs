@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using Microsoft.Agents.AI;
 using Temporalio.Client.Schedules;
 using Temporalio.Common;
