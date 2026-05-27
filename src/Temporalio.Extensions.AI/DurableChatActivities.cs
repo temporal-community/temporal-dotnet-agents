@@ -2,7 +2,6 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Temporalio.Activities;
 using Temporalio.Extensions.AI.Exceptions;
 
@@ -53,6 +52,15 @@ internal sealed class DurableChatActivities(
         span?.SetTag(DurableChatTelemetry.ConversationIdAttribute, input.ConversationId);
         span?.SetTag(DurableChatTelemetry.RequestModelAttribute, modelId);
 
+        // Swap any ToolNamePlaceholder instances (left over from wire deserialization) with
+        // real AIFunction references resolved from the durable-tool registry. Wire format
+        // carries names only — placeholders here mean the caller supplied an explicit
+        // ChatOptions.Tools subset that needs activity-side rehydration. Pattern 1
+        // (GetResponseAsync) typically relies on FunctionInvokingChatClient inside the
+        // chat-client chain to invoke tools, so the rehydrated entries need to be the real
+        // AIFunctions or FIC has nothing to call.
+        var resolvedOptions = SwapPlaceholderTools(input.Options);
+
         var chatClient = ResolveChatClient(input.ClientKey);
 
         // Step 4d: B-check backstop for the MEAI mixed-pattern conflict. The startup A-check
@@ -65,21 +73,21 @@ internal sealed class DurableChatActivities(
         // Step 4c: per-call IChatClientDecorator resolution. Per-call WithChatClientFactoryKey
         // wins; worker-level DefaultChatClientFactoryKey is the fallback. Empty-string per-call
         // value is the documented opt-out (overrides the worker default with "no decoration").
-        var factoryKey = input.Options.GetChatClientFactoryKey()
+        var factoryKey = resolvedOptions.GetChatClientFactoryKey()
             ?? services.GetService<DurableExecutionOptions>()?.DefaultChatClientFactoryKey;
 
         if (!string.IsNullOrEmpty(factoryKey))
         {
             var decorator = services.GetKeyedService<IChatClientDecorator>(factoryKey)
                 ?? throw new DurableChatClientFactoryNotFoundException(factoryKey);
-            chatClient = decorator.Decorate(chatClient, input.Options);
+            chatClient = decorator.Decorate(chatClient, resolvedOptions);
         }
 
         try
         {
             var collected = new List<ChatResponseUpdate>();
             await foreach (var update in chatClient.GetStreamingResponseAsync(
-                    input.Messages, input.Options, ct)
+                    input.Messages, resolvedOptions, ct)
                 .WithCancellation(ct)
                 .ConfigureAwait(false))
             {
@@ -177,9 +185,12 @@ internal sealed class DurableChatActivities(
         span?.SetTag(DurableChatTelemetry.RequestModelAttribute, modelId);
 
         // Auto-populate tools from the registry if the caller didn't supply any (OD-1).
-        // If ChatOptions.Tools is explicitly provided we respect that subset choice.
+        // If ChatOptions.Tools is explicitly provided we respect that subset choice — but
+        // any entries that survived the wire are ToolNamePlaceholder instances (the converter
+        // only round-trips names) so we must swap them for the real AIFunction references
+        // before they reach the LLM.
         var registry = services.GetService<DurableFunctionRegistry>();
-        var effectiveOptions = input.Options;
+        var effectiveOptions = SwapPlaceholderTools(input.Options);
         if (registry is { Count: > 0 } && (effectiveOptions?.Tools is null or { Count: 0 }))
         {
             effectiveOptions = effectiveOptions is null
@@ -250,6 +261,61 @@ internal sealed class DurableChatActivities(
                 input.ConversationId, input.TurnNumber);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Replaces any <see cref="ToolNamePlaceholder"/> entries left over from wire
+    /// deserialization with the real <see cref="AIFunction"/> instances from
+    /// <see cref="DurableFunctionRegistry"/>. <see cref="ChatOptions.Tools"/> serializes
+    /// as a list of names only (see <see cref="ChatOptionsToolsJsonConverter"/>); placeholders
+    /// reaching the LLM would either throw on invocation (Pattern 1) or be ignored as
+    /// non-callable tools. Returns the input unchanged when there are no placeholders to
+    /// swap, so allocation is paid only on the explicit-subset path.
+    /// </summary>
+    private ChatOptions? SwapPlaceholderTools(ChatOptions? options)
+    {
+        if (options?.Tools is not { Count: > 0 } tools)
+        {
+            return options;
+        }
+
+        var hasPlaceholder = false;
+        foreach (var tool in tools)
+        {
+            if (tool is ToolNamePlaceholder)
+            {
+                hasPlaceholder = true;
+                break;
+            }
+        }
+        if (!hasPlaceholder)
+        {
+            return options;
+        }
+
+        var registry = services.GetService<DurableFunctionRegistry>();
+        var resolved = options.Clone();
+        var newTools = new List<AITool>(tools.Count);
+        foreach (var tool in tools)
+        {
+            if (tool is ToolNamePlaceholder placeholder)
+            {
+                if (registry is not null
+                    && registry.TryGetValue(placeholder.Name, out var realTool))
+                {
+                    newTools.Add(realTool);
+                }
+                // If the registry doesn't know the tool, drop it silently — the caller asked
+                // for a name we cannot satisfy, and feeding a non-invocable placeholder to the
+                // LLM would fail later in a less clear way.
+            }
+            else
+            {
+                newTools.Add(tool);
+            }
+        }
+        resolved.Tools = newTools;
+        return resolved;
     }
 
     /// <summary>
