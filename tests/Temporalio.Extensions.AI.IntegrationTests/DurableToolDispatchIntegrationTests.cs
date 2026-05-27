@@ -16,6 +16,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Common;
 using Temporalio.Exceptions;
 using Temporalio.Extensions.AI.IntegrationTests.Helpers;
 using Temporalio.Extensions.Hosting;
@@ -629,15 +630,22 @@ public class DurableToolDispatchIntegrationTests
     }
 
     /// <summary>
-    /// Test 11: the silent-failure safety net.
-    /// Middleware path (<c>DurableChatClient</c>) + <c>AddDurableTools</c> registered
-    /// + scripted LLM returns <see cref="FunctionCallContent"/> with no dispatch handler
-    /// → expect <c>DurableToolsNotWrappedException</c> at runtime.
+    /// Test 11: the silent-failure safety net. Custom workflow invokes
+    /// <c>GetResponseAsync</c> directly (NOT via <c>DurableChatSessionClient</c>),
+    /// scripted LLM returns <see cref="FunctionCallContent"/>, and the chat-client
+    /// chain contains no <c>FunctionInvokingChatClient</c> — meaning nothing would
+    /// actually dispatch the returned tool calls. The runtime check in
+    /// <c>GetResponseAsync</c> must throw <c>DurableToolsNotWrappedException</c>
+    /// to surface the misconfiguration loudly.
     /// </summary>
-    [Fact(Skip = "TODO: Test setup uses DurableChatSessionClient + AddDurableTools, which activates Pattern 3 (intent-based), not the middleware path. Pattern 3's dispatch loop routes through GetChatStepAsync where the runtime check is not wired; the silent-failure check lives in GetResponseAsync. Need a redesigned test that drives the actual middleware path via a custom workflow + DurableChatClient.")]
+    [Fact]
     public async Task DurableToolsNotWrappedException_ThrowsOnSilentFailure()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await WorkflowEnvironment.StartLocalAsync(
+            new WorkflowEnvironmentStartLocalOptions
+            {
+                DataConverter = DurableAIDataConverter.Instance,
+            });
 
         var harness = new ScriptedToolHarness();
         var weatherTool = harness.BuildAlwaysSucceeds("get_weather", "weather", _ => "n/a");
@@ -703,11 +711,27 @@ public class DurableToolDispatchIntegrationTests
     /// Test 12: when the caller passes an explicit subset of tools via
     /// <see cref="ChatOptions.Tools"/>, the activity must NOT overwrite that with
     /// the full registry. Verifies the "respect explicit pass" promise of OD-1.
+    ///
+    /// Originally skipped because AITool/AIFunction instances couldn't survive JSON
+    /// serialization across the workflow→activity boundary (they wrap delegates).
+    /// Resolved by <see cref="ChatOptionsToolsJsonConverter"/>, which serializes the
+    /// tool subset as a <c>$toolNames</c> name sidecar and reconstitutes placeholder
+    /// AIFunction instances on the activity side; <c>SwapPlaceholderTools</c> then
+    /// swaps them for real registry entries by name before the LLM call.
     /// </summary>
-    [Fact(Skip = "TODO: AITool/AIFunction instances do not survive JSON serialization across the workflow→activity boundary (they contain delegates). The activity receives ChatOptions.Tools as null/empty and triggers auto-population from the registry, overwriting the caller's explicit subset. To honor OD-1's 'respect explicit pass' promise, Pattern 3 needs to track caller's tool subset via tool NAMES (string[]) instead of AITool instances. Filed as follow-up.")]
+    [Fact]
     public async Task AutoPopulation_RespectsExplicitChatOptionsTools()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        // ChatOptionsToolsJsonConverter only applies through DurableAIDataConverter; the
+        // embedded server's default client uses DataConverter.Default, which has no MEAI
+        // polymorphism wiring and would silently drop Tools on the workflow-update wire.
+        // Production code gets the converter auto-wired via AddTemporalClient / 3-arg
+        // AddHostedTemporalWorker / DurableAIPlugin; tests have to set it explicitly.
+        await using var env = await WorkflowEnvironment.StartLocalAsync(
+            new WorkflowEnvironmentStartLocalOptions
+            {
+                DataConverter = DurableAIDataConverter.Instance,
+            });
 
         var harness = new ScriptedToolHarness();
         var weather = harness.BuildAlwaysSucceeds("weather", "Weather", _ => "sunny");
@@ -836,6 +860,9 @@ public sealed class MiddlewareChatWorkflow
             {
                 StartToCloseTimeout = TimeSpan.FromSeconds(30),
                 HeartbeatTimeout = TimeSpan.FromSeconds(10),
+                // DurableToolsNotWrappedException is a misconfiguration; retrying does not
+                // recover. Bound to one attempt so the failure surfaces fast.
+                RetryPolicy = new RetryPolicy { MaximumAttempts = 1 },
             });
 
         return response.Messages.Count > 0 ? response.Messages[0].Text ?? string.Empty : string.Empty;
