@@ -1,7 +1,7 @@
 // OpenTelemetry sample — demonstrates how to configure distributed tracing for
 // Temporalio.Extensions.AI, showing the full span hierarchy produced by a
 // durable chat session.
-// Run:  dotnet run --project samples/MEAI/OpenTelemetry/OpenTelemetry.csproj
+// Run:  dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
 
 #pragma warning disable TAI001 // Opt in to the experimental plugin surface (DurableAIPlugin, AddWorkerPlugin)
 
@@ -14,13 +14,24 @@ using Microsoft.Extensions.Logging;
 using OpenAI;
 using OpenTelemetry.Trace;
 using Temporalio.Client;
+using Temporalio.Common;
 using Temporalio.Extensions.AI;
-using Temporalio.Extensions.Hosting;
 using Temporalio.Extensions.OpenTelemetry;
+
+// Enable the OpenAI .NET SDK's experimental OpenTelemetry instrumentation.
+// Without this switch, AddSource("OpenAI.*") in the tracing config below matches
+// nothing emitted by the OpenAI client — verified at
+// https://github.com/openai/openai-dotnet/blob/main/docs/Observability.md
+AppContext.SetSwitch("OpenAI.Experimental.EnableOpenTelemetry", true);
 
 // ── Setup: Build the application host ────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
+// Quiet down the host lifetime/info categories so the console exporter's span
+// output isn't interleaved with "Application started." / "Hosting environment:"
+// log lines. Spans dominate the console; lifecycle events still show on error.
+builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Error);
+builder.Logging.AddFilter("Microsoft.Extensions.Hosting", LogLevel.Error);
 
 var apiKey = builder.Configuration.GetValue<string>("OPENAI_API_KEY");
 var apiBaseUrl = builder.Configuration.GetValue<string>("OPENAI_API_BASE_URL");
@@ -28,7 +39,10 @@ var model = builder.Configuration.GetValue<string>("OPENAI_MODEL") ?? "gpt-4o-mi
 var temporalAddress = builder.Configuration.GetValue<string>("TEMPORAL_ADDRESS") ?? "localhost:7233";
 
 if (string.IsNullOrEmpty(apiBaseUrl))
-    throw new InvalidOperationException("OPENAI_API_BASE_URL is not configured in appsettings.json.");
+    throw new InvalidOperationException(
+        "OPENAI_API_BASE_URL is not configured. Set it in appsettings.json, " +
+        "as an environment variable, or via " +
+        "`dotnet user-secrets set OPENAI_API_BASE_URL https://api.openai.com/v1 --project samples/MEAI/OpenTelemetry`.");
 if (string.IsNullOrEmpty(apiKey))
     throw new InvalidOperationException("OPENAI_API_KEY is not configured. Set it with: dotnet user-secrets set \"OPENAI_API_KEY\" \"sk-...\" --project samples/MEAI/OpenTelemetry");
 
@@ -41,7 +55,17 @@ builder.Services
         .AddSource(TracingInterceptor.ClientSource.Name)
         .AddSource(TracingInterceptor.WorkflowsSource.Name)
         .AddSource(TracingInterceptor.ActivitiesSource.Name)
-        .AddConsoleExporter());
+        .AddSource("OpenAI.*")
+        .AddHttpClientInstrumentation()
+        .AddConsoleExporter()
+        // Production OTLP exporter — uncomment when ready to ship traces to Jaeger / Tempo /
+        // Honeycomb / Datadog / Grafana Cloud. Reads OTEL_EXPORTER_OTLP_ENDPOINT automatically
+        // (default http://localhost:4317 for gRPC, http://localhost:4318 for HTTP/protobuf).
+        // SECURITY: requires https:// in production, plus OTEL_EXPORTER_OTLP_HEADERS for SaaS
+        // backend auth — set via secrets manager, never plaintext env var (leaks via /proc,
+        // container metadata, crash dumps). See README "Going to Production" section.
+        // .AddOtlpExporter()
+        );
 
 // ── Setup: Connect Temporal client with TracingInterceptor + DurableAIDataConverter
 //
@@ -69,16 +93,18 @@ builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 // AddChatClient is the idiomatic MEAI DI pattern — it returns a ChatClientBuilder
 // for chaining middleware, then Build() registers the final IChatClient singleton.
 // DurableChatActivities constructor-injects the unkeyed IChatClient on the worker
-// side; this is the client it calls when executing the durable_chat.turn activity.
+// side; this is the client it calls when executing the GetResponse activity
+// (which produces the leaf `chat {modelId}` span).
 IChatClient openAiChatClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) }
 ).GetChatClient(model).AsIChatClient();
 
-builder.Services
-    .AddChatClient(openAiChatClient)
-    .UseFunctionInvocation()   // handles tool call loops inside the activity
-    .Build();
+// This sample registers no tools, so we deliberately do NOT chain
+// .UseFunctionInvocation() — with zero tools, the middleware is a no-op and
+// would mislead readers about the span hierarchy. To see per-tool spans, look
+// at samples/MEAI/DurableTools or samples/MEAI/DurableChat (Pattern 3).
+builder.Services.AddChatClient(openAiChatClient);
 
 // ── Setup: Register worker + durable AI via the plugin path ─────────────────
 // AddWorkerPlugin(DurableAIPlugin) is the canonical pattern for AI integrations.
@@ -91,7 +117,13 @@ builder.Services
     .AddWorkerPlugin(new DurableAIPlugin(opts =>
     {
         opts.ActivityTimeout = TimeSpan.FromMinutes(5);
+        // Demo-friendly TTL (default is 14 days). The sample finishes in seconds;
+        // long TTLs only matter for production sessions that may sit idle between turns.
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
+        // Without this, RetryPolicy is null and Temporal applies its built-in
+        // "retry forever" default — a footgun for transient failures. LLM
+        // activities are generally idempotent, so 3 attempts is a sensible cap.
+        opts.RetryPolicy = new RetryPolicy { MaximumAttempts = 3 };
     }));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
@@ -99,13 +131,37 @@ var host = builder.Build();
 await host.StartAsync();
 
 Console.WriteLine("Worker started. OpenTelemetry console exporter is active.\n");
+Console.WriteLine("--- spans ---\n");
 
 var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
 
+// Track every conversation we start so we can signal Shutdown to each running
+// workflow before the host exits (see "Shutdown" block below).
+var conversationIds = new List<string>();
+
 // ── Run multi-turn conversation ───────────────────────────────────────────────
-await RunMultiTurnDemoAsync(sessionClient);
+conversationIds.AddRange(await RunMultiTurnDemoAsync(sessionClient));
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
+// Each demo starts a Temporal workflow that survives host.StopAsync() — the host
+// only stops the worker process, not the workflows running on the Temporal
+// server. Without an explicit Shutdown signal, those workflows sit parked for
+// SessionTimeToLive (1h above) burning workflow slots and cluttering the UI on
+// re-runs. Signal each one so DurableChatWorkflowBase.RequestShutdownAsync
+// triggers a clean completion of the workflow loop.
+foreach (var conversationId in conversationIds)
+{
+    try
+    {
+        var handle = temporalClient.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
+        await handle.SignalAsync("Shutdown", Array.Empty<object>());
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($" [shutdown] Failed to signal {conversationId}: {ex.Message}");
+    }
+}
+
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
 Console.WriteLine("Done.");
 
@@ -119,12 +175,12 @@ Console.WriteLine("Done.");
 //   durable_chat.send (conversation.id = <id>)
 //     UpdateWorkflow:Chat
 //       RunActivity:GetResponse
-//         durable_chat.turn (conversation.id, gen_ai.usage.*)
+//         chat {modelId} (conversation.id, gen_ai.usage.*)
 //
-// The conversation.id attribute is the same on both the send and turn spans,
+// The conversation.id attribute is the same on both the send and leaf spans,
 // making it easy to filter all traces for a single session in your backend.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
+static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
     Console.WriteLine(" Multi-Turn Conversation with OpenTelemetry Tracing");
@@ -155,8 +211,10 @@ static async Task RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
     Console.WriteLine("   durable_chat.send");
     Console.WriteLine("     UpdateWorkflow:Chat");
     Console.WriteLine("       RunActivity:GetResponse");
-    Console.WriteLine("         durable_chat.turn");
+    Console.WriteLine("         chat {modelId}");
     Console.WriteLine();
     Console.WriteLine($" Filter by tag conversation.id = {conversationId}");
     Console.WriteLine("════════════════════════════════════════════════════════\n");
+
+    return new[] { conversationId };
 }
