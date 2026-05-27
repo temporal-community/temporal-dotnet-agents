@@ -15,7 +15,6 @@ using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Hosting;
-using Temporalio.Workflows;
 
 // ── Setup: Build the application host ────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -45,7 +44,9 @@ var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnect
 builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 
 // ── Setup: Register IChatClient ───────────────────────────────────────────────
-// UseFunctionInvocation handles the tool call loop inside the activity.
+// UseFunctionInvocation() handles the tool-call loop. This client is injected into
+// ShoppingActivities (constructor parameter `IChatClient chatClient`), so the loop
+// runs inside the activity.
 IChatClient openAiChatClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) }
@@ -57,18 +58,19 @@ builder.Services
     .Build();
 
 // ── Setup: Register worker ────────────────────────────────────────────────────
-// AddDurableAI registers supporting infrastructure (options, DataConverter, activities).
-// RegisterDefaultWorkflow = false skips the default DurableChatWorkflow since we use
-// ShoppingAssistantWorkflow instead.
+// AddDurableAI wires supporting infrastructure for this sample: options binding, the
+// DurableAIDataConverter, and the library's internal DurableChatActivities. We do NOT
+// resolve DurableChatSessionClient here — turns are driven by our own ShoppingAssistantWorkflow
+// + ShoppingActivities, and RegisterDefaultWorkflow = false suppresses the library's
+// stock DurableChatWorkflow so only the custom workflow is on the worker.
 // AddWorkflow<ShoppingAssistantWorkflow> registers the custom workflow type.
 // AddSingletonActivities<ShoppingActivities> registers the shopping activity class.
 builder.Services
     .AddHostedTemporalWorker(taskQueue)
     .AddDurableAI(opts =>
     {
-        opts.ActivityTimeout = TimeSpan.FromMinutes(5);
-        opts.SessionTimeToLive = TimeSpan.FromHours(1);
-        opts.RegisterDefaultWorkflow = false;  // Use custom workflow instead
+        // no DurableChatSessionClient used; turn off default-workflow registration
+        opts.RegisterDefaultWorkflow = false;
     })
     .AddWorkflow<ShoppingAssistantWorkflow>()
     .AddSingletonActivities<ShoppingActivities>();
@@ -87,7 +89,10 @@ Console.WriteLine("════════════════════�
 var workflowId = $"shopping-{Guid.NewGuid():N}";
 Console.WriteLine($" Session ID: {workflowId}\n");
 
-// Start the ShoppingAssistantWorkflow. It runs until idle TTL or Shutdown signal.
+// Start the ShoppingAssistantWorkflow. The base session loop runs until idle TTL elapses,
+// the Shutdown signal arrives, history reaches MaxEntryCount, or Workflow.ContinueAsNewSuggested
+// fires — see DurableChatWorkflowBase.RunAsync (lines 213-247). The latter two exits
+// continue-as-new into a fresh run with carried history.
 var handle = await temporalClient.StartWorkflowAsync(
     (ShoppingAssistantWorkflow wf) => wf.RunAsync(new DurableChatWorkflowInput
     {

@@ -31,12 +31,14 @@ Program.cs
                          └─ returns ShoppingTurnOutput { Response, CartActions }
 ```
 
+Note: cart tools execute inline inside the single `ShoppingActivity` invocation via `UseFunctionInvocation()`. They are NOT dispatched as separate Temporal activities. For per-tool activity dispatch with retry/timeout isolation, see `samples/MEAI/DurableTools/`.
+
 ## Highlights
 
 - **Typed update responses.** `[WorkflowUpdate("Shop")]` returns `ShoppingTurnOutput`, carrying both the assistant's `ChatResponse` and the `IReadOnlyList<CartAction>` mutated during tool calls. The stock `DurableChatWorkflow.ChatAsync` returns a `DurableSessionResponse` that wraps the LLM's `ChatResponse` — useful, but it cannot carry domain-specific structured data the way a custom workflow can.
-- **Cart tools live in the activity, not the workflow.** `ShoppingActivities.GetShoppingResponseAsync` defines `add_to_cart` and `remove_from_cart` as local `AIFunction` instances that close over a per-invocation `List<CartAction>`. This keeps side-effect capture inside the activity boundary — correct for Temporal's determinism model.
+- **Cart tools are inline closures executed inside a single activity.** `ShoppingActivities.GetShoppingResponseAsync` defines `add_to_cart` and `remove_from_cart` as local `AIFunction` instances that close over a per-invocation `List<CartAction>`, then passes them via `ChatOptions.Tools` to an `IChatClient` configured with `UseFunctionInvocation()`. The whole tool-call loop runs inside one `ShoppingActivity` execution — this is Pattern 1 (in-activity tool dispatch) hosted inside a custom workflow shell, not Pattern 2. For per-tool activity dispatch with retry/timeout isolation, see the `DurableTools` sample which wraps tools with `.AsDurable()` (Pattern 2).
 - **`RegisterDefaultWorkflow = false`.** Passing this option to `AddDurableAI` prevents the library from registering `DurableChatWorkflow` on the worker. This avoids a conflict when the custom workflow is registered instead, and signals intent clearly.
-- **Base class handles history and continue-as-new.** `DurableChatWorkflowBase<TOutput>` manages conversation history accumulation, the idle TTL loop, continue-as-new transitions, HITL approval handlers, and the `RequestShutdownAsync` signal. The subclass only needs to implement the three abstract members — `ExecuteTurnAsync`, `BuildResponseEntry`, and `CreateContinueAsNewException` — and call `RunTurnAsync` from its own `[WorkflowUpdate]` handler.
+- **Base class handles history and continue-as-new.** `DurableChatWorkflowBase<TOutput>` manages conversation history accumulation, the idle TTL loop, continue-as-new transitions, HITL approval handlers, and the `RequestShutdownAsync` signal. The base's `RunAsync` is `protected virtual` and is **not** annotated with `[WorkflowRun]` (see `DurableChatWorkflowBase.cs` line 183), so the subclass must declare its own `[WorkflowRun] public new Task RunAsync(DurableChatWorkflowInput input)` that delegates to `base.RunAsync(input)`. Beyond that, the subclass implements the three abstract members — `ExecuteTurnAsync`, `BuildResponseEntry`, and `CreateContinueAsNewException` — and calls `RunTurnAsync` from its own `[WorkflowUpdate]` handler.
 
 ## Getting Started
 
@@ -44,13 +46,17 @@ Program.cs
 
 - [.NET 10 SDK](https://dot.net) or later
 - A local Temporal server: `temporal server start-dev`
-- An OpenAI-compatible API key
+- An OpenAI-compatible API key (`OPENAI_API_KEY`)
+- An OpenAI-compatible base URL (`OPENAI_API_BASE_URL`) — required; `Program.cs` throws `InvalidOperationException` if missing
+- Optionally, `OPENAI_MODEL` to override the default (`gpt-4o-mini`)
 
 ### Configure API credentials
 
 ```bash
 dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MEAI/CustomWorkflow
 dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --project samples/MEAI/CustomWorkflow
+# Optional:
+# dotnet user-secrets set "OPENAI_MODEL" "gpt-4o-mini" --project samples/MEAI/CustomWorkflow
 ```
 
 ### Run
@@ -62,7 +68,11 @@ dotnet run --project samples/MEAI/CustomWorkflow/CustomWorkflow.csproj
 ### Expected Output
 
 ```
+Worker started.
+
+════════════════════════════════════════════════════════
  Demo: Custom Workflow Output (ShoppingAssistant)
+════════════════════════════════════════════════════════
  Session ID: shopping-<guid>
 
  Turn 1 — Add to cart
@@ -74,4 +84,8 @@ dotnet run --project samples/MEAI/CustomWorkflow/CustomWorkflow.csproj
    Assistant: I've removed the Blue Widget (SKU-001) from your cart.
    Cart actions:
      [REMOVE] Blue Widget (SKU: SKU-001)
+
+════════════════════════════════════════════════════════
+
+Done.
 ```

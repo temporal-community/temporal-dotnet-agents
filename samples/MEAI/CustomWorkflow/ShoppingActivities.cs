@@ -68,25 +68,43 @@ internal sealed class ShoppingActivities(
             name: "remove_from_cart",
             description: "Remove a product from the shopping cart by product ID.");
 
-        // Merge the caller's ChatOptions with the cart tools.
-        var options = new ChatOptions
+        // Clone the caller's ChatOptions so every field (ModelId, Seed, StopSequences,
+        // ResponseFormat, AdditionalProperties, Instructions, etc.) is preserved, then
+        // overwrite Tools with the cart tools the LLM needs to see this turn.
+        // ChatOptions.Clone() is the MEAI-supplied shallow-copy constructor.
+        var options = input.Options?.Clone() ?? new ChatOptions();
+        options.Tools = [addToCart, removeFromCart];
+        options.ToolMode ??= ChatToolMode.Auto;
+
+        // The Temporal SDK does NOT auto-heartbeat. The LLM + UseFunctionInvocation() tool
+        // loop inside GetResponseAsync can easily exceed the default 2-minute HeartbeatTimeout.
+        // Run a background task that heartbeats every 30 seconds (well under the default)
+        // for the duration of the call. Same pattern as samples/MEAI/HumanInTheLoop.
+        using var hbCts = new CancellationTokenSource();
+        var heartbeatTask = Task.Run(async () =>
         {
-            Tools = [addToCart, removeFromCart],
-            ToolMode = input.Options?.ToolMode ?? ChatToolMode.Auto,
-            Temperature = input.Options?.Temperature,
-            MaxOutputTokens = input.Options?.MaxOutputTokens,
-            TopP = input.Options?.TopP,
-            FrequencyPenalty = input.Options?.FrequencyPenalty,
-            PresencePenalty = input.Options?.PresencePenalty,
-        };
+            while (!hbCts.Token.IsCancellationRequested)
+            {
+                try { await Task.Delay(TimeSpan.FromSeconds(30), hbCts.Token); }
+                catch (OperationCanceledException) { break; }
+                if (!hbCts.Token.IsCancellationRequested)
+                    ctx.Heartbeat($"turn-{input.TurnNumber}");
+            }
+        }, hbCts.Token);
 
-        // Heartbeat for long-running LLM calls.
-        ctx.Heartbeat($"turn-{input.TurnNumber}");
-
-        var response = await chatClient.GetResponseAsync(
-            input.Messages,
-            options,
-            ct).ConfigureAwait(false);
+        ChatResponse response;
+        try
+        {
+            response = await chatClient.GetResponseAsync(
+                input.Messages,
+                options,
+                ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            await hbCts.CancelAsync();
+            await heartbeatTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
 
         _logger.LogDebug(
             "Shopping activity completed for conversation {ConversationId}, turn {TurnNumber}. CartActions: {CartActionCount}",

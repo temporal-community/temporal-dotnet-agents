@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Common;
 using Temporalio.Extensions.AI;
 using Temporalio.Workflows;
 
@@ -13,9 +14,11 @@ namespace CustomWorkflow;
 [Workflow("CustomWorkflow.ShoppingAssistant")]
 public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<ShoppingTurnOutput>
 {
-    // Per-turn metadata captured by ShopAsync before the base session loop dispatches
-    // the activity. Read inside ExecuteTurnAsync to populate the activity input.
-    private string? _lastConversationId;
+    // Per-turn metadata keyed by correlation ID. Populated in ShopAsync before
+    // dispatching to RunTurnAsync; read inside ExecuteTurnAsync and removed after use.
+    // Keying by correlation ID (vs. a scalar field) avoids the race where a second
+    // Shop update overwrites the first turn's value while it is still awaiting its activity.
+    private readonly Dictionary<string, string> _conversationIdByCorrelation = new();
 
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
@@ -39,16 +42,27 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
     [WorkflowUpdate("Shop")]
     public async Task<ShoppingTurnOutput> ShopAsync(DurableChatInput input)
     {
-        // Capture per-turn metadata for ExecuteTurnAsync.
-        _lastConversationId = input.ConversationId;
-
         // Build the request entry — factory auto-generates the correlation ID via
         // Workflow.NewGuid() when the caller did not supply one.
         var messages = input.Messages as IReadOnlyList<ChatMessage> ?? input.Messages.ToList();
         var requestEntry = DurableSessionRequest.FromMessages(messages, input.CorrelationId);
 
-        var (output, _) = await RunTurnAsync(requestEntry, input.Options);
-        return output;
+        // Stash per-turn metadata keyed by the correlation ID so concurrent Shop updates
+        // cannot stomp on each other's values while waiting on the _isProcessing mutex.
+        if (!string.IsNullOrEmpty(input.ConversationId))
+        {
+            _conversationIdByCorrelation[requestEntry.CorrelationId] = input.ConversationId;
+        }
+
+        try
+        {
+            var (output, _) = await RunTurnAsync(requestEntry, input.Options);
+            return output;
+        }
+        finally
+        {
+            _conversationIdByCorrelation.Remove(requestEntry.CorrelationId);
+        }
     }
 
     /// <summary>
@@ -74,17 +88,31 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
             .SelectMany(e => e.Messages)
             .ToList();
 
+        var conversationId = _conversationIdByCorrelation.TryGetValue(
+            requestEntry.CorrelationId, out var stashed)
+                ? stashed
+                : Workflow.Info.WorkflowId;
+
         var activityInput = new DurableChatInput
         {
             Messages = activityMessages,
             Options = chatOptions,
-            ConversationId = _lastConversationId ?? Workflow.Info.WorkflowId,
+            ConversationId = conversationId,
             TurnNumber = CurrentTurnNumber,
             CorrelationId = requestEntry.CorrelationId,
         };
+        // Sample-specific hardening: this activity wraps non-idempotent cart mutations
+        // (add_to_cart / remove_from_cart closures inside GetShoppingResponseAsync) plus a
+        // non-deterministic LLM call. The base class leaves RetryPolicy unset, which lets the
+        // Temporal server default (retry forever) apply — that would re-invoke the LLM on any
+        // transient failure and risk duplicating cart side effects. Cap attempts at 1 so the
+        // turn fails fast and the caller can re-issue the Shop update explicitly.
+        // NOT a general rule: idempotent activities should keep the default retry behavior.
+        var hardened = (ActivityOptions)activityOptions.Clone();
+        hardened.RetryPolicy = new RetryPolicy { MaximumAttempts = 1 };
         return Workflow.ExecuteActivityAsync(
             (ShoppingActivities a) => a.GetShoppingResponseAsync(activityInput),
-            activityOptions);
+            hardened);
     }
 
     protected override ContinueAsNewException CreateContinueAsNewException(
