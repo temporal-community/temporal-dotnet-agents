@@ -23,7 +23,7 @@ sessionClient.ChatAsync(...)           ← starts; blocks inside tool
            ├─ handle.ExecuteUpdateAsync("RequestApproval", ...)
            │       workflow: stores request, WaitConditionAsync
            │
-           └─ [suspended — activity stays alive via heartbeat]
+           └─ [suspended — background task heartbeats every 4 min to keep activity alive]
 
 sessionClient.GetPendingApprovalAsync(conversationId)   ← returns pending request
 sessionClient.SubmitApprovalAsync(conversationId, decision)
@@ -37,7 +37,8 @@ ChatAsync returns with assistant's final message
 
 ## Highlights
 
-- **No spin-wait in the workflow.** The workflow blocks on `WaitConditionAsync` until `_approvalDecision` is set. The activity heartbeats to prevent timeout. No timers, no polling loops, no wasted server resources.
+- **No spin-wait in the workflow.** The workflow blocks on `WaitConditionAsync` until `_approvalDecision` is set. No timers, no polling loops, no wasted server resources.
+- **Heartbeating is manual — the SDK does not do it automatically.** Once LLM token streaming ends, the activity goes silent. A background `Task` inside the tool closure calls `ActivityExecutionContext.Current.Heartbeat(...)` every 4 minutes (well under the 10-minute `HeartbeatTimeout`) for the duration of the `ExecuteUpdateAsync` wait. Without this, the server would declare the activity failed after `HeartbeatTimeout` and schedule a retry, re-issuing the approval request.
 - **`ActivityTimeout` must cover human review time.** If the activity times out before approval arrives, Temporal will retry it — re-triggering the tool and issuing a duplicate approval request. Set both `ActivityTimeout` and `ApprovalTimeout` to a value comfortably longer than your expected review window.
 - **`RequestApproval` is a `[WorkflowUpdate]`, not a signal.** Updates are synchronous from the caller's perspective — `ExecuteUpdateAsync` blocks until the update handler returns, which is after `SubmitApprovalAsync` resolves the `WaitConditionAsync`.
 - **The conversation is fully preserved during suspension.** Because the workflow holds history in-memory (persisted via Temporal), the LLM receives the complete tool result when it resumes — no message re-assembly required.
@@ -65,8 +66,26 @@ dotnet run --project samples/MEAI/HumanInTheLoop/HumanInTheLoop.csproj
 
 ### Expected Output
 
+> Tool and main-thread output can interleave slightly depending on scheduling.
+> The order below reflects the typical sequence.
+
 ```
+╔══════════════════════════════════════════════════════════╗
+║   Data Management Assistant — HITL Approval Sample       ║
+╠══════════════════════════════════════════════════════════╣
+║  The assistant can delete records but requires approval.  ║
+║  This sample auto-approves to demonstrate the full flow.  ║
+╚══════════════════════════════════════════════════════════╝
+
+════════════════════════════════════════════════════════════
+ Demo: Human-in-the-Loop Tool Approval
+════════════════════════════════════════════════════════════
+ Conversation ID: hitl-demo-<guid>
+
  User : Delete all records older than 30 days.
+
+ [Main] Chat started — polling for pending approval...
+
 
  [Tool] delete_records called (olderThan=30 days)
  [Tool] Sending approval request to workflow...
@@ -76,12 +95,19 @@ dotnet run --project samples/MEAI/HumanInTheLoop/HumanInTheLoop.csproj
  ╠══════════════════════════════════════════════════╣
  ║  Request ID  : a3f1b2c4...                       ║
  ║  Function    : delete_records                    ║
+ ║  Description : Permanently delete all records old║
  ╚══════════════════════════════════════════════════╝
 
  [Reviewer] Auto-approving request to demonstrate the full flow...
- [Tool] Approval decision received: APPROVED
- [Tool] Deleting records older than 30 days...
+ [Reviewer] Approval submitted — waiting for assistant response...
 
+ [Tool] Approval decision received: APPROVED
+ [Tool] Reason: Auto-approved by sample reviewer.
+ [Tool] Deleting records older than 30 days...
  Assistant: I have successfully deleted all records older than 30 days.
+
  [History] 6 messages persisted in workflow state.
+════════════════════════════════════════════════════════════
+
+Done.
 ```

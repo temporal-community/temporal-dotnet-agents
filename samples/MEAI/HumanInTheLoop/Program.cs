@@ -11,9 +11,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
+using Temporalio.Activities;
 using Temporalio.Client;
 using Temporalio.Extensions.AI;
-using Temporalio.Extensions.Hosting;
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -66,11 +66,18 @@ builder.Services
     .AddHostedTemporalWorker(taskQueue)
     .AddDurableAI(opts =>
     {
-        // Leave headroom for the full review window.
-        opts.ActivityTimeout  = TimeSpan.FromHours(24);
-        opts.HeartbeatTimeout = TimeSpan.FromMinutes(5);
-        opts.ApprovalTimeout  = TimeSpan.FromHours(24);
-        opts.SessionTimeToLive = TimeSpan.FromHours(2);
+        // These three values must move together:
+        //   SessionTimeToLive >= ActivityTimeout >= ApprovalTimeout
+        //
+        // SessionTimeToLive controls when the workflow exits its main loop. If it fires
+        // before ApprovalTimeout, the pending RequestApproval update coroutine is cancelled
+        // abruptly — the caller receives an update-failure error instead of a clean
+        // DurableApprovalDecision. ActivityTimeout must also outlast the approval window
+        // so the activity hosting the tool-call loop isn't retried mid-wait.
+        opts.ActivityTimeout   = TimeSpan.FromHours(24);
+        opts.HeartbeatTimeout  = TimeSpan.FromMinutes(10);
+        opts.ApprovalTimeout   = TimeSpan.FromHours(24);
+        opts.SessionTimeToLive = TimeSpan.FromHours(26);  // must exceed ApprovalTimeout
     });
 
 // ── Build and start host ──────────────────────────────────────────────────────
@@ -149,29 +156,50 @@ static async Task RunHitlDemoAsync(
             Console.WriteLine(" [Tool] Sending approval request to workflow...");
 
             // ── Step 2: Send the RequestApproval update ───────────────────
-            // The workflow ID is "{prefix}{conversationId}". The prefix is
-            // "chat-" by default (DurableExecutionOptions.WorkflowIdPrefix).
-            // We construct it the same way DurableChatSessionClient does.
+            // sessionClient.GetWorkflowId() constructs "{WorkflowIdPrefix}{conversationId}",
+            // keeping the prefix in sync with DurableExecutionOptions.WorkflowIdPrefix.
+            // Do NOT hardcode "chat-" — if the prefix is changed in options, this must follow.
             //
-            // DurableChatWorkflow is internal to the library, so we use the
-            // untyped GetWorkflowHandle(workflowId) overload and call the update
-            // by its registered name ("RequestApproval") with an argument array.
+            // DurableChatWorkflow is internal to the library, so we use the untyped
+            // GetWorkflowHandle overload and call the update by its registered name.
             //
-            // ExecuteUpdateAsync blocks until the workflow's RequestApprovalAsync
-            // update handler returns — which only happens after SubmitApprovalAsync
-            // is called. The activity (and therefore this tool invocation) remains
-            // suspended in Temporal until then.
-            var workflowId = $"chat-{conversationId}";
+            // ExecuteUpdateAsync blocks until the RequestApprovalAsync handler returns,
+            // which only happens after SubmitApprovalAsync is called externally.
+            //
+            // IMPORTANT: The Temporal SDK does NOT automatically heartbeat activities.
+            // Heartbeats only fired during LLM token streaming (in GetResponseAsync). Once
+            // the streaming loop ends and this tool closure begins, the activity goes silent.
+            // Without a background heartbeat, the server will declare the activity failed
+            // after HeartbeatTimeout — retrying the activity and re-issuing this request.
+            // We run a background task that heartbeats every 4 minutes (well under the
+            // 10-minute HeartbeatTimeout) for the duration of the approval wait.
+            var workflowId = sessionClient.GetWorkflowId(conversationId);
             var handle     = temporalClient.GetWorkflowHandle(workflowId);
 
-            // This line suspends until a human calls SubmitApprovalAsync.
-            // The DurableChatWorkflow.RequestApprovalAsync [WorkflowUpdate("RequestApproval")] handler:
-            //   • stores the request in _pendingApproval
-            //   • waits on WaitConditionAsync until _approvalDecision is set
-            //   • returns the decision once SubmitApprovalAsync sets _approvalDecision
-            var decision = await handle.ExecuteUpdateAsync<DurableApprovalDecision>(
-                "RequestApproval",
-                new object[] { request });
+            using var hbCts = new CancellationTokenSource();
+            var heartbeatTask = Task.Run(async () =>
+            {
+                while (!hbCts.Token.IsCancellationRequested)
+                {
+                    try { await Task.Delay(TimeSpan.FromMinutes(4), hbCts.Token); }
+                    catch (OperationCanceledException) { break; }
+                    if (!hbCts.Token.IsCancellationRequested)
+                        ActivityExecutionContext.Current.Heartbeat("waiting-for-approval");
+                }
+            }, hbCts.Token);
+
+            DurableApprovalDecision decision;
+            try
+            {
+                decision = await handle.ExecuteUpdateAsync<DurableApprovalDecision>(
+                    "RequestApproval",
+                    new object[] { request });
+            }
+            finally
+            {
+                await hbCts.CancelAsync();
+                await heartbeatTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
 
             Console.WriteLine($" [Tool] Approval decision received: {(decision.Approved ? "APPROVED" : "REJECTED")}");
             if (decision.Reason is { Length: > 0 })
@@ -219,6 +247,8 @@ static async Task RunHitlDemoAsync(
     };
 
     // Start chat in the background — it will block inside the tool waiting for approval.
+    // Note: the chat task is NOT awaited here. It runs concurrently so the main thread
+    // can poll for the pending approval request and submit a decision.
     var chatTask = sessionClient.ChatAsync(
         conversationId,
         [systemMessage, new ChatMessage(ChatRole.User, userQuestion)],
@@ -234,7 +264,11 @@ static async Task RunHitlDemoAsync(
     {
         await Task.Delay(TimeSpan.FromSeconds(1));
 
-        if (chatTask.IsCompleted) break;
+        // Check for faults before querying — a faulted task has IsCompleted == true
+        // so the while predicate will exit on the next tick, but the misleading
+        // "no approval gate" message would print. Surface the fault explicitly here.
+        if (chatTask.IsFaulted)
+            await chatTask; // rethrows the underlying exception
 
         try
         {
@@ -258,9 +292,10 @@ static async Task RunHitlDemoAsync(
         Console.WriteLine(" ║           APPROVAL REQUIRED                      ║");
         Console.WriteLine(" ╠══════════════════════════════════════════════════╣");
         Console.WriteLine($" ║  Request ID  : {pending.RequestId[..8]}...                       ║");
-        Console.WriteLine($" ║  Function    : {pending.FunctionName,-38}║");
+        var fnName = pending.FunctionName ?? string.Empty;
+        Console.WriteLine($" ║  Function    : {fnName[..Math.Min(34, fnName.Length)],-34}║");
         if (pending.Description is { Length: > 0 })
-            Console.WriteLine($" ║  Description : {pending.Description[..Math.Min(38, pending.Description.Length)],-38}║");
+            Console.WriteLine($" ║  Description : {pending.Description[..Math.Min(34, pending.Description.Length)],-34}║");
         Console.WriteLine(" ╚══════════════════════════════════════════════════╝");
         Console.WriteLine();
 
