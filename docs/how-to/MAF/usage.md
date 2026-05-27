@@ -134,20 +134,21 @@ The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined
 5. [Structured Output](#structured-output)
 6. [Tool Filtering](#tool-filtering)
 7. [Agent Orchestration (Inside Workflows)](#agent-orchestration-inside-workflows)
-8. [Session Identity](#session-identity)
-9. [Session TTL](#session-ttl)
-10. [Activity Timeouts](#activity-timeouts)
-11. [Accessing Temporal from Agent Tools](#accessing-temporal-from-agent-tools)
-12. [Streaming Responses](#streaming-responses)
-13. [Routing](#routing)
-14. [Parallel Agent Execution](#parallel-agent-execution)
-15. [Human-in-the-Loop (HITL) Approval Gates](#human-in-the-loop-hitl-approval-gates)
-16. [Scheduling](#scheduling)
-17. [MCP Tool Integration](#mcp-tool-integration)
-18. [External Memory with AIContextProvider](#external-memory-with-aicontextprovider)
-19. [External History Store](#external-history-store)
-20. [Per-Tool Activity Configuration](#per-tool-activity-configuration)
-21. [OpenTelemetry Integration](#opentelemetry-integration)
+8. [Invoking Agents from External Code (Proxy)](#invoking-agents-from-external-code-proxy)
+9. [Session Identity](#session-identity)
+10. [Session TTL](#session-ttl)
+11. [Activity Timeouts](#activity-timeouts)
+12. [Accessing Temporal from Agent Tools](#accessing-temporal-from-agent-tools)
+13. [Streaming Responses](#streaming-responses)
+14. [Routing](#routing)
+15. [Parallel Agent Execution](#parallel-agent-execution)
+16. [Human-in-the-Loop (HITL) Approval Gates](#human-in-the-loop-hitl-approval-gates)
+17. [Scheduling](#scheduling)
+18. [MCP Tool Integration](#mcp-tool-integration)
+19. [External Memory with AIContextProvider](#external-memory-with-aicontextprovider)
+20. [External History Store](#external-history-store)
+21. [Per-Tool Activity Configuration](#per-tool-activity-configuration)
+22. [OpenTelemetry Integration](#opentelemetry-integration)
 
 ---
 
@@ -375,6 +376,113 @@ public class ResearchWorkflow
 
 `TemporalAIAgent` (returned by `GetAgent`) stores the conversation history as workflow state. This means it survives
 worker restarts, supports retries, and is durable by design — all without any extra persistence code.
+
+---
+
+## Invoking Agents from External Code (Proxy)
+
+Use `TemporalAIAgentProxy` to interact with a registered agent from outside a Temporal workflow — for example, from an
+ASP.NET handler, a background service, or a console application. The proxy communicates with the running `AgentWorkflow`
+via Temporal workflow updates and is the correct counterpart to `TemporalWorkflowExtensions.GetAgent`, which is
+workflow-context only.
+
+`TemporalAIAgentProxy` is `internal`; callers always reference it as `AIAgent` (MAF's base class). Resolution is always
+via `services.GetTemporalAgentProxy("Name")`.
+
+| | `TemporalAIAgent` | `TemporalAIAgentProxy` |
+|---|---|---|
+| Returned by | `TemporalWorkflowExtensions.GetAgent("Name")` | `services.GetTemporalAgentProxy("Name")` |
+| Context | Inside a `[Workflow]` method | Outside a workflow (ASP.NET, console, background service) |
+| History | Stored in the calling workflow's event history | Stored in the target `AgentWorkflow`'s event history |
+| Session | New or existing `TemporalAgentSession` | Same |
+
+> **Misuse guard:** `TemporalWorkflowExtensions.GetAgent` throws `InvalidOperationException` when called outside a
+> workflow context with the message: _"If you need to invoke an agent from external code, resolve a
+> TemporalAIAgentProxy from your service provider via GetTemporalAgentProxy(name) instead."_
+
+### Same-Process Registration
+
+When the worker and the caller live in the same process, calling `AddTemporalAgents(...)` on the worker builder
+automatically registers a keyed `AIAgent` proxy singleton for every declared agent. No additional setup is required —
+call `GetTemporalAgentProxy` directly against the host's service provider:
+
+```csharp
+// Worker and caller in the same process
+builder.Services
+    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddTemporalAgents(opts =>
+    {
+        opts.AddDurableAgent("SupportAgent", agent =>
+        {
+            agent.Instructions = "You help customers with support requests.";
+            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
+        });
+    });
+
+// ...
+
+// Resolve and use the proxy — return type is AIAgent
+AIAgent agentProxy = host.Services.GetTemporalAgentProxy("SupportAgent");
+
+var session = await agentProxy.CreateSessionAsync();
+AgentResponse response = await agentProxy.RunAsync("My order hasn't arrived.", session);
+
+Console.WriteLine(response.Messages[0].Text);
+```
+
+### Split-Process Registration
+
+When the Temporal worker runs in a separate process (for example, a dedicated worker binary next to an API server),
+use `AddTemporalAgentProxies` on the client process's `IServiceCollection`. No worker is registered — only the client
+infrastructure and the declared proxy singletons.
+
+```csharp
+// Client-only process (e.g. ASP.NET API server)
+builder.Services.AddTemporalAgentProxies(
+    configure: opts =>
+    {
+        opts.AddAgentProxy("SupportAgent");
+        opts.AddAgentProxy("BillingAgent");
+    },
+    taskQueue: "agents",
+    targetHost: "localhost:7233");
+
+// ...
+
+// ASP.NET controller or minimal API handler
+app.MapPost("/chat", async (string message, IServiceProvider services) =>
+{
+    AIAgent agentProxy = services.GetTemporalAgentProxy("SupportAgent");
+
+    var session = await agentProxy.CreateSessionAsync();
+    AgentResponse response = await agentProxy.RunAsync(message, session);
+
+    return Results.Ok(response.Messages[0].Text);
+});
+```
+
+`AddTemporalAgentProxies` registers `ITemporalAgentClient` and the keyed `AIAgent` proxies only. When `targetHost` is
+provided it also registers an `ITemporalClient`. If the client is already registered elsewhere (e.g., via
+`AddTemporalClient`), omit `targetHost` and the existing registration is used.
+
+### Multi-Turn Conversations via Proxy
+
+The proxy's `CreateSessionAsync` and `RunAsync` signatures are identical to those of `TemporalAIAgent`. Retain the
+session across calls to preserve conversation history:
+
+```csharp
+AIAgent agentProxy = services.GetTemporalAgentProxy("SupportAgent");
+
+var session = await agentProxy.CreateSessionAsync();
+
+var r1 = await agentProxy.RunAsync("My order hasn't arrived.", session);
+Console.WriteLine(r1.Messages[0].Text);
+
+var r2 = await agentProxy.RunAsync("The order number is 12345.", session);
+Console.WriteLine(r2.Messages[0].Text);  // Context from r1 is preserved
+```
+
+For the in-workflow counterpart, see [Agent Orchestration (Inside Workflows)](#agent-orchestration-inside-workflows).
 
 ---
 
