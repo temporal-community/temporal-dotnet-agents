@@ -42,14 +42,9 @@ Program.cs
 
 - [.NET 10 SDK](https://dot.net) or later
 - A local Temporal server: `temporal server start-dev`
-- An OpenAI-compatible API key
 
-### Configure API credentials
-
-```bash
-dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MEAI/DurableTools
-dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --project samples/MEAI/DurableTools
-```
+> No API key required — `GetCurrentWeather` is a mock that returns random strings.
+> This sample exercises the durable activity dispatch path only; no LLM is involved.
 
 ### Run
 

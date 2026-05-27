@@ -56,16 +56,21 @@ var weatherTool = AIFunctionFactory.Create(
 // ── Setup: Register worker + durable AI ──────────────────────────────────────
 // AddDurableAI registers DurableFunctionActivities (and supporting infrastructure)
 // on the worker. No IChatClient is needed — this sample only exercises the
-// per-tool durable activity path (Pattern 2), not the chat session path (Pattern 1).
+// per-tool durable activity path (Pattern 2), not the chat session path.
+//
+// RegisterDefaultWorkflow = false suppresses DurableChatWorkflow registration.
+// This sample never creates a DurableChatSessionClient, so registering that
+// workflow would be unused baggage on the worker.
+//
 // AddDurableTools registers weatherTool in the DurableFunctionRegistry so
 // DurableFunctionActivities can resolve it by name at activity execution time.
-// AddWorkflow<WeatherReportWorkflow> registers the workflow type with the worker.
+// AddWorkflow<WeatherReportWorkflow> registers the custom workflow with the worker.
 builder.Services
     .AddHostedTemporalWorker(taskQueue)
     .AddDurableAI(opts =>
     {
         opts.ActivityTimeout = TimeSpan.FromMinutes(5);
-        opts.SessionTimeToLive = TimeSpan.FromHours(1);
+        opts.RegisterDefaultWorkflow = false;   // no DurableChatSessionClient used here
     })
     .AddDurableTools(weatherTool)
     .AddWorkflow<WeatherReportWorkflow>();
