@@ -9,11 +9,13 @@ using Temporalio.Extensions.Hosting;
 namespace Temporalio.Extensions.AI.Internal;
 
 /// <summary>
-/// Startup-time A-check that detects the silent mixed-pattern conflict in MEAI:
-/// <c>.UseFunctionInvocation()</c> on the <see cref="IChatClient"/> chain AND
-/// <c>.AsDurable()</c>-wrapped function tools registered via <c>AddDurableTools</c>.
-/// Runs as <c>IPostConfigureOptions&lt;TemporalWorkerServiceOptions&gt;</c> — the same
-/// lifecycle hook used by the data-converter wiring + Step 3b's agent-pipeline validator.
+/// Startup-time A-check that detects the silent mixed-pattern conflict in MEAI: when the
+/// <see cref="DurableFunctionRegistry"/> is non-empty (populated by <c>AddDurableTools()</c>
+/// for Pattern 3 OR by <c>.AsDurable()</c> wrapping for Pattern 2) AND the unkeyed
+/// <see cref="IChatClient"/> chain contains <see cref="FunctionInvokingChatClient"/>
+/// (Pattern 1's in-process loop). Runs as
+/// <c>IPostConfigureOptions&lt;TemporalWorkerServiceOptions&gt;</c> — the same lifecycle hook
+/// used by the data-converter wiring + Step 3b's agent-pipeline validator.
 /// </summary>
 /// <remarks>
 /// <para>

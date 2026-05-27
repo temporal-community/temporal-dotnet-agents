@@ -85,6 +85,23 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// Optional chat options for this turn (e.g. model id, tools list). May be null when
     /// the subclass does not need MEAI-shaped options.
     /// </param>
+    /// <remarks>
+    /// <para>
+    /// <strong>Retry policy footgun.</strong> The <paramref name="activityOptions"/> argument
+    /// passed by <see cref="RunTurnAsync"/> has <see cref="ActivityOptions.RetryPolicy"/> set to
+    /// <see langword="null"/>. When <see langword="null"/>, the Temporal server applies its
+    /// default retry policy: <c>InitialInterval=1s, BackoffCoefficient=2.0, MaximumInterval=100s,
+    /// MaximumAttempts=0</c> (unlimited retries, bounded only by <c>StartToCloseTimeout</c>).
+    /// </para>
+    /// <para>
+    /// Implementers dispatching <em>non-idempotent</em> activities (mutating state, calling
+    /// external APIs without idempotency keys, sending notifications) are responsible for
+    /// hardening this — copy <paramref name="activityOptions"/> with an explicit
+    /// <see cref="ActivityOptions.RetryPolicy"/> (e.g. <c>new RetryPolicy { MaximumAttempts = 1 }</c>)
+    /// before passing it to <c>Workflow.ExecuteActivityAsync</c>. See <see cref="RunTurnAsync"/>
+    /// for full context and the relevant Temporal docs link.
+    /// </para>
+    /// </remarks>
     protected abstract Task<TOutput> ExecuteTurnAsync(
         ActivityOptions activityOptions,
         DurableSessionRequest requestEntry,
@@ -268,6 +285,39 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// Subclass update handlers typically return one or the other depending on the
     /// shape they want to expose to callers.
     /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <strong>Retry policy footgun for subclassers.</strong> The <see cref="ActivityOptions"/>
+    /// constructed inside this method and handed to <see cref="ExecuteTurnAsync"/> sets only
+    /// <see cref="ActivityOptions.StartToCloseTimeout"/>, <see cref="ActivityOptions.HeartbeatTimeout"/>,
+    /// and <see cref="ActivityOptions.Summary"/>. It deliberately leaves
+    /// <see cref="ActivityOptions.RetryPolicy"/> as <see langword="null"/>.
+    /// </para>
+    /// <para>
+    /// When <see cref="ActivityOptions.RetryPolicy"/> is <see langword="null"/>, the .NET SDK
+    /// transmits no policy and the Temporal server applies its <em>default</em>:
+    /// <c>InitialInterval=1s, BackoffCoefficient=2.0, MaximumInterval=100s, MaximumAttempts=0</c>.
+    /// <c>MaximumAttempts=0</c> means <strong>unlimited retries</strong> with exponential backoff
+    /// capped at 100&#160;seconds between attempts, bounded only by
+    /// <see cref="ActivityOptions.StartToCloseTimeout"/>.
+    /// </para>
+    /// <para>
+    /// This default is safe for idempotent LLM calls (the canonical use case for
+    /// <see cref="DurableChatWorkflowBase{TOutput}"/>): retrying an inference request just
+    /// re-asks the model. It is <strong>not safe</strong> for subclassers whose
+    /// <see cref="ExecuteTurnAsync"/> dispatches non-idempotent activities — mutating state,
+    /// calling external APIs without idempotency keys, sending notifications, etc. In those
+    /// cases retries can duplicate side effects.
+    /// </para>
+    /// <para>
+    /// Subclassers with non-idempotent activities must override <see cref="ExecuteTurnAsync"/>
+    /// and construct a hardened <see cref="ActivityOptions"/> with an explicit
+    /// <see cref="ActivityOptions.RetryPolicy"/> (e.g.
+    /// <c>new RetryPolicy { MaximumAttempts = 1 }</c>) before invoking the activity.
+    /// See <see href="https://docs.temporal.io/encyclopedia/retry-policies"/> for the full
+    /// server-default behavior reference.
+    /// </para>
+    /// </remarks>
     protected async Task<(TOutput Output, DurableSessionResponse ResponseEntry)> RunTurnAsync(
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions = null,
@@ -296,6 +346,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
 
             _turnCount++;
 
+            // RetryPolicy intentionally left null; subclasses with non-idempotent activities must override ExecuteTurnAsync and harden.
             var activityOptions = new ActivityOptions
             {
                 StartToCloseTimeout = Input!.ActivityTimeout,
