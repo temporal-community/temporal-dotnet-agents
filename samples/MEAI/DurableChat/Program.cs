@@ -11,8 +11,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using Temporalio.Client;
+using Temporalio.Common;
 using Temporalio.Extensions.AI;
-using Temporalio.Extensions.Hosting;
 
 // ── Setup: Build the application host ────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -40,72 +40,96 @@ if (string.IsNullOrEmpty(apiKey))
         "`dotnet user-secrets set OPENAI_API_KEY sk-... --project samples/MEAI/DurableChat`. " +
         "Note: user secrets only load in the Development environment (DOTNET_ENVIRONMENT unset or set to 'Development').");
 
-// ── Setup: Connect Temporal client with DurableAIDataConverter ────────────────
-// DurableAIDataConverter.Instance wraps Temporal's payload converter with
-// AIJsonUtilities.DefaultOptions, which handles MEAI's $type discriminator for
-// polymorphic AIContent subclasses (TextContent, FunctionCallContent, etc.).
-// Without this, type information is lost when types round-trip through history.
-var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions(temporalAddress)
-{
-    DataConverter = DurableAIDataConverter.Instance,
-    Namespace = "default",
-});
-builder.Services.AddSingleton<ITemporalClient>(temporalClient);
-
-// ── Setup: Weather tool ──────────────────────────────────────────────────────
-// This is a normal AIFunction. Pattern 3 (registering it via AddDurableTools)
-// is what makes it run as a separate Temporal activity per call — there is no
-// special wrapping required on the tool itself.
+// ── Setup: Tool functions ────────────────────────────────────────────────────
+// Plain AIFunctions. Pattern 3 (registering them via AddDurableTools below) is
+// what makes each call run as a separate Temporal activity — no special
+// wrapping required on the tool itself.
+//
+// Tools run in activity context (not workflow), so `Random.Shared` is allowed.
+// Do NOT use it inside `[Workflow]` code — replays would diverge.
 static string GetCurrentWeather(string city)
     => Random.Shared.NextDouble() > 0.5
         ? $"It's sunny and 22 °C in {city}."
         : $"It's overcast and 15 °C in {city}.";
+
+// A second registry tool so Demo 4 Scenario 1 can demonstrate "pass an explicit
+// subset" meaningfully — with only one tool in the registry, subset and
+// auto-populate would be indistinguishable.
+static string GetTimeOfDay(string city)
+    => $"It is approximately 14:30 local time in {city}.";
 
 var weatherTool = AIFunctionFactory.Create(
     GetCurrentWeather,
     name: "get_current_weather",
     description: "Returns the current weather conditions for a given city.");
 
+var timeOfDayTool = AIFunctionFactory.Create(
+    GetTimeOfDay,
+    name: "get_time_of_day",
+    description: "Returns the current local time of day for a given city.");
+
 // ── Setup: Register IChatClient ───────────────────────────────────────────────
-// AddChatClient is the idiomatic MEAI pattern — it returns a ChatClientBuilder
-// for chaining middleware, then Build() registers the final IChatClient singleton.
+// AddChatClient registers the IChatClient as a singleton in DI. It returns a
+// ChatClientBuilder for chaining middleware (`.UseFunctionInvocation()`, etc.),
+// but when no middleware is chained, the registration is already complete —
+// `.Build()` would just return the same client and discard the value.
 // DurableChatActivities constructor-injects this on the worker side.
 //
 // NOTE: we deliberately do NOT call .UseFunctionInvocation() here. With tools
-// registered via AddDurableTools() below, DurableChatWorkflow auto-detects
-// Pattern 3 and runs a dispatch loop where each tool call becomes its own
-// Temporal activity. Adding UseFunctionInvocation() while tools are registered
-// via AddDurableTools() is blocked at worker startup by DurableMixedPatternValidator.
+// registered via AddDurableTools() below, Pattern 3 activates: DurableChatSessionClient
+// freezes the per-tool ActivityOptions into the workflow input, and the workflow
+// runs a dispatch loop where each tool call becomes its own Temporal activity.
+// Adding UseFunctionInvocation() while tools are registered via AddDurableTools()
+// is blocked at worker startup by DurableMixedPatternValidator.
 IChatClient openAiChatClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) }
 ).GetChatClient(model).AsIChatClient();
 
-builder.Services
-    .AddChatClient(openAiChatClient)
-    .Build();
+builder.Services.AddChatClient(openAiChatClient);
 
 // ── Setup: Register worker + durable AI ──────────────────────────────────────
+// The 3-arg AddHostedTemporalWorker(address, namespace, taskQueue) overload
+// creates its own ITemporalClient — that's the path the AI library's plugin
+// hooks into to auto-wire DurableAIDataConverter. The data converter is what
+// preserves MEAI's $type discriminators for polymorphic AIContent subclasses
+// (TextContent, FunctionCallContent, etc.) across the wire. Going through a
+// manual `TemporalClient.ConnectAsync(...)` + AddSingleton<ITemporalClient>
+// bypasses that auto-wire path — you'd have to set
+// `DataConverter = DurableAIDataConverter.Instance` yourself.
+//
 // AddDurableAI registers DurableChatWorkflow, DurableChatActivities, and
 // DurableChatSessionClient on the worker. The session client is resolved from
 // DI after the host starts.
 //
-// AddDurableTools registers the weather tool in the DurableFunctionRegistry.
-// Because at least one tool is registered, Pattern 3 activates: the workflow
-// dispatches each tool invocation as a separate InvokeFunction activity, and
-// per-tool retry/timeout can be configured via the DurableChatToolOptions
-// callback.
+// AddDurableTools registers tools in the DurableFunctionRegistry. Because at
+// least one tool is registered, Pattern 3 activates: the workflow dispatches
+// each tool invocation as a separate InvokeFunction activity, and per-tool
+// retry/timeout can be configured via the DurableChatToolOptions callback.
 builder.Services
-    .AddHostedTemporalWorker(TaskQueue)
+    .AddHostedTemporalWorker(temporalAddress, "default", TaskQueue)
     .AddDurableAI(opts =>
     {
-        opts.ActivityTimeout = TimeSpan.FromMinutes(5);
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
-        opts.MaxToolCallsPerTurn = 10;   // [Pattern 3] cap the LLM↔tool loop per turn
+
+        // Worker-level fallback for any tool that doesn't override its RetryPolicy.
+        // Without this, RetryPolicy is null and Temporal applies its built-in
+        // "retry forever" default — a footgun for transient failures in demos and
+        // for write-style tools alike.
+        opts.RetryPolicy = new RetryPolicy { MaximumAttempts = 3 };
+
+        // [Pattern 3] cap the LLM↔tool loop per turn. Only effective when Pattern 3
+        // is active — which it is here, because AddDurableTools(...) below populates
+        // the DurableFunctionRegistry.
+        opts.MaxToolCallsPerTurn = 10;
     })
-    .AddDurableTools(
-        weatherTool,
-        opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));   // per-tool timeout
+    // Per-tool retry-policy fallback chain:
+    //   per-tool opts.RetryPolicy (not set here) → worker `RetryPolicy = MaximumAttempts = 3`.
+    // Weather lookup is idempotent (read-only), so we accept retries. For write-style
+    // tools (send email, charge a card), override with `opts.NoRetry()` to prevent
+    // double-execution on transient activity failure.
+    .AddDurableTools(weatherTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30)))
+    .AddDurableTools(timeOfDayTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 var host = builder.Build();
@@ -114,14 +138,38 @@ await host.StartAsync();
 Console.WriteLine("Worker started.\n");
 
 var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+var temporalClient = host.Services.GetRequiredService<ITemporalClient>();
+
+// Track every conversation we start so we can signal Shutdown to each running
+// workflow before the host exits (see "Shutdown" block below).
+var conversationIds = new List<string>();
 
 // ── Run demos ─────────────────────────────────────────────────────────────────
-await RunMultiTurnDemoAsync(sessionClient);
-await RunToolCallDemoAsync(sessionClient);
-await RunHistoryQueryDemoAsync(sessionClient);
-await DurableToolDemo.RunDurableToolDemoAsync(sessionClient, weatherTool);
+conversationIds.AddRange(await RunMultiTurnDemoAsync(sessionClient));
+conversationIds.AddRange(await RunToolCallDemoAsync(sessionClient));
+conversationIds.AddRange(await RunHistoryQueryDemoAsync(sessionClient));
+conversationIds.AddRange(await DurableToolDemo.RunDurableToolDemoAsync(sessionClient, weatherTool));
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
+// Each demo starts a Temporal workflow that survives host.StopAsync() — the host
+// only stops the worker process, not the workflows running on the Temporal
+// server. Without an explicit Shutdown signal, those workflows sit parked for
+// SessionTimeToLive (1h above) burning workflow slots and cluttering the UI on
+// re-runs. Signal each one so DurableChatWorkflowBase.RequestShutdownAsync
+// triggers a clean completion of the workflow loop.
+foreach (var conversationId in conversationIds)
+{
+    try
+    {
+        var handle = temporalClient.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
+        await handle.SignalAsync("Shutdown", Array.Empty<object>());
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($" [shutdown] Failed to signal {conversationId}: {ex.Message}");
+    }
+}
+
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
 Console.WriteLine("Done.");
 
@@ -132,7 +180,7 @@ Console.WriteLine("Done.");
 // workflow. The second question ("that city") is only answerable because the
 // workflow held onto the first turn's context.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
+static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
     Console.WriteLine(" Demo 1: Multi-Turn Conversation");
@@ -156,6 +204,7 @@ static async Task RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
     Console.WriteLine($" Agent: {r2.Text}");
 
     Console.WriteLine("════════════════════════════════════════════════════════\n");
+    return [conversationId];
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -163,7 +212,7 @@ static async Task RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
 //
 // Background: tool registration is split across two concerns.
 //
-//   - `AddDurableTools(weatherTool, ...)` (Program.cs line ~106) registers the
+//   - `AddDurableTools(weatherTool, ...)` (Program.cs above) registers the
 //     tool IMPLEMENTATION on the worker so a Temporal activity exists that can
 //     dispatch the function when the LLM requests it.
 //
@@ -187,7 +236,7 @@ static async Task RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
 // InvokeFunction activity for the tool call — visible side-by-side in the
 // Temporal Web UI.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunToolCallDemoAsync(DurableChatSessionClient sessionClient)
+static async Task<IEnumerable<string>> RunToolCallDemoAsync(DurableChatSessionClient sessionClient)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
     Console.WriteLine(" Demo 2: Tool Call (auto-populated from registry)");
@@ -208,6 +257,7 @@ static async Task RunToolCallDemoAsync(DurableChatSessionClient sessionClient)
 
     Console.WriteLine($" Agent: {response.Text}");
     Console.WriteLine("════════════════════════════════════════════════════════\n");
+    return [conversationId];
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -217,7 +267,7 @@ static async Task RunToolCallDemoAsync(DurableChatSessionClient sessionClient)
 // and can be retrieved at any time via GetHistoryAsync. This includes tool
 // call and tool result messages, not just user/assistant text.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunHistoryQueryDemoAsync(DurableChatSessionClient sessionClient)
+static async Task<IEnumerable<string>> RunHistoryQueryDemoAsync(DurableChatSessionClient sessionClient)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
     Console.WriteLine(" Demo 3: History Query");
@@ -254,4 +304,5 @@ static async Task RunHistoryQueryDemoAsync(DurableChatSessionClient sessionClien
 
     Console.WriteLine($"\n Total entries stored: {history.Count} ({messages.Count} messages)");
     Console.WriteLine("════════════════════════════════════════════════════════\n");
+    return [conversationId];
 }

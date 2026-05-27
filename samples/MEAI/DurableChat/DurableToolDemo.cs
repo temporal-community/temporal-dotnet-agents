@@ -5,7 +5,10 @@
 // its own Temporal activity, visible in the Web UI and configurable per-tool.
 //
 // Two scenarios:
-//   1. Explicit ChatOptions.Tools — caller controls the tool subset for this call.
+//   1. Explicit ChatOptions.Tools — caller controls the tool subset for this
+//      call. With two tools registered (weather + time-of-day), passing only
+//      the weather tool demonstrates that the workflow honors the subset and
+//      does NOT auto-add the time-of-day tool from the registry.
 //   2. Null ChatOptions.Tools — the workflow auto-populates from the
 //      DurableFunctionRegistry, so every AddDurableTools()-registered tool is
 //      available.
@@ -17,15 +20,19 @@ internal static class DurableToolDemo
 {
     /// <summary>
     /// Runs two Pattern 3 scenarios against the supplied <see cref="DurableChatSessionClient"/>.
+    /// Returns the conversation IDs started so the caller can signal Shutdown to
+    /// each workflow before exiting.
     /// </summary>
     /// <remarks>
     /// Prerequisites in <c>Program.cs</c>:
     /// <list type="bullet">
     ///   <item>The chat client pipeline does NOT call <c>.UseFunctionInvocation()</c>.</item>
-    ///   <item><c>AddDurableTools(weatherTool, ...)</c> was called on the worker builder.</item>
+    ///   <item><c>AddDurableTools(weatherTool, ...)</c> AND <c>AddDurableTools(timeOfDayTool, ...)</c>
+    ///   were called on the worker builder so the registry contains more than one tool — that's
+    ///   what makes Scenario 1's "explicit subset" observable.</item>
     /// </list>
     /// </remarks>
-    public static async Task RunDurableToolDemoAsync(
+    public static async Task<IEnumerable<string>> RunDurableToolDemoAsync(
         DurableChatSessionClient sessionClient,
         AIFunction weatherTool)
     {
@@ -37,33 +44,43 @@ internal static class DurableToolDemo
         Console.WriteLine(" http://localhost:8233.\n");
 
         // ── Scenario 1: caller passes ChatOptions.Tools explicitly ───────────
-        // The workflow honors the explicit list as-is; it does NOT add other
-        // tools from the registry. Use this when you want to scope which tools
-        // are available for a specific call.
-        await RunExplicitToolsScenarioAsync(sessionClient, weatherTool);
+        // Two tools are registered in the worker (weather + time-of-day) but
+        // this scenario passes ONLY weatherTool. The workflow honors the
+        // explicit list as-is and does NOT add time-of-day from the registry.
+        // Use this when you want to scope which tools are available for a
+        // specific call.
+        var explicitId = await RunExplicitToolsScenarioAsync(sessionClient, weatherTool);
 
         // ── Scenario 2: ChatOptions.Tools is null → auto-populate ────────────
         // When the caller doesn't provide tools, the activity fills in every
-        // tool currently in the DurableFunctionRegistry. This is the most
-        // convenient mode for chat-style applications where you want the LLM
-        // to be able to pick from anything you've registered.
-        await RunAutoPopulatedToolsScenarioAsync(sessionClient);
+        // tool currently in the DurableFunctionRegistry (both weather AND
+        // time-of-day). This is the most convenient mode for chat-style
+        // applications where you want the LLM to be able to pick from
+        // anything you've registered.
+        var autoId = await RunAutoPopulatedToolsScenarioAsync(sessionClient);
 
         Console.WriteLine(" Tool calls visible in Temporal Web UI as separate");
         Console.WriteLine(" `Temporalio.Extensions.AI.InvokeFunction` activities.");
         Console.WriteLine("════════════════════════════════════════════════════════\n");
+
+        return [explicitId, autoId];
     }
 
-    private static async Task RunExplicitToolsScenarioAsync(
+    private static async Task<string> RunExplicitToolsScenarioAsync(
         DurableChatSessionClient sessionClient,
         AIFunction weatherTool)
     {
         Console.WriteLine(" ── Scenario 1: explicit ChatOptions.Tools = [weatherTool] ──");
+        Console.WriteLine(" (registry has both weather and time-of-day; only weather is exposed)");
 
         var conversationId = $"durable-tools-explicit-{Guid.NewGuid():N}";
         Console.WriteLine($" Conversation ID: {conversationId}");
 
-        var q = "What is the weather like in Tokyo right now?";
+        // Ask a question that COULD plausibly invoke either tool. Because the
+        // caller restricted the available set to [weatherTool], the LLM cannot
+        // call get_time_of_day even though it's in the registry. This is the
+        // observable difference from Scenario 2.
+        var q = "What is the weather like in Tokyo right now, and what time is it there?";
         Console.WriteLine($" User : {q}");
 
         // Explicit Tools list. The workflow respects it — no auto-population.
@@ -74,9 +91,10 @@ internal static class DurableToolDemo
             options: options);
 
         Console.WriteLine($" Agent: {response.Text}\n");
+        return conversationId;
     }
 
-    private static async Task RunAutoPopulatedToolsScenarioAsync(
+    private static async Task<string> RunAutoPopulatedToolsScenarioAsync(
         DurableChatSessionClient sessionClient)
     {
         Console.WriteLine(" ── Scenario 2: ChatOptions.Tools = null (auto-populated) ──");
@@ -84,17 +102,22 @@ internal static class DurableToolDemo
         var conversationId = $"durable-tools-auto-{Guid.NewGuid():N}";
         Console.WriteLine($" Conversation ID: {conversationId}");
 
-        var q = "Compare the weather in Paris and Berlin right now.";
+        // Same flavor of question as Scenario 1, but with auto-population the
+        // LLM has both tools available — expect get_current_weather AND
+        // get_time_of_day to fire, each as its own InvokeFunction activity.
+        var q = "What is the weather like in Paris right now, and what time is it there?";
         Console.WriteLine($" User : {q}");
 
         // No options at all. The activity will auto-populate ChatOptions.Tools
-        // from the DurableFunctionRegistry. Since the LLM asks about two cities,
-        // expect two parallel InvokeFunction activities (one per FunctionCallContent
-        // in the assistant turn) — fanned out via Workflow.WhenAllAsync.
+        // from the DurableFunctionRegistry. When the LLM emits multiple
+        // FunctionCallContent in one assistant turn, they fan out in parallel
+        // via Workflow.WhenAllAsync (verified at DurableChatWorkflow.cs:204-226).
+        // Some models may emit them sequentially across turns instead.
         var response = await sessionClient.ChatAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, q)]);
 
         Console.WriteLine($" Agent: {response.Text}\n");
+        return conversationId;
     }
 }
