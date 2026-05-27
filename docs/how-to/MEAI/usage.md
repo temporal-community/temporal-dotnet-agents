@@ -298,8 +298,8 @@ builder.Services
 
 | Option | Type | Default | Purpose |
 |---|---|---|---|
-| `MaxToolCallsPerTurn` | `int` | 20 | Maximum LLM↔tool iterations within a single turn. When exceeded, the workflow synthesizes an "iteration limit exceeded" assistant message and returns — it does not throw. |
-| `MaximumConsecutiveErrorsPerRequest` | `int` | 3 | Number of consecutive failed tool steps tolerated before a non-retryable `ApplicationFailureException` surfaces to the caller. Resets to 0 after any all-success step. Set to **`0`** to propagate the first tool failure immediately (MAF-style behavior). |
+| `MaxToolCallsPerTurn` | `int` | 20 | Maximum LLM↔tool iterations within a single turn. When exceeded, the workflow synthesizes an "iteration limit exceeded" assistant message and returns — it does not throw. (See [Pattern 3 Loop Semantics](#pattern-3-loop-semantics) below.) |
+| `MaximumConsecutiveErrorsPerRequest` | `int` | 3 | Number of consecutive failed tool steps tolerated before a non-retryable `ApplicationFailureException` surfaces to the caller. Resets to 0 after any all-success step. Set to **`0`** to propagate the first tool failure immediately (MAF-style behavior). (See [Pattern 3 Loop Semantics](#pattern-3-loop-semantics) below.) |
 | `IncludeDetailedErrors` | `bool` | `false` | When `true`, synthesized `FunctionResultContent` error messages include the exception type and message (`"Error: {message} ({errorType})"`). When `false`, callers see a generic `"Error: Tool invocation failed."`. |
 
 ### Per-tool overrides (`DurableChatToolOptions`)
@@ -352,6 +352,31 @@ For each registered tool the effective `ActivityOptions` is:
 - `Summary` = tool name (auto-populated for the Temporal Web UI)
 
 The resolved dict is captured into workflow history at session start, so per-tool options are **frozen for the lifetime of a session** — a new `AddDurableTools` registered after a session begins will not affect the in-flight session. See [tool-functions.md — Mid-session drift warning](tool-functions.md#mid-session-drift-warning).
+
+---
+
+## Pattern 3 Loop Semantics
+
+`MaxToolCallsPerTurn` and `MaximumConsecutiveErrorsPerRequest` are **independent counters** with different jobs. Confusing them leads to surprising turn-abort behavior, so it is worth pinning down exactly what each one counts.
+
+`MaxToolCallsPerTurn` bounds the outer `for` loop in the workflow ([`DurableChatWorkflow.cs:167`](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L167)). Every iteration consumes exactly one slot — it does not matter whether the tool calls in that iteration succeeded or faulted. Errors **do** count against this iteration budget.
+
+`MaximumConsecutiveErrorsPerRequest` is a separate counter that only moves when *at least one* tool call in an iteration faulted (`hadError = true` at [line 245](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L245), incremented at [lines 260–270](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L260)). A fully successful iteration resets it back to zero ([line 273](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L273)).
+
+### What happens on each iteration
+
+1. **LLM step.** The workflow dispatches `GetChatStepAsync` ([line 179](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L179)). The LLM call itself is **not gated** by either counter — an LLM failure surfaces directly as an activity exception, and it does **not** increment the error counter.
+2. **Tool fan-out.** If the response contains tool calls, they dispatch in parallel via `Workflow.WhenAllAsync` ([line 226](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L226)).
+3. **Per-task inspection.** The workflow walks every task individually and synthesizes one `FunctionResultContent` per `CallId` in original order ([lines 235–258](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L235-L258)) — successful results carry the activity output; failures carry an error message that gets fed back to the LLM. Every `CallId` always gets a result; partial-failure turns never leave orphan IDs (OpenAI/Anthropic reject those).
+4. **Consecutive-error check.** *After* synthesizing tool-result messages, the workflow checks the threshold ([line 263](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L263)). Exceeding it throws a non-retryable `ApplicationFailureException` that terminates the turn.
+
+### The three behavioral modes
+
+- **`MaximumConsecutiveErrorsPerRequest = 0`** — immediate-failure agent. The first faulted iteration aborts the turn.
+- **Default of `3`** — up to three consecutive partially-faulting iterations are tolerated before the turn aborts. Any all-success iteration mixed in resets the counter.
+- **Errors effectively disabled (very large value)** — `MaxToolCallsPerTurn` still caps total dispatches. When the cap is hit the workflow synthesizes the sentinel assistant message ([lines 281–293](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L281-L293)) and returns cleanly — it does **not** throw.
+
+In other words: iteration-cap exhaustion is a **soft** outcome (sentinel message, healthy workflow), while exceeding the consecutive-error budget is a **hard** outcome (non-retryable failure propagated to the caller). Choose `MaximumConsecutiveErrorsPerRequest` based on how loudly you want a stuck tool to fail.
 
 ---
 
@@ -415,8 +440,8 @@ When the Temporal event history for a session grows large (Temporal's per-workfl
 | `MaxEntryCount` | `int` | `1000` | Maximum number of `DurableSessionEntry` records the workflow holds before triggering `ContinueAsNew`. Each turn adds two entries (request + response), so the default retains roughly 500 turns. Renamed from `MaxHistorySize` in 0.2.0. |
 | `HistoryReducer` | `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>?` | `null` | Optional synchronous, deterministic delegate that trims the workflow's entry log when rolling over via `ContinueAsNew`. Operates on entries (not flat messages), preserving per-turn `Usage` / `CorrelationId` metadata. |
 | `RegisterDefaultWorkflow` | `bool` | `true` | When `true`, the registrar registers the built-in `DurableChatWorkflow` and `DurableChatSessionClient`. Set to `false` when supplying your own `DurableChatWorkflowBase<TOutput>` subclass — see [Custom Workflow Output](./custom-workflow-output.md). All other infrastructure (DI options, `DurableAIDataConverter`, activities, embeddings) is registered regardless. |
-| `MaxToolCallsPerTurn` | `int` | `20` | **Model 3 only.** Maximum LLM↔tool iterations per turn before the workflow synthesizes an "iteration limit exceeded" assistant message. Does not throw — see [tool-functions.md](tool-functions.md#maxtoolcallsperturn-exhaustion). |
-| `MaximumConsecutiveErrorsPerRequest` | `int` | `3` | **Model 3 only.** Number of consecutive failed tool steps tolerated before a non-retryable `ApplicationFailureException` surfaces. Set to `0` for immediate propagation (MAF-style behavior). |
+| `MaxToolCallsPerTurn` | `int` | `20` | **Model 3 only.** Maximum LLM↔tool iterations per turn before the workflow synthesizes an "iteration limit exceeded" assistant message. Does not throw — see [Pattern 3 Loop Semantics](#pattern-3-loop-semantics) and [tool-functions.md](tool-functions.md#maxtoolcallsperturn-exhaustion). |
+| `MaximumConsecutiveErrorsPerRequest` | `int` | `3` | **Model 3 only.** Number of consecutive failed tool steps tolerated before a non-retryable `ApplicationFailureException` surfaces. Set to `0` for immediate propagation (MAF-style behavior). See [Pattern 3 Loop Semantics](#pattern-3-loop-semantics). |
 | `IncludeDetailedErrors` | `bool` | `false` | **Model 3 only.** When `true`, synthesized tool-error `FunctionResultContent` includes exception type and message; when `false`, a generic `"Error: Tool invocation failed."` is used. |
 
 ---
