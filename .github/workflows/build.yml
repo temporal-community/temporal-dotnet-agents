@@ -115,7 +115,7 @@ jobs:
         run: |
           dotnet nuget push "artifacts/packages/*.nupkg" \
             --api-key "${{ secrets.NUGET_GITHUB_PAT }}" \
-            --source "https://nuget.pkg.github.com/cecilphillip/index.json" \
+            --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
             --skip-duplicate
 
       - name: Publish to NuGet.org
