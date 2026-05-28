@@ -168,6 +168,23 @@ publish-github: pack
         --skip-duplicate
     @echo "✓ Packages published to GitHub"
 
+# Push main branch and all tags to both origin and temporal remotes.
+# Refuses to run if the current branch is not main.
+sync-remotes:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    current=$(git branch --show-current)
+    if [ "$current" != "main" ]; then
+        echo "ERROR: Not on main branch (current: $current)."
+        echo "       Checkout main before syncing remotes."
+        exit 1
+    fi
+    echo "Pushing main + tags → origin..."
+    git push origin main --tags
+    echo "Pushing main + tags → temporal..."
+    git push temporal main --tags
+    echo "✓ Both remotes synced."
+
 # Alias: build
 compile: build
 
