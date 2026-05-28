@@ -10,7 +10,7 @@
     <Authors>Cecil Phillip</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <RepositoryUrl>https://github.com/cecilphillip/TemporalAgents</RepositoryUrl>
+    <RepositoryUrl>https://github.com/temporal-community/temporal-dotnet-agents</RepositoryUrl>
     <PackageProjectUrl>$(RepositoryUrl)</PackageProjectUrl>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
 
