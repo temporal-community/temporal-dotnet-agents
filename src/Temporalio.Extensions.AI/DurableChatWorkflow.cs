@@ -35,10 +35,13 @@ namespace Temporalio.Extensions.AI;
 [Workflow("Temporalio.Extensions.AI.DurableChatWorkflow")]
 internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse>
 {
-    // Per-turn metadata captured by ChatAsync before the base session loop dispatches
-    // the activity. Read inside ExecuteTurnAsync to populate the activity input.
-    private string? _lastClientKey;
-    private string? _lastConversationId;
+    // Per-turn metadata keyed by DurableSessionRequest object reference.
+    // Using ReferenceEqualityComparer because DurableSessionRequest.FromMessages always
+    // returns a new object, so each turn has a distinct key even if CorrelationId is reused.
+    // The entry is removed in the finally block of ChatAsync so cancelled/failed turns do
+    // not leak entries for the workflow's lifetime.
+    private readonly Dictionary<DurableSessionRequest, (string? ClientKey, string? ConversationId)>
+        _perTurnMeta = new(ReferenceEqualityComparer.Instance);
 
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
@@ -52,7 +55,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         ArgumentNullException.ThrowIfNull(input);
         if (IsShutdownRequested)
             throw new InvalidOperationException("Session has been shut down.");
-        if (input.Messages is null || input.Messages.Count == 0)
+        if (input.Messages is null or { Count: 0 })
             throw new ArgumentException("At least one message is required.");
     }
 
@@ -63,21 +66,25 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     [WorkflowUpdate("Chat")]
     public async Task<DurableSessionResponse> ChatAsync(DurableChatInput input)
     {
-        // Capture per-turn metadata for ExecuteTurnAsync. ClientKey and ConversationId
-        // are carried on DurableChatInput (caller-supplied / session-client-supplied) but
-        // not embedded in DurableSessionRequest, so we stash them on private fields
-        // until ExecuteTurnAsync runs.
-        _lastClientKey = input.ClientKey;
-        _lastConversationId = input.ConversationId;
-
         // Build the request entry for this turn — the factory auto-generates the
         // correlation ID via Workflow.NewGuid() (deterministic, replay-safe) when the
         // caller did not supply one.
         var messages = input.Messages as IReadOnlyList<ChatMessage> ?? input.Messages.ToList();
         var requestEntry = DurableSessionRequest.FromMessages(messages, input.CorrelationId);
 
-        var (_, responseEntry) = await RunTurnAsync(requestEntry, input.Options);
-        return responseEntry;
+        // Store per-turn metadata keyed by the request entry object reference.
+        // Removed in the finally block so exceptions (cancellation, timeout, tool failure)
+        // do not leak the entry for the workflow's lifetime.
+        _perTurnMeta[requestEntry] = (input.ClientKey, input.ConversationId);
+        try
+        {
+            var (_, responseEntry) = await RunTurnAsync(requestEntry, input.Options);
+            return responseEntry;
+        }
+        finally
+        {
+            _perTurnMeta.Remove(requestEntry);
+        }
     }
 
     /// <summary>
@@ -98,13 +105,13 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         // Pattern 3 activates when the session client populated per-tool ActivityOptions
         // at workflow start. The decision is frozen in workflow history, so replay is
         // deterministic regardless of which worker picks up the activation.
-        var toolOptions = Input!.ToolActivityOptions;
+        var toolOptions = RequiredInput.ToolActivityOptions;
         if (toolOptions is null || toolOptions.Count == 0)
         {
             return ExecutePattern1TurnAsync(activityOptions, requestEntry, chatOptions);
         }
 
-        return ExecuteDurableChatTurnAsync(activityOptions, requestEntry, chatOptions);
+        return ExecutePattern3TurnAsync(activityOptions, requestEntry, chatOptions);
     }
 
     /// <summary>
@@ -116,6 +123,10 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
     {
+        if (!_perTurnMeta.TryGetValue(requestEntry, out var meta))
+            throw new InvalidOperationException(
+                $"Per-turn metadata missing for request {requestEntry.CorrelationId}. This is a bug.");
+
         // Flatten the entire history (including the just-appended request entry) into
         // a single message list so the LLM sees the full conversation each turn.
         var activityMessages = History
@@ -126,9 +137,9 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         {
             Messages = activityMessages,
             Options = chatOptions,
-            ConversationId = _lastConversationId ?? Workflow.Info.WorkflowId,
+            ConversationId = meta.ConversationId ?? Workflow.Info.WorkflowId,
             TurnNumber = CurrentTurnNumber,
-            ClientKey = _lastClientKey,
+            ClientKey = meta.ClientKey,
             CorrelationId = requestEntry.CorrelationId,
         };
         return Workflow.ExecuteActivityAsync(
@@ -146,11 +157,15 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     /// synthesizes a sentinel <see cref="ChatResponse"/> rather than throwing, matching the
     /// behavior of MAF's <c>AgentWorkflow</c>.
     /// </summary>
-    private async Task<ChatResponse> ExecuteDurableChatTurnAsync(
+    private async Task<ChatResponse> ExecutePattern3TurnAsync(
         ActivityOptions stepActivityOptions,
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
     {
+        if (!_perTurnMeta.TryGetValue(requestEntry, out var meta))
+            throw new InvalidOperationException(
+                $"Per-turn metadata missing for request {requestEntry.CorrelationId}. This is a bug.");
+
         // Seed the LLM with the flattened conversation transcript: prior turns from
         // history + the request that was just appended (which is the last entry in History
         // by the time ExecuteTurnAsync runs).
@@ -158,11 +173,11 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             .SelectMany(e => e.Messages)
             .ToList();
 
-        var allTurnMessages = new List<ChatMessage>();
+        List<ChatMessage> allTurnMessages = [];
         UsageDetails? totalUsage = null;
         var consecutiveErrors = 0;
 
-        var maxIterations = Input!.MaxToolCallsPerTurn;
+        var maxIterations = RequiredInput.MaxToolCallsPerTurn;
 
         for (var iteration = 0; iteration < maxIterations; iteration++)
         {
@@ -170,9 +185,9 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             {
                 Messages = accumulated,
                 Options = chatOptions,
-                ConversationId = _lastConversationId ?? Workflow.Info.WorkflowId,
+                ConversationId = meta.ConversationId ?? Workflow.Info.WorkflowId,
                 TurnNumber = CurrentTurnNumber,
-                ClientKey = _lastClientKey,
+                ClientKey = meta.ClientKey,
                 CorrelationId = requestEntry.CorrelationId,
             };
 
@@ -240,14 +255,22 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
                 {
                     functionResultContents.Add(new FunctionResultContent(tc.CallId, task.Result.Result));
                 }
+                else if (task.IsCanceled)
+                {
+                    // Workflow cancellation should propagate as OperationCanceledException,
+                    // not be misclassified as a consecutive application error.
+                    throw new OperationCanceledException(
+                        "A tool activity was cancelled, propagating cancellation.");
+                }
                 else
                 {
                     hadError = true;
                     var ex = task.Exception?.InnerException ?? task.Exception;
+                    var includeDetails = RequiredInput.IncludeDetailedErrors;
                     var errorMessage =
-                        Input!.IncludeDetailedErrors && ex is ApplicationFailureException afe
+                        includeDetails && ex is ApplicationFailureException afe
                             ? $"Error: {afe.Message} ({afe.ErrorType})"
-                            : Input!.IncludeDetailedErrors && ex is not null
+                            : includeDetails && ex is not null
                                 ? $"Error: {ex.GetType().Name}: {ex.Message}"
                                 : "Error: Tool invocation failed.";
 
@@ -260,11 +283,10 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             if (hadError)
             {
                 consecutiveErrors++;
-                if (consecutiveErrors > Input!.MaximumConsecutiveErrorsPerRequest)
+                if (consecutiveErrors > RequiredInput.MaximumConsecutiveErrorsPerRequest)
                 {
                     throw new ApplicationFailureException(
-                        $"Exceeded MaximumConsecutiveErrorsPerRequest " +
-                        $"({Input!.MaximumConsecutiveErrorsPerRequest}).",
+                        $"Exceeded MaximumConsecutiveErrorsPerRequest ({RequiredInput.MaximumConsecutiveErrorsPerRequest}).",
                         nonRetryable: true);
                 }
             }
@@ -300,16 +322,20 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     /// </summary>
     private ActivityOptions ResolveToolActivityOptions(string toolName)
     {
-        if (Input!.ToolActivityOptions is not null
-            && Input!.ToolActivityOptions.TryGetValue(toolName, out var perTool))
+        if (RequiredInput.ToolActivityOptions is not null
+            && RequiredInput.ToolActivityOptions.TryGetValue(toolName, out var perTool))
         {
             return perTool;
         }
 
+        Workflow.Logger.LogWarning(
+            "Tool '{ToolName}' not found in ToolActivityOptions; using defaults. Check session client registration.",
+            toolName);
+
         return new ActivityOptions
         {
-            StartToCloseTimeout = Input!.ActivityTimeout,
-            HeartbeatTimeout = Input!.HeartbeatTimeout,
+            StartToCloseTimeout = RequiredInput.ActivityTimeout,
+            HeartbeatTimeout = RequiredInput.HeartbeatTimeout,
             Summary = toolName,
         };
     }

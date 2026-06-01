@@ -28,6 +28,16 @@ public abstract class DurableChatWorkflowBase<TOutput>
     protected DurableChatWorkflowInput? Input { get; private set; }
 
     /// <summary>
+    /// Non-nullable accessor for <see cref="Input"/>. Throws <see cref="InvalidOperationException"/>
+    /// when accessed before <see cref="RunAsync"/> has set the input. Prefer this over
+    /// <c>Input!</c> suppression — the type system cannot enforce the FIFO scheduler invariant
+    /// that guarantees <see cref="Input"/> is non-null before any update handler executes.
+    /// </summary>
+    protected DurableChatWorkflowInput RequiredInput =>
+        Input ?? throw new InvalidOperationException(
+            "RequiredInput accessed before RunAsync initialized Input.");
+
+    /// <summary>
     /// Returns <see langword="true"/> once a <c>Shutdown</c> signal has been received.
     /// Subclass update validators can use this to reject new turns after shutdown.
     /// </summary>
@@ -349,8 +359,8 @@ public abstract class DurableChatWorkflowBase<TOutput>
             // RetryPolicy intentionally left null; subclasses with non-idempotent activities must override ExecuteTurnAsync and harden.
             var activityOptions = new ActivityOptions
             {
-                StartToCloseTimeout = Input!.ActivityTimeout,
-                HeartbeatTimeout = Input!.HeartbeatTimeout,
+                StartToCloseTimeout = RequiredInput.ActivityTimeout,
+                HeartbeatTimeout = RequiredInput.HeartbeatTimeout,
                 Summary = DurableChatClient.BuildActivitySummary(chatOptions),
             };
 
@@ -365,7 +375,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
             _history.Add(responseEntryToAppend);
 
             // Update turn count search attribute if opt-in was requested.
-            if (Input!.EnableSearchAttributes)
+            if (RequiredInput.EnableSearchAttributes)
             {
                 Workflow.UpsertTypedSearchAttributes(
                     DurableSessionAttributes.TurnCount.ValueSet(_turnCount));
@@ -417,7 +427,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
     public Task<DurableApprovalDecision> RequestApprovalAsync(DurableApprovalRequest request) =>
         _approval.RequestApprovalAsync(
             request,
-            approvalTimeout: Input!.ApprovalTimeout,
+            approvalTimeout: RequiredInput.ApprovalTimeout,
             onRequested: req => Workflow.Logger.LogInformation(
                 "[{ConversationId}] Approval requested (RequestId: {RequestId}, Description: {Description})",
                 Workflow.Info.WorkflowId, req.RequestId, req.Description ?? req.RequestId),
