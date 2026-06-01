@@ -19,6 +19,9 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     private readonly ILogger _logger;
     private readonly DurableFunctionRegistry? _functionRegistry;
     private readonly DurableChatToolOptionsRegistry? _toolOptionsRegistry;
+    // Snapshot is computed once at first use. DurableFunctionRegistry is effectively stable
+    // after host construction — runtime mutation is not supported.
+    private readonly Lazy<IReadOnlyDictionary<string, ActivityOptions>?> _toolActivityOptionsCache;
 
     /// <summary>
     /// Initializes a new <see cref="DurableChatSessionClient"/>.
@@ -51,6 +54,9 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         _logger = logger ?? NullLogger<DurableChatSessionClient>.Instance;
         _functionRegistry = functionRegistry;
         _toolOptionsRegistry = toolOptionsRegistry;
+        _toolActivityOptionsCache = new Lazy<IReadOnlyDictionary<string, ActivityOptions>?>(
+            BuildToolActivityOptions,
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     // Validates and returns the options; used as a field initializer so validation fires
@@ -101,7 +107,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         // start. The resulting dict (or null when no tools are registered) is the
         // activation marker for Pattern 3 — it freezes into workflow history and survives
         // continue-as-new transitions deterministically.
-        var toolActivityOptions = BuildToolActivityOptions();
+        var toolActivityOptions = _toolActivityOptionsCache.Value;
 
         // Start the workflow if it doesn't exist, or reuse the existing one.
         // OriginalCreatedAt is intentionally omitted here — the workflow sets it to

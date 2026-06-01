@@ -86,7 +86,7 @@ internal sealed class DurableChatActivities(
 
         try
         {
-            var collected = new List<ChatResponseUpdate>();
+            var collected = new List<ChatResponseUpdate>(32);
             await foreach (var update in chatClient.GetStreamingResponseAsync(
                     input.Messages, resolvedOptions, ct)
                 .WithCancellation(ct)
@@ -197,15 +197,15 @@ internal sealed class DurableChatActivities(
             effectiveOptions = effectiveOptions is null
                 ? new ChatOptions()
                 : effectiveOptions.Clone();
-            // AIFunction : AITool — direct cast, no custom conversion needed.
-            effectiveOptions.Tools = registry.Values.Cast<AITool>().ToList();
+            // AIFunction : AITool — direct spread, no intermediate iterator needed.
+            effectiveOptions.Tools = [..registry.Values];
         }
 
         var chatClient = ResolveChatClient(input.ClientKey);
 
         try
         {
-            var collected = new List<ChatResponseUpdate>();
+            var collected = new List<ChatResponseUpdate>(32);
             await foreach (var update in chatClient.GetStreamingResponseAsync(
                     input.Messages, effectiveOptions, ct)
                 .WithCancellation(ct)
