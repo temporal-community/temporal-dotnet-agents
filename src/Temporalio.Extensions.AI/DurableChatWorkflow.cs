@@ -236,20 +236,29 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             // Inspect each task individually after WhenAllAsync. Never use ContinueWith inside
             // a workflow — it's non-deterministic on replay. WhenAllAsync throws if any task
             // faults; we swallow application failures here and look at each task's terminal state.
-            // Workflow-level cancellation (CancellationToken fired) must propagate immediately —
-            // it is distinct from a task reaching the Cancelled terminal state, which is handled
-            // by the task.IsCanceled check in the per-task loop below.
+            // Workflow-level cancellation must propagate immediately. Two paths arrive here:
+            // (a) WhenAllAsync itself throws OperationCanceledException when the workflow token fires.
+            // (b) Temporal delivers a cancelled activity as a Faulted task (ActivityFailureException
+            //     wrapping a cancellation cause), not as a Cancelled task — caught by the bare catch
+            //     below and re-detected via Workflow.CancellationToken.IsCancellationRequested.
             try
             {
                 await Workflow.WhenAllAsync(toolTasks).ConfigureAwait(true);
             }
             catch (OperationCanceledException) when (Workflow.CancellationToken.IsCancellationRequested)
             {
-                throw; // workflow cancellation — propagate, do not classify as an application error
+                throw; // workflow cancellation as OCE — do not classify as an application error
             }
             catch
             {
-                // Per-task inspection below handles both success and failure paths.
+                // If the workflow is being cancelled, faulted activity tasks may represent
+                // Temporal-delivered cancellations rather than application errors.
+                if (Workflow.CancellationToken.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException(
+                        "Workflow cancelled during tool fan-out; propagating cancellation.");
+                }
+                // Per-task inspection below handles application-level failures.
             }
 
             var functionResultContents = new List<AIContent>(toolCalls.Count);
@@ -262,10 +271,11 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
                 {
                     functionResultContents.Add(new FunctionResultContent(tc.CallId, task.Result.Result));
                 }
-                else if (task.IsCanceled)
+                else if (task.IsCanceled || Workflow.CancellationToken.IsCancellationRequested)
                 {
-                    // Workflow cancellation should propagate as OperationCanceledException,
-                    // not be misclassified as a consecutive application error.
+                    // Workflow cancellation should propagate as OperationCanceledException.
+                    // Temporal may deliver cancelled activities as Faulted (not Cancelled) tasks,
+                    // so IsCanceled alone is insufficient — check the workflow token too.
                     throw new OperationCanceledException(
                         "A tool activity was cancelled, propagating cancellation.");
                 }
