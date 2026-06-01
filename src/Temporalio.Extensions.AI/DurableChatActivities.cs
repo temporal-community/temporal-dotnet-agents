@@ -306,9 +306,12 @@ internal sealed class DurableChatActivities(
                 {
                     newTools.Add(realTool);
                 }
-                // If the registry doesn't know the tool, drop it silently — the caller asked
-                // for a name we cannot satisfy, and feeding a non-invocable placeholder to the
-                // LLM would fail later in a less clear way.
+                else
+                {
+                    _logger.LogWarning(
+                        "Tool '{ToolName}' not found in DurableFunctionRegistry; dropping from options.",
+                        placeholder.Name);
+                }
             }
             else
             {
