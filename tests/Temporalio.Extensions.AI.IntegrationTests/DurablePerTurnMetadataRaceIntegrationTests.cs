@@ -172,6 +172,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         var client0Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var client0Started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        client0.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-0-answer")));
         client0.BlockOnNextCall(client0Gate, client0Started);
         client1.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-1-answer")));
         client2.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-2-answer")));
