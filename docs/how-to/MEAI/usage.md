@@ -351,7 +351,7 @@ For each registered tool the effective `ActivityOptions` is:
 - `RetryPolicy` = per-tool `RetryPolicy` ?? `DurableExecutionOptions.RetryPolicy`
 - `Summary` = tool name (auto-populated for the Temporal Web UI)
 
-The resolved dict is captured into workflow history at session start, so per-tool options are **frozen for the lifetime of a session** — a new `AddDurableTools` registered after a session begins will not affect the in-flight session. See [tool-functions.md — Mid-session drift warning](tool-functions.md#mid-session-drift-warning).
+The resolved dict is captured into workflow history at session start, so per-tool options are **frozen for the lifetime of a session** — a new `AddDurableTools` registered after a session begins will not affect the in-flight session. See [tool-functions.md — Mid-session drift warning](tool-functions.md#mid-session-drift-warning). The client-side per-tool options map is also cached once at first use — see the Mid-session drift warning in tool-functions.md.
 
 ---
 

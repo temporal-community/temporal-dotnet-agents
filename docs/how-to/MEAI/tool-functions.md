@@ -313,9 +313,7 @@ picked up by sessions started *after* the registration. This is required for rep
 determinism: a workflow replaying on a different worker process must see the same options
 that were active when the session began.
 
-Practical implication: if you register tools dynamically (rare), make sure registration
-happens before the first `ChatAsync` for that conversation. For typical static
-registrations at worker startup this is not a concern.
+Practical implication: `DurableChatSessionClient` caches the per-tool options snapshot on first use — it is computed once for the lifetime of the client instance (thread-safe via `Lazy<T>`). All `AddDurableTools` calls must therefore complete before the host starts, not merely before the first `ChatAsync` for a given conversation. For typical static registrations at worker startup this is automatic. Dynamic late registration is not supported.
 
 ### Long-running turns — RPC timeout vs. update cancellation
 

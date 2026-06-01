@@ -636,7 +636,7 @@ Pattern 3 is the third tool-execution model (alongside Pattern 1 — `UseFunctio
 
 Pattern 3 is **intent-based**. `DurableChatSessionClient.ChatAsync` checks `DurableFunctionRegistry.Count > 0` at workflow-start time. If at least one tool is registered via `AddDurableTools`, the client eagerly resolves per-tool `ActivityOptions` for **every** registered tool (filling defaults from `DurableExecutionOptions.ActivityTimeout`, `HeartbeatTimeout`, and `RetryPolicy`) and ships the complete dict into `DurableChatWorkflowInput.ToolActivityOptions`.
 
-The workflow then detects Pattern 3 by checking `Input.ToolActivityOptions is { Count: > 0 }`. This **freezes** the activation decision and the resolved options in workflow history, making replay deterministic regardless of which worker process picks up the activation. A worker that joins after a session has begun cannot accidentally see a different tool list or different options.
+The workflow then detects Pattern 3 by checking `Input.ToolActivityOptions is { Count: > 0 }`. This **freezes** the activation decision and the resolved options in workflow history, making replay deterministic regardless of which worker process picks up the activation. A worker that joins after a session has begun cannot accidentally see a different tool list or different options. The client-side `BuildToolActivityOptions()` result is cached via `Lazy<T>` for the lifetime of `DurableChatSessionClient` — tool registration must be complete before the first `ChatAsync` call on the client, not merely before each session.
 
 ```
 DurableChatSessionClient.ChatAsync
@@ -793,6 +793,8 @@ When a tool activity fails inside the dispatch loop, the workflow's default beha
 - Setting `MaximumConsecutiveErrorsPerRequest = 0` propagates the first tool failure immediately (MAF-style)
 
 This is asymmetric with the Agents library, which currently propagates tool failures immediately. The Agents library is expected to adopt this catch-and-feed-back behavior as a follow-up for cross-library consistency.
+
+**Cancellation during fan-out.** If the workflow is cancelled while tool tasks are in flight (`Workflow.CancelAsync()` or an external cancellation signal), the fan-out propagates `OperationCanceledException` directly. Workflow cancellation is not fed into the consecutive-error counter and is not misclassified as `ApplicationFailureException`. Callers that cancel a session workflow mid-turn should expect `OperationCanceledException` (or a wrapping `WorkflowFailedException` / `WorkflowUpdateFailedException`) from `ChatAsync`.
 
 ---
 
