@@ -235,10 +235,17 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
 
             // Inspect each task individually after WhenAllAsync. Never use ContinueWith inside
             // a workflow — it's non-deterministic on replay. WhenAllAsync throws if any task
-            // faults; we swallow here and look at each task's terminal state.
+            // faults; we swallow application failures here and look at each task's terminal state.
+            // Workflow-level cancellation (CancellationToken fired) must propagate immediately —
+            // it is distinct from a task reaching the Cancelled terminal state, which is handled
+            // by the task.IsCanceled check in the per-task loop below.
             try
             {
                 await Workflow.WhenAllAsync(toolTasks).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException) when (Workflow.CancellationToken.IsCancellationRequested)
+            {
+                throw; // workflow cancellation — propagate, do not classify as an application error
             }
             catch
             {
