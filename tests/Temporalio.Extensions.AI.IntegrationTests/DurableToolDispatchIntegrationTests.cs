@@ -570,6 +570,112 @@ public class DurableToolDispatchIntegrationTests
         await host.StopAsync();
     }
 
+    // ── CRIT-2: WhenAllAsync fan-out cancellation path ──────────────────────
+
+    /// <summary>
+    /// CRIT-2 regression: when <c>Workflow.WhenAllAsync</c> throws because the
+    /// workflow was cancelled mid tool fan-out, previously cancelled tasks fell into
+    /// the <c>hadError</c> path in the per-task inspection loop.  With
+    /// <c>MaximumConsecutiveErrorsPerRequest = 0</c> (MAF-style immediate propagation),
+    /// the cancelled task incremented <c>consecutiveErrors</c> past the threshold and
+    /// the workflow surfaced a non-retryable <see cref="ApplicationFailureException"/>
+    /// rather than a workflow cancellation.
+    ///
+    /// After the fix (<c>task.IsCanceled → rethrow OperationCanceledException</c>),
+    /// workflow cancellation must not be misclassified as an application error.
+    /// </summary>
+    [Fact]
+    public async Task WhenAllAsync_WorkflowCancelledDuringToolFanOut_DoesNotSurfaceApplicationFailureException()
+    {
+        await using var env = await WorkflowEnvironment.StartLocalAsync();
+
+        // A gate that the tool will block on until the test releases it.
+        // The tool never returns on its own — the workflow will be cancelled first.
+        var toolGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var toolStartedSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var blockingTool = AIFunctionFactory.Create(
+            async (string? _ = null) =>
+            {
+                // Signal that the tool activity has started so the test knows when to cancel.
+                toolStartedSignal.TrySetResult();
+                // Block until released or the activity's CancellationToken fires.
+                await toolGate.Task.ConfigureAwait(false);
+                return (object?)"unblocked";
+            },
+            "blocking_cancel_tool",
+            "A tool that blocks until released.");
+
+        // LLM script: first step returns a tool call, second step never runs.
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-cancel", "blocking_cancel_tool")],
+            "This final answer should not be reached.");
+
+        var taskQueue = $"pattern3-cancel-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            scripted,
+            builder => builder.AddDurableTools(blockingTool, o => o.NoRetry()),
+            // MaximumConsecutiveErrorsPerRequest = 0 is the tightest setting:
+            // even one error immediately throws. This was the trigger for the bug.
+            opts => opts.MaximumConsecutiveErrorsPerRequest = 0);
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"cancel-fanout-{Guid.NewGuid():N}";
+
+        // Fire the chat turn in the background; it will block at the tool fan-out.
+        var chatTask = Task.Run(async () =>
+            await sessionClient.ChatAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "start the tool")]));
+
+        // Wait until the tool activity has started so the fan-out is in progress.
+        await toolStartedSignal.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // Cancel the workflow while the tool is still blocking.
+        var workflowId = sessionClient.GetWorkflowId(conversationId);
+        var handle = env.Client.GetWorkflowHandle(workflowId);
+        await handle.CancelAsync();
+
+        // The chatTask will throw when the workflow cancellation propagates.
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() => chatTask);
+
+        // Assert: the exception must NOT be an ApplicationFailureException whose
+        // message indicates an exceeded error threshold.  Before the fix, the bug
+        // produced exactly that ("Exceeded MaximumConsecutiveErrorsPerRequest").
+        // The correct failure mode is a workflow cancellation (or a wrapping
+        // WorkflowFailedException / WorkflowUpdateFailedException containing it).
+        AssertNotApplicationFailureFromErrorThreshold(ex);
+
+        // Release the tool gate so the blocked activity thread can clean up.
+        toolGate.TrySetResult();
+
+        await host.StopAsync();
+    }
+
+    /// <summary>
+    /// Walks the full exception chain and fails if any exception is an
+    /// <see cref="ApplicationFailureException"/> whose message contains the
+    /// "Exceeded MaximumConsecutiveErrorsPerRequest" threshold-exceeded sentinel.
+    /// </summary>
+    private static void AssertNotApplicationFailureFromErrorThreshold(Exception ex)
+    {
+        for (var e = (Exception?)ex; e is not null; e = e.InnerException)
+        {
+            if (e is ApplicationFailureException afe &&
+                afe.Message.Contains("Exceeded MaximumConsecutiveErrorsPerRequest",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                Assert.Fail(
+                    $"Workflow cancellation was misclassified as ApplicationFailureException: {afe.Message}. " +
+                    "CRIT-2 fix: cancelled tasks must rethrow OperationCanceledException, " +
+                    "not increment the consecutive-error counter.");
+            }
+        }
+    }
+
     // ── Other gaps ──────────────────────────────────────────────────────────
 
     /// <summary>
