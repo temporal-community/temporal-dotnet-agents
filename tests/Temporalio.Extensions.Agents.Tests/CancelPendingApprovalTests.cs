@@ -96,7 +96,7 @@ public class CancelPendingApprovalTests
             return Task.FromResult(_pending);
         }
 
-        public Task<DurableApprovalDecision> SubmitApprovalAsync(
+        public Task SubmitApprovalAsync(
             TemporalAgentSessionId sessionId,
             DurableApprovalDecision decision,
             CancellationToken cancellationToken = default)
@@ -104,7 +104,7 @@ public class CancelPendingApprovalTests
             SubmitApprovalCallCount++;
             LastSubmittedSessionId = sessionId;
             LastSubmittedDecision = decision;
-            return Task.FromResult(decision);
+            return Task.CompletedTask;
         }
 
         public Task<AgentResponse> RunAgentAsync(TemporalAgentSessionId sessionId, RunRequest request, CancellationToken cancellationToken = default) =>

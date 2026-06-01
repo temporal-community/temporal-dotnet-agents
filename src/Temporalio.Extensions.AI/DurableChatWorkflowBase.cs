@@ -437,8 +437,11 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// Unblocks <see cref="RequestApprovalAsync"/>.
     /// </summary>
     [WorkflowUpdate("SubmitApproval")]
-    public Task<DurableApprovalDecision> SubmitApprovalAsync(DurableApprovalDecision decision) =>
-        Task.FromResult(_approval.SubmitApprovalAsync(decision));
+    public Task SubmitApprovalAsync(DurableApprovalDecision decision)
+    {
+        _approval.SubmitApproval(decision);
+        return Task.CompletedTask;
+    }
 
     /// <summary>
     /// Returns the currently pending approval request, or null if none.

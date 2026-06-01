@@ -193,7 +193,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     /// Submits a human decision for a pending tool approval request.
     /// Unblocks the workflow's <c>RequestApprovalAsync</c> update.
     /// </summary>
-    public async Task<DurableApprovalDecision> SubmitApprovalAsync(
+    public async Task SubmitApprovalAsync(
         string conversationId,
         DurableApprovalDecision decision,
         CancellationToken cancellationToken = default)
@@ -202,7 +202,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         ArgumentNullException.ThrowIfNull(decision);
 
         var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
-        return await handle.ExecuteUpdateAsync<DurableChatWorkflow, DurableApprovalDecision>(
+        await handle.ExecuteUpdateAsync(
             wf => wf.SubmitApprovalAsync(decision),
             new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } });
     }

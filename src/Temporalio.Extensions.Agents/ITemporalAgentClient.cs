@@ -41,11 +41,10 @@ public interface ITemporalAgentClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Submits a human <see cref="DurableApprovalDecision"/> to the agent workflow.
-    /// Unblocks the tool that issued the <see cref="DurableApprovalRequest"/> and returns
-    /// the resolved decision.
+    /// Submits a human <see cref="DurableApprovalDecision"/> to the agent workflow,
+    /// unblocking the pending <see cref="DurableApprovalRequest"/>.
     /// </summary>
-    Task<DurableApprovalDecision> SubmitApprovalAsync(
+    Task SubmitApprovalAsync(
         TemporalAgentSessionId sessionId,
         DurableApprovalDecision decision,
         CancellationToken cancellationToken = default);

@@ -50,8 +50,7 @@ public class DurableApprovalIntegrationTests : IClassFixture<IntegrationTestFixt
             Reason = "Approved by test",
         };
 
-        var submitted = await _fixture.SessionClient.SubmitApprovalAsync(conversationId, decision);
-        Assert.True(submitted.Approved);
+        await _fixture.SessionClient.SubmitApprovalAsync(conversationId, decision);
 
         // The request task should complete now.
         var result = await requestTask;

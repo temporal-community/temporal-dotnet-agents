@@ -105,7 +105,7 @@ internal sealed class DefaultTemporalAgentClient(
     }
 
     /// <inheritdoc/>
-    public async Task<DurableApprovalDecision> SubmitApprovalAsync(
+    public async Task SubmitApprovalAsync(
         TemporalAgentSessionId sessionId,
         DurableApprovalDecision decision,
         CancellationToken cancellationToken = default)
@@ -113,7 +113,7 @@ internal sealed class DefaultTemporalAgentClient(
         ArgumentNullException.ThrowIfNull(decision);
 
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
-        return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
+        await handle.ExecuteUpdateAsync(
             wf => wf.SubmitApprovalAsync(decision),
             new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
             .ConfigureAwait(false);

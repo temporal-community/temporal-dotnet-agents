@@ -118,13 +118,11 @@ internal sealed class DurableApprovalMixin
     }
 
     /// <summary>
-    /// Stores the human decision and returns it, unblocking the
-    /// <see cref="RequestApprovalAsync"/> wait condition.
+    /// Stores the human decision, unblocking the <see cref="RequestApprovalAsync"/> wait condition.
     /// </summary>
-    public DurableApprovalDecision SubmitApprovalAsync(DurableApprovalDecision decision)
+    public void SubmitApproval(DurableApprovalDecision decision)
     {
         _approvalDecision = decision;
-        return decision;
     }
 
     /// <summary>

@@ -125,7 +125,7 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
             await Task.Delay(TimeSpan.FromMilliseconds(500));
 
             // Submit the approval decision.
-            await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
+            await handle.ExecuteUpdateAsync(
                 wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
                 {
                     RequestId = approvalRequest.RequestId,
