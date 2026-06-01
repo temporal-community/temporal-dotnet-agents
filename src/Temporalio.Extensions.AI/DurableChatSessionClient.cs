@@ -49,6 +49,8 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         DurableFunctionRegistry? functionRegistry,
         DurableChatToolOptionsRegistry? toolOptionsRegistry)
     {
+        // Primary constructors have no body for guard statements, so ArgumentNullException.ThrowIfNull()
+        // cannot be used here — field initializers run before any constructor body would.
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _options = ValidateOptions(options);
         _logger = logger ?? NullLogger<DurableChatSessionClient>.Instance;

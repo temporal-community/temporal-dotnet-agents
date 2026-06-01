@@ -38,7 +38,6 @@ internal sealed class DurableChatActivities(
     public async Task<ChatResponse> GetResponseAsync(DurableChatInput input)
     {
         var ctx = ActivityExecutionContext.HasCurrent ? ActivityExecutionContext.Current : null;
-        var ct = ctx?.CancellationToken ?? CancellationToken.None;
 
         _logger.LogDebug(
             "Executing durable chat activity for conversation {ConversationId}, turn {TurnNumber}",
@@ -49,9 +48,7 @@ internal sealed class DurableChatActivities(
             $"{DurableChatTelemetry.ChatOperationName} {modelId ?? "unknown"}",
             System.Diagnostics.ActivityKind.Client);
 
-        span?.SetTag(DurableChatTelemetry.OperationNameAttribute, DurableChatTelemetry.ChatOperationName);
-        span?.SetTag(DurableChatTelemetry.ConversationIdAttribute, input.ConversationId);
-        span?.SetTag(DurableChatTelemetry.RequestModelAttribute, modelId);
+        SetupSpanTags(span, input.ConversationId, modelId);
 
         // Swap any ToolNamePlaceholder instances (left over from wire deserialization) with
         // real AIFunction references resolved from the durable-tool registry. Wire format
@@ -84,44 +81,22 @@ internal sealed class DurableChatActivities(
             chatClient = decorator.Decorate(chatClient, resolvedOptions);
         }
 
-        try
-        {
-            var collected = new List<ChatResponseUpdate>(32);
-            await foreach (var update in chatClient.GetStreamingResponseAsync(
-                    input.Messages, resolvedOptions, ct)
-                .WithCancellation(ct)
-                .ConfigureAwait(false))
-            {
-                collected.Add(update);
-                ctx?.Heartbeat(update.Text);
-            }
-            var response = collected.ToChatResponse();
+        var response = await StreamAndCollectAsync(
+            chatClient, input.Messages, resolvedOptions, input, span, ctx)
+            .ConfigureAwait(false);
 
-            span?.SetTag(DurableChatTelemetry.InputTokensAttribute, response.Usage?.InputTokenCount);
-            span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, response.Usage?.OutputTokenCount);
-            span?.SetTag(DurableChatTelemetry.ResponseModelAttribute, response.ModelId);
+        _logger.LogDebug(
+            "Durable chat activity completed for conversation {ConversationId}, turn {TurnNumber}",
+            input.ConversationId, input.TurnNumber);
 
-            _logger.LogDebug(
-                "Durable chat activity completed for conversation {ConversationId}, turn {TurnNumber}",
-                input.ConversationId, input.TurnNumber);
+        // Safety net for the silent-failure footgun (Pattern 3 design: OD-6).
+        // If the user registered durable tools but neither (a) FunctionInvokingChatClient
+        // is in the chain to handle them inline, nor (b) the workflow is the Pattern 3
+        // dispatch loop (which routes through GetChatStepAsync, not this activity),
+        // tool calls would be silently dropped. Throw to surface the misconfiguration.
+        EnsureToolDispatchHandlerWired(chatClient, response);
 
-            // Safety net for the silent-failure footgun (Pattern 3 design: OD-6).
-            // If the user registered durable tools but neither (a) FunctionInvokingChatClient
-            // is in the chain to handle them inline, nor (b) the workflow is the Pattern 3
-            // dispatch loop (which routes through GetChatStepAsync, not this activity),
-            // tool calls would be silently dropped. Throw to surface the misconfiguration.
-            EnsureToolDispatchHandlerWired(chatClient, response);
-
-            return response;
-        }
-        catch (Exception ex)
-        {
-            span?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
-            _logger.LogError(ex,
-                "Durable chat activity failed for conversation {ConversationId}, turn {TurnNumber}",
-                input.ConversationId, input.TurnNumber);
-            throw;
-        }
+        return response;
     }
 
     /// Once-per-client backstop check for the silent A+B mixed-pattern misconfiguration:
@@ -170,7 +145,6 @@ internal sealed class DurableChatActivities(
     public async Task<DurableChatStepResult> GetChatStepAsync(DurableChatInput input)
     {
         var ctx = ActivityExecutionContext.HasCurrent ? ActivityExecutionContext.Current : null;
-        var ct = ctx?.CancellationToken ?? CancellationToken.None;
 
         _logger.LogDebug(
             "Executing durable chat step activity for conversation {ConversationId}, turn {TurnNumber}",
@@ -181,9 +155,7 @@ internal sealed class DurableChatActivities(
             $"{DurableChatTelemetry.ChatOperationName} {modelId ?? "unknown"}",
             System.Diagnostics.ActivityKind.Client);
 
-        span?.SetTag(DurableChatTelemetry.OperationNameAttribute, DurableChatTelemetry.ChatOperationName);
-        span?.SetTag(DurableChatTelemetry.ConversationIdAttribute, input.ConversationId);
-        span?.SetTag(DurableChatTelemetry.RequestModelAttribute, modelId);
+        SetupSpanTags(span, input.ConversationId, modelId);
 
         // Auto-populate tools from the registry if the caller didn't supply any (OD-1).
         // If ChatOptions.Tools is explicitly provided we respect that subset choice — but
@@ -203,11 +175,49 @@ internal sealed class DurableChatActivities(
 
         var chatClient = ResolveChatClient(input.ClientKey);
 
+        var response = await StreamAndCollectAsync(
+            chatClient, input.Messages, effectiveOptions, input, span, ctx)
+            .ConfigureAwait(false);
+
+        // Coalesce all assistant messages from the response into a single ChatMessage
+        // carrying every content item. Streaming responses may split content across
+        // multiple chunks; the workflow loop just needs one assistant message to
+        // append to its accumulated transcript.
+        var (assistantMessage, toolCalls, isFinal) = CollectAssistantContents(response);
+
+        _logger.LogDebug(
+            "Durable chat step activity completed for conversation {ConversationId}, turn {TurnNumber} " +
+            "(IsFinal={IsFinal}, ToolCalls={ToolCallCount})",
+            input.ConversationId, input.TurnNumber, isFinal, toolCalls.Count);
+
+        return new DurableChatStepResult
+        {
+            IsFinal = isFinal,
+            AssistantMessage = assistantMessage,
+            ToolCalls = isFinal ? null : toolCalls,
+            Usage = response.Usage,
+        };
+    }
+
+    /// <summary>
+    /// Shared streaming accumulator: streams the LLM response, heartbeats each chunk,
+    /// materializes the response via <c>ToChatResponse()</c>, populates span success tags,
+    /// and rethrows any exception with span error status and a log entry. The span is passed
+    /// in (owned by the caller's <c>using</c> block) so its lifetime spans the entire method.
+    /// </summary>
+    private async Task<ChatResponse> StreamAndCollectAsync(
+        IChatClient chatClient,
+        IList<ChatMessage> messages,
+        ChatOptions? options,
+        DurableChatInput input,
+        System.Diagnostics.Activity? span,
+        ActivityExecutionContext? ctx)
+    {
+        var ct = ctx?.CancellationToken ?? CancellationToken.None;
         try
         {
             var collected = new List<ChatResponseUpdate>(32);
-            await foreach (var update in chatClient.GetStreamingResponseAsync(
-                    input.Messages, effectiveOptions, ct)
+            await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options, ct)
                 .WithCancellation(ct)
                 .ConfigureAwait(false))
             {
@@ -220,48 +230,43 @@ internal sealed class DurableChatActivities(
             span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, response.Usage?.OutputTokenCount);
             span?.SetTag(DurableChatTelemetry.ResponseModelAttribute, response.ModelId);
 
-            // Coalesce all assistant messages from the response into a single ChatMessage
-            // carrying every content item. Streaming responses may split content across
-            // multiple chunks; the workflow loop just needs one assistant message to
-            // append to its accumulated transcript.
-            var assistantContents = new List<AIContent>();
-            foreach (var msg in response.Messages)
-            {
-                if (msg.Role == ChatRole.Assistant)
-                {
-                    foreach (var c in msg.Contents)
-                    {
-                        assistantContents.Add(c);
-                    }
-                }
-            }
-
-            var assistantMessage = new ChatMessage(ChatRole.Assistant, assistantContents);
-
-            var toolCalls = assistantContents.OfType<FunctionCallContent>().ToList();
-            var isFinal = toolCalls.Count == 0;
-
-            _logger.LogDebug(
-                "Durable chat step activity completed for conversation {ConversationId}, turn {TurnNumber} " +
-                "(IsFinal={IsFinal}, ToolCalls={ToolCallCount})",
-                input.ConversationId, input.TurnNumber, isFinal, toolCalls.Count);
-
-            return new DurableChatStepResult
-            {
-                IsFinal = isFinal,
-                AssistantMessage = assistantMessage,
-                ToolCalls = isFinal ? null : toolCalls,
-                Usage = response.Usage,
-            };
+            return response;
         }
         catch (Exception ex)
         {
             span?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
             _logger.LogError(ex,
-                "Durable chat step activity failed for conversation {ConversationId}, turn {TurnNumber}",
+                "Durable chat activity failed for conversation {ConversationId}, turn {TurnNumber}",
                 input.ConversationId, input.TurnNumber);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Coalesces assistant messages in <paramref name="response"/> into a single
+    /// <see cref="ChatMessage"/> and extracts tool-call requests. Used by
+    /// <see cref="GetChatStepAsync"/> to build a <see cref="DurableChatStepResult"/>.
+    /// </summary>
+    private static (ChatMessage AssistantMessage, List<FunctionCallContent> ToolCalls, bool IsFinal)
+        CollectAssistantContents(ChatResponse response)
+    {
+        List<AIContent> assistantContents = [];
+        foreach (var msg in response.Messages)
+        {
+            if (msg.Role == ChatRole.Assistant)
+            {
+                foreach (var c in msg.Contents)
+                {
+                    assistantContents.Add(c);
+                }
+            }
+        }
+
+        var assistantMessage = new ChatMessage(ChatRole.Assistant, assistantContents);
+        var toolCalls = assistantContents.OfType<FunctionCallContent>().ToList();
+        var isFinal = toolCalls.Count == 0;
+
+        return (assistantMessage, toolCalls, isFinal);
     }
 
     /// <summary>
@@ -320,6 +325,19 @@ internal sealed class DurableChatActivities(
         }
         resolved.Tools = newTools;
         return resolved;
+    }
+
+    /// <summary>
+    /// Sets up the shared OTel span tags for both Pattern 1 and Pattern 3 activities.
+    /// </summary>
+    private static void SetupSpanTags(
+        System.Diagnostics.Activity? span,
+        string? conversationId,
+        string? modelId)
+    {
+        span?.SetTag(DurableChatTelemetry.OperationNameAttribute, DurableChatTelemetry.ChatOperationName);
+        span?.SetTag(DurableChatTelemetry.ConversationIdAttribute, conversationId);
+        span?.SetTag(DurableChatTelemetry.RequestModelAttribute, modelId);
     }
 
     /// <summary>

@@ -38,8 +38,9 @@ namespace Temporalio.Extensions.AI;
 public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionOptions durableOptions)
     : DelegatingChatClient(innerClient)
 {
-    // Field initializer validates durableOptions at construction time — primary constructors
-    // have no body for inline guards. Stored so methods reference a single captured value.
+    // Field initializer validates durableOptions at construction time. ArgumentNullException.ThrowIfNull()
+    // cannot be used here — primary constructors have no body for guard statements; field
+    // initializers are the only available validation site.
     private readonly DurableExecutionOptions _durableOptions =
         durableOptions ?? throw new ArgumentNullException(nameof(durableOptions));
 

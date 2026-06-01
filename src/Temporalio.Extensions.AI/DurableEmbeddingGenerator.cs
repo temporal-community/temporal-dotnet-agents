@@ -21,7 +21,9 @@ public sealed class DurableEmbeddingGenerator(
     DurableExecutionOptions durableOptions)
     : DelegatingEmbeddingGenerator<string, Embedding<float>>(innerGenerator)
 {
-    // Field initializer validates durableOptions at construction time.
+    // Field initializer validates durableOptions at construction time. ArgumentNullException.ThrowIfNull()
+    // cannot be used here — primary constructors have no body for guard statements; field
+    // initializers are the only available validation site.
     private readonly DurableExecutionOptions _durableOptions =
         durableOptions ?? throw new ArgumentNullException(nameof(durableOptions));
 
