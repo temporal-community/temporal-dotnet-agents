@@ -77,9 +77,10 @@ internal sealed record ProxyResolvedWorkerConfig
 
     /// <summary>
     /// Pre-computed <see cref="ActivityOptions"/> for all <c>RunToolInterceptor</c> dispatches
-    /// on this workflow. Shared across all tool calls in a turn (per-tool interceptor timeout is
-    /// taken from the per-tool <see cref="DurableToolOptions.InterceptorTimeout"/>; this options
-    /// object uses the worker-level default when that is null).
+    /// on this workflow. Shared across all tool calls in a turn — all interceptor activities use
+    /// this single options object. Per-tool interceptor timeout overrides
+    /// (<see cref="DurableToolOptions.InterceptorTimeout"/>) are not yet wired at dispatch time;
+    /// they are stored on the registration but not read here.
     /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> means no
     /// interceptor is configured, or the config predates Feature L.
     /// </summary>

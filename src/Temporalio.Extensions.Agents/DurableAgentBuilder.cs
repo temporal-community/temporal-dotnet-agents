@@ -261,10 +261,10 @@ public sealed class DurableAgentBuilder
     public DurableAgentBuilder AddTool(AIFunction tool, Action<DurableToolOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(tool);
-        if (string.IsNullOrEmpty(tool.Name))
+        if (string.IsNullOrWhiteSpace(tool.Name))
         {
             throw new ArgumentException(
-                "Tool must have a non-empty Name.",
+                "Tool must have a non-null, non-empty, non-whitespace Name.",
                 nameof(tool));
         }
 

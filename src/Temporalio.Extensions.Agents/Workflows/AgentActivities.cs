@@ -278,14 +278,19 @@ internal sealed class AgentActivities(
                 providerAIContexts!.Add(providerCtx);
             }
 
-            int extraCapacity = 0;
-            foreach (var c in providerAIContexts!) { extraCapacity += c.Messages?.Count() ?? 0; }
+            // Materialize each context's Messages list once. AIContext.Messages is typed as
+            // IEnumerable<ChatMessage> — calling Count() and then iterating again would
+            // double-enumerate any lazy or one-shot provider (F3 fix).
+            var materializedMessages = providerAIContexts!
+                .Select(c => c.Messages?.ToList())
+                .ToList();
+            var extraCapacity = materializedMessages.Sum(m => m?.Count ?? 0);
             var extraMessages = new List<ChatMessage>(extraCapacity);
-            foreach (var ctxResult in providerAIContexts!)
+            foreach (var extra in materializedMessages)
             {
-                if (ctxResult.Messages is { } extra)
+                if (extra is { } msgs)
                 {
-                    foreach (var m in extra)
+                    foreach (var m in msgs)
                     {
                         extraMessages.Add(m);
                     }
@@ -905,10 +910,19 @@ internal sealed class AgentActivities(
 
         ctx.Heartbeat($"intercepting tool '{input.ToolName}'");
 
-        // Deserialize the state bag snapshot the same way RunDurableAgentStep does.
-        var session = TemporalAgentSession.FromStateBag(
-            TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!),
-            input.SerializedStateBag);
+        // Deserialize the state bag snapshot when present. Parsing the workflow ID is only
+        // valid when this activity runs inside AgentWorkflow (ID = ta-{agent}-{key} format).
+        // For TemporalAIAgent sub-agent calls the workflow ID is the parent's, which may not
+        // parse as a TemporalAgentSessionId — and SerializedStateBag is always null on that
+        // path anyway. Skip the parse entirely when there is nothing to deserialize.
+        AgentSessionStateBag? stateBag = null;
+        if (input.SerializedStateBag.HasValue)
+        {
+            var session = TemporalAgentSession.FromStateBag(
+                TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!),
+                input.SerializedStateBag);
+            stateBag = session.StateBag.Count > 0 ? session.StateBag : null;
+        }
 
         var toolContext = new AgentToolContext
         {
@@ -918,7 +932,7 @@ internal sealed class AgentActivities(
                 ? new Dictionary<string, object?>()
                 : new Dictionary<string, object?>(input.Arguments),
             CallId = input.CallId,
-            StateBag = session.StateBag.Count > 0 ? session.StateBag : null,
+            StateBag = stateBag,
         };
 
         AgentToolDecision decision;
