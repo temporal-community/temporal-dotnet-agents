@@ -54,4 +54,30 @@ internal sealed record AgentJobInput
     /// <see cref="DurableAgentBuilder.MaxToolCallsPerTurn"/>. Defaults to 20.
     /// </summary>
     public int MaxToolCallsPerTurn { get; init; } = 20;
+
+    // Feature L — interceptor plumbing for AgentJobWorkflow (resolved at runtime from
+    // CachedDurableAgent; not frozen in workflow input like AgentWorkflow's
+    // ProxyResolvedWorkerConfig approach, since AgentJobWorkflow is fire-and-forget
+    // without a resolution handshake).
+
+    /// <summary>
+    /// Pre-computed <see cref="ActivityOptions"/> for <c>RunToolInterceptor</c> dispatches.
+    /// <see langword="null"/> when no interceptor is configured.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ActivityOptions? InterceptorActivityOptions { get; init; }
+
+    /// <summary>
+    /// Names of tools that skip the interceptor (have <c>SkipInterceptor()</c> set).
+    /// <see langword="null"/> is equivalent to an empty list.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? InterceptorSkippedTools { get; init; }
+
+    /// <summary>
+    /// Names of tools that require approval even when the interceptor returns Proceed.
+    /// <see langword="null"/> is equivalent to an empty list.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? RequiresApprovalTools { get; init; }
 }

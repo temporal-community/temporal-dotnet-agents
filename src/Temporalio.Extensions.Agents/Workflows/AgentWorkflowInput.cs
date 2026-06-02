@@ -104,4 +104,31 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     /// </summary>
     [JsonIgnore]
     public bool WorkerSettingsResolved => ResolvedWorkerConfig is not null;
+
+    // ── Feature L forwarding properties ──
+
+    /// <summary>
+    /// Pre-computed <see cref="ActivityOptions"/> for <c>RunToolInterceptor</c> dispatches.
+    /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.InterceptorActivityOptions"/>;
+    /// <see langword="null"/> when no interceptor is configured or config is not yet resolved.
+    /// </summary>
+    [JsonIgnore]
+    public ActivityOptions? InterceptorActivityOptions =>
+        ResolvedWorkerConfig?.InterceptorActivityOptions;
+
+    /// <summary>
+    /// Names of tools that skip the interceptor. Forwards to
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.InterceptorSkippedTools"/>.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<string>? InterceptorSkippedTools =>
+        ResolvedWorkerConfig?.InterceptorSkippedTools;
+
+    /// <summary>
+    /// Names of tools that always require human approval (Rule 2). Forwards to
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.RequiresApprovalTools"/>.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyList<string>? RequiresApprovalTools =>
+        ResolvedWorkerConfig?.RequiresApprovalTools;
 }

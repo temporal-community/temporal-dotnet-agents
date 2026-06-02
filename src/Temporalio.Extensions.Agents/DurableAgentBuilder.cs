@@ -51,6 +51,7 @@ public sealed class DurableAgentBuilder
     private readonly List<DurableToolRegistration> _tools = new();
     private readonly HashSet<string> _toolNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Func<IServiceProvider, AIContextProvider>> _contextProviders = new();
+    private Func<IServiceProvider, IAgentToolInterceptor>? _toolInterceptorFactory;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DurableAgentBuilder"/> class with the given agent
@@ -360,6 +361,21 @@ public sealed class DurableAgentBuilder
         return this;
     }
 
+    /// <summary>
+    /// Registers a per-agent <see cref="IAgentToolInterceptor"/> factory. The factory is invoked
+    /// once at first activity dispatch and the resolved instance is cached for the worker's lifetime.
+    /// Per-agent interceptor wins over <see cref="TemporalAgentsOptions.DefaultToolInterceptor"/>.
+    /// </summary>
+    /// <param name="factory">Factory that produces the <see cref="IAgentToolInterceptor"/>.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
+    public DurableAgentBuilder AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        _toolInterceptorFactory = factory;
+        return this;
+    }
+
     /// <summary>Internal accessor for Phase 2 registration plumbing.</summary>
     internal IReadOnlyList<DurableToolRegistration> ToolRegistrations => _tools;
 
@@ -400,7 +416,8 @@ public sealed class DurableAgentBuilder
             MaxToolCallsPerTurn: MaxToolCallsPerTurn,
             HistoryReducer: HistoryReducer,
             ConfigureAgentPipeline: ConfigureAgentPipeline,
-            CompactionStrategyKey: CompactionStrategyKey);
+            CompactionStrategyKey: CompactionStrategyKey,
+            ToolInterceptorFactory: _toolInterceptorFactory);
     }
 
     private void AddToolCore(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure)

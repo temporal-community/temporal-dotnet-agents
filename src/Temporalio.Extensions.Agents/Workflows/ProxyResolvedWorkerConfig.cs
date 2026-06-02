@@ -74,4 +74,35 @@ internal sealed record ProxyResolvedWorkerConfig
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CompactionStrategyKey { get; init; }
+
+    /// <summary>
+    /// Pre-computed <see cref="ActivityOptions"/> for all <c>RunToolInterceptor</c> dispatches
+    /// on this workflow. Shared across all tool calls in a turn (per-tool interceptor timeout is
+    /// taken from the per-tool <see cref="DurableToolOptions.InterceptorTimeout"/>; this options
+    /// object uses the worker-level default when that is null).
+    /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> means no
+    /// interceptor is configured, or the config predates Feature L.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ActivityOptions? InterceptorActivityOptions { get; init; }
+
+    /// <summary>
+    /// Names of tools that have <see cref="DurableToolOptions.SkipInterceptorFlag"/> set.
+    /// The workflow skips <c>RunToolInterceptor</c> for these tools even when an interceptor
+    /// is configured.
+    /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> is
+    /// equivalent to an empty list.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? InterceptorSkippedTools { get; init; }
+
+    /// <summary>
+    /// Names of tools that have <see cref="DurableToolOptions.RequireApprovalFlag"/> set.
+    /// The workflow forces a workflow-parked approval for these tools even if the interceptor
+    /// returns <c>Proceed</c> (Rule 2 — absolute configuration-time floor).
+    /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> is
+    /// equivalent to an empty list.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? RequiresApprovalTools { get; init; }
 }
