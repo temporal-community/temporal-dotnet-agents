@@ -51,6 +51,32 @@ opts.AddDurableAgent("TaskAgent", agent =>
 });
 ```
 
+### `WorkingSetContextProvider`
+
+`WorkingSetContextProvider` is a library-provided `AIContextProvider` that ships with `Temporalio.Extensions.Agents` — no additional package reference required.
+
+On every LLM step it scans the accumulated `ChatMessage` history (assistant and tool messages only), extracts recently-referenced file paths using two heuristics — the first line inside a code fence and path-shaped tokens that contain a `/` or `\` and carry a recognized extension — deduplicates them, and injects a compact `## Working set` system note listing the most-recently-seen files (up to `MaxPaths`, default 20). The extracted paths are also written to `AgentSessionStateBag["temporal.working_set"]` as a CSV string, so the working set survives worker restarts and continue-as-new transitions.
+
+**When to use it.** Agents that read, edit, or reference files across multiple turns — coding assistants, document editors, research agents — benefit from the injected note because it keeps the LLM oriented on which files are active without requiring the user to re-state context.
+
+**Registration.** No DI dependencies; construct directly:
+
+```csharp
+opts.AddDurableAgent("CodingAgent", agent =>
+{
+    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+    agent.AddContextProvider(new WorkingSetContextProvider());
+});
+```
+
+**`SilentMode`.** When `SilentMode = true`, the `## Working set` note is suppressed and no tokens are added to the LLM context. The `StateBag` entry is still written, so downstream providers or tools can read the current working set without paying the token cost.
+
+```csharp
+agent.AddContextProvider(new WorkingSetContextProvider { SilentMode = true });
+```
+
+**Known limitation — external-store sessions.** When `IAgentHistoryStore` is configured, the workflow strips message payloads from in-workflow history entries before passing them to the step activity. `WorkingSetContextProvider` therefore only sees the current turn's messages, not the full accumulated history. For those sessions the injected note (and the `StateBag` entry) reflect only what was mentioned in the current turn. A future revision may close this gap by loading from the store directly.
+
 ---
 
 ## What is not supported: `BackgroundAgentsProvider`
