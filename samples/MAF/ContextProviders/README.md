@@ -1,19 +1,21 @@
-# Context Providers: Individual MAF Providers with Durable Agents
+# Context Providers: Custom AIContextProvider Subclasses with Durable Agents
 
 ## Overview
 
-Shows how to register individual Microsoft Agent Framework (MAF) context providers — `TodoProvider` and `AgentModeProvider` — via `DurableAgentBuilder.AddContextProvider`. The full MAF `HarnessAgent` bundle is structurally incompatible with this library, but the individual providers are standard `AIContextProvider` subclasses that work today.
+Shows how to implement and register custom `AIContextProvider` subclasses via `DurableAgentBuilder.AddContextProvider`. Context providers fire once per LLM step (not once per turn), inject additional `ChatMessage` context into each LLM call, and can optionally persist state in `AgentSessionStateBag` so it survives worker restarts and continue-as-new transitions.
 
 This sample demonstrates:
-- Registering `TodoProvider` via `agent.AddContextProvider(new TodoProvider())`
-- Registering `AgentModeProvider` via `agent.AddContextProvider(new AgentModeProvider())`
-- Multiple providers composing cleanly — each fires in registration order per LLM step
-- Todo state and agent mode persisting across turns via `AgentSessionStateBag`
+- Implementing `TurnCounterProvider` — a stateful provider that reads and increments a session-scoped counter from `AgentSessionStateBag` and injects it as a system message before each LLM call.
+- Implementing `DateTimeProvider` — a stateless provider that injects the current UTC date/time on every step, without touching `AgentSessionStateBag`.
+- Registering both providers via `agent.AddContextProvider(...)` — multiple providers compose cleanly in registration order.
+
+MAF's own providers (`TodoProvider`, `AgentModeProvider`) are standard `AIContextProvider` subclasses and register via the same `AddContextProvider` call. See the note in [`individual-context-providers.md`](../../../docs/how-to/MAF/individual-context-providers.md) for details on when they will be demonstrated here.
 
 ## Highlights
 
-- **Providers fire per LLM step, not per turn.** A single agent turn may involve multiple LLM calls. Providers must be idempotent.
-- **State lives in `AgentSessionStateBag`.** Both `TodoProvider` and `AgentModeProvider` store per-session state in the `StateBag`, which is serialized after every turn and carried forward through continue-as-new transitions and worker restarts.
+- **Providers fire per LLM step, not per turn.** A single agent turn may involve multiple LLM calls (one per step in the tool-call loop). Providers must be idempotent and cheap.
+- **Stateful providers use `AgentSessionStateBag`.** `TurnCounterProvider` reads and writes `"session.turn_count"` via `TemporalAgentContext.Current`. The StateBag is serialized after every turn and carried forward through continue-as-new transitions and worker restarts — no extra storage needed.
+- **Stateless providers need no StateBag.** `DateTimeProvider` computes its value on the fly and returns it directly — showing that `StateBag` is opt-in.
 - **`BackgroundAgentsProvider` is not supported.** It holds live `Task<T>` references that cannot survive serialization. Use `TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync` for parallel agent fan-out instead.
 
 ## Getting Started
@@ -42,16 +44,16 @@ dotnet run --project samples/MAF/ContextProviders/ContextProviders.csproj
 ```
 Worker started. Sending messages...
 
-Session workflow ID: ta-planneragent-<guid>
+Session workflow ID: ta-assistant-<guid>
 
-User : I need to write a blog post about Temporal durable agents.
-Agent: I've added the following todos to your plan: [research Temporal, outline post, ...] We're currently in plan mode...
+User : Hello! How many times have you been called so far in this session?
+Agent: This is LLM call #1 in this session, so you've reached me once so far!
 
-User : Go ahead and execute the plan.
-Agent: Switching to execute mode. Starting with the first todo...
+User : What's the current time?
+Agent: The current UTC time is 2026-06-02 14:35.
 
-User : What todos are still open?
-Agent: The following todos are still open: [...]
+User : How many total LLM calls have we had now?
+Agent: We've had 3 total LLM calls in this session so far.
 
 Done.
 ```

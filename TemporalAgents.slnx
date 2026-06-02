@@ -32,6 +32,7 @@
     <Project Path="samples/MAF/Compaction/Compaction.csproj" />
     <Project Path="samples/MAF/ToolInterceptor/ToolInterceptor.csproj" />
     <Project Path="samples/MAF/WorkingSet/WorkingSet.csproj" />
+    <Project Path="samples/MAF/ContextProviders/ContextProviders.csproj" />
   </Folder>
   <Folder Name="/samples/MAF/SplitWorkerClient/">
     <Project Path="samples/MAF/SplitWorkerClient/Client/Client.csproj" />

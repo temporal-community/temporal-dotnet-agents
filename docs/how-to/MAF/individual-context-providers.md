@@ -101,6 +101,6 @@ Providers fire **once per LLM call**, not once per turn. A single agent turn may
 
 ## Sample
 
-See [`samples/MAF/ContextProviders/`](../../../samples/MAF/ContextProviders/) for a complete example that registers `TodoProvider` and `AgentModeProvider` together and exercises both during a multi-turn conversation.
+See [`samples/MAF/ContextProviders/`](../../../samples/MAF/ContextProviders/) for a complete example that demonstrates the `AddContextProvider` pattern with two custom providers — a turn counter and a date/time injector. MAF's own providers (`TodoProvider`, `AgentModeProvider`) follow the same registration pattern and will be demonstrated here once available in the published NuGet package.
 
 See [`samples/MAF/WorkingSet/`](../../../samples/MAF/WorkingSet/) for a focused `WorkingSetContextProvider` demo: a four-turn code assistant that progressively builds a working set from mock file reads, with Turn 4 answered from injected context alone — no tool call required.
