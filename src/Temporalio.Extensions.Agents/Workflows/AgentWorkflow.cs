@@ -21,6 +21,14 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     internal static readonly SearchAttributeKey<string> AgentNameSearchAttribute =
         SearchAttributeKey.CreateKeyword("AgentName");
 
+    /// <summary>
+    /// Default StateBag size threshold (in bytes) for the continue-as-new warning.
+    /// Warns when the serialized <c>CarriedStateBag</c> exceeds 64 KB. Warning only —
+    /// no hard failure — so sessions keep running even when StateBag grows large.
+    /// This constant is <c>internal</c> so tests can reference it without magic numbers.
+    /// </summary>
+    internal const int StateBagSizeWarnThresholdBytes = 64 * 1024;
+
     // MAF-specific input (typed view of the base's Input). Set in RunAsync.
     private AgentWorkflowInput? _input;
 
@@ -172,6 +180,23 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             ActivityTimeout = input.ActivityTimeout,
             HeartbeatTimeout = input.HeartbeatTimeout,
         };
+
+        // StateBag size guard (Feature D): emit a warning when the serialized StateBag
+        // exceeds the configurable threshold (default 64 KB). The warning only — no hard
+        // failure — so sessions keep running even when StateBag grows large.
+        if (_currentStateBag.HasValue)
+        {
+            var stateBagJson = _currentStateBag.Value.GetRawText();
+            var byteCount = System.Text.Encoding.UTF8.GetByteCount(stateBagJson);
+            if (byteCount > StateBagSizeWarnThresholdBytes)
+            {
+                Workflow.Logger.LogWarning(
+                    "[{SessionId}] CarriedStateBag is {Bytes:N0} bytes at continue-as-new time " +
+                    "(threshold: {Threshold:N0} bytes). Consider reducing AIContextProvider state " +
+                    "to avoid bloating the CAN payload.",
+                    Workflow.Info.WorkflowId, byteCount, StateBagSizeWarnThresholdBytes);
+            }
+        }
 
         Workflow.Logger.LogWorkflowContinueAsNew(
             _input.AgentName, Workflow.Info.WorkflowId,
