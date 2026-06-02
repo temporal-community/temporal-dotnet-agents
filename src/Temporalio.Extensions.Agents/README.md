@@ -143,9 +143,11 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `EnableSearchAttributes` | `bool` | `false` | Opt in to upsert `AgentName`, `SessionCreatedAt`, `TurnCount` on each workflow run |
-| `MaxEntryCount` | `int` | `1000` | Cap on `DurableSessionEntry` records (request + response pairs) before triggering continue-as-new. Renamed from `MaxHistorySize` in 0.2.0 |
-| `HistoryReducer` | `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>?` | `null` | Custom strategy for trimming history at continue-as-new boundaries. Operates on entries, preserving per-turn `Usage` and `CorrelationId` |
-| `RetryPolicy` | `RetryPolicy?` | `null` | Override the default retry policy for agent activities |
+| `DefaultMaxEntryCount` | `int` | `1000` | Cap on `DurableSessionEntry` records (request + response pairs) before triggering continue-as-new |
+| `DefaultHistoryReducer` | `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>?` | `null` | Custom strategy for trimming history at continue-as-new boundaries. Operates on entries, preserving per-turn `Usage` and `CorrelationId` |
+| `DefaultRetryPolicy` | `RetryPolicy?` | `null` | Override the default retry policy for agent activities |
+| `DefaultActivityTimeout` | `TimeSpan` | `5 min` | Default start-to-close timeout for agent activities |
+| `DefaultApprovalTimeout` | `TimeSpan` | `7 days` | How long a HITL gate waits before auto-rejecting |
 
 `EnableSearchAttributes` defaults to `false`. Enabling it requires the three search attributes to be pre-registered on the Temporal server. With `temporal server start-dev` this happens automatically; on production clusters run the CLI commands in the [Observability guide](../../docs/how-to/MAF/observability.md#search-attributes).
 
@@ -161,6 +163,11 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 | [HumanInTheLoop](../../samples/MAF/HumanInTheLoop) | HITL approval gates via `[WorkflowUpdate]` |
 | [WorkflowRouting](../../samples/MAF/WorkflowRouting) | Durable routing inside a Temporal workflow — static and dynamic patterns |
 | [AmbientAgent](../../samples/MAF/AmbientAgent) | Ambient agent pattern |
+| [ConfigurableAgent](../../samples/MAF/ConfigurableAgent) | Per-agent configuration and read-only tools |
+| [ExternalHistoryStore](../../samples/MAF/ExternalHistoryStore) | `IAgentHistoryStore` + `AIContextProvider` + history reduction |
+| [PerToolActivities](../../samples/MAF/PerToolActivities) | Per-tool Temporal activities with write-tool no-retry |
+| [Compaction](../../samples/MAF/Compaction) | In-session compaction with `"summarization"` strategy + GDPR erasure |
+| [ContextProviders](../../samples/MAF/ContextProviders) | `TodoProvider` and `AgentModeProvider` via `AddContextProvider` |
 
 ## Core Components
 
