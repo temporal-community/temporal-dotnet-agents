@@ -1059,6 +1059,8 @@ builder.Services
 
 For the canonical write-vs-read tool example, the per-tool retry hierarchy, and what the Temporal Web UI shows, see [Durable Agents](./durable-agents.md).
 
+To add a pre-dispatch lifecycle hook — for risk scoring, PII scrubbing, argument enrichment, or dynamic approval gates — register an `IAgentToolInterceptor`. See [Tool Interceptor](./tool-interceptor.md) for the full guide.
+
 ---
 
 ## OpenTelemetry Integration

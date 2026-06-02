@@ -343,6 +343,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **HITL Patterns**: `docs/how-to/MAF/hitl-patterns.md`
 - **History & Token Optimization**: `docs/how-to/MAF/prompt-caching.md`
 - **Durable Agents (per-tool activities)**: `docs/how-to/MAF/durable-agents.md`
+- **Tool Interceptor**: `docs/how-to/MAF/tool-interceptor.md`
 - **In-Session Compaction**: `docs/how-to/MAF/compaction.md`
 - **Do's and Don'ts**: `docs/how-to/MAF/dos-and-donts.md`
 - **Durability Guarantees**: `docs/architecture/MAF/durability-and-determinism.md`
