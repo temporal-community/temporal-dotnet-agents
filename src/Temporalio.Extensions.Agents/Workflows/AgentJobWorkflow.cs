@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents.Workflows;
@@ -63,35 +64,131 @@ internal sealed class AgentJobWorkflow
             }
 
             var toolCalls = stepResult.ToolCalls;
-            var toolTasks = new List<Task<InvokeAgentToolResult>>(toolCalls.Count);
-            foreach (var tc in toolCalls)
+
+            // Feature L: Phase 1 — fan out interceptor activities if an interceptor is configured.
+            AgentToolInterceptorResult[]? interceptorResults = null;
+            if (input.InterceptorActivityOptions is { } interceptorOpts)
             {
-                var toolOptions = ResolveDurableToolActivityOptions(input, tc.Name);
+                var interceptorTasks = new List<Task<AgentToolInterceptorResult>>(toolCalls.Count);
+                var skippedTools = input.InterceptorSkippedTools;
 
-                var toolInput = new InvokeAgentToolInput
+                foreach (var tc in toolCalls)
                 {
-                    AgentName = input.AgentName,
-                    ToolName = tc.Name,
-                    Arguments = tc.Arguments is null
-                        ? null
-                        : new Dictionary<string, object?>(tc.Arguments),
-                    CallId = tc.CallId,
-                };
+                    var isSkipped = skippedTools is not null
+                        && skippedTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
 
-                toolTasks.Add(Workflow.ExecuteActivityAsync(
-                    (AgentActivities a) => a.InvokeAgentToolAsync(toolInput),
-                    toolOptions));
+                    if (isSkipped)
+                    {
+                        interceptorTasks.Add(Task.FromResult(
+                            new AgentToolInterceptorResult { Outcome = AgentToolOutcome.Proceed }));
+                    }
+                    else
+                    {
+                        var interceptorInput = new AgentToolInterceptorInput
+                        {
+                            AgentName = input.AgentName,
+                            ToolName = tc.Name,
+                            Arguments = tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments),
+                            CallId = tc.CallId,
+                            SerializedStateBag = null,
+                        };
+                        interceptorTasks.Add(Workflow.ExecuteActivityAsync(
+                            (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
+                            new ActivityOptions
+                            {
+                                StartToCloseTimeout = interceptorOpts.StartToCloseTimeout,
+                                HeartbeatTimeout = interceptorOpts.HeartbeatTimeout,
+                                RetryPolicy = interceptorOpts.RetryPolicy,
+                                Summary = $"intercept:{tc.Name}",
+                            }));
+                    }
+                }
+
+                interceptorResults = await Workflow.WhenAllAsync(interceptorTasks).ConfigureAwait(true);
             }
 
-            var toolResults = await Workflow.WhenAllAsync(toolTasks).ConfigureAwait(true);
+            // Feature L: Phase 2 — process decisions.
+            var toolTasks = new List<Task<InvokeAgentToolResult>?>(toolCalls.Count);
+            var syntheticResults = new string?[toolCalls.Count];
 
-
-            var functionResultContents = new List<AIContent>(toolCalls.Count);
             for (var i = 0; i < toolCalls.Count; i++)
             {
-                functionResultContents.Add(new FunctionResultContent(
-                    callId: toolCalls[i].CallId,
-                    result: toolResults[i].Result));
+                var tc = toolCalls[i];
+                var interceptorResult = interceptorResults?[i];
+                var outcome = interceptorResult?.Outcome ?? AgentToolOutcome.Proceed;
+
+                // Rule 2: RequireApproval floor.
+                var toolRequiresApproval = input.RequiresApprovalTools is not null
+                    && input.RequiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
+                if (toolRequiresApproval && outcome == AgentToolOutcome.Proceed)
+                {
+                    outcome = AgentToolOutcome.PauseForApproval;
+                }
+
+                switch (outcome)
+                {
+                    case AgentToolOutcome.Proceed:
+                        var effectiveArgs = interceptorResult?.ModifiedArguments is { } mArgs
+                            ? mArgs
+                            : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
+                        var toolOptions = ResolveDurableToolActivityOptions(input, tc.Name);
+                        var toolInput = new InvokeAgentToolInput
+                        {
+                            AgentName = input.AgentName,
+                            ToolName = tc.Name,
+                            Arguments = effectiveArgs,
+                            CallId = tc.CallId,
+                        };
+                        toolTasks.Add(Workflow.ExecuteActivityAsync(
+                            (AgentActivities a) => a.InvokeAgentToolAsync(toolInput),
+                            toolOptions));
+                        break;
+
+                    case AgentToolOutcome.PauseForApproval:
+                        // AgentJobWorkflow has no DurableApprovalMixin — degrade to Block.
+                        Workflow.Logger.LogWarning(
+                            "Interceptor returned PauseForApproval for tool '{ToolName}' on agent '{AgentName}' " +
+                            "but AgentJobWorkflow does not support workflow-parked approval. Degrading to Block.",
+                            tc.Name, input.AgentName);
+                        syntheticResults[i] = $"[Blocked] Tool '{tc.Name}' requires approval but approval is not supported in job workflows.";
+                        toolTasks.Add(null);
+                        break;
+
+                    case AgentToolOutcome.Skip:
+                        syntheticResults[i] = interceptorResult?.Message ?? string.Empty;
+                        toolTasks.Add(null);
+                        break;
+
+                    case AgentToolOutcome.Block:
+                    default:
+                        syntheticResults[i] = $"[Blocked] {interceptorResult?.Message ?? "Tool execution was blocked."}";
+                        toolTasks.Add(null);
+                        break;
+                }
+            }
+
+            // Phase 3: await approved tasks.
+            var pendingTasks = toolTasks.Where(t => t is not null).Cast<Task<InvokeAgentToolResult>>().ToList();
+            InvokeAgentToolResult[]? toolResults = pendingTasks.Count > 0
+                ? await Workflow.WhenAllAsync(pendingTasks).ConfigureAwait(true)
+                : null;
+
+            var functionResultContents = new List<AIContent>(toolCalls.Count);
+            var pendingIdx = 0;
+            for (var i = 0; i < toolCalls.Count; i++)
+            {
+                if (syntheticResults[i] is { } synthetic)
+                {
+                    functionResultContents.Add(new FunctionResultContent(
+                        callId: toolCalls[i].CallId,
+                        result: synthetic));
+                }
+                else if (toolResults is not null && pendingIdx < toolResults.Length)
+                {
+                    functionResultContents.Add(new FunctionResultContent(
+                        callId: toolCalls[i].CallId,
+                        result: toolResults[pendingIdx++].Result));
+                }
             }
 
             accumulated.Add(new ChatMessage(ChatRole.Tool, functionResultContents));

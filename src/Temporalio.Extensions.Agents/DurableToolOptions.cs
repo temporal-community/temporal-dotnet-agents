@@ -39,6 +39,28 @@ public sealed class DurableToolOptions
     public RetryPolicy? RetryPolicy { get; set; }
 
     /// <summary>
+    /// Gets a value indicating whether the configured <see cref="IAgentToolInterceptor"/> should
+    /// be skipped for this tool. When <see langword="true"/>, the interceptor activity is not
+    /// dispatched and the tool proceeds directly to <c>InvokeAgentTool</c>.
+    /// Default is <see langword="false"/>.
+    /// </summary>
+    public bool SkipInterceptorFlag { get; private set; }
+
+    /// <summary>
+    /// Gets or sets the timeout budget for this tool's <c>RunToolInterceptor</c> activity.
+    /// Independent of <see cref="StartToCloseTimeout"/> (which governs the tool activity itself).
+    /// When <see langword="null"/>, the worker-level default activity timeout is used.
+    /// </summary>
+    public TimeSpan? InterceptorTimeout { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether a human approval is always required before this tool
+    /// is dispatched, regardless of what the <see cref="IAgentToolInterceptor"/> returns.
+    /// This is Rule 2 — an absolute configuration-time floor.
+    /// </summary>
+    public bool RequireApprovalFlag { get; private set; }
+
+    /// <summary>
     /// Disables retries for this tool by setting <see cref="RetryPolicy"/> to a policy with
     /// <see cref="RetryPolicy.MaximumAttempts"/> equal to <c>1</c>.
     /// </summary>
@@ -95,6 +117,53 @@ public sealed class DurableToolOptions
         }
 
         StartToCloseTimeout = timeout;
+        return this;
+    }
+
+    /// <summary>
+    /// Opts this tool out of the configured <see cref="IAgentToolInterceptor"/>.
+    /// The <c>RunToolInterceptor</c> activity is not dispatched for this tool; it proceeds
+    /// directly to <c>InvokeAgentTool</c>.
+    /// </summary>
+    /// <returns>This instance, for fluent chaining.</returns>
+    public DurableToolOptions SkipInterceptor()
+    {
+        SkipInterceptorFlag = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the timeout budget for this tool's <c>RunToolInterceptor</c> activity.
+    /// </summary>
+    /// <param name="timeout">The interceptor activity start-to-close timeout; must be greater than <see cref="TimeSpan.Zero"/>.</param>
+    /// <returns>This instance, for fluent chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="timeout"/> is less than or equal to <see cref="TimeSpan.Zero"/>.
+    /// </exception>
+    public DurableToolOptions WithInterceptorTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(timeout),
+                timeout,
+                "Interceptor timeout must be greater than zero.");
+        }
+
+        InterceptorTimeout = timeout;
+        return this;
+    }
+
+    /// <summary>
+    /// Marks this tool as always requiring human approval before dispatch, regardless of what
+    /// the <see cref="IAgentToolInterceptor"/> returns. This is the absolute configuration-time
+    /// floor (Rule 2): even if the interceptor returns <c>Proceed</c>, the turn loop will
+    /// pause for approval using the interceptor's <c>EnrichedDescription</c> (if any).
+    /// </summary>
+    /// <returns>This instance, for fluent chaining.</returns>
+    public DurableToolOptions RequireApproval()
+    {
+        RequireApprovalFlag = true;
         return this;
     }
 }

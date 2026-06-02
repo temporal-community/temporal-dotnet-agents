@@ -48,7 +48,8 @@ internal sealed record CachedDurableAgent(
     bool SuppressAgentTurnSpan,
     string? CompactionStrategyKey,
     Compaction.ICompactionStrategy? CompactionStrategy,
-    IReadOnlyList<AITool> ToolsAsAITools);
+    IReadOnlyList<AITool> ToolsAsAITools,
+    IAgentToolInterceptor? ToolInterceptor = null);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
@@ -403,15 +404,61 @@ internal sealed class AgentActivities(
             // Bundle resolved settings into ProxyResolvedWorkerConfig only when this was a
             // resolution-request step (NeedsWorkerSettingsResolution). Non-resolution steps return
             // null for the config; consumer forwarding properties handle the null safely.
-            ProxyResolvedWorkerConfig? resolvedConfig = input.NeedsWorkerSettingsResolution
-                ? new ProxyResolvedWorkerConfig
+            ProxyResolvedWorkerConfig? resolvedConfig = null;
+            if (input.NeedsWorkerSettingsResolution)
+            {
+                // Feature L: build interceptor-related lists from tool registrations.
+                ActivityOptions? interceptorActivityOpts = null;
+                List<string>? interceptorSkippedTools = null;
+                List<string>? requiresApprovalTools = null;
+
+                if (cached.ToolInterceptor is not null)
+                {
+                    var effectiveTimeout = cached.Registration.ActivityTimeout
+                        ?? cached.AgentsOptions.DefaultActivityTimeout;
+                    var effectiveHeartbeat = cached.Registration.HeartbeatTimeout
+                        ?? cached.AgentsOptions.DefaultHeartbeatTimeout;
+                    var effectiveRetry = cached.Registration.RetryPolicy
+                        ?? cached.AgentsOptions.DefaultRetryPolicy;
+
+                    interceptorActivityOpts = new ActivityOptions
+                    {
+                        StartToCloseTimeout = effectiveTimeout,
+                        HeartbeatTimeout = effectiveHeartbeat,
+                        RetryPolicy = effectiveRetry,
+                        // Summary is set per-tool at dispatch time: $"intercept:{toolName}"
+                    };
+
+                    foreach (var toolReg in cached.Registration.Tools)
+                    {
+                        if (toolReg.Options.SkipInterceptorFlag)
+                        {
+                            (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
+                        }
+
+                        if (toolReg.Options.RequireApprovalFlag)
+                        {
+                            (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
+                        }
+
+                        // Per-tool interceptor timeout overrides the shared options.
+                        // We store it in ToolActivityOptions indexed by a special key so the
+                        // workflow can look it up. For now share the base options — per-tool
+                        // interceptor timeout customization is handled at dispatch time.
+                    }
+                }
+
+                resolvedConfig = new ProxyResolvedWorkerConfig
                 {
                     MaxToolCallsPerTurn = resolvedMaxToolCalls ?? cached.Registration.MaxToolCallsPerTurn,
                     UseExternalStoreMode = resolvedExternalStore ?? false,
                     ToolActivityOptions = resolvedToolOpts ?? new Dictionary<string, ActivityOptions>(),
                     CompactionStrategyKey = cached.CompactionStrategyKey,
-                }
-                : null;
+                    InterceptorActivityOptions = interceptorActivityOpts,
+                    InterceptorSkippedTools = interceptorSkippedTools,
+                    RequiresApprovalTools = requiresApprovalTools,
+                };
+            }
 
             // Step 6d: evaluate the compaction trigger (Q2 = B). Compaction is opt-in; if no
             // strategy was configured, or if no external store backs the agent, skip
@@ -634,6 +681,11 @@ internal sealed class AgentActivities(
 
         IReadOnlyList<AITool> toolsAsAITools = [.. resolvedTools.Values.Cast<AITool>()];
 
+        // Resolve tool interceptor: per-agent factory wins over worker-level default (H1 rule).
+        var interceptorFactory = registration.ToolInterceptorFactory
+            ?? agentsOptions.DefaultToolInterceptor;
+        var resolvedInterceptor = interceptorFactory?.Invoke(providerServices);
+
         return new CachedDurableAgent(
             agent,
             resolvedTools,
@@ -644,7 +696,8 @@ internal sealed class AgentActivities(
             suppressAgentTurnSpan,
             effectiveCompactionKey,
             resolvedStrategy,
-            toolsAsAITools);
+            toolsAsAITools,
+            resolvedInterceptor);
     }
 
     /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
@@ -814,6 +867,114 @@ internal sealed class AgentActivities(
         await cached.HistoryStore
             .AppendAsync(input.SessionId, [result.Marker], ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Pre-tool lifecycle activity. Fires before <c>InvokeAgentTool</c> for each tool call in a
+    /// turn. Resolves the agent's <see cref="IAgentToolInterceptor"/> (per-agent or worker default),
+    /// calls <see cref="IAgentToolInterceptor.BeforeToolCallAsync"/>, and returns a serializable
+    /// <see cref="AgentToolInterceptorResult"/> DTO for the workflow to act on.
+    /// </summary>
+    [Activity("Temporalio.Extensions.Agents.RunToolInterceptor")]
+    public async Task<AgentToolInterceptorResult> RunToolInterceptorAsync(AgentToolInterceptorInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var ctx = ActivityExecutionContext.Current;
+        var ct = ctx.CancellationToken;
+
+        var cached = ResolveDurableAgent(input.AgentName);
+
+        if (cached.ToolInterceptor is null)
+        {
+            // Interceptor was removed between workflow dispatch and activity execution
+            // (e.g. worker restart without interceptor re-registration). Degrade to Proceed
+            // so the tool still runs rather than silently blocking the session.
+            _logger.LogWarning(
+                "RunToolInterceptor dispatched for agent '{AgentName}' tool '{ToolName}' " +
+                "but no IAgentToolInterceptor is resolved. Defaulting to Proceed.",
+                input.AgentName, input.ToolName);
+            return new AgentToolInterceptorResult { Outcome = AgentToolOutcome.Proceed };
+        }
+
+        ctx.Heartbeat($"intercepting tool '{input.ToolName}'");
+
+        // Deserialize the state bag snapshot the same way RunDurableAgentStep does.
+        var session = TemporalAgentSession.FromStateBag(
+            TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!),
+            input.SerializedStateBag);
+
+        var toolContext = new AgentToolContext
+        {
+            AgentName = input.AgentName,
+            ToolName = input.ToolName,
+            Arguments = input.Arguments is null
+                ? new Dictionary<string, object?>()
+                : new Dictionary<string, object?>(input.Arguments),
+            CallId = input.CallId,
+            StateBag = session.StateBag.Count > 0 ? session.StateBag : null,
+        };
+
+        AgentToolDecision decision;
+        try
+        {
+            decision = await cached.ToolInterceptor
+                .BeforeToolCallAsync(toolContext, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "IAgentToolInterceptor.BeforeToolCallAsync threw for agent '{AgentName}' tool '{ToolName}'. " +
+                "Defaulting to Block.",
+                input.AgentName, input.ToolName);
+            return new AgentToolInterceptorResult
+            {
+                Outcome = AgentToolOutcome.Block,
+                Message = $"Interceptor threw an exception: {ex.Message}",
+            };
+        }
+
+        return decision switch
+        {
+            AgentToolDecision.ProceedDecision p => new AgentToolInterceptorResult
+            {
+                Outcome = AgentToolOutcome.Proceed,
+                EnrichedDescription = p.EnrichedDescription,
+                ModifiedArguments = p.ModifiedArguments is null
+                    ? null
+                    : new Dictionary<string, object?>(p.ModifiedArguments),
+                Metadata = p.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(p.Metadata),
+            },
+            AgentToolDecision.ApprovalRequiredDecision a => new AgentToolInterceptorResult
+            {
+                Outcome = AgentToolOutcome.PauseForApproval,
+                EnrichedDescription = a.Description,
+                Message = a.Description,
+                Metadata = a.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(a.Metadata),
+            },
+            AgentToolDecision.SkipDecision s => new AgentToolInterceptorResult
+            {
+                Outcome = AgentToolOutcome.Skip,
+                Message = s.SyntheticResult,
+                Metadata = s.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(s.Metadata),
+            },
+            AgentToolDecision.BlockDecision b => new AgentToolInterceptorResult
+            {
+                Outcome = AgentToolOutcome.Block,
+                Message = b.Reason,
+                Metadata = b.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(b.Metadata),
+            },
+            _ => new AgentToolInterceptorResult { Outcome = AgentToolOutcome.Proceed },
+        };
     }
 
     [Activity("Temporalio.Extensions.Agents.InvokeAgentTool")]

@@ -299,6 +299,36 @@ internal sealed class DefaultTemporalAgentClient(
 
         var hasExternalStore = registration.HistoryStore is not null || options.HistoryStore is not null;
 
+        // Feature L: pre-compute interceptor config (interceptor presence + skip/require-approval lists).
+        var hasInterceptor = registration.ToolInterceptorFactory is not null
+                           || options.DefaultToolInterceptor is not null;
+        ActivityOptions? interceptorActivityOpts = null;
+        List<string>? interceptorSkippedTools = null;
+        List<string>? requiresApprovalTools = null;
+
+        if (hasInterceptor)
+        {
+            interceptorActivityOpts = new ActivityOptions
+            {
+                StartToCloseTimeout = perAgentActivityTimeout,
+                HeartbeatTimeout = perAgentHeartbeatTimeout,
+                RetryPolicy = perAgentRetryPolicy,
+            };
+
+            foreach (var toolReg in registration.Tools)
+            {
+                if (toolReg.Options.SkipInterceptorFlag)
+                {
+                    (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
+                }
+
+                if (toolReg.Options.RequireApprovalFlag)
+                {
+                    (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
+                }
+            }
+        }
+
         return new AgentWorkflowInput
         {
             AgentName = agentName,
@@ -318,6 +348,9 @@ internal sealed class DefaultTemporalAgentClient(
                 MaxToolCallsPerTurn = registration.MaxToolCallsPerTurn,
                 UseExternalStoreMode = hasExternalStore,
                 ToolActivityOptions = toolActivityOptions,
+                InterceptorActivityOptions = interceptorActivityOpts,
+                InterceptorSkippedTools = interceptorSkippedTools,
+                RequiresApprovalTools = requiresApprovalTools,
             },
         };
     }

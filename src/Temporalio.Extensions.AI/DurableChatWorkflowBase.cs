@@ -16,7 +16,7 @@ namespace Temporalio.Extensions.AI;
 public abstract class DurableChatWorkflowBase<TOutput>
 {
     private List<DurableSessionEntry> _history = new(16);
-    private readonly DurableApprovalMixin _approval = new();
+    private readonly DurableApprovalMixin _approvalMixin = new();
     private bool _isProcessing;
     private bool _shutdownRequested;
     private int _turnCount;
@@ -417,7 +417,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// </summary>
     [WorkflowUpdateValidator(nameof(RequestApprovalAsync))]
     public void ValidateRequestApproval(DurableApprovalRequest request) =>
-        _approval.ValidateRequestApproval(request);
+        _approvalMixin.ValidateRequestApproval(request);
 
     /// <summary>
     /// Blocks the workflow until a human submits a decision via <see cref="SubmitApprovalAsync"/>.
@@ -425,7 +425,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// </summary>
     [WorkflowUpdate("RequestApproval")]
     public Task<DurableApprovalDecision> RequestApprovalAsync(DurableApprovalRequest request) =>
-        _approval.RequestApprovalAsync(
+        _approvalMixin.RequestApprovalAsync(
             request,
             approvalTimeout: RequiredInput.ApprovalTimeout,
             onRequested: req => Workflow.Logger.LogInformation(
@@ -440,7 +440,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// </summary>
     [WorkflowUpdateValidator(nameof(SubmitApprovalAsync))]
     public void ValidateSubmitApproval(DurableApprovalDecision decision) =>
-        _approval.ValidateSubmitApproval(decision);
+        _approvalMixin.ValidateSubmitApproval(decision);
 
     /// <summary>
     /// Submits the human decision for the pending approval request.
@@ -449,7 +449,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
     [WorkflowUpdate("SubmitApproval")]
     public Task SubmitApprovalAsync(DurableApprovalDecision decision)
     {
-        _approval.SubmitApproval(decision);
+        _approvalMixin.SubmitApproval(decision);
         return Task.CompletedTask;
     }
 
@@ -457,5 +457,25 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// Returns the currently pending approval request, or null if none.
     /// </summary>
     [WorkflowQuery("GetPendingApproval")]
-    public DurableApprovalRequest? GetPendingApproval() => _approval.GetPendingApproval();
+    public DurableApprovalRequest? GetPendingApproval() => _approvalMixin.GetPendingApproval();
+
+    /// <summary>
+    /// Invokes the approval state machine directly from the turn loop (Feature A —
+    /// compute-free workflow-parked HITL). Unlike the <c>[WorkflowUpdate]</c> path (which
+    /// passes through <see cref="RequestApprovalAsync"/>), this method bypasses the update
+    /// handler so the workflow can park on the wait-condition inside the turn loop itself
+    /// rather than inside an update handler. The mixin's single-pending-approval guard still
+    /// runs (it is now enforced inside <c>DurableApprovalMixin.RequestApprovalAsync</c> as
+    /// well as inside <c>ValidateRequestApproval</c>).
+    /// </summary>
+    /// <remarks>
+    /// Must only be called from workflow-thread code. The approval unblocks when
+    /// <see cref="SubmitApprovalAsync"/> is called with a matching <c>RequestId</c>.
+    /// </remarks>
+    protected Task<DurableApprovalDecision> RequestApprovalFromTurnLoopAsync(
+        DurableApprovalRequest request,
+        TimeSpan approvalTimeout,
+        Action<DurableApprovalRequest>? onRequested = null,
+        Action<DurableApprovalDecision>? onResolved = null) =>
+        _approvalMixin.RequestApprovalAsync(request, approvalTimeout, onRequested, onResolved);
 }
