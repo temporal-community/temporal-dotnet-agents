@@ -117,6 +117,14 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
         ResolvedWorkerConfig?.InterceptorActivityOptions;
 
     /// <summary>
+    /// Per-tool <see cref="ActivityOptions"/> for interceptor dispatches with custom timeouts.
+    /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.InterceptorToolActivityOptions"/>.
+    /// </summary>
+    [JsonIgnore]
+    public IReadOnlyDictionary<string, ActivityOptions>? InterceptorToolActivityOptions =>
+        ResolvedWorkerConfig?.InterceptorToolActivityOptions;
+
+    /// <summary>
     /// Names of tools that skip the interceptor. Forwards to
     /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.InterceptorSkippedTools"/>.
     /// </summary>

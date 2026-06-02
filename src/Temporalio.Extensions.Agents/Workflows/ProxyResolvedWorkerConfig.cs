@@ -88,6 +88,16 @@ internal sealed record ProxyResolvedWorkerConfig
     public ActivityOptions? InterceptorActivityOptions { get; init; }
 
     /// <summary>
+    /// Per-tool <see cref="ActivityOptions"/> for <c>RunToolInterceptor</c> dispatches where the
+    /// tool has an explicit <see cref="DurableToolOptions.InterceptorTimeout"/> set.
+    /// The workflow uses this entry when present; falls back to <see cref="InterceptorActivityOptions"/>
+    /// otherwise. Only populated when at least one tool carries a custom interceptor timeout.
+    /// Nullable and NOT <c>required</c> for forward-compat.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, ActivityOptions>? InterceptorToolActivityOptions { get; init; }
+
+    /// <summary>
     /// Names of tools that have <see cref="DurableToolOptions.SkipInterceptorFlag"/> set.
     /// The workflow skips <c>RunToolInterceptor</c> for these tools even when an interceptor
     /// is configured.

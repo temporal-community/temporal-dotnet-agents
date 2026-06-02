@@ -428,6 +428,8 @@ internal sealed class AgentActivities(
                     }
                 }
 
+                Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
+
                 if (cached.ToolInterceptor is not null)
                 {
                     var effectiveTimeout = cached.Registration.ActivityTimeout
@@ -452,10 +454,17 @@ internal sealed class AgentActivities(
                             (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
                         }
 
-                        // Per-tool interceptor timeout overrides the shared options.
-                        // We store it in ToolActivityOptions indexed by a special key so the
-                        // workflow can look it up. For now share the base options — per-tool
-                        // interceptor timeout customization is handled at dispatch time.
+                        // Wire per-tool interceptor timeout when set (F2 fix).
+                        if (toolReg.Options.InterceptorTimeout.HasValue)
+                        {
+                            perToolInterceptorOpts ??= new Dictionary<string, ActivityOptions>(StringComparer.OrdinalIgnoreCase);
+                            perToolInterceptorOpts[toolReg.Name] = new ActivityOptions
+                            {
+                                StartToCloseTimeout = toolReg.Options.InterceptorTimeout,
+                                HeartbeatTimeout = effectiveHeartbeat,
+                                RetryPolicy = effectiveRetry,
+                            };
+                        }
                     }
                 }
 
@@ -466,6 +475,7 @@ internal sealed class AgentActivities(
                     ToolActivityOptions = resolvedToolOpts ?? new Dictionary<string, ActivityOptions>(),
                     CompactionStrategyKey = cached.CompactionStrategyKey,
                     InterceptorActivityOptions = interceptorActivityOpts,
+                    InterceptorToolActivityOptions = perToolInterceptorOpts,
                     InterceptorSkippedTools = interceptorSkippedTools,
                     RequiresApprovalTools = requiresApprovalTools,
                 };

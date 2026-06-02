@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.Agents.Workflows;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;
@@ -111,6 +112,43 @@ public class ToolInterceptorRegistrationTests
 
         var toolReg = registration.Tools.Single(t => t.Name == "myTool");
         Assert.True(toolReg.Options.SkipInterceptorFlag);
+    }
+
+    [Fact]
+    public void WithInterceptorTimeout_IsWiredIntoResolvedWorkerConfig()
+    {
+        // Arrange: agent with one tool carrying a custom interceptor timeout and
+        // one without, plus an interceptor registered so the config is populated.
+        var customTimeout = TimeSpan.FromSeconds(45);
+        var options = new TemporalAgentsOptions();
+        options.AddDurableAgent("MyAgent", a =>
+        {
+            a.ChatClient = _ => new StubChatClient();
+            a.AddToolInterceptor(_ => new StubInterceptor());
+            a.AddTool(
+                AIFunctionFactory.Create(() => "timed", "timedTool"),
+                opts => opts.WithInterceptorTimeout(customTimeout));
+            a.AddTool(
+                AIFunctionFactory.Create(() => "default", "defaultTool"));
+        });
+
+        // Act: build the workflow input the same way the client does.
+        var input = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore(
+            "MyAgent", options, "test-queue");
+
+        var config = input.ResolvedWorkerConfig;
+        Assert.NotNull(config);
+
+        // timedTool must have its own entry with the custom timeout.
+        Assert.NotNull(config.InterceptorToolActivityOptions);
+        Assert.True(config.InterceptorToolActivityOptions.TryGetValue("timedTool", out var timedOpts));
+        Assert.Equal(customTimeout, timedOpts!.StartToCloseTimeout);
+
+        // defaultTool must NOT have a per-tool entry — it falls back to the shared opts.
+        Assert.False(config.InterceptorToolActivityOptions.ContainsKey("defaultTool"));
+
+        // The shared interceptor options are still present as the fallback.
+        Assert.NotNull(config.InterceptorActivityOptions);
     }
 
     // ── Stubs ──────────────────────────────────────────────────────────────────

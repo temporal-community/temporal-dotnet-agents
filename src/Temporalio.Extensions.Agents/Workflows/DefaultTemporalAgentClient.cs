@@ -353,6 +353,8 @@ internal sealed class DefaultTemporalAgentClient(
             }
         }
 
+        Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
+
         if (hasInterceptor)
         {
             interceptorActivityOpts = new ActivityOptions
@@ -367,6 +369,18 @@ internal sealed class DefaultTemporalAgentClient(
                 if (toolReg.Options.SkipInterceptorFlag)
                 {
                     (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
+                }
+
+                // Wire per-tool interceptor timeout when set (F2 fix).
+                if (toolReg.Options.InterceptorTimeout.HasValue)
+                {
+                    perToolInterceptorOpts ??= new Dictionary<string, ActivityOptions>(StringComparer.OrdinalIgnoreCase);
+                    perToolInterceptorOpts[toolReg.Name] = new ActivityOptions
+                    {
+                        StartToCloseTimeout = toolReg.Options.InterceptorTimeout,
+                        HeartbeatTimeout = perAgentHeartbeatTimeout,
+                        RetryPolicy = perAgentRetryPolicy,
+                    };
                 }
             }
         }
@@ -391,6 +405,7 @@ internal sealed class DefaultTemporalAgentClient(
                 UseExternalStoreMode = hasExternalStore,
                 ToolActivityOptions = toolActivityOptions,
                 InterceptorActivityOptions = interceptorActivityOpts,
+                InterceptorToolActivityOptions = perToolInterceptorOpts,
                 InterceptorSkippedTools = interceptorSkippedTools,
                 RequiresApprovalTools = requiresApprovalTools,
             },

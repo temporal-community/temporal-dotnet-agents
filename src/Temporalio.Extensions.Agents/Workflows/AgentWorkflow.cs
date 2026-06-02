@@ -445,6 +445,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             // or when no interceptor is configured get a synthetic Proceed.
             AgentToolInterceptorResult[]? interceptorResults = null;
             var interceptorOpts = _input!.InterceptorActivityOptions;
+            var interceptorToolOpts = _input!.InterceptorToolActivityOptions;
             var skippedTools = _input!.InterceptorSkippedTools;
 
             if (interceptorOpts is not null)
@@ -473,12 +474,16 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             SerializedStateBag = _currentStateBag,
                         };
 
-                        // Per-tool interceptor timeout if configured. Set summary per-tool.
+                        // Use per-tool interceptor timeout when set; fall back to shared opts.
+                        var baseOpts = interceptorToolOpts is not null
+                            && interceptorToolOpts.TryGetValue(tc.Name, out var toolSpecific)
+                                ? toolSpecific
+                                : interceptorOpts;
                         var perToolInterceptorOpts = new ActivityOptions
                         {
-                            StartToCloseTimeout = interceptorOpts.StartToCloseTimeout,
-                            HeartbeatTimeout = interceptorOpts.HeartbeatTimeout,
-                            RetryPolicy = interceptorOpts.RetryPolicy,
+                            StartToCloseTimeout = baseOpts.StartToCloseTimeout,
+                            HeartbeatTimeout = baseOpts.HeartbeatTimeout,
+                            RetryPolicy = baseOpts.RetryPolicy,
                             Summary = $"intercept:{tc.Name}",
                         };
 
