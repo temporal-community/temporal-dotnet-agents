@@ -182,6 +182,9 @@ internal sealed class DefaultTemporalAgentClient(
         var effectiveHeartbeatTimeout = options.DefaultHeartbeatTimeout;
         var effectiveRetryPolicy = options.DefaultRetryPolicy;
         Dictionary<string, ActivityOptions>? toolActivityOptions = null;
+        ActivityOptions? interceptorActivityOpts = null;
+        List<string>? interceptorSkippedTools = null;
+        List<string>? requiresApprovalTools = null;
 
         if (options.DurableAgentRegistrations.TryGetValue(agentName, out var jobRegistration))
         {
@@ -193,6 +196,37 @@ internal sealed class DefaultTemporalAgentClient(
                 effectiveActivityTimeout,
                 effectiveHeartbeatTimeout,
                 effectiveRetryPolicy);
+
+            // Populate requiresApprovalTools unconditionally — tools with RequireApproval() must
+            // gate on approval regardless of whether an interceptor is configured (BLOCK-2 fix).
+            foreach (var toolReg in jobRegistration.Tools)
+            {
+                if (toolReg.Options.RequireApprovalFlag)
+                {
+                    (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
+                }
+            }
+
+            // Interceptor config is only relevant when an interceptor is registered (BLOCK-1 fix).
+            var hasInterceptor = jobRegistration.ToolInterceptorFactory is not null
+                              || options.DefaultToolInterceptor is not null;
+            if (hasInterceptor)
+            {
+                interceptorActivityOpts = new ActivityOptions
+                {
+                    StartToCloseTimeout = effectiveActivityTimeout,
+                    HeartbeatTimeout = effectiveHeartbeatTimeout,
+                    RetryPolicy = effectiveRetryPolicy,
+                };
+
+                foreach (var toolReg in jobRegistration.Tools)
+                {
+                    if (toolReg.Options.SkipInterceptorFlag)
+                    {
+                        (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
+                    }
+                }
+            }
         }
 
         var effectiveMaxToolCalls = jobRegistration?.MaxToolCallsPerTurn ?? 20;
@@ -208,6 +242,9 @@ internal sealed class DefaultTemporalAgentClient(
                 RetryPolicy = effectiveRetryPolicy,
                 DurableAgentToolActivityOptions = toolActivityOptions,
                 MaxToolCallsPerTurn = effectiveMaxToolCalls,
+                InterceptorActivityOptions = interceptorActivityOpts,
+                InterceptorSkippedTools = interceptorSkippedTools,
+                RequiresApprovalTools = requiresApprovalTools,
             }),
             new WorkflowOptions(workflowId, taskQueue));
 
@@ -300,11 +337,21 @@ internal sealed class DefaultTemporalAgentClient(
         var hasExternalStore = registration.HistoryStore is not null || options.HistoryStore is not null;
 
         // Feature L: pre-compute interceptor config (interceptor presence + skip/require-approval lists).
+        // requiresApprovalTools is populated unconditionally — RequireApproval() is an absolute
+        // floor that must be enforced even when no tool interceptor is registered (BLOCK-2 fix).
         var hasInterceptor = registration.ToolInterceptorFactory is not null
                            || options.DefaultToolInterceptor is not null;
         ActivityOptions? interceptorActivityOpts = null;
         List<string>? interceptorSkippedTools = null;
         List<string>? requiresApprovalTools = null;
+
+        foreach (var toolReg in registration.Tools)
+        {
+            if (toolReg.Options.RequireApprovalFlag)
+            {
+                (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
+            }
+        }
 
         if (hasInterceptor)
         {
@@ -320,11 +367,6 @@ internal sealed class DefaultTemporalAgentClient(
                 if (toolReg.Options.SkipInterceptorFlag)
                 {
                     (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
-                }
-
-                if (toolReg.Options.RequireApprovalFlag)
-                {
-                    (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
                 }
             }
         }

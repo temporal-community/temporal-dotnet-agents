@@ -412,6 +412,17 @@ internal sealed class AgentActivities(
                 List<string>? interceptorSkippedTools = null;
                 List<string>? requiresApprovalTools = null;
 
+                // requiresApprovalTools is populated unconditionally — RequireApproval() is an
+                // absolute floor that must be enforced even when no tool interceptor is registered
+                // (BLOCK-2 fix). Only interceptorActivityOpts and the skip list need the interceptor guard.
+                foreach (var toolReg in cached.Registration.Tools)
+                {
+                    if (toolReg.Options.RequireApprovalFlag)
+                    {
+                        (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
+                    }
+                }
+
                 if (cached.ToolInterceptor is not null)
                 {
                     var effectiveTimeout = cached.Registration.ActivityTimeout
@@ -434,11 +445,6 @@ internal sealed class AgentActivities(
                         if (toolReg.Options.SkipInterceptorFlag)
                         {
                             (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
-                        }
-
-                        if (toolReg.Options.RequireApprovalFlag)
-                        {
-                            (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
                         }
 
                         // Per-tool interceptor timeout overrides the shared options.

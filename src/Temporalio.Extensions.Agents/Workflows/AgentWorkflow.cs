@@ -505,11 +505,14 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 // Determine effective outcome.
                 var outcome = interceptorResult?.Outcome ?? AgentToolOutcome.Proceed;
 
-                // Rule 2: RequireApproval is an absolute floor — override Proceed with approval.
+                // Rule 2: RequireApproval is an absolute floor. Block is strictly stricter than
+                // approval and is honoured as-is; every other outcome (Proceed, Skip,
+                // PauseForApproval) is overridden to PauseForApproval so the approval gate
+                // cannot be bypassed by an interceptor returning Skip (BLOCK-3 fix).
                 var toolRequiresApproval = requiresApprovalTools is not null
                     && requiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
 
-                if (toolRequiresApproval && outcome == AgentToolOutcome.Proceed)
+                if (toolRequiresApproval && outcome != AgentToolOutcome.Block)
                 {
                     outcome = AgentToolOutcome.PauseForApproval;
                 }

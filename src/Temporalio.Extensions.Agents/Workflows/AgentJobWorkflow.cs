@@ -117,10 +117,13 @@ internal sealed class AgentJobWorkflow
                 var interceptorResult = interceptorResults?[i];
                 var outcome = interceptorResult?.Outcome ?? AgentToolOutcome.Proceed;
 
-                // Rule 2: RequireApproval floor.
+                // Rule 2: RequireApproval is an absolute floor. Block is strictly stricter than
+                // approval and is honoured as-is; every other outcome (Proceed, Skip,
+                // PauseForApproval) is overridden to PauseForApproval so the approval gate
+                // cannot be bypassed by an interceptor returning Skip (BLOCK-3 fix).
                 var toolRequiresApproval = input.RequiresApprovalTools is not null
                     && input.RequiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
-                if (toolRequiresApproval && outcome == AgentToolOutcome.Proceed)
+                if (toolRequiresApproval && outcome != AgentToolOutcome.Block)
                 {
                     outcome = AgentToolOutcome.PauseForApproval;
                 }
