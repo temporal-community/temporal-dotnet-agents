@@ -13,15 +13,23 @@ How to implement approval gates, build approval dashboards, handle timeouts, and
 5. [Timeout Configuration](#timeout-configuration)
 6. [Multi-Step Approval Chains](#multi-step-approval-chains)
 7. [Error Handling and Rejection](#error-handling-and-rejection)
-8. [Testing HITL Flows](#testing-hitl-flows)
-9. [Types Reference](#types-reference)
-10. [Complete Example: Email Approval](#complete-example-email-approval)
+8. [Workflow-Parked Approval (Feature A)](#workflow-parked-approval-feature-a)
+9. [Testing HITL Flows](#testing-hitl-flows)
+10. [Types Reference](#types-reference)
+11. [Complete Example: Email Approval](#complete-example-email-approval)
 
 ---
 
 ## Overview
 
-TemporalAgents supports human-in-the-loop (HITL) approval gates that allow agent tools to **pause mid-turn** and wait for a human decision before proceeding. The approval flow is fully durable — if the worker crashes while waiting for a human, the activity resumes from exactly the same point once a new worker picks it up.
+TemporalAgents supports two HITL flavors. Choose based on how long the approval window is and whether the tool has work to do mid-gate:
+
+| Flavor | How triggered | Activity pinned? | Best for |
+|--------|---------------|------------------|---------|
+| **In-tool** (`RequestApprovalAsync`) | Explicit call inside a tool implementation | Yes — activity heartbeats during the wait | Short, interactive approvals (seconds to minutes); gates mid-tool logic |
+| **Workflow-parked** (`RequireApproval()` / `PauseForApproval`) | `DurableToolOptions.RequireApproval()` or `IAgentToolInterceptor` returning `PauseForApproval` | No — turn loop parks; no activity pinned | Multi-day waits; cost-sensitive workloads; approval before any tool work begins |
+
+Both flavors use `SubmitApprovalAsync` for external systems to unblock the workflow.
 
 Three `[WorkflowUpdate]` / `[WorkflowQuery]` handlers make this work:
 
@@ -325,6 +333,94 @@ catch (InvalidOperationException ex)
     Console.WriteLine($"Cannot submit: {ex.Message}");
 }
 ```
+
+---
+
+## Workflow-Parked Approval (Feature A)
+
+The in-tool path (`RequestApprovalAsync`) keeps an activity running while waiting for a human — the activity heartbeats during the pause. This is the right choice for interactive approvals (seconds to minutes) where the tool has logic to execute after the gate.
+
+For multi-day approval windows or cost-sensitive workloads where pinning an activity slot is undesirable, use the **workflow-parked** flavor: the turn loop itself parks, no activity is pinned, and the workflow resumes only after `SubmitApprovalAsync` is called.
+
+### Triggering Workflow-Parked Approval
+
+Two mechanisms trigger the workflow-parked flavor:
+
+**1. `DurableToolOptions.RequireApproval()` — absolute floor**
+
+Set on any tool registration. Approval is always required before the tool runs, even if the `IAgentToolInterceptor` returns `Proceed`:
+
+```csharp
+opts.AddDurableAgent("DataAgent", agent =>
+{
+    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+
+    agent.AddTool(
+        sp => AIFunctionFactory.Create(
+            sp.GetRequiredService<DataService>().DeleteRecords,
+            "delete_records"),
+        opts => opts.RequireApproval());  // always park for human approval
+});
+```
+
+**2. `IAgentToolInterceptor` returning `PauseForApproval`**
+
+Register an interceptor that evaluates each tool call and decides dynamically whether to pause:
+
+```csharp
+public class RiskyToolInterceptor : IAgentToolInterceptor
+{
+    public Task<AgentToolDecision> BeforeToolCallAsync(
+        AgentToolContext context, CancellationToken cancellationToken)
+    {
+        // Park for approval on any destructive tool call
+        if (context.ToolName.StartsWith("delete_") || context.ToolName.StartsWith("send_"))
+        {
+            return Task.FromResult(AgentToolDecision.PauseForApproval(
+                $"Tool '{context.ToolName}' requires human approval. Arguments: {context.Arguments}"));
+        }
+
+        return Task.FromResult(AgentToolDecision.Proceed());
+    }
+}
+
+// Register on a specific agent:
+opts.AddDurableAgent("DataAgent", agent =>
+{
+    agent.AddToolInterceptor(sp => new RiskyToolInterceptor());
+    // ...
+});
+
+// Or as a worker-level default (applies to all agents that don't override):
+opts.DefaultToolInterceptor = sp => new RiskyToolInterceptor();
+```
+
+> **Note:** `PauseForApproval` is only supported on `AgentWorkflow`-backed agents (sessions and sub-agents inside workflows). On `AgentJobWorkflow` (`AddScheduledAgentRun`, `ScheduleAgentAsync`) the decision degrades to `Block` with a warning logged, because scheduled jobs have no persistent session to resume.
+
+### Unblocking a Parked Workflow
+
+The external system calls `SubmitApprovalAsync` exactly as in the in-tool path — the API surface is identical:
+
+```csharp
+await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+{
+    RequestId = pending.RequestId,
+    Approved  = true,
+    Reason    = "Approved after compliance review."
+});
+```
+
+If approved, the tool executes normally. If rejected, the tool is skipped and the agent receives a synthetic rejection result.
+
+### When to Use Which Flavor
+
+| | In-tool (`RequestApprovalAsync`) | Workflow-parked (`RequireApproval()` / `PauseForApproval`) |
+|---|---|---|
+| Activity pinned while waiting | Yes | No |
+| Suitable for multi-day waits | With a large `ActivityTimeout` | Yes — no timeout concern |
+| Gate positioned | Mid-tool logic | Pre-tool dispatch |
+| Interceptor integration | N/A | Native |
+| `AgentJobWorkflow` support | Yes | No — degrades to `Block` |
 
 ---
 
