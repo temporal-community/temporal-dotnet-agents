@@ -326,6 +326,7 @@ The tool receives the token instead of the raw SSN. `ModifiedArguments` affects 
 - [Durable Agents](./durable-agents.md) — per-tool activity configuration, `DurableToolOptions` reference
 - [HITL Patterns](./hitl-patterns.md) — approval dashboard API, `SubmitApprovalAsync`, in-tool vs workflow-parked comparison
 - [Usage Guide — Per-Tool Activity Configuration](./usage.md#per-tool-activity-configuration)
+- [`samples/MAF/ToolInterceptor/`](../../../samples/MAF/ToolInterceptor/) — runnable sample: all four decision paths + `RequireApproval()` in a refund-agent scenario
 
 ---
 
