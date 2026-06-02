@@ -100,6 +100,7 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.HistoryStore` | `opts.HistoryStore` |
 | `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
 | `agent.CompactionStrategyKey` | `opts.DefaultCompactionStrategy` |
+| `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
 
 The retry-policy hierarchy adds one more layer specifically for tools. From most to least specific:
 
@@ -770,6 +771,20 @@ Console.WriteLine("Decision submitted.");
 
 `SubmitApprovalAsync` unblocks the tool in the workflow, and `RequestApprovalAsync` in the tool returns the same
 `DurableApprovalDecision`.
+
+### Workflow-Parked Approval (compute-free, multi-day waits)
+
+For long approval windows or cost-sensitive workloads where pinning an activity slot is undesirable, use the
+workflow-parked flavor: the turn loop itself parks, no activity is held open, and the workflow resumes only after
+`SubmitApprovalAsync` is called. Triggered two ways:
+
+- `agent.AddTool(tool, opts => opts.RequireApproval())` — absolute floor; always parks before the tool runs.
+- `IAgentToolInterceptor` returning `AgentToolDecision.PauseForApproval(description)` — dynamic, interceptor-driven.
+
+Register an interceptor per agent (`agent.AddToolInterceptor(sp => ...)`) or as a worker-level default
+(`opts.DefaultToolInterceptor`). `SubmitApprovalAsync` is the same external API for both flavors.
+
+See [HITL Patterns](./hitl-patterns.md) for the full guide including the two-flavor comparison table and testing patterns.
 
 ---
 

@@ -85,6 +85,8 @@ opts => opts.RequireApproval()                      // absolute floor: always pa
                                                     // even if the interceptor returns Proceed
 ```
 
+`RequireApproval()` and `PauseForApproval` are the two workflow-parked HITL triggers — the turn loop parks (no activity pinned) and `SubmitApprovalAsync` unblocks it. This differs from the in-tool path (`TemporalAgentContext.Current.RequestApprovalAsync`), which keeps the activity running and heartbeating while waiting. See [HITL Patterns](./hitl-patterns.md) for a full comparison and the `IAgentToolInterceptor` registration pattern.
+
 ## Per-tool retry policy hierarchy
 
 For every tool dispatched as a Temporal activity (`InvokeAgentTool`), the effective retry policy is:
