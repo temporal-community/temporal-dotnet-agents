@@ -89,10 +89,25 @@ public interface ITemporalAgentClient
     /// <param name="delay">How long to wait before the workflow begins executing.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <remarks>
-    /// <b>Known limitation:</b> if a workflow with the same <paramref name="sessionId"/> is
-    /// already running (due to <c>UseExisting</c> conflict policy), the delay is ignored and
-    /// the existing workflow is reused immediately. This method only applies the delay when
-    /// starting a brand-new session.
+    /// <para>
+    /// Internally uses signal-with-start to atomically create the workflow and queue the initial
+    /// request signal in a single server RPC. This prevents a crash window between workflow
+    /// creation and signal delivery.
+    /// </para>
+    /// <para>
+    /// <b>Duplicate-call behaviour within the delay window:</b> if this method is called more
+    /// than once with the same <paramref name="sessionId"/> before the delay elapses, each call
+    /// sends another <c>SignalWithStartWorkflow</c> RPC. Temporal's <c>StartDelay</c>
+    /// documentation specifies that the first workflow task is dispatched immediately when a
+    /// <c>SignalWithStart</c> arrives for a not-yet-started workflow — so the second call will
+    /// cause the workflow to start early and the delay to be ignored for the rest of its
+    /// duration. Callers should not schedule the same session twice before its delay expires.
+    /// </para>
+    /// <para>
+    /// <b>Already-running session:</b> if a workflow with the same <paramref name="sessionId"/>
+    /// is already running (due to <c>UseExisting</c> conflict policy), the request signal is
+    /// delivered to the running workflow; no new workflow is started.
+    /// </para>
     /// </remarks>
     Task RunAgentDelayedAsync(
         TemporalAgentSessionId sessionId,
