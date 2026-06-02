@@ -66,7 +66,7 @@ public sealed class AgentToolContext
 | `ToolName` | The tool name as registered on the agent. |
 | `Arguments` | The argument dictionary the LLM emitted in its `FunctionCallContent`. |
 | `CallId` | LLM-assigned call identifier. `null` for models that do not emit call IDs. |
-| `StateBag` | Read-only snapshot of session state at turn start. Deserialized in the interceptor activity from the same source as `TemporalAgentSession.FromStateBag`. Mutations are not persisted — only the LLM-step activity's `UpdatedStateBag` flows back to the workflow. `null` when no state has accumulated. |
+| `StateBag` | Snapshot of session state after the most recent LLM step completed, immediately before tool dispatch. Deserialized in the interceptor activity from the same source as `TemporalAgentSession.FromStateBag`. Treat as read-only — mutations to the object are not persisted back to the workflow; only the LLM-step activity's `UpdatedStateBag` flows back. `null` when no state has accumulated. |
 
 ---
 
@@ -86,7 +86,7 @@ return AgentToolDecision.Proceed(
 
 Optional parameters:
 
-- `enrichedDescription` — human-readable context injected into `DurableApprovalRequest.Description` when the tool also has `RequireApproval()` set, or when the interceptor returns `PauseForApproval` on a subsequent call.
+- `enrichedDescription` — human-readable context injected into `DurableApprovalRequest.Description` when the tool has `RequireApproval()` set (the `Proceed` decision is overridden to `PauseForApproval` by the Rule 2 floor, using this description for the reviewer).
 - `modifiedArguments` — replacement argument dictionary. The turn loop passes these to `InvokeAgentToolInput` instead of the original LLM-supplied arguments. The LLM's original arguments are already in Temporal history from `RunDurableAgentStep`; this substitution only affects the tool dispatch event. Use this for PII scrubbing (see [PII argument scrubbing](#pii-argument-scrubbing)).
 - `metadata` — arbitrary key/value pairs stored in Temporal history for audit purposes.
 
@@ -203,7 +203,7 @@ Use this for read-only, low-risk tools where the interceptor overhead (an extra 
 
 ## Interceptor activity timeout
 
-By default, the `RunToolInterceptor` activity uses the worker-level `DefaultActivityTimeout`. Override it per tool:
+By default, the `RunToolInterceptor` activity uses the per-agent `ActivityTimeout` (falling back to the worker-level `DefaultActivityTimeout` when the agent doesn't set one). Override it per tool with an independent budget:
 
 ```csharp
 agent.AddTool(
@@ -294,7 +294,7 @@ public class RiskScoringInterceptor(IRiskService riskService) : IAgentToolInterc
 
 ### PII argument scrubbing
 
-Tokenize a sensitive field before it reaches the tool, keeping PII out of the tool activity's event.
+Tokenize a sensitive field before it reaches the tool, keeping PII out of the `InvokeAgentTool` activity event.
 
 ```csharp
 public class PiiScrubbingInterceptor(IPiiVault vault) : IAgentToolInterceptor
@@ -317,7 +317,7 @@ public class PiiScrubbingInterceptor(IPiiVault vault) : IAgentToolInterceptor
 }
 ```
 
-The tool receives the token instead of the raw SSN. The LLM's original arguments remain in workflow history from `RunDurableAgentStep` — only the `InvokeAgentToolInput` event carries the scrubbed version.
+The tool receives the token instead of the raw SSN. `ModifiedArguments` affects only the `ActivityScheduled(InvokeAgentTool)` event. The LLM's original arguments appear in two earlier events: `ActivityCompleted(RunDurableAgentStep)` (the LLM step result) and `ActivityScheduled(RunToolInterceptor)` (the interceptor's input). For complete Temporal history PII isolation, use the `IAgentHistoryStore` external-store path.
 
 ---
 

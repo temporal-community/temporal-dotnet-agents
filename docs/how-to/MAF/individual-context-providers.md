@@ -1,12 +1,12 @@
 # Individual MAF Context Providers
 
-MAF ships several `AIContextProvider` subclasses as part of its `HarnessAgent` bundle — `TodoProvider`, `AgentModeProvider`, `FileMemoryProvider`, `AgentSkillsProvider`, and others. The full `HarnessAgent` bundle is structurally incompatible with this library (see [`harness-agent-compatibility.md`](./harness-agent-compatibility.md)), but **the individual providers work today** via `DurableAgentBuilder.AddContextProvider`.
+MAF ships several `AIContextProvider` subclasses as part of its `HarnessAgent` bundle — `TodoProvider`, `AgentModeProvider`, `FileMemoryProvider`, `AgentSkillsProvider`, and others. The full `HarnessAgent` bundle is structurally incompatible with this library (see [`harness-agent-compatibility.md`](./harness-agent-compatibility.md)), but **most individual session-state providers work today** via `DurableAgentBuilder.AddContextProvider`. Providers that retain live process state (such as `BackgroundAgentsProvider`, which holds `Task<T>` references) are not compatible.
 
 ---
 
 ## Supported providers
 
-Register any concrete `AIContextProvider` subclass by passing an instance or a DI factory to `agent.AddContextProvider(...)`. MAF's providers are all standard subclasses, so they slot in without modification.
+Register a session-state `AIContextProvider` subclass by passing an instance or a DI factory to `agent.AddContextProvider(...)`. MAF's session-state providers are standard subclasses and slot in without modification.
 
 ### `TodoProvider`
 
@@ -36,7 +36,7 @@ opts.AddDurableAgent("ResearchAgent", agent =>
 });
 ```
 
-To start a session in a specific mode, call `modeProvider.SetMode(null, "execute")` before the first turn (or inject via an `AgentSessionStateBag` on session creation).
+Mode state is stored in `AgentSessionStateBag` and persists across turns and worker restarts. The mode starts as `"plan"` by default; the agent changes it with the `mode_set` tool during the session.
 
 ### Combining providers
 

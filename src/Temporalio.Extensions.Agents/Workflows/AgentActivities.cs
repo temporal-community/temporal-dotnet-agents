@@ -269,7 +269,14 @@ internal sealed class AgentActivities(
             : new List<Microsoft.Agents.AI.AIContext>(cached.ContextProviders.Count);
         if (cached.ContextProviders.Count > 0)
         {
-            var aggregated = new Microsoft.Agents.AI.AIContext();
+            // Pre-populate with the accumulated conversation history so providers that need
+            // to scan prior messages (e.g. WorkingSetContextProvider) can read them from
+            // context.AIContext.Messages. Each provider's output is still appended to this
+            // aggregated context for subsequent providers in the chain.
+            var aggregated = new Microsoft.Agents.AI.AIContext
+            {
+                Messages = messagesForLlm,
+            };
             foreach (var provider in cached.ContextProviders)
             {
                 var invokingCtx = new Microsoft.Agents.AI.AIContextProvider.InvokingContext(
