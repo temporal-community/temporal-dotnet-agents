@@ -28,10 +28,11 @@ TemporalAgents/
 │   └── Temporalio.Extensions.AI/       # MEAI IChatClient middleware (no Agent Framework)
 ├── tests/                     # Four projects: {Agents,AI} × {Tests, IntegrationTests}
 └── samples/
-    ├── MAF/                   # 11 samples: BasicAgent, SplitWorkerClient, WorkflowOrchestration,
+    ├── MAF/                   # 13 samples: BasicAgent, SplitWorkerClient, WorkflowOrchestration,
     │                          # EvaluatorOptimizer, MultiAgentRouting, HumanInTheLoop,
     │                          # WorkflowRouting, AmbientAgent, ConfigurableAgent,
-    │                          # ExternalHistoryStore, PerToolActivities, Compaction
+    │                          # ExternalHistoryStore, PerToolActivities, Compaction,
+    │                          # ContextProviders
     └── MEAI/                  # 6 samples: DurableChat, DurableTools, OpenTelemetry
                                # (DurableOpenTelemetry.csproj), HumanInTheLoop,
                                # DurableEmbeddings, CustomWorkflow
@@ -116,6 +117,7 @@ var results = await TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync(new[
 - Stored in `_currentStateBag` on `AgentWorkflow`; passed forward in `AgentWorkflowInput.CarriedStateBag`
 - Restored at activity start via `TemporalAgentSession.FromStateBag`
 - Empty bag (`StateBag.Count == 0`) returns `null` — no wasted serialization
+- **64 KB size guard**: `CreateContinueAsNewException` emits `LogWarning` when the serialized `CarriedStateBag` exceeds 64 KB. This is a signal to prune or externalize StateBag contents.
 
 **External history store** (opt-in for regulated workloads + long sessions): set `opts.HistoryStore = sp => sp.GetRequiredService<MyStore>()` (worker default) or `agent.HistoryStore = sp => ...` (per-agent). When configured, the workflow strips message payloads from in-workflow history entries (`ShouldStripMessagesFromHistoryEntry` returns true), the `RunDurableAgentStep` activity loads prior history from the store on the first step of a turn, and after the turn loop exits the workflow dispatches a separate `AppendAgentTurn` activity that appends the new entries to the store. Complementary to `AIContextProvider`, not a replacement. See `docs/how-to/MAF/external-history-store.md`.
 
@@ -167,6 +169,10 @@ As of Layer 3, `AgentWorkflow : DurableChatWorkflowBase<AgentResponse>`. The sha
 - `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException`, `DurableToolsNotWrappedException` — `Temporalio.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the others are stable.
 - `DurableChatStepResult` — `Temporalio.Extensions.AI` (internal sealed) — Pattern 3 activity return type from `GetChatStepAsync`; carries `IsFinal`, `AssistantMessage`, optional `ToolCalls` and `Usage`.
 - `DurableChatToolOptions` — `Temporalio.Extensions.AI` (public sealed) — per-tool options builder for Pattern 3; mirrors MAF's `DurableToolOptions` verbatim.
+- `IAgentToolInterceptor` — `Temporalio.Extensions.Agents` — pre-tool lifecycle hook. `BeforeToolCallAsync(AgentToolContext, CancellationToken) → Task<AgentToolDecision>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`.
+- `AgentToolDecision` — `Temporalio.Extensions.Agents` — return type of `BeforeToolCallAsync`. Static factories: `Proceed(...)`, `PauseForApproval(description)`, `Skip(syntheticResult)`, `Block(reason)`.
+- `AgentToolContext` — `Temporalio.Extensions.Agents` — passed to `BeforeToolCallAsync`. Properties: `AgentName`, `ToolName`, `Arguments`, `CallId`, `StateBag?` (read-only snapshot).
+- `WorkingSetContextProvider` — `Temporalio.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Register via `agent.AddContextProvider(sp => new WorkingSetContextProvider())`. Stores result in `AgentSessionStateBag["temporal.working_set"]`. Effectively a no-op for external-store sessions (sparse current-turn messages only).
 
 ### DI Patterns
 - `TemporalAgentsOptions` has an **internal constructor** — always access via the `AddTemporalAgents(opts => ...)` delegate.
@@ -251,7 +257,7 @@ just cleanup-stale-worktrees                                               # SAF
 
 ```bash
 just test-samples-meai     # 5 MEAI samples, per-sample timeout budget, preflight checks OPENAI_API_KEY + Temporal server
-just test-samples-maf      # 10 MAF samples, same
+just test-samples-maf      # 11 MAF samples, same
 just test-samples          # both
 just verify-sample-coverage # drift detector — fails if a new sample dir isn't in the recipe lists
 just clean-test-artifacts  # remove artifacts/{test-individual,sample-runs}/
@@ -295,6 +301,7 @@ dotnet run --project samples/MAF/{BasicAgent,WorkflowOrchestration,EvaluatorOpti
 dotnet run --project samples/MAF/ExternalHistoryStore/ExternalHistoryStore.csproj   # IAgentHistoryStore + AIContextProvider + reduction strategy
 dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj         # per-tool Temporal activities with write-tool no-retry
 dotnet run --project samples/MAF/Compaction/Compaction.csproj                       # UseCompaction("summarization") + GDPR erasure cascade demo
+dotnet run --project samples/MAF/ContextProviders/ContextProviders.csproj           # TodoProvider + AgentModeProvider via AddContextProvider
 
 # SplitWorkerClient — Worker first, then Client in a separate terminal
 dotnet run --project samples/MAF/SplitWorkerClient/Worker/Worker.csproj
