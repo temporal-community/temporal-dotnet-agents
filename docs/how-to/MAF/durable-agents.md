@@ -74,9 +74,15 @@ To use the agent, call `TemporalWorkflowExtensions.GetAgent("RefundAgent")` insi
 ## Fluent sugar on `DurableToolOptions`
 
 ```csharp
-opts => opts.NoRetry()              // RetryPolicy { MaximumAttempts = 1 }
+opts => opts.NoRetry()                              // RetryPolicy { MaximumAttempts = 1 }
 opts => opts.WithMaxAttempts(3)
 opts => opts.WithTimeout(TimeSpan.FromSeconds(30))
+
+// Tool interceptor overrides (Feature L)
+opts => opts.SkipInterceptor()                      // bypass IAgentToolInterceptor for this tool
+opts => opts.WithInterceptorTimeout(TimeSpan.FromSeconds(10))  // per-tool interceptor activity timeout
+opts => opts.RequireApproval()                      // absolute floor: always pause for human approval
+                                                    // even if the interceptor returns Proceed
 ```
 
 ## Per-tool retry policy hierarchy

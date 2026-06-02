@@ -70,6 +70,7 @@ builder.Services
 | `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
 | `HistoryStore` | Per-agent `IAgentHistoryStore` factory. `null` inherits `opts.HistoryStore`; if both are `null`, history is carried in workflow state. |
 | `CompactionStrategyKey` | Keyed-DI name of the `ICompactionStrategy` to use for in-session compaction. `null` inherits `opts.DefaultCompactionStrategy`; both `null` disables compaction. Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"`. Requires an external history store. `[Experimental("TA002")]`. See [`compaction.md`](./compaction.md). |
+| `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `AgentToolDecision`: `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
 
 ### `DurableToolOptions` reference
 
@@ -79,6 +80,9 @@ builder.Services
 | `NoRetry()` | Sets `RetryPolicy = new() { MaximumAttempts = 1 }`. Use on write tools. |
 | `WithMaxAttempts(int n)` | Sets a fixed-retry policy. |
 | `WithTimeout(TimeSpan t)` | Sets `StartToCloseTimeout`. |
+| `SkipInterceptor()` | Bypasses `IAgentToolInterceptor` for this specific tool. |
+| `WithInterceptorTimeout(TimeSpan t)` | Per-tool timeout for the interceptor activity. |
+| `RequireApproval()` | Absolute floor: always pause for human approval even if the interceptor returns `Proceed`. |
 
 ### Inheritance — per-agent vs worker-level
 
