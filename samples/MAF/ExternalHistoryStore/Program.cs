@@ -64,7 +64,7 @@ builder.Services.AddTemporalClient(temporalAddress, "default");
 
 // ── Step 5: Wire BOTH layers on the worker ───────────────────────────────────
 // • opts.HistoryStore — Layer 1 worker default factory. Presence of a non-null
-//   factory is the opt-in (no boolean flag in v0.3).
+//   factory is the opt-in.
 // • agent.AddContextProvider — Layer 2 per-agent provider. The factory runs once
 //   at first activity dispatch and the resolved instance is cached for the life
 //   of the worker process.
