@@ -37,7 +37,7 @@ public static class TemporalWorkflowExtensions
                 "from your service provider via GetTemporalAgentProxy(name) instead.");
         }
 
-        ArgumentException.ThrowIfNullOrEmpty(agentName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
         return new TemporalAIAgent(agentName, activityOptions);
     }
 
@@ -59,7 +59,7 @@ public static class TemporalWorkflowExtensions
                 "Use TemporalAgentSessionId.WithRandomKey(agentName) in external (non-workflow) code.");
         }
 
-        ArgumentException.ThrowIfNullOrEmpty(agentName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
         return TemporalAgentSessionId.WithDeterministicKey(agentName, Workflow.NewGuid());
     }
 

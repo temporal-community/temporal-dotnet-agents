@@ -39,7 +39,7 @@ public sealed class AgentSessionResponse : DurableSessionResponse
     {
         ArgumentNullException.ThrowIfNull(response);
 
-        if (string.IsNullOrEmpty(correlationId))
+        if (string.IsNullOrWhiteSpace(correlationId))
         {
             throw new ArgumentException(
                 "correlationId is required and must be non-empty.",

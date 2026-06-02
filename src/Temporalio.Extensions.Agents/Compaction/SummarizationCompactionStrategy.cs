@@ -125,7 +125,7 @@ public sealed class SummarizationCompactionStrategy : ICompactionStrategy
 
         var summaryMessages = response.Messages.Count > 0
             ? response.Messages.ToArray()
-            : new[] { new ChatMessage(ChatRole.Assistant, "(no rollup produced)") };
+            : [new ChatMessage(ChatRole.Assistant, "(no rollup produced)")];
 
         var marker = new CompactionMarkerEntry
         {

@@ -120,7 +120,7 @@ internal static partial class Logs
         this ILogger logger, string agentName, string workflowId, string requestId, bool approved);
 
     [LoggerMessage(EventId = 25, Level = LogLevel.Warning,
-        Message = "[{AgentName}/{WorkflowId}] Fire-and-forget activity failed; orphaned history entry rolled back")]
+        Message = "[{AgentName}/{WorkflowId}] Fire-and-forget turn failed; orphaned request entry remains in history for session '{WorkflowId}'. Turn result is unavailable.")]
     public static partial void LogFireAndForgetActivityFailed(
         this ILogger logger, string agentName, string workflowId, Exception ex);
 

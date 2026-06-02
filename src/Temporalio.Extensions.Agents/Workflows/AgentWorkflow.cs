@@ -134,6 +134,9 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
     {
+        // activityOptions from the base is intentionally not used — AgentWorkflow constructs its own
+        // ActivityOptions from _input.RetryPolicy to apply MAF-specific retry policy and summary.
+        // If the base class gains new required fields in activityOptions, revisit this override.
         _ = activityOptions;
         var agentRequestEntry = (AgentSessionRequest)requestEntry;
         var runRequest = ToRunRequest(agentRequestEntry);
@@ -282,12 +285,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         var allTurnMessages = new List<ChatMessage>();
         UsageDetails? totalUsage = null;
 
-        // Note: do NOT snapshot _input.MaxToolCallsPerTurn here. The Fix-4 resolution handshake
+        // Note: do NOT snapshot _input.MaxToolCallsPerTurn here. The resolution handshake
         // mutates _input mid-loop on proxy-started sessions, so we must re-read it each iteration
         // (and again after the loop for the aborted-response log/message).
         for (var iteration = 0; iteration < _input!.MaxToolCallsPerTurn; iteration++)
         {
-            // Fix 4 (P1-1 + P1-2): proxy-started sessions have WorkerSettingsResolved=false.
+            // Proxy-started sessions have WorkerSettingsResolved=false.
             // On the first step of the first turn, ask the activity to resolve worker-side
             // settings (external-store mode, per-tool activity options) and return them.
             var needsResolution = iteration == 0 && !_input!.WorkerSettingsResolved;
@@ -307,11 +310,10 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 stepActivityOptions).ConfigureAwait(true);
 
-            // Fix 4: apply resolved worker-side settings once and carry forward via CAN. As of
-            // the Step 3c.1 migration, the entire resolved bundle travels as
-            // ProxyResolvedWorkerConfig — the flat MaxToolCallsPerTurn / UseExternalStoreMode /
-            // DurableAgentToolActivityOptions fields are now forwarding computed properties
-            // on AgentWorkflowInput.
+            // Apply resolved worker-side settings once and carry forward via CAN. The
+            // entire resolved bundle travels as ProxyResolvedWorkerConfig — 
+            // the flat MaxToolCallsPerTurn / UseExternalStoreMode / DurableAgentToolActivityOptions
+            // fields are now forwarding computed properties on AgentWorkflowInput.
             if (needsResolution && stepResult.ResolvedWorkerConfig is not null)
             {
                 _input = new AgentWorkflowInput

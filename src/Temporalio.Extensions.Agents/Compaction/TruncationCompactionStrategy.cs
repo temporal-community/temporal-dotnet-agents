@@ -108,7 +108,7 @@ public sealed class TruncationCompactionStrategy : ICompactionStrategy
         {
             CorrelationId = context.MarkerCorrelationId,
             CreatedAt = DateTimeOffset.UtcNow,
-            Messages = Array.Empty<Microsoft.Extensions.AI.ChatMessage>(),
+            Messages = [],
             CompactedMessageIds = context.TargetMessageIds,
             Strategy = Key,
             ModelId = string.Empty, // non-LLM strategy

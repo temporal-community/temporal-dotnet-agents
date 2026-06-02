@@ -33,6 +33,10 @@ public sealed class TemporalAIAgent : AIAgent
     // rather than being carried in-workflow. Each turn's request messages are still passed
     // to the step activity; prior turns are loaded by the activity from the store.
     private bool _useExternalStore;
+    // Cached after the first successful worker-settings resolution step so subsequent turns
+    // skip the resolution handshake and use the resolved value rather than the hard-coded default.
+    private bool _settingsResolved;
+    private int _resolvedMaxToolCallsPerTurn = 20;
 
     internal TemporalAIAgent(string agentName, ActivityOptions? activityOptions = null)
     {
@@ -82,7 +86,9 @@ public sealed class TemporalAIAgent : AIAgent
         AgentRunOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        session ??= await CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+        if (!Workflow.InWorkflow) throw new InvalidOperationException("TemporalAIAgent must be used inside a Temporal workflow. Use TemporalAIAgentProxy for external-context invocation.");
+
+        session ??= await CreateSessionAsync(cancellationToken).ConfigureAwait(true);
 
         IList<string>? enableToolNames = null;
         bool enableToolCalls = true;
@@ -135,7 +141,7 @@ public sealed class TemporalAIAgent : AIAgent
         {
             // Only include the current request's messages. The activity loads prior turns
             // from the external store and prepends them before sending to the LLM.
-            var currentEntry = _history[_history.Count - 1];
+            var currentEntry = _history[^1];
             foreach (var m in currentEntry.Messages)
                 accumulated.Add(m);
         }
@@ -150,7 +156,7 @@ public sealed class TemporalAIAgent : AIAgent
 
         var allTurnMessages = new List<ChatMessage>();
         UsageDetails? totalUsage = null;
-        var maxIterations = 20;  // resolved from worker registration on the first step
+        var maxIterations = _resolvedMaxToolCallsPerTurn;
 
         for (var iteration = 0; iteration < maxIterations; iteration++)
         {
@@ -162,16 +168,18 @@ public sealed class TemporalAIAgent : AIAgent
                 SerializedStateBag = null,
                 SessionId = sessionId,
                 IsFirstStep = iteration == 0,
-                NeedsWorkerSettingsResolution = iteration == 0,
+                NeedsWorkerSettingsResolution = !_settingsResolved && iteration == 0,
             };
 
             var stepResult = await Workflow.ExecuteActivityAsync(
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 _activityOptions);
 
-            if (iteration == 0 && stepResult.ResolvedMaxToolCallsPerTurn.HasValue)
+            if (stepResult.ResolvedWorkerConfig is not null)
             {
-                maxIterations = stepResult.ResolvedMaxToolCallsPerTurn.Value;
+                _settingsResolved = true;
+                _resolvedMaxToolCallsPerTurn = stepResult.ResolvedWorkerConfig.MaxToolCallsPerTurn;
+                maxIterations = _resolvedMaxToolCallsPerTurn;
             }
 
             // Capture the resolved external-store flag from the first step so that

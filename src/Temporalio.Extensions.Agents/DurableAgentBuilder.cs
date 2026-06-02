@@ -211,9 +211,15 @@ public sealed class DurableAgentBuilder
     /// first activity dispatch.
     /// </summary>
     /// <remarks>
-    /// There is no per-agent explicit-disable mechanism. Users who want one agent on a worker to
-    /// opt out of an externally configured store should split that agent into a separate worker
-    /// registration.
+    /// <para>
+    /// <b>There is no per-agent opt-out mechanism.</b> External-history-store mode is activated
+    /// when any history store factory is present — either a non-null factory on this property OR
+    /// a non-null factory on <see cref="TemporalAgentsOptions.HistoryStore"/>. Setting this
+    /// property to a factory that returns <see langword="null"/> does not disable the store; it
+    /// causes the activity to throw at runtime when it attempts to append turns. If you need
+    /// one agent on a worker to bypass an externally configured store, deploy that agent on a
+    /// separate worker registration that does not set <see cref="TemporalAgentsOptions.HistoryStore"/>.
+    /// </para>
     /// </remarks>
     public Func<IServiceProvider, IAgentHistoryStore>? HistoryStore { get; set; }
 
@@ -405,7 +411,7 @@ public sealed class DurableAgentBuilder
 
     private void AddToolCore(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure)
     {
-        if (!_toolNames.Add(name))
+        if (_toolNames.Contains(name))
         {
             throw new ArgumentException(
                 $"Tool '{name}' is already registered on agent '{Name}'.",
@@ -414,6 +420,7 @@ public sealed class DurableAgentBuilder
 
         var options = new DurableToolOptions();
         configure?.Invoke(options);
+        _toolNames.Add(name);
         _tools.Add(new DurableToolRegistration(name, factory, options));
     }
 }

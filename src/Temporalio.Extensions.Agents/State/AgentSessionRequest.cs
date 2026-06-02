@@ -51,7 +51,7 @@ public sealed class AgentSessionRequest : DurableSessionRequest
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (string.IsNullOrEmpty(request.CorrelationId))
+        if (string.IsNullOrWhiteSpace(request.CorrelationId))
         {
             throw new InvalidOperationException(
                 "RunRequest.CorrelationId is required. Set it explicitly at the construction site: " +

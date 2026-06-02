@@ -124,7 +124,7 @@ public static class CompactionAwareErasureHelper
                 {
                     CorrelationId = marker.CorrelationId,
                     CreatedAt = marker.CreatedAt,
-                    Messages = Array.Empty<Microsoft.Extensions.AI.ChatMessage>(),
+                    Messages = [],
                     CompactedMessageIds = surviving,
                     Strategy = marker.Strategy,
                     ModelId = marker.ModelId,

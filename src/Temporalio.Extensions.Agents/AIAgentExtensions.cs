@@ -58,7 +58,7 @@ public static class AIAgentExtensions
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
-        ArgumentException.ThrowIfNullOrEmpty(message);
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
 
         var options = new TemporalAgentRunOptions { IsFireAndForget = true };
         return agent.RunAsync(message, session, options, cancellationToken);

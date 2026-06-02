@@ -47,7 +47,8 @@ internal sealed record CachedDurableAgent(
     TemporalAgentsOptions AgentsOptions,
     bool SuppressAgentTurnSpan,
     string? CompactionStrategyKey,
-    Compaction.ICompactionStrategy? CompactionStrategy);
+    Compaction.ICompactionStrategy? CompactionStrategy,
+    IReadOnlyList<AITool> ToolsAsAITools);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
@@ -110,9 +111,11 @@ internal sealed class AgentActivities(
         IReadOnlyList<DurableSessionEntry> reduced;
         if (reducer is not null)
         {
-            // HistoryReducer signature expects IList<DurableSessionEntry>; materialize prior.
-            // Materialize the result as a List<T> which satisfies both IList and IReadOnlyList.
-            reduced = reducer(prior.ToList()).ToList();
+            // prior.ToList() gives the reducer a fresh mutable copy (reducer contract: may mutate input).
+            // Avoid a second ToList() on the result when the reducer already returns IReadOnlyList<T>.
+            var reducerInput = prior.ToList();
+            var reducerResult = reducer(reducerInput);
+            reduced = reducerResult as IReadOnlyList<DurableSessionEntry> ?? reducerResult.ToList();
         }
         else
         {
@@ -142,7 +145,9 @@ internal sealed class AgentActivities(
         var cached = ResolveDurableAgent(input.AgentName);
         if (cached.HistoryStore is null)
         {
-            return;
+            throw new InvalidOperationException(
+                $"AppendAgentTurn dispatched for agent '{input.AgentName}' but no IAgentHistoryStore is configured. " +
+                "This indicates a mismatch between UseExternalStoreMode on the workflow input and the worker's resolved registration.");
         }
 
         var ct = ActivityExecutionContext.Current.CancellationToken;
@@ -176,7 +181,7 @@ internal sealed class AgentActivities(
 
         var cached = ResolveDurableAgent(input.AgentName);
 
-        // Fix 4 (P1-1 + P1-2): when the workflow was started by a proxy-only client, resolve
+        // When the workflow was started by a proxy-only client, resolve
         // and return worker-side settings so the workflow can patch its input on the first turn.
         bool? resolvedExternalStore = null;
         Dictionary<string, ActivityOptions>? resolvedToolOpts = null;
@@ -237,8 +242,9 @@ internal sealed class AgentActivities(
         var registration = cached.Registration;
         var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
         chatOptions.Instructions = registration.Instructions;
-        var tools = cached.Tools.Values.Cast<AITool>().ToList();
-        chatOptions.Tools = tools.Count > 0 ? tools : null;
+        // Spread [..] makes a per-call copy so downstream mutation (EnableToolNames filter below)
+        // cannot corrupt the cached IReadOnlyList.
+        chatOptions.Tools = cached.ToolsAsAITools.Count > 0 ? [.. cached.ToolsAsAITools] : null;
         chatOptions.ResponseFormat = input.Request.ResponseFormat;
 
         if (!input.Request.EnableToolCalls)
@@ -250,7 +256,7 @@ internal sealed class AgentActivities(
             chatOptions.Tools = [.. chatOptions.Tools.Where(t => enabledNames.Contains(t.Name))];
         }
 
-        // Step 3c.2: LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
+        // LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
         // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire
         // around the call. The pipeline was composed once at ComposeDurableAgent time and
         // cached on cached.Agent — it may be the bare ChatClientAgent (no user decorators) or
@@ -271,7 +277,9 @@ internal sealed class AgentActivities(
                 providerAIContexts!.Add(providerCtx);
             }
 
-            var extraMessages = new List<ChatMessage>();
+            int extraCapacity = 0;
+            foreach (var c in providerAIContexts!) { extraCapacity += c.Messages?.Count() ?? 0; }
+            var extraMessages = new List<ChatMessage>(extraCapacity);
             foreach (var ctxResult in providerAIContexts!)
             {
                 if (ctxResult.Messages is { } extra)
@@ -295,7 +303,7 @@ internal sealed class AgentActivities(
         var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
         TemporalAgentContext.SetCurrent(temporalContext);
 
-        // Step 3c.3 (2b-enriched OTel): when the user's pipeline installs OpenTelemetryAgent or
+        // When the user's pipeline installs OpenTelemetryAgent or
         // OpenTelemetryChatClient, suppress our own agent.turn span to avoid duplicate gen_ai.*
         // attributes (downstream cost-aggregation queries would double-count tokens). Instead
         // tag Activity.Current — which will be MAF's invoke_agent span when present, or the
@@ -353,7 +361,7 @@ internal sealed class AgentActivities(
 
             var response = collected.ToAgentResponse();
             var assistantMessage = response.Messages.Count > 0
-                ? response.Messages[response.Messages.Count - 1]
+                ? response.Messages[^1]
                 : new ChatMessage(ChatRole.Assistant, string.Empty);
 
             var toolCalls = assistantMessage.Contents
@@ -500,8 +508,8 @@ internal sealed class AgentActivities(
         }
 
         var userClient = registration.ChatClient(providerServices);
-        var providers = registration.ContextProviderFactories.Count == 0
-            ? Array.Empty<AIContextProvider>()
+        AIContextProvider[] providers = registration.ContextProviderFactories.Count == 0
+            ? []
             : registration.ContextProviderFactories.Select(f => f(providerServices)).ToArray();
 
         IChatClient chatClient = userClient;
@@ -624,6 +632,8 @@ internal sealed class AgentActivities(
             }
         }
 
+        IReadOnlyList<AITool> toolsAsAITools = [.. resolvedTools.Values.Cast<AITool>()];
+
         return new CachedDurableAgent(
             agent,
             resolvedTools,
@@ -633,19 +643,13 @@ internal sealed class AgentActivities(
             agentsOptions,
             suppressAgentTurnSpan,
             effectiveCompactionKey,
-            resolvedStrategy);
+            resolvedStrategy,
+            toolsAsAITools);
     }
 
     /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
-    /// <remarks>
-    /// Hard-coded because the type is <see langword="internal sealed"/> in
-    /// <c>Microsoft.Agents.AI</c> and not accessible via <c>typeof()</c>. The constant is
-    /// duplicated from <see cref="Internal.DurableAgentPipelineValidator"/> deliberately —
-    /// both call sites share the same wire-format-stable contract with MAF; if MAF ever
-    /// renames the type, both constants update in lockstep.
-    /// </remarks>
     private const string FunctionInvocationDelegatingAgentFullName =
-        "Microsoft.Agents.AI.FunctionInvocationDelegatingAgent";
+        Internal.AgentInternalConstants.FunctionInvocationDelegatingAgentFullName;
 
     /// <summary>
     /// Per-tool activity used by durable agents. Looks up the named agent's local tool registry,
@@ -808,7 +812,7 @@ internal sealed class AgentActivities(
             .ConfigureAwait(false);
 
         await cached.HistoryStore
-            .AppendAsync(input.SessionId, new DurableSessionEntry[] { result.Marker }, ct)
+            .AppendAsync(input.SessionId, [result.Marker], ct)
             .ConfigureAwait(false);
     }
 
@@ -855,7 +859,8 @@ internal sealed class AgentActivities(
         var contextSetUp = false;
         try
         {
-            var sessionId = TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!);
+            ArgumentNullException.ThrowIfNull(ctx.Info.WorkflowId, nameof(ctx.Info.WorkflowId));
+            var sessionId = TemporalAgentSessionId.Parse(ctx.Info.WorkflowId);
             var session = TemporalAgentSession.FromStateBag(sessionId, null);
             var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
             TemporalAgentContext.SetCurrent(temporalContext);

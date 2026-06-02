@@ -34,10 +34,7 @@ internal class TemporalAIAgentProxy(
         JsonSerializerOptions? jsonSerializerOptions = null,
         CancellationToken cancellationToken = default)
     {
-        if (session is null)
-        {
-            throw new ArgumentNullException(nameof(session));
-        }
+        ArgumentNullException.ThrowIfNull(session);
 
         if (session is not TemporalAgentSession temporalSession)
         {

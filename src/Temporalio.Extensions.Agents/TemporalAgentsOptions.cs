@@ -165,7 +165,7 @@ public sealed class TemporalAgentsOptions
     /// </summary>
     internal DurableAgentRegistration? TryGetDurableRegistration(string name)
     {
-        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         return _durableAgentRegistrations.TryGetValue(name, out var registration) ? registration : null;
     }
 
@@ -281,13 +281,8 @@ public sealed class TemporalAgentsOptions
     /// <summary>
     /// Returns the names of all registered agents (durable and proxy), in registration order.
     /// </summary>
-    public IReadOnlyList<string> GetRegisteredAgentNames()
-    {
-        var names = new List<string>(_durableAgentRegistrations.Count + _proxyDeclarations.Count);
-        names.AddRange(_durableAgentRegistrations.Keys);
-        names.AddRange(_proxyDeclarations.Keys);
-        return names;
-    }
+    public IReadOnlyList<string> GetRegisteredAgentNames() =>
+        [.. _durableAgentRegistrations.Keys, .. _proxyDeclarations.Keys];
 
     /// <summary>
     /// Returns <see langword="true"/> if an agent with the given name is registered.

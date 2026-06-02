@@ -58,13 +58,8 @@ internal sealed class DurableAgentPipelineValidator
     : IPostConfigureOptions<TemporalWorkerServiceOptions>
 {
     /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
-    /// <remarks>
-    /// Hard-coded because the type is <see langword="internal sealed"/> upstream and not
-    /// accessible via <c>typeof()</c>. The contract is wire-format-stable in MAF; if the type
-    /// is ever renamed, this constant updates in lockstep.
-    /// </remarks>
     private const string FunctionInvocationDelegatingAgentFullName =
-        "Microsoft.Agents.AI.FunctionInvocationDelegatingAgent";
+        AgentInternalConstants.FunctionInvocationDelegatingAgentFullName;
 
     /// <summary>Message prefix MAF emits when pre-flight rejects function-invocation middleware.</summary>
     /// <remarks>
@@ -97,8 +92,10 @@ internal sealed class DurableAgentPipelineValidator
         TemporalAgentsOptions agentsOptions,
         IServiceProvider serviceProvider)
     {
-        _agentsOptions = agentsOptions ?? throw new ArgumentNullException(nameof(agentsOptions));
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        ArgumentNullException.ThrowIfNull(agentsOptions);
+        ArgumentNullException.ThrowIfNull(serviceProvider);
+        _agentsOptions = agentsOptions;
+        _serviceProvider = serviceProvider;
     }
 
     /// <inheritdoc/>

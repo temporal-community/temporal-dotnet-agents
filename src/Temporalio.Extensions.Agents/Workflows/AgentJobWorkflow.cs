@@ -10,7 +10,17 @@ namespace Temporalio.Extensions.Agents.Workflows;
 /// the durable-agent dispatch loop in-place and exits.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Workflow ID convention: <c>ta-{agentName}-scheduled-{scheduleId}</c>.
+/// </para>
+/// <para>
+/// <b>External history store is not supported for scheduled or deferred runs.</b>
+/// Even when the agent is configured with an <c>IAgentHistoryStore</c>, turns executed
+/// by this workflow are <em>not</em> written to the store. The workflow does not dispatch
+/// <c>AppendAgentTurn</c> activities, so the external store sees no record of these runs.
+/// Use <see cref="AgentWorkflow"/> (via <c>TemporalAIAgentProxy</c> or
+/// <c>DefaultTemporalAgentClient</c>) for workloads that require durable history storage.
+/// </para>
 /// </remarks>
 [Workflow("Temporalio.Extensions.Agents.AgentJobWorkflow")]
 internal sealed class AgentJobWorkflow
