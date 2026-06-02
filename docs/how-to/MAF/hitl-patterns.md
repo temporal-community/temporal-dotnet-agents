@@ -126,7 +126,7 @@ if (pending is not null)
 `SubmitApprovalAsync` is a `[WorkflowUpdate]` — it validates the `RequestId`, sets the decision, and unblocks the tool:
 
 ```csharp
-DurableApprovalDecision decision = await client.SubmitApprovalAsync(
+await client.SubmitApprovalAsync(
     sessionId,
     new DurableApprovalDecision
     {
@@ -134,8 +134,6 @@ DurableApprovalDecision decision = await client.SubmitApprovalAsync(
         Approved  = true,
         Reason    = "Reviewed and approved by operations team."
     });
-
-Console.WriteLine($"Decision submitted. Approved={decision.Approved}");
 ```
 
 ### Validation Guards

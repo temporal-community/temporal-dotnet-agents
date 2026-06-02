@@ -752,7 +752,7 @@ if (pending is not null)
 ### Submitting a Decision (External System)
 
 ```csharp
-DurableApprovalDecision decision = await client.SubmitApprovalAsync(
+await client.SubmitApprovalAsync(
     sessionId,
     new DurableApprovalDecision
     {

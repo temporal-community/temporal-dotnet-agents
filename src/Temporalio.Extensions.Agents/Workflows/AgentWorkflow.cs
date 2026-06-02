@@ -492,8 +492,19 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             }
 
             // ── Feature L — Phase 2 & Feature A: Process decisions, park for approvals ────
-            var toolTasks = new List<Task<InvokeAgentToolResult>?>(toolCalls.Count);
-            var syntheticResults = new string?[toolCalls.Count]; // null = dispatch normally
+            //
+            // Safety invariant (BLOCK-4): NO tool activity is dispatched until ALL approval
+            // waits in this turn are fully resolved. Proceed-outcome tool inputs are buffered
+            // in pendingToolDispatches and dispatched in Phase 2.5, after the approval loop
+            // completes. This prevents a write-style tool (e.g. send_email, apply_refund) from
+            // executing concurrently with a human review window opened by another tool in the
+            // same turn.
+            //
+            var toolTasks = new Task<InvokeAgentToolResult>?[toolCalls.Count];
+            var syntheticResults = new string?[toolCalls.Count]; // null = real tool result
+
+            // Buffered dispatches: populated during Phase 2, dispatched in Phase 2.5.
+            var pendingToolDispatches = new List<(int Index, InvokeAgentToolInput Input, ActivityOptions Options)>(toolCalls.Count);
 
             var requiresApprovalTools = _input!.RequiresApprovalTools;
 
@@ -520,22 +531,17 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 switch (outcome)
                 {
                     case AgentToolOutcome.Proceed:
-                        // Use modified arguments if the interceptor provided them.
+                        // Buffer for dispatch after all approval waits resolve (BLOCK-4).
                         var effectiveArgs = interceptorResult?.ModifiedArguments is { } modArgs
                             ? modArgs
                             : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
-
-                        var toolOptions = ResolveDurableToolActivityOptions(tc.Name);
-                        var toolInput = new InvokeAgentToolInput
+                        pendingToolDispatches.Add((i, new InvokeAgentToolInput
                         {
                             AgentName = _input!.AgentName,
                             ToolName = tc.Name,
                             Arguments = effectiveArgs,
                             CallId = tc.CallId,
-                        };
-                        toolTasks.Add(Workflow.ExecuteActivityAsync(
-                            (AgentActivities a) => a.InvokeAgentToolAsync(toolInput),
-                            toolOptions));
+                        }, ResolveDurableToolActivityOptions(tc.Name)));
                         break;
 
                     case AgentToolOutcome.PauseForApproval:
@@ -569,22 +575,17 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
 
                         if (decision.Approved)
                         {
-                            // Dispatch the tool with original (or modified) arguments.
+                            // Buffer the approved tool for dispatch in Phase 2.5.
                             var approvedArgs = interceptorResult?.ModifiedArguments is { } mArgs
                                 ? mArgs
                                 : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
-
-                            var approvedToolOptions = ResolveDurableToolActivityOptions(tc.Name);
-                            var approvedInput = new InvokeAgentToolInput
+                            pendingToolDispatches.Add((i, new InvokeAgentToolInput
                             {
                                 AgentName = _input!.AgentName,
                                 ToolName = tc.Name,
                                 Arguments = approvedArgs,
                                 CallId = tc.CallId,
-                            };
-                            toolTasks.Add(Workflow.ExecuteActivityAsync(
-                                (AgentActivities a) => a.InvokeAgentToolAsync(approvedInput),
-                                approvedToolOptions));
+                            }, ResolveDurableToolActivityOptions(tc.Name)));
                         }
                         else
                         {
@@ -593,25 +594,30 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                                 ? "Tool call was denied or timed out."
                                 : decision.Reason;
                             syntheticResults[i] = $"[Denied] {denialReason}";
-                            toolTasks.Add(null);
                         }
                         break;
 
                     case AgentToolOutcome.Skip:
                         syntheticResults[i] = interceptorResult?.Message ?? string.Empty;
-                        toolTasks.Add(null);
                         break;
 
                     case AgentToolOutcome.Block:
                     default:
                         syntheticResults[i] = $"[Blocked] {interceptorResult?.Message ?? "Tool execution was blocked."}";
-                        toolTasks.Add(null);
                         break;
                 }
             }
 
-            // ── Phase 3: Wait for approved tool tasks ────────────────────────────────────
-            // Collect non-null tasks and await them together.
+            // ── Phase 2.5: Dispatch all buffered tool activities ──────────────────────────
+            // All approval waits are resolved before any InvokeAgentTool activity starts.
+            foreach (var (idx, input, opts) in pendingToolDispatches)
+            {
+                toolTasks[idx] = Workflow.ExecuteActivityAsync(
+                    (AgentActivities a) => a.InvokeAgentToolAsync(input),
+                    opts);
+            }
+
+            // ── Phase 3: Wait for all dispatched tool activities ──────────────────────────
             var pendingTasks = toolTasks
                 .Where(t => t is not null)
                 .Cast<Task<InvokeAgentToolResult>>()

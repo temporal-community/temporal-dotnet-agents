@@ -358,7 +358,7 @@ The polling and submission calls are made by an **external client** (or any proc
 var pending = await sessionClient.GetPendingApprovalAsync("conversation-123");
 if (pending is not null)
 {
-    var decision = await sessionClient.SubmitApprovalAsync(
+    await sessionClient.SubmitApprovalAsync(
         "conversation-123",
         new DurableApprovalDecision
         {
