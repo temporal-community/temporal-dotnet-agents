@@ -309,6 +309,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 |---|---|
 | "Cannot find Temporalio package" | Use NuGet, not project refs; `dotnet restore` |
 | "Agent not registered" | Verify `.AddTemporalAgents()` includes the agent |
+| `InvalidOperationException` from `TemporalAIAgent` (called outside workflow) | `TemporalAIAgent` is workflow-context only. Obtain it via `TemporalWorkflowExtensions.GetAgent` inside a `[Workflow]` method. For external callers, use `services.GetTemporalAgentProxy("Name")` instead. |
 | `Assert.Throws<ArgumentException>` fails | xUnit requires exact type — use `ArgumentNullException` for null, `ArgumentException` for empty |
 | `GetTypeInfo metadata not provided` for `TemporalAgentSession` | Don't serialize via `DefaultOptions`; use `StateBag.Serialize()` |
 | Activity timeout (HITL) | Increase `DefaultActivityTimeout` (or per-agent `ActivityTimeout`) to accommodate human review time |

@@ -92,6 +92,7 @@ internal sealed class AgentJobWorkflow
 **Properties:**
 - No conversation history — starts fresh every time (no `HistoryStore` load on `IsFirstStep`)
 - No StateBag persistence (`SerializedStateBag` is always `null`)
+- No external history store integration. The `HistoryStore` factory on `TemporalAgentsOptions` or `DurableAgentBuilder` is ignored for `AgentJobWorkflow`. Neither `LoadAsync` nor `AppendAsync` is called. If your worker has a store configured, scheduled runs are not written to it.
 - No TTL loop or `[WorkflowUpdate]` handlers
 - No continue-as-new
 - Result is visible in the Temporal Web UI event history

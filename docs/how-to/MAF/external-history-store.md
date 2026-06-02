@@ -143,6 +143,8 @@ builder.Services
 
 > **Per-agent opt-out is not supported.** If you need one agent on a worker to keep history in workflow state while another uses a store, register them on separate worker builders (different task queues). The store factory applies uniformly to every durable agent on a single worker that doesn't override.
 
+> **Warning — null-returning factory is not an opt-out.** Setting `agent.HistoryStore = sp => null` does not disable external store mode for that agent. `UseExternalStoreMode` is computed from the presence of the delegate, not the value it returns at runtime. A null-returning factory activates external-store mode with no store, causing a `NullReferenceException` when the workflow dispatches `AppendAgentTurn`. There is no per-agent opt-out mechanism. To run one agent without a store on a worker that has `opts.HistoryStore` set, register that agent on a separate task queue.
+
 The factory runs once at first activity dispatch (the same lifecycle as `agent.ChatClient`); the resolved instance is cached for the lifetime of the worker process.
 
 ---
@@ -390,6 +392,7 @@ Skip external history when:
 - **Short conversations without PII.** A customer-support bot that exchanges five turns over a half-hour window has no O(n²) problem worth solving.
 - **No regulatory constraint on Temporal's event store.** If your Temporal cluster is already in scope for the same compliance perimeter as the rest of your data plane, moving history out of it gains you nothing.
 - **You want a single source of truth.** Temporal's event log is replayable, durable, and operationally well-understood. Splitting state across Temporal and another store doubles the failure modes.
+- **Scheduled or deferred agent runs** (`AgentJobWorkflow`). The `HistoryStore` factory is ignored for scheduled jobs — `AddScheduledAgentRun`, `ScheduleAgentAsync`, and `ScheduleOneTimeAgentRunAsync` all route through `AgentJobWorkflow`, which does not load from or append to the external store. These workflows always start fresh each invocation. If you need turn history from a scheduled run, dispatch a full `AgentWorkflow` session from inside the job using `TemporalAgentContext`.
 
 For sessions of fewer than ~50 turns with no PII concerns, the default path is the recommendation.
 

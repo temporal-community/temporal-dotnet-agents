@@ -67,7 +67,7 @@ builder.Services
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
 | `RetryPolicy` | Retry policy for the agent's `RunAgentStep` activity (the LLM call). Per-tool retry is configured separately via `DurableToolOptions`. |
 | `MaxEntryCount`, `HistoryReducer` | Per-agent continue-as-new bounds and reducer. Inherit worker defaults when unset. |
-| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetAgent()`. No worker-level fallback. |
+| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
 | `HistoryStore` | Per-agent `IAgentHistoryStore` factory. `null` inherits `opts.HistoryStore`; if both are `null`, history is carried in workflow state. |
 | `CompactionStrategyKey` | Keyed-DI name of the `ICompactionStrategy` to use for in-session compaction. `null` inherits `opts.DefaultCompactionStrategy`; both `null` disables compaction. Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"`. Requires an external history store. `[Experimental("TA002")]`. See [`compaction.md`](./compaction.md). |
 
@@ -399,6 +399,10 @@ via `services.GetTemporalAgentProxy("Name")`.
 > **Misuse guard:** `TemporalWorkflowExtensions.GetAgent` throws `InvalidOperationException` when called outside a
 > workflow context with the message: _"If you need to invoke an agent from external code, resolve a
 > TemporalAIAgentProxy from your service provider via GetTemporalAgentProxy(name) instead."_
+> Additionally, `TemporalAIAgent.RunAsync` (via `RunCoreAsync`) throws `InvalidOperationException` if invoked
+> outside a Temporal workflow context — for instance, if a `TemporalAIAgent` reference escapes the workflow
+> executor onto a non-workflow thread. In both cases the fix is the same: use `GetTemporalAgentProxy` for
+> external callers.
 
 ### Same-Process Registration
 
@@ -779,6 +783,8 @@ inside the job using `TemporalAgentContext`.
 | `ScheduleActivities.ScheduleOneTimeAgentRunAsync` | Inside a workflow | One-time                |
 | `ITemporalAgentClient.RunAgentDelayedAsync`       | External caller   | One-time (full session) |
 
+> **External history store not supported for scheduled runs.** If `opts.HistoryStore` is configured on your worker, that store is **not** used by `AgentJobWorkflow` — the workflow behind `AddScheduledAgentRun`, `ScheduleAgentAsync`, and `ScheduleOneTimeAgentRunAsync`. Scheduled runs always start fresh with no history load or append. See the [When NOT to Use It](./external-history-store.md#when-not-to-use-it) section of the external-history-store guide.
+
 ### Recurring Schedules
 
 #### Config-time registration
@@ -998,7 +1004,7 @@ For regulated workloads (HIPAA, PCI) or long-running sessions where Temporal eve
 | `opts.HistoryStore` | `Func<IServiceProvider, IAgentHistoryStore>?` | `null` | Worker-level default factory. When non-null, every durable agent on this worker that doesn't override uses this store. |
 | `agent.HistoryStore` | `Func<IServiceProvider, IAgentHistoryStore>?` | `null` | Per-agent override. Wins over `opts.HistoryStore` for this one agent. |
 
-Presence of a non-null factory is the opt-in — there is no boolean flag.
+Presence of a non-null factory is the opt-in — there is no boolean flag. Setting `agent.HistoryStore = sp => null` is not a valid opt-out — `UseExternalStoreMode` is determined by whether the delegate itself is non-null, not by the value it returns. A null-returning factory activates external-store mode with no store, which causes a `NullReferenceException` on the first turn.
 
 ```csharp
 builder.Services.AddSingleton<MyCosmosHistoryStore>();
