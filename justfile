@@ -66,10 +66,8 @@ test-unit-ai: build
 # Run all unit tests (Agents + AI)
 test-unit-all: test-unit test-unit-ai
 
-# Run integration tests only — Agents library (requires: temporal server start-dev)
+# Run integration tests only — Agents library (uses embedded Temporal server)
 test-integration: build
-    @echo "NOTE: Integration tests require a running Temporal server."
-    @echo "      Start one with: temporal server start-dev --namespace default"
     dotnet test {{integration_tests_dir}} \
         --configuration {{configuration}} \
         --no-build \

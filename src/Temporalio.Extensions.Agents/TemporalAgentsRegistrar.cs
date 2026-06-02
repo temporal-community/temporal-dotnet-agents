@@ -69,7 +69,8 @@ internal static class TemporalAgentsRegistrar
             // ScheduleActivities: enables one-time deferred runs from orchestrating workflows.
             services.AddSingleton(sp => new ScheduleActivities(
                 sp.GetRequiredService<ITemporalClient>(),
-                taskQueue));
+                taskQueue,
+                agentsOptions));
             builder.AddSingletonActivities<ScheduleActivities>();
 
             // ScheduleRegistrationService: creates configured schedules at worker startup.

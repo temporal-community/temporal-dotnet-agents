@@ -254,7 +254,7 @@ internal sealed class AgentActivities(
         }
         else if (input.Request.EnableToolNames is { Count: > 0 } enabledNames && chatOptions.Tools is not null)
         {
-            chatOptions.Tools = [.. chatOptions.Tools.Where(t => enabledNames.Contains(t.Name))];
+            chatOptions.Tools = [.. chatOptions.Tools.Where(t => enabledNames.Contains(t.Name, StringComparer.OrdinalIgnoreCase))];
         }
 
         // LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Temporalio.Activities;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
+using Temporalio.Common;
 
 namespace Temporalio.Extensions.Agents.Workflows;
 
@@ -30,7 +31,7 @@ namespace Temporalio.Extensions.Agents.Workflows;
 /// persistent schedule entity. This avoids zombie schedules after the single run completes.
 /// </para>
 /// </remarks>
-public sealed class ScheduleActivities(ITemporalClient client, string taskQueue)
+public sealed class ScheduleActivities(ITemporalClient client, string taskQueue, TemporalAgentsOptions options)
 {
     /// <summary>
     /// Schedules a one-time, deferred <see cref="AgentJobWorkflow"/> run.
@@ -68,16 +69,14 @@ public sealed class ScheduleActivities(ITemporalClient client, string taskQueue)
 
         var workflowId = $"ta-{run.AgentName.ToLowerInvariant()}-scheduled-{run.RunId}";
 
+        // Build the full AgentJobInput the same way ScheduleAgentAsync does, so per-agent
+        // timeouts, per-tool options, and interceptor config are respected (P2 fix).
+        var jobInput = DefaultTemporalAgentClient.BuildAgentJobInput(run.AgentName, run.Request, options, taskQueue);
+
         try
         {
             await client.StartWorkflowAsync(
-                (AgentJobWorkflow wf) => wf.RunAsync(new AgentJobInput
-                {
-                    AgentName = run.AgentName,
-                    TaskQueue = taskQueue,
-                    Request = run.Request,
-                    RetryPolicy = run.RetryPolicy,
-                }),
+                (AgentJobWorkflow wf) => wf.RunAsync(jobInput),
                 new WorkflowOptions(workflowId, taskQueue)
                 {
                     StartDelay = delay,

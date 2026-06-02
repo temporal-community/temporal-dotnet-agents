@@ -152,6 +152,15 @@ internal sealed class DefaultTemporalAgentClient(
             await client.StartWorkflowAsync(
                 (AgentWorkflow wf) => wf.RunAsync(BuildAgentWorkflowInput(sessionId.AgentName)),
                 workflowOptions).ConfigureAwait(false);
+
+            // Send the request as a fire-and-forget signal. Signals are buffered by Temporal
+            // and delivered when the workflow begins executing after the StartDelay elapses.
+            // An update cannot be used here because the workflow has not started yet.
+            var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
+            await handle.SignalAsync(
+                wf => wf.RunAgentFireAndForgetAsync(request),
+                new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -176,90 +185,8 @@ internal sealed class DefaultTemporalAgentClient(
 
         var workflowId = $"ta-{agentName.ToLowerInvariant()}-scheduled-{scheduleId}";
 
-        // Resolve per-agent timeouts/retry and build the per-tool activity options dictionary
-        // so that write tools registered with opts.NoRetry() are respected in scheduled jobs.
-        var effectiveActivityTimeout = options.DefaultActivityTimeout;
-        var effectiveHeartbeatTimeout = options.DefaultHeartbeatTimeout;
-        var effectiveRetryPolicy = options.DefaultRetryPolicy;
-        Dictionary<string, ActivityOptions>? toolActivityOptions = null;
-        ActivityOptions? interceptorActivityOpts = null;
-        Dictionary<string, ActivityOptions>? perToolInterceptorOptsForJob = null;
-        List<string>? interceptorSkippedTools = null;
-        List<string>? requiresApprovalTools = null;
-
-        if (options.DurableAgentRegistrations.TryGetValue(agentName, out var jobRegistration))
-        {
-            effectiveActivityTimeout = jobRegistration.ActivityTimeout ?? options.DefaultActivityTimeout;
-            effectiveHeartbeatTimeout = jobRegistration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
-            effectiveRetryPolicy = jobRegistration.RetryPolicy ?? options.DefaultRetryPolicy;
-            toolActivityOptions = BuildDurableAgentToolActivityOptions(
-                jobRegistration,
-                effectiveActivityTimeout,
-                effectiveHeartbeatTimeout,
-                effectiveRetryPolicy);
-
-            // Populate requiresApprovalTools unconditionally — tools with RequireApproval() must
-            // gate on approval regardless of whether an interceptor is configured (BLOCK-2 fix).
-            foreach (var toolReg in jobRegistration.Tools)
-            {
-                if (toolReg.Options.RequireApprovalFlag)
-                {
-                    (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
-                }
-            }
-
-            // Interceptor config is only relevant when an interceptor is registered (BLOCK-1 fix).
-            var hasInterceptor = jobRegistration.ToolInterceptorFactory is not null
-                              || options.DefaultToolInterceptor is not null;
-
-            if (hasInterceptor)
-            {
-                interceptorActivityOpts = new ActivityOptions
-                {
-                    StartToCloseTimeout = effectiveActivityTimeout,
-                    HeartbeatTimeout = effectiveHeartbeatTimeout,
-                    RetryPolicy = effectiveRetryPolicy,
-                };
-
-                foreach (var toolReg in jobRegistration.Tools)
-                {
-                    if (toolReg.Options.SkipInterceptorFlag)
-                    {
-                        (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
-                    }
-
-                    if (toolReg.Options.InterceptorTimeout.HasValue)
-                    {
-                        perToolInterceptorOptsForJob ??= new Dictionary<string, ActivityOptions>(StringComparer.OrdinalIgnoreCase);
-                        perToolInterceptorOptsForJob[toolReg.Name] = new ActivityOptions
-                        {
-                            StartToCloseTimeout = toolReg.Options.InterceptorTimeout,
-                            HeartbeatTimeout = effectiveHeartbeatTimeout,
-                            RetryPolicy = effectiveRetryPolicy,
-                        };
-                    }
-                }
-            }
-        }
-
-        var effectiveMaxToolCalls = jobRegistration?.MaxToolCallsPerTurn ?? 20;
-
         var action = ScheduleActionStartWorkflow.Create(
-            (AgentJobWorkflow wf) => wf.RunAsync(new AgentJobInput
-            {
-                AgentName = agentName,
-                TaskQueue = taskQueue,
-                Request = request,
-                ActivityTimeout = effectiveActivityTimeout,
-                HeartbeatTimeout = effectiveHeartbeatTimeout,
-                RetryPolicy = effectiveRetryPolicy,
-                DurableAgentToolActivityOptions = toolActivityOptions,
-                MaxToolCallsPerTurn = effectiveMaxToolCalls,
-                InterceptorActivityOptions = interceptorActivityOpts,
-                InterceptorToolActivityOptions = perToolInterceptorOptsForJob,
-                InterceptorSkippedTools = interceptorSkippedTools,
-                RequiresApprovalTools = requiresApprovalTools,
-            }),
+            (AgentJobWorkflow wf) => wf.RunAsync(BuildAgentJobInput(agentName, request, options, taskQueue)),
             new WorkflowOptions(workflowId, taskQueue));
 
         using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
@@ -435,6 +362,87 @@ internal sealed class DefaultTemporalAgentClient(
     /// <see cref="DurableAgentRegistration"/>. Per-tool activity options and external-store mode
     /// are intentionally left null/false here — those are resolved by the worker on its side.
     /// </summary>
+    /// <summary>
+    /// Builds a fully-populated <see cref="AgentJobInput"/> for a single fire-and-forget agent run.
+    /// Shared by <see cref="ScheduleAgentAsync"/> and <see cref="ScheduleActivities"/> so both paths
+    /// honour per-agent timeouts, per-tool options, and interceptor config (P2 fix).
+    /// </summary>
+    internal static AgentJobInput BuildAgentJobInput(
+        string agentName,
+        RunRequest request,
+        TemporalAgentsOptions options,
+        string taskQueue)
+    {
+        var effectiveActivityTimeout = options.DefaultActivityTimeout;
+        var effectiveHeartbeatTimeout = options.DefaultHeartbeatTimeout;
+        var effectiveRetryPolicy = options.DefaultRetryPolicy;
+        Dictionary<string, ActivityOptions>? toolActivityOptions = null;
+        ActivityOptions? interceptorActivityOpts = null;
+        Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
+        List<string>? interceptorSkippedTools = null;
+        List<string>? requiresApprovalTools = null;
+
+        if (options.DurableAgentRegistrations.TryGetValue(agentName, out var registration))
+        {
+            effectiveActivityTimeout = registration.ActivityTimeout ?? options.DefaultActivityTimeout;
+            effectiveHeartbeatTimeout = registration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
+            effectiveRetryPolicy = registration.RetryPolicy ?? options.DefaultRetryPolicy;
+            toolActivityOptions = BuildDurableAgentToolActivityOptions(
+                registration, effectiveActivityTimeout, effectiveHeartbeatTimeout, effectiveRetryPolicy);
+
+            foreach (var toolReg in registration.Tools)
+            {
+                if (toolReg.Options.RequireApprovalFlag)
+                    (requiresApprovalTools ??= []).Add(toolReg.Name);
+            }
+
+            var hasInterceptor = registration.ToolInterceptorFactory is not null
+                              || options.DefaultToolInterceptor is not null;
+            if (hasInterceptor)
+            {
+                interceptorActivityOpts = new ActivityOptions
+                {
+                    StartToCloseTimeout = effectiveActivityTimeout,
+                    HeartbeatTimeout = effectiveHeartbeatTimeout,
+                    RetryPolicy = effectiveRetryPolicy,
+                };
+
+                foreach (var toolReg in registration.Tools)
+                {
+                    if (toolReg.Options.SkipInterceptorFlag)
+                        (interceptorSkippedTools ??= []).Add(toolReg.Name);
+
+                    if (toolReg.Options.InterceptorTimeout.HasValue)
+                    {
+                        perToolInterceptorOpts ??= new Dictionary<string, ActivityOptions>(StringComparer.OrdinalIgnoreCase);
+                        perToolInterceptorOpts[toolReg.Name] = new ActivityOptions
+                        {
+                            StartToCloseTimeout = toolReg.Options.InterceptorTimeout,
+                            HeartbeatTimeout = effectiveHeartbeatTimeout,
+                            RetryPolicy = effectiveRetryPolicy,
+                        };
+                    }
+                }
+            }
+        }
+
+        return new AgentJobInput
+        {
+            AgentName = agentName,
+            TaskQueue = taskQueue,
+            Request = request,
+            ActivityTimeout = effectiveActivityTimeout,
+            HeartbeatTimeout = effectiveHeartbeatTimeout,
+            RetryPolicy = effectiveRetryPolicy,
+            DurableAgentToolActivityOptions = toolActivityOptions,
+            MaxToolCallsPerTurn = registration?.MaxToolCallsPerTurn ?? 20,
+            InterceptorActivityOptions = interceptorActivityOpts,
+            InterceptorToolActivityOptions = perToolInterceptorOpts,
+            InterceptorSkippedTools = interceptorSkippedTools,
+            RequiresApprovalTools = requiresApprovalTools,
+        };
+    }
+
     private static AgentWorkflowInput BuildProxyOnlyAgentWorkflowInput(
         string agentName,
         TemporalAgentsOptions options,

@@ -39,6 +39,9 @@ public sealed class TemporalAIAgent : AIAgent
     private bool _settingsResolved;
     private int _resolvedMaxToolCallsPerTurn = 20;
 
+    // Per-tool activity options resolved on first step (P1-2 fix).
+    private IReadOnlyDictionary<string, ActivityOptions>? _toolActivityOptions;
+
     // Feature L — interceptor config resolved on first step.
     private ActivityOptions? _interceptorActivityOptions;
     private IReadOnlyDictionary<string, ActivityOptions>? _interceptorToolActivityOptions;
@@ -197,9 +200,10 @@ public sealed class TemporalAIAgent : AIAgent
                 _useExternalStore = stepResult.ResolvedUseExternalStoreMode.Value;
             }
 
-            // Feature L: capture interceptor config from the first resolution step.
+            // Capture worker-side config from the first resolution step.
             if (iteration == 0 && stepResult.ResolvedWorkerConfig is { } resolvedConfig)
             {
+                _toolActivityOptions = resolvedConfig.ToolActivityOptions;      // per-tool InvokeAgentTool options (P1-2 fix)
                 _interceptorActivityOptions = resolvedConfig.InterceptorActivityOptions;
                 _interceptorToolActivityOptions = resolvedConfig.InterceptorToolActivityOptions;
                 _interceptorSkippedTools = resolvedConfig.InterceptorSkippedTools;
@@ -328,9 +332,15 @@ public sealed class TemporalAIAgent : AIAgent
                             Arguments = effectiveArgs,
                             CallId = tc.CallId,
                         };
+                        // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)
+                        // falling back to the shared _activityOptions (P1-2 fix).
+                        var toolDispatchOpts = _toolActivityOptions is not null
+                            && _toolActivityOptions.TryGetValue(tc.Name, out var perToolOpts)
+                                ? perToolOpts
+                                : _activityOptions;
                         toolTasks.Add(Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.InvokeAgentToolAsync(toolInput),
-                            _activityOptions));
+                            toolDispatchOpts));
                         break;
 
                     case AgentToolOutcome.PauseForApproval:
