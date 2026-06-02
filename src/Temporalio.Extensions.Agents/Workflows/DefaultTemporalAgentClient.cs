@@ -183,6 +183,7 @@ internal sealed class DefaultTemporalAgentClient(
         var effectiveRetryPolicy = options.DefaultRetryPolicy;
         Dictionary<string, ActivityOptions>? toolActivityOptions = null;
         ActivityOptions? interceptorActivityOpts = null;
+        Dictionary<string, ActivityOptions>? perToolInterceptorOptsForJob = null;
         List<string>? interceptorSkippedTools = null;
         List<string>? requiresApprovalTools = null;
 
@@ -210,6 +211,7 @@ internal sealed class DefaultTemporalAgentClient(
             // Interceptor config is only relevant when an interceptor is registered (BLOCK-1 fix).
             var hasInterceptor = jobRegistration.ToolInterceptorFactory is not null
                               || options.DefaultToolInterceptor is not null;
+
             if (hasInterceptor)
             {
                 interceptorActivityOpts = new ActivityOptions
@@ -224,6 +226,17 @@ internal sealed class DefaultTemporalAgentClient(
                     if (toolReg.Options.SkipInterceptorFlag)
                     {
                         (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
+                    }
+
+                    if (toolReg.Options.InterceptorTimeout.HasValue)
+                    {
+                        perToolInterceptorOptsForJob ??= new Dictionary<string, ActivityOptions>(StringComparer.OrdinalIgnoreCase);
+                        perToolInterceptorOptsForJob[toolReg.Name] = new ActivityOptions
+                        {
+                            StartToCloseTimeout = toolReg.Options.InterceptorTimeout,
+                            HeartbeatTimeout = effectiveHeartbeatTimeout,
+                            RetryPolicy = effectiveRetryPolicy,
+                        };
                     }
                 }
             }
@@ -243,6 +256,7 @@ internal sealed class DefaultTemporalAgentClient(
                 DurableAgentToolActivityOptions = toolActivityOptions,
                 MaxToolCallsPerTurn = effectiveMaxToolCalls,
                 InterceptorActivityOptions = interceptorActivityOpts,
+                InterceptorToolActivityOptions = perToolInterceptorOptsForJob,
                 InterceptorSkippedTools = interceptorSkippedTools,
                 RequiresApprovalTools = requiresApprovalTools,
             }),

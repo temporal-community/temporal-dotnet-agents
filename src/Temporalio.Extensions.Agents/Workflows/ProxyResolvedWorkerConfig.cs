@@ -76,11 +76,9 @@ internal sealed record ProxyResolvedWorkerConfig
     public string? CompactionStrategyKey { get; init; }
 
     /// <summary>
-    /// Pre-computed <see cref="ActivityOptions"/> for all <c>RunToolInterceptor</c> dispatches
-    /// on this workflow. Shared across all tool calls in a turn — all interceptor activities use
-    /// this single options object. Per-tool interceptor timeout overrides
-    /// (<see cref="DurableToolOptions.InterceptorTimeout"/>) are not yet wired at dispatch time;
-    /// they are stored on the registration but not read here.
+    /// Pre-computed <see cref="ActivityOptions"/> for <c>RunToolInterceptor</c> dispatches that
+    /// do not have a per-tool override. Used as the fallback when a tool has no entry in
+    /// <see cref="InterceptorToolActivityOptions"/>.
     /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> means no
     /// interceptor is configured, or the config predates Feature L.
     /// </summary>

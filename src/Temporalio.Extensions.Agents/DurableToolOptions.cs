@@ -51,12 +51,6 @@ public sealed class DurableToolOptions
     /// Independent of <see cref="StartToCloseTimeout"/> (which governs the tool activity itself).
     /// When <see langword="null"/>, the worker-level default activity timeout is used.
     /// </summary>
-    /// <remarks>
-    /// <b>Not yet wired at dispatch time.</b> Setting this property currently has no effect —
-    /// all <c>RunToolInterceptor</c> activities use the shared worker-level interceptor options.
-    /// Per-tool interceptor timeout overrides are planned for a future release. This property
-    /// is kept so callers can opt in without an API change when the wiring lands.
-    /// </remarks>
     public TimeSpan? InterceptorTimeout { get; set; }
 
     /// <summary>

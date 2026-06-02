@@ -41,6 +41,7 @@ public sealed class TemporalAIAgent : AIAgent
 
     // Feature L — interceptor config resolved on first step.
     private ActivityOptions? _interceptorActivityOptions;
+    private IReadOnlyDictionary<string, ActivityOptions>? _interceptorToolActivityOptions;
     private IReadOnlyList<string>? _interceptorSkippedTools;
     private IReadOnlyList<string>? _requiresApprovalTools;
 
@@ -200,6 +201,7 @@ public sealed class TemporalAIAgent : AIAgent
             if (iteration == 0 && stepResult.ResolvedWorkerConfig is { } resolvedConfig)
             {
                 _interceptorActivityOptions = resolvedConfig.InterceptorActivityOptions;
+                _interceptorToolActivityOptions = resolvedConfig.InterceptorToolActivityOptions;
                 _interceptorSkippedTools = resolvedConfig.InterceptorSkippedTools;
                 _requiresApprovalTools = resolvedConfig.RequiresApprovalTools;
             }
@@ -257,6 +259,10 @@ public sealed class TemporalAIAgent : AIAgent
                 {
                     var isSkipped = _interceptorSkippedTools is not null
                         && _interceptorSkippedTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
+                    var baseInterceptorOpts = _interceptorToolActivityOptions is not null
+                        && _interceptorToolActivityOptions.TryGetValue(tc.Name, out var toolSpecific)
+                            ? toolSpecific
+                            : interceptorOpts;
 
                     if (isSkipped)
                     {
@@ -277,9 +283,9 @@ public sealed class TemporalAIAgent : AIAgent
                             (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
                             new ActivityOptions
                             {
-                                StartToCloseTimeout = interceptorOpts.StartToCloseTimeout,
-                                HeartbeatTimeout = interceptorOpts.HeartbeatTimeout,
-                                RetryPolicy = interceptorOpts.RetryPolicy,
+                                StartToCloseTimeout = baseInterceptorOpts.StartToCloseTimeout,
+                                HeartbeatTimeout = baseInterceptorOpts.HeartbeatTimeout,
+                                RetryPolicy = baseInterceptorOpts.RetryPolicy,
                                 Summary = $"intercept:{tc.Name}",
                             }));
                     }

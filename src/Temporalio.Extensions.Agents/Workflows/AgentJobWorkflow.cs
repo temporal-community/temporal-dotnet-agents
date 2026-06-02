@@ -71,6 +71,7 @@ internal sealed class AgentJobWorkflow
             {
                 var interceptorTasks = new List<Task<AgentToolInterceptorResult>>(toolCalls.Count);
                 var skippedTools = input.InterceptorSkippedTools;
+                var interceptorToolOpts = input.InterceptorToolActivityOptions;
 
                 foreach (var tc in toolCalls)
                 {
@@ -92,13 +93,17 @@ internal sealed class AgentJobWorkflow
                             CallId = tc.CallId,
                             SerializedStateBag = null,
                         };
+                        var baseOpts = interceptorToolOpts is not null
+                            && interceptorToolOpts.TryGetValue(tc.Name, out var toolSpecific)
+                                ? toolSpecific
+                                : interceptorOpts;
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
                             new ActivityOptions
                             {
-                                StartToCloseTimeout = interceptorOpts.StartToCloseTimeout,
-                                HeartbeatTimeout = interceptorOpts.HeartbeatTimeout,
-                                RetryPolicy = interceptorOpts.RetryPolicy,
+                                StartToCloseTimeout = baseOpts.StartToCloseTimeout,
+                                HeartbeatTimeout = baseOpts.HeartbeatTimeout,
+                                RetryPolicy = baseOpts.RetryPolicy,
                                 Summary = $"intercept:{tc.Name}",
                             }));
                     }

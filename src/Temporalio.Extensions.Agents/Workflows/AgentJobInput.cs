@@ -68,6 +68,15 @@ internal sealed record AgentJobInput
     public ActivityOptions? InterceptorActivityOptions { get; init; }
 
     /// <summary>
+    /// Per-tool <see cref="ActivityOptions"/> for <c>RunToolInterceptor</c> dispatches where the
+    /// tool has an explicit <see cref="DurableToolOptions.InterceptorTimeout"/> set.
+    /// Falls back to <see cref="InterceptorActivityOptions"/> for tools not in this map.
+    /// <see langword="null"/> when no tool carries a custom interceptor timeout.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, ActivityOptions>? InterceptorToolActivityOptions { get; init; }
+
+    /// <summary>
     /// Names of tools that skip the interceptor (have <c>SkipInterceptor()</c> set).
     /// <see langword="null"/> is equivalent to an empty list.
     /// </summary>
