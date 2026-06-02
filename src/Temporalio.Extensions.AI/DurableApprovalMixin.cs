@@ -85,6 +85,14 @@ internal sealed class DurableApprovalMixin
         Action<DurableApprovalRequest>? onRequested = null,
         Action<DurableApprovalDecision>? onResolved = null)
     {
+        // Guard against concurrent requests. ValidateRequestApproval runs this check on the
+        // [WorkflowUpdateValidator] path (update arrives over the wire), but direct turn-loop
+        // calls bypass that callback entirely. Running the check here means both paths are
+        // protected; the double-check on the update path is harmless.
+        if (_pendingApproval is not null)
+            throw new InvalidOperationException(
+                "An approval request is already pending. Submit or timeout the current request before sending another.");
+
         _pendingApproval = request;
         _approvalDecision = null;
 
