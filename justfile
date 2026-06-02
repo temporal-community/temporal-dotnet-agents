@@ -549,7 +549,8 @@ test-samples-maf: build _sample-preflight
         "ConfigurableAgent:samples/MAF/ConfigurableAgent:150" \
         "ExternalHistoryStore:samples/MAF/ExternalHistoryStore:120" \
         "PerToolActivities:samples/MAF/PerToolActivities:90" \
-        "Compaction:samples/MAF/Compaction:180" ; do
+        "Compaction:samples/MAF/Compaction:180" \
+        "ContextProviders:samples/MAF/ContextProviders:90" ; do
         IFS=':' read -r name dir cap <<< "$entry"
         echo "═══ MAF/$name (cap ${cap}s) ═══"
         start=$(date +%s)
