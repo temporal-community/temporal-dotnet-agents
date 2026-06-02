@@ -147,20 +147,18 @@ internal sealed class DefaultTemporalAgentClient(
 
         workflowOptions.Rpc = new RpcOptions { CancellationToken = cancellationToken };
 
+        // Attach the request signal atomically with the workflow start (signal-with-start).
+        // A separate SignalAsync after StartWorkflowAsync would create a crash window between the
+        // two RPCs where the workflow exists without its request. Signal-with-start is a single
+        // server round-trip: the workflow is created AND the signal is queued in one operation.
+        // The signal is buffered and delivered when execution begins after the StartDelay elapses.
+        workflowOptions.SignalWithStart((AgentWorkflow wf) => wf.RunAgentFireAndForgetAsync(request));
+
         try
         {
             await client.StartWorkflowAsync(
                 (AgentWorkflow wf) => wf.RunAsync(BuildAgentWorkflowInput(sessionId.AgentName)),
                 workflowOptions).ConfigureAwait(false);
-
-            // Send the request as a fire-and-forget signal. Signals are buffered by Temporal
-            // and delivered when the workflow begins executing after the StartDelay elapses.
-            // An update cannot be used here because the workflow has not started yet.
-            var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
-            await handle.SignalAsync(
-                wf => wf.RunAgentFireAndForgetAsync(request),
-                new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
-                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -354,18 +352,9 @@ internal sealed class DefaultTemporalAgentClient(
     }
 
     /// <summary>
-    /// Builds an <see cref="AgentWorkflowInput"/> for a proxy-only declaration (this process
-    /// called <see cref="TemporalAgentsOptions.AddAgentProxy"/> but not
-    /// <see cref="TemporalAgentsOptions.AddDurableAgent"/>). The proxy client constructs the
-    /// input locally to start the workflow on the server; the actual workflow execution and
-    /// per-tool dispatch happen in the worker process which owns the
-    /// <see cref="DurableAgentRegistration"/>. Per-tool activity options and external-store mode
-    /// are intentionally left null/false here — those are resolved by the worker on its side.
-    /// </summary>
-    /// <summary>
     /// Builds a fully-populated <see cref="AgentJobInput"/> for a single fire-and-forget agent run.
     /// Shared by <see cref="ScheduleAgentAsync"/> and <see cref="ScheduleActivities"/> so both paths
-    /// honour per-agent timeouts, per-tool options, and interceptor config (P2 fix).
+    /// honour per-agent timeouts, per-tool options, and interceptor config.
     /// </summary>
     internal static AgentJobInput BuildAgentJobInput(
         string agentName,
@@ -443,6 +432,15 @@ internal sealed class DefaultTemporalAgentClient(
         };
     }
 
+    /// <summary>
+    /// Builds an <see cref="AgentWorkflowInput"/> for a proxy-only declaration (this process
+    /// called <see cref="TemporalAgentsOptions.AddAgentProxy"/> but not
+    /// <see cref="TemporalAgentsOptions.AddDurableAgent"/>). The proxy client constructs the
+    /// input locally to start the workflow on the server; the actual workflow execution and
+    /// per-tool dispatch happen in the worker process which owns the
+    /// <see cref="DurableAgentRegistration"/>. Per-tool activity options and external-store mode
+    /// are intentionally left null/false here — those are resolved by the worker on its side.
+    /// </summary>
     private static AgentWorkflowInput BuildProxyOnlyAgentWorkflowInput(
         string agentName,
         TemporalAgentsOptions options,
