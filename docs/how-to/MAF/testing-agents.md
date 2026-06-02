@@ -383,10 +383,8 @@ public async Task SubmitApproval_BeforeTimeout_ReturnsApprovedDecision()
         Reason    = "Looks good"
     };
 
-    var decision = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
+    await handle.ExecuteUpdateAsync(
         wf => wf.SubmitApprovalAsync(approvalDecision));
-
-    Assert.True(decision.Approved);
 }
 ```
 

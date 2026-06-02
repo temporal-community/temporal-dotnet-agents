@@ -761,7 +761,7 @@ await client.SubmitApprovalAsync(
         Reason    = "Reviewed and approved by operations team."
     });
 
-Console.WriteLine($"Decision submitted. Approved={decision.Approved}");
+Console.WriteLine("Decision submitted.");
 ```
 
 `SubmitApprovalAsync` unblocks the tool in the workflow, and `RequestApprovalAsync` in the tool returns the same

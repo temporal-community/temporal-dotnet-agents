@@ -368,7 +368,7 @@ public async Task SubmitApproval_BeforeTimeout_ReturnsApprovedDecision()
 
     // Wait for the request to be pending, then submit
     await Task.Delay(500);
-    await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
+    await handle.ExecuteUpdateAsync(
         wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
         {
             RequestId = request.RequestId,
