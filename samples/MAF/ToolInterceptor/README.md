@@ -17,12 +17,17 @@ The sample registers an `OrderInterceptor` that fires before every `apply_refund
 ## What it demonstrates
 
 - `IAgentToolInterceptor.BeforeToolCallAsync` — all four decision outcomes in one coherent flow
-- `AgentToolDecision.Skip` — synthetic result injected; tool activity never dispatched
-- `AgentToolDecision.Block` — error result injected; tool activity never dispatched
-- `AgentToolDecision.PauseForApproval` — enriched description provided to the reviewer
+- `DurableToolDecision.Skip` — synthetic result injected; tool activity never dispatched
+- `DurableToolDecision.Block` — error result injected; tool activity never dispatched
+- `DurableToolDecision.PauseForApproval` — enriched description provided to the reviewer
 - `DurableToolOptions.RequireApproval()` — configuration-time floor independent of interceptor
 - `DurableToolOptions.SkipInterceptor()` — opt read-only `lookup_order` out of the interceptor
 - `ITemporalAgentClient.GetPendingApprovalAsync` / `SubmitApprovalAsync` — approval poll/submit loop
+
+> **Library split:** `DurableToolDecision`, `DurableToolContext`, and `IDurableToolInterceptor<TContext>` are
+> defined in `Temporalio.Extensions.AI`. `IAgentToolInterceptor` and `AgentToolContext` remain in
+> `Temporalio.Extensions.Agents`. Add `using Temporalio.Extensions.AI;` to any file that references
+> `DurableToolDecision` directly.
 
 ## Prerequisites
 
