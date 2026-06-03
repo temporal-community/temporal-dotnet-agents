@@ -76,13 +76,26 @@ IChatClient openAiChatClient = new OpenAIClient(
 builder.Services.AddChatClient(openAiChatClient);
 
 // ── Setup: Register interceptor and file system in DI ─────────────────────────
+// Register the interceptor both as its concrete type and as the base interface so
+// DurableChatActivities.RunToolInterceptorAsync can resolve it from DI.
 builder.Services.AddSingleton<AuditInterceptor>();
+builder.Services.AddSingleton<IDurableToolInterceptor<DurableToolContext>>(
+    sp => sp.GetRequiredService<AuditInterceptor>());
 builder.Services.AddSingleton(fs);
 
+// ── Setup: Connect Temporal client with DurableAIDataConverter ───────────────
+// DurableAIDataConverter.Instance wraps the payload converter with
+// AIJsonUtilities.DefaultOptions so MEAI's polymorphic AIContent subclasses
+// ($type discriminators) survive round-trips through Temporal history.
+// Registered as ITemporalClient so it can be resolved for shutdown signals.
+var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions(temporalAddress)
+{
+    DataConverter = DurableAIDataConverter.Instance,
+    Namespace = "default",
+});
+builder.Services.AddSingleton<ITemporalClient>(temporalClient);
+
 // ── Setup: Register worker + durable AI ──────────────────────────────────────
-// The 3-arg AddHostedTemporalWorker(address, namespace, taskQueue) overload
-// auto-wires DurableAIDataConverter — no manual TemporalClient.ConnectAsync required.
-//
 // DefaultToolInterceptor wires AuditInterceptor into the Pattern 3 dispatch loop.
 // Before each tool activity, RunToolInterceptor fires AuditInterceptor.BeforeToolCallAsync.
 // The returned DurableToolDecision controls whether the tool proceeds, is blocked,
@@ -91,7 +104,7 @@ builder.Services.AddSingleton(fs);
 // ApprovalTimeout must cover the full human review window. Turn 3 auto-approves
 // in milliseconds, so the default 7-day window is intentionally generous here.
 var workerBuilder = builder.Services
-    .AddHostedTemporalWorker(temporalAddress, "default", TaskQueue)
+    .AddHostedTemporalWorker(TaskQueue)
     .AddDurableAI(opts =>
     {
         opts.SessionTimeToLive = TimeSpan.FromMinutes(10);
@@ -126,8 +139,8 @@ await host.StartAsync();
 
 Console.WriteLine("Worker started.\n");
 
-var sessionClient  = host.Services.GetRequiredService<DurableChatSessionClient>();
-var temporalClient = host.Services.GetRequiredService<ITemporalClient>();
+var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+// temporalClient was connected and registered above; resolve it for workflow signals.
 
 // Track conversation IDs so we can signal Shutdown before the host exits.
 var conversationIds = new List<string>();
