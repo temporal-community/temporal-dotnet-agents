@@ -19,9 +19,13 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     private readonly ILogger _logger;
     private readonly DurableFunctionRegistry? _functionRegistry;
     private readonly DurableChatToolOptionsRegistry? _toolOptionsRegistry;
-    // Snapshot is computed once at first use. DurableFunctionRegistry is effectively stable
+    // Snapshots are computed once at first use. DurableFunctionRegistry is effectively stable
     // after host construction — runtime mutation is not supported.
     private readonly Lazy<IReadOnlyDictionary<string, ActivityOptions>?> _toolActivityOptionsCache;
+    private readonly Lazy<ActivityOptions?> _interceptorActivityOptionsCache;
+    private readonly Lazy<IReadOnlyDictionary<string, ActivityOptions>?> _interceptorToolActivityOptionsCache;
+    private readonly Lazy<IReadOnlyList<string>?> _interceptorSkippedToolsCache;
+    private readonly Lazy<IReadOnlyList<string>?> _requiresApprovalToolsCache;
 
     /// <summary>
     /// Initializes a new <see cref="DurableChatSessionClient"/>.
@@ -58,6 +62,18 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         _toolOptionsRegistry = toolOptionsRegistry;
         _toolActivityOptionsCache = new Lazy<IReadOnlyDictionary<string, ActivityOptions>?>(
             BuildToolActivityOptions,
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        _interceptorActivityOptionsCache = new Lazy<ActivityOptions?>(
+            BuildInterceptorActivityOptions,
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        _interceptorToolActivityOptionsCache = new Lazy<IReadOnlyDictionary<string, ActivityOptions>?>(
+            BuildInterceptorToolActivityOptions,
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        _interceptorSkippedToolsCache = new Lazy<IReadOnlyList<string>?>(
+            BuildInterceptorSkippedTools,
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        _requiresApprovalToolsCache = new Lazy<IReadOnlyList<string>?>(
+            BuildRequiresApprovalTools,
             LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
@@ -111,6 +127,14 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         // continue-as-new transitions deterministically.
         var toolActivityOptions = _toolActivityOptionsCache.Value;
 
+        // Interceptor config: all four are computed once and frozen into workflow history
+        // for replay-deterministic behaviour. RequiresApprovalTools is populated even when
+        // no interceptor is registered (BLOCK-2 fix — RequireApproval() is an absolute floor).
+        var interceptorActivityOptions = _interceptorActivityOptionsCache.Value;
+        var interceptorToolActivityOptions = _interceptorToolActivityOptionsCache.Value;
+        var interceptorSkippedTools = _interceptorSkippedToolsCache.Value;
+        var requiresApprovalTools = _requiresApprovalToolsCache.Value;
+
         // Start the workflow if it doesn't exist, or reuse the existing one.
         // OriginalCreatedAt is intentionally omitted here — the workflow sets it to
         // Workflow.UtcNow on the first run and carries it forward through CAN transitions.
@@ -128,6 +152,10 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
                 MaxToolCallsPerTurn = _options.MaxToolCallsPerTurn,
                 MaximumConsecutiveErrorsPerRequest = _options.MaximumConsecutiveErrorsPerRequest,
                 IncludeDetailedErrors = _options.IncludeDetailedErrors,
+                InterceptorActivityOptions = interceptorActivityOptions,
+                InterceptorToolActivityOptions = interceptorToolActivityOptions,
+                InterceptorSkippedTools = interceptorSkippedTools,
+                RequiresApprovalTools = requiresApprovalTools,
             }),
             new WorkflowOptions(workflowId, _options.TaskQueue!)
             {
@@ -260,6 +288,109 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
                 RetryPolicy = perTool?.RetryPolicy ?? _options.RetryPolicy,
                 Summary = kvp.Key,
             };
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Builds the shared <see cref="ActivityOptions"/> for the <c>RunToolInterceptor</c>
+    /// activity. Returns <see langword="null"/> when no interceptor factory is registered —
+    /// that's the workflow's signal to skip the interceptor fan-out entirely.
+    /// </summary>
+    private ActivityOptions? BuildInterceptorActivityOptions()
+    {
+        if (_options.DefaultToolInterceptor is null)
+        {
+            return null;
+        }
+
+        return new ActivityOptions
+        {
+            StartToCloseTimeout = _options.ActivityTimeout,
+            HeartbeatTimeout = _options.HeartbeatTimeout,
+            RetryPolicy = _options.RetryPolicy,
+        };
+    }
+
+    /// <summary>
+    /// Builds per-tool <see cref="ActivityOptions"/> overrides for the <c>RunToolInterceptor</c>
+    /// activity. Only tools with a non-null <c>InterceptorTimeout</c> get an entry.
+    /// Returns <see langword="null"/> when no interceptor is registered or no per-tool
+    /// overrides are configured.
+    /// </summary>
+    private IReadOnlyDictionary<string, ActivityOptions>? BuildInterceptorToolActivityOptions()
+    {
+        if (_options.DefaultToolInterceptor is null || _toolOptionsRegistry is null)
+        {
+            return null;
+        }
+
+        Dictionary<string, ActivityOptions>? result = null;
+
+        foreach (var kvp in _toolOptionsRegistry)
+        {
+            if (kvp.Value.InterceptorTimeout.HasValue)
+            {
+                result ??= new Dictionary<string, ActivityOptions>(StringComparer.OrdinalIgnoreCase);
+                result[kvp.Key] = new ActivityOptions
+                {
+                    StartToCloseTimeout = kvp.Value.InterceptorTimeout,
+                    HeartbeatTimeout = _options.HeartbeatTimeout,
+                    RetryPolicy = _options.RetryPolicy,
+                };
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Builds the list of tool names that should skip the interceptor activity.
+    /// Returns <see langword="null"/> when no interceptor is registered or no tools
+    /// have <c>SkipInterceptorFlag</c> set.
+    /// </summary>
+    private IReadOnlyList<string>? BuildInterceptorSkippedTools()
+    {
+        if (_options.DefaultToolInterceptor is null || _toolOptionsRegistry is null)
+        {
+            return null;
+        }
+
+        List<string>? result = null;
+
+        foreach (var kvp in _toolOptionsRegistry)
+        {
+            if (kvp.Value.SkipInterceptorFlag)
+            {
+                (result ??= new List<string>()).Add(kvp.Key);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Builds the list of tool names that always require human approval before dispatch.
+    /// Populated unconditionally regardless of whether a <c>DefaultToolInterceptor</c> is
+    /// registered (BLOCK-2 fix — <c>RequireApproval()</c> is an absolute configuration-time floor).
+    /// Returns <see langword="null"/> when no tools have <c>RequireApprovalFlag</c> set.
+    /// </summary>
+    private IReadOnlyList<string>? BuildRequiresApprovalTools()
+    {
+        if (_toolOptionsRegistry is null)
+        {
+            return null;
+        }
+
+        List<string>? result = null;
+
+        foreach (var kvp in _toolOptionsRegistry)
+        {
+            if (kvp.Value.RequireApprovalFlag)
+            {
+                (result ??= new List<string>()).Add(kvp.Key);
+            }
         }
 
         return result;

@@ -113,7 +113,7 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     /// <see langword="null"/> when no interceptor is configured or config is not yet resolved.
     /// </summary>
     [JsonIgnore]
-    public ActivityOptions? InterceptorActivityOptions =>
+    public new ActivityOptions? InterceptorActivityOptions =>
         ResolvedWorkerConfig?.InterceptorActivityOptions;
 
     /// <summary>
@@ -121,7 +121,7 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.InterceptorToolActivityOptions"/>.
     /// </summary>
     [JsonIgnore]
-    public IReadOnlyDictionary<string, ActivityOptions>? InterceptorToolActivityOptions =>
+    public new IReadOnlyDictionary<string, ActivityOptions>? InterceptorToolActivityOptions =>
         ResolvedWorkerConfig?.InterceptorToolActivityOptions;
 
     /// <summary>
@@ -129,7 +129,7 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.InterceptorSkippedTools"/>.
     /// </summary>
     [JsonIgnore]
-    public IReadOnlyList<string>? InterceptorSkippedTools =>
+    public new IReadOnlyList<string>? InterceptorSkippedTools =>
         ResolvedWorkerConfig?.InterceptorSkippedTools;
 
     /// <summary>
@@ -137,6 +137,6 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.RequiresApprovalTools"/>.
     /// </summary>
     [JsonIgnore]
-    public IReadOnlyList<string>? RequiresApprovalTools =>
+    public new IReadOnlyList<string>? RequiresApprovalTools =>
         ResolvedWorkerConfig?.RequiresApprovalTools;
 }

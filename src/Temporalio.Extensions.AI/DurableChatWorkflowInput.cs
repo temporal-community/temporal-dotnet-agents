@@ -87,6 +87,41 @@ public class DurableChatWorkflowInput
     public IReadOnlyDictionary<string, ActivityOptions>? ToolActivityOptions { get; init; }
 
     /// <summary>
+    /// Shared <see cref="ActivityOptions"/> used when dispatching a <c>RunToolInterceptor</c>
+    /// activity. Non-null only when a <c>DefaultToolInterceptor</c> was registered at session
+    /// start. Acts as the Pattern 3 interceptor activation marker — null means no interceptor
+    /// activities are dispatched.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ActivityOptions? InterceptorActivityOptions { get; init; }
+
+    /// <summary>
+    /// Per-tool overrides for the <c>RunToolInterceptor</c> activity timeout.
+    /// Keys are tool names (case-insensitive). Only entries for tools that have a
+    /// non-null <c>InterceptorTimeout</c> are present; all others use
+    /// <see cref="InterceptorActivityOptions"/>.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, ActivityOptions>? InterceptorToolActivityOptions { get; init; }
+
+    /// <summary>
+    /// Tool names that should be skipped when dispatching the <c>RunToolInterceptor</c>
+    /// activity. Populated from tools where <c>SkipInterceptorFlag</c> is set.
+    /// Case-insensitive comparisons apply at runtime.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? InterceptorSkippedTools { get; init; }
+
+    /// <summary>
+    /// Tool names that always require human approval before dispatch, regardless of
+    /// what the interceptor returns. Populated unconditionally (no interceptor required).
+    /// This is the BLOCK-2 fix: <c>RequireApproval()</c> is an absolute configuration-time
+    /// floor independent of whether a <c>DefaultToolInterceptor</c> is registered.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? RequiresApprovalTools { get; init; }
+
+    /// <summary>
     /// Maximum number of LLM iterations the Pattern 3 dispatch loop will execute before
     /// synthesizing an "iterations exceeded" sentinel response and aborting the turn.
     /// Defaults to 20. Mirrors MAF's <c>DurableAgentBuilder.MaxToolCallsPerTurn</c>.

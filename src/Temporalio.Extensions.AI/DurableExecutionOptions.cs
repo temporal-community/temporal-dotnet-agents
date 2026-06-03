@@ -188,6 +188,27 @@ public sealed class DurableExecutionOptions
     /// </remarks>
     public int MaxEntryCount { get; set; } = 1000;
 
+    /// <summary>
+    /// Gets or sets a factory that creates a worker-level
+    /// <see cref="IDurableToolInterceptor{TContext}"/> for intercepting tool calls before
+    /// dispatch in the Pattern 3 loop. When <see langword="null"/> (default), no
+    /// interceptor activity is dispatched and tools are invoked directly.
+    /// </summary>
+    /// <remarks>
+    /// The factory receives the worker-side <see cref="IServiceProvider"/>. Register
+    /// the interceptor implementation in DI and resolve it via the factory:
+    /// <code>
+    /// opts.DefaultToolInterceptor = sp => sp.GetRequiredService&lt;MyInterceptor&gt;();
+    /// </code>
+    /// When non-null, the session client pre-computes interceptor <c>ActivityOptions</c>
+    /// at session start and freezes them into <c>DurableChatWorkflowInput</c> so replay
+    /// is deterministic regardless of which worker processes a given turn.
+    /// </remarks>
+    public Func<IServiceProvider, IDurableToolInterceptor<DurableToolContext>>? DefaultToolInterceptor
+    {
+        get; set;
+    }
+
     internal void Validate()
     {
         if (string.IsNullOrEmpty(TaskQueue))

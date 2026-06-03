@@ -9,6 +9,13 @@ using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Workflows;
 
+// Aliases to resolve ambiguity with the identically-named types added to
+// Temporalio.Extensions.AI in Phase 2. This file belongs to the Agents library
+// and must always reference the Agents-internal wire types.
+using AgentsInterceptorInput = Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorInput;
+using AgentsInterceptorResult = Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorResult;
+using AgentsToolOutcome = Temporalio.Extensions.Agents.Workflows.DurableToolOutcome;
+
 namespace Temporalio.Extensions.Agents;
 
 /// <summary>
@@ -255,10 +262,10 @@ public sealed class TemporalAIAgent : AIAgent
             var toolCalls = stepResult.ToolCalls;
 
             // Feature L: Phase 1 — fan out interceptor activities if configured.
-            DurableToolInterceptorResult[]? interceptorResults = null;
+            AgentsInterceptorResult[]? interceptorResults = null;
             if (_interceptorActivityOptions is { } interceptorOpts)
             {
-                var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
+                var interceptorTasks = new List<Task<AgentsInterceptorResult>>(toolCalls.Count);
                 foreach (var tc in toolCalls)
                 {
                     var isSkipped = _interceptorSkippedTools is not null
@@ -271,11 +278,11 @@ public sealed class TemporalAIAgent : AIAgent
                     if (isSkipped)
                     {
                         interceptorTasks.Add(Task.FromResult(
-                            new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
+                            new AgentsInterceptorResult { Outcome = AgentsToolOutcome.Proceed }));
                     }
                     else
                     {
-                        var interceptorInput = new DurableToolInterceptorInput
+                        var interceptorInput = new AgentsInterceptorInput
                         {
                             AgentName = _agentName,
                             ToolName = tc.Name,
@@ -306,7 +313,7 @@ public sealed class TemporalAIAgent : AIAgent
             {
                 var tc = toolCalls[i];
                 var interceptorResult = interceptorResults?[i];
-                var outcome = interceptorResult?.Outcome ?? DurableToolOutcome.Proceed;
+                var outcome = interceptorResult?.Outcome ?? AgentsToolOutcome.Proceed;
 
                 // Rule 2: RequireApproval is an absolute floor. Block is strictly stricter than
                 // approval and is honoured as-is; every other outcome (Proceed, Skip,
@@ -314,14 +321,14 @@ public sealed class TemporalAIAgent : AIAgent
                 // cannot be bypassed by an interceptor returning Skip (BLOCK-3 fix).
                 var toolRequiresApproval = _requiresApprovalTools is not null
                     && _requiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
-                if (toolRequiresApproval && outcome != DurableToolOutcome.Block)
+                if (toolRequiresApproval && outcome != AgentsToolOutcome.Block)
                 {
-                    outcome = DurableToolOutcome.PauseForApproval;
+                    outcome = AgentsToolOutcome.PauseForApproval;
                 }
 
                 switch (outcome)
                 {
-                    case DurableToolOutcome.Proceed:
+                    case AgentsToolOutcome.Proceed:
                         var effectiveArgs = interceptorResult?.ModifiedArguments is { } mArgs
                             ? mArgs
                             : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
@@ -343,7 +350,7 @@ public sealed class TemporalAIAgent : AIAgent
                             toolDispatchOpts));
                         break;
 
-                    case DurableToolOutcome.PauseForApproval:
+                    case AgentsToolOutcome.PauseForApproval:
                         // TemporalAIAgent is a sub-agent inside an orchestrating workflow and
                         // has no DurableApprovalMixin — degrade to Block with a warning.
                         Workflow.Logger.LogWarning(
@@ -354,12 +361,12 @@ public sealed class TemporalAIAgent : AIAgent
                         toolTasks.Add(null);
                         break;
 
-                    case DurableToolOutcome.Skip:
+                    case AgentsToolOutcome.Skip:
                         syntheticResults[i] = interceptorResult?.Message ?? string.Empty;
                         toolTasks.Add(null);
                         break;
 
-                    case DurableToolOutcome.Block:
+                    case AgentsToolOutcome.Block:
                     default:
                         syntheticResults[i] = $"[Blocked] {interceptorResult?.Message ?? "Tool execution was blocked."}";
                         toolTasks.Add(null);
