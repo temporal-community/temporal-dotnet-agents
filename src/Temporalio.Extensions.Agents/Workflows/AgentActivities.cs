@@ -960,7 +960,7 @@ internal sealed class AgentActivities(
                 .BeforeToolCallAsync(toolContext, ct)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
                 "IAgentToolInterceptor.BeforeToolCallAsync threw for agent '{AgentName}' tool '{ToolName}'. " +
@@ -1060,10 +1060,24 @@ internal sealed class AgentActivities(
         {
             ArgumentNullException.ThrowIfNull(ctx.Info.WorkflowId, nameof(ctx.Info.WorkflowId));
             var sessionId = TemporalAgentSessionId.Parse(ctx.Info.WorkflowId);
-            var session = TemporalAgentSession.FromStateBag(sessionId, null);
-            var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
-            TemporalAgentContext.SetCurrent(temporalContext);
-            contextSetUp = true;
+
+            // Validate that the parsed agent name matches the tool's registered agent.
+            // Scheduled-job workflow IDs (ta-{agent}-scheduled-{runId}) parse successfully
+            // but produce a wrong agent name (e.g. "refundagent-scheduled"). Setting a
+            // context with a mismatched ID would let tools call RequestApprovalAsync against
+            // the wrong workflow; skip context setup in that case.
+            if (!sessionId.AgentName.Equals(input.AgentName, StringComparison.OrdinalIgnoreCase))
+            {
+                // Workflow ID parsed but belongs to a different agent (e.g. a scheduled job).
+                // Leave TemporalAgentContext unset — tools that need it will throw on access.
+            }
+            else
+            {
+                var session = TemporalAgentSession.FromStateBag(sessionId, null);
+                var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
+                TemporalAgentContext.SetCurrent(temporalContext);
+                contextSetUp = true;
+            }
         }
         catch (FormatException)
         {

@@ -80,21 +80,24 @@ public sealed class WorkingSetContextProvider : AIContextProvider
         // Extract file paths from the history as a pure deterministic function.
         var paths = ExtractFilePaths(messages, MaxPaths);
 
-        // Persist the working-set to the StateBag via TemporalAgentContext when available.
-        // TemporalAgentContext.Current is set by AgentActivities.RunDurableAgentStepAsync
-        // before providers are invoked.
+        // Persist the working-set to the StateBag via the session on the InvokingContext.
+        // Providers run inside RunDurableAgentStepAsync; TemporalAgentContext.Current is set
+        // by InvokeAgentToolAsync (a different activity) and is not available here.
+        // Accessing the StateBag directly through the session avoids that dependency.
         if (paths.Count > 0)
         {
             try
             {
-                var agentContext = TemporalAgentContext.Current;
                 var csv = string.Join(",", paths);
-                agentContext.CurrentSession.StateBag.SetValue(
-                    StateBagKey, csv, System.Text.Json.JsonSerializerOptions.Default);
+                if (context.Session is TemporalAgentSession agentSession)
+                {
+                    agentSession.StateBag.SetValue(
+                        StateBagKey, csv, System.Text.Json.JsonSerializerOptions.Default);
+                }
             }
             catch
             {
-                // No TemporalAgentContext available (e.g. in tests) — continue without
+                // Session not a TemporalAgentSession (e.g. in tests) — continue without
                 // persisting the working-set. The injected note still provides value.
             }
         }
