@@ -34,6 +34,9 @@ namespace Temporalio.Extensions.AI;
 [JsonSerializable(typeof(ActivityOptions))]
 [JsonSerializable(typeof(IReadOnlyDictionary<string, ActivityOptions>))]
 [JsonSerializable(typeof(Dictionary<string, ActivityOptions>))]
+[JsonSerializable(typeof(DurableToolOutcome))]
+[JsonSerializable(typeof(DurableToolInterceptorInput))]
+[JsonSerializable(typeof(DurableToolInterceptorResult))]
 internal partial class DurableAIJsonContext : JsonSerializerContext;
 
 /// <summary>
