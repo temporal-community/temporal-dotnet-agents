@@ -368,29 +368,19 @@ public sealed class DurableAgentBuilder
     }
 
     /// <summary>
-    /// Registers a per-agent <see cref="IAgentToolInterceptor"/> factory. The factory is invoked
-    /// once at first activity dispatch and the resolved instance is cached for the worker's lifetime.
-    /// Per-agent interceptor wins over <see cref="TemporalAgentsOptions.DefaultToolInterceptor"/>.
+    /// Registers a per-agent interceptor factory. The factory is invoked once at first activity
+    /// dispatch and the resolved instance is cached for the worker's lifetime. Per-agent interceptor
+    /// wins over <see cref="TemporalAgentsOptions.DefaultToolInterceptor"/> (H1 rule).
     /// </summary>
-    /// <param name="factory">Factory that produces the <see cref="IAgentToolInterceptor"/>.</param>
-    /// <returns>This builder, for fluent chaining.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
-    public DurableAgentBuilder AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)
-    {
-        ArgumentNullException.ThrowIfNull(factory);
-        // Wrap to the wider type — IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContext>.
-        _toolInterceptorFactory = sp => factory(sp);
-        return this;
-    }
-
-    /// <summary>
-    /// Registers a per-agent <see cref="IDurableToolInterceptor{TContext}"/> factory using
-    /// <see cref="AgentToolContext"/> as the context type. Use this overload when implementing
-    /// <c>IDurableToolInterceptor&lt;DurableToolContext&gt;</c> — contravariance makes it
-    /// assignable to <c>IDurableToolInterceptor&lt;AgentToolContext&gt;</c> so a base-context
-    /// interceptor works directly in the MAF activity without implementing
-    /// <see cref="IAgentToolInterceptor"/>.
-    /// </summary>
+    /// <remarks>
+    /// Accepts any factory whose return type is assignable to
+    /// <c>IDurableToolInterceptor&lt;AgentToolContext&gt;</c>. That includes:
+    /// <list type="bullet">
+    ///   <item><see cref="IAgentToolInterceptor"/> implementations (the MAF-specific sub-interface)</item>
+    ///   <item>Types implementing <c>IDurableToolInterceptor&lt;<see cref="DurableToolContext"/>&gt;</c>
+    ///   directly — contravariance makes them assignable to the <see cref="AgentToolContext"/> slot</item>
+    /// </list>
+    /// </remarks>
     /// <param name="factory">Factory that produces the interceptor.</param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
