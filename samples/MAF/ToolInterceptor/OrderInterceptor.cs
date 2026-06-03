@@ -1,13 +1,20 @@
-// OrderInterceptor — demonstrates all four IAgentToolInterceptor decision paths.
+// OrderInterceptor — demonstrates IDurableToolInterceptor<DurableToolContext>.
 //
-// Only fires for apply_refund. All other tools pass through with Proceed().
+// This interceptor is intentionally typed against the BASE context (DurableToolContext),
+// not the MAF-specific IAgentToolInterceptor. It only needs ToolName and Arguments —
+// both are base context fields — so there is no reason to reach for the richer
+// AgentToolContext. This also means the same class could be registered in a MEAI
+// session (Phase 2) without modification.
+//
+// Use IAgentToolInterceptor / AgentToolContext only when you need:
+//   • context.AgentName  — to distinguish behaviour by registered agent
+//   • context.StateBag   — to read/carry MAF session state across turns
 //
 // Decision logic for apply_refund:
 //   • Order not found          → Skip  (synthetic "not found" result; tool never dispatches)
 //   • Amount > 500             → Block (policy violation; tool never dispatches)
 //   • Everything else          → PauseForApproval (enriched description for the reviewer)
 
-using Temporalio.Extensions.Agents;
 using Temporalio.Extensions.AI;
 
 namespace ToolInterceptor;
@@ -15,14 +22,17 @@ namespace ToolInterceptor;
 /// <summary>
 /// Pre-tool interceptor that enforces refund policy before <c>apply_refund</c>
 /// is dispatched as a Temporal activity.
+/// Implements <see cref="IDurableToolInterceptor{TContext}"/> with the base
+/// <see cref="DurableToolContext"/> — no MAF-specific fields required.
 /// </summary>
-public sealed class OrderInterceptor(FakeOrderService orderService) : IAgentToolInterceptor
+public sealed class OrderInterceptor(FakeOrderService orderService)
+    : IDurableToolInterceptor<DurableToolContext>
 {
     private const string RefundTool = "apply_refund";
     private const decimal AutoApprovalLimit = 500m;
 
     public Task<DurableToolDecision> BeforeToolCallAsync(
-        AgentToolContext context,
+        DurableToolContext context,
         CancellationToken cancellationToken)
     {
         // All tools other than apply_refund proceed without inspection.

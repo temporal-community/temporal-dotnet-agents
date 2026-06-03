@@ -1,5 +1,5 @@
-// ToolInterceptor — demonstrates IAgentToolInterceptor (Feature L) and
-// workflow-parked HITL approval via RequireApproval() (Feature A).
+// ToolInterceptor — demonstrates IDurableToolInterceptor<DurableToolContext> (Feature L)
+// and workflow-parked HITL approval via RequireApproval() (Feature A).
 //
 // Scenario: customer refund agent. Three turns exercise all four interceptor
 // decision paths in a single coherent flow:
