@@ -1,3 +1,5 @@
+using Temporalio.Extensions.AI;
+
 namespace Temporalio.Extensions.Agents;
 
 /// <summary>
@@ -9,6 +11,12 @@ namespace Temporalio.Extensions.Agents;
 /// Implement this interface to enrich approval context, apply risk scoring, write pre-execution
 /// audit records, perform argument transformation, or short-circuit tool dispatch entirely —
 /// all without modifying individual tool implementations.
+/// </para>
+/// <para>
+/// This interface is a convenience alias for
+/// <see cref="IDurableToolInterceptor{TContext}"><c>IDurableToolInterceptor&lt;AgentToolContext&gt;</c></see>.
+/// Implementors return <see cref="DurableToolDecision"/> (defined in
+/// <c>Temporalio.Extensions.AI</c>) from <c>BeforeToolCallAsync</c>.
 /// </para>
 /// <para>
 /// <b>Execution model.</b> One <c>RunToolInterceptor</c> activity is dispatched per tool call,
@@ -28,18 +36,8 @@ namespace Temporalio.Extensions.Agents;
 /// are not broken.
 /// </para>
 /// </remarks>
-public interface IAgentToolInterceptor
+public interface IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContext>
 {
-    /// <summary>
-    /// Called before each tool activity is dispatched. Return an <see cref="AgentToolDecision"/>
-    /// to control whether the tool runs, is skipped, is blocked, or requires human approval.
-    /// </summary>
-    /// <param name="context">Describes the tool call about to be dispatched.</param>
-    /// <param name="cancellationToken">Activity cancellation token.</param>
-    /// <returns>
-    /// An <see cref="AgentToolDecision"/> that controls how the turn loop handles the tool call.
-    /// </returns>
-    Task<AgentToolDecision> BeforeToolCallAsync(
-        AgentToolContext context,
-        CancellationToken cancellationToken);
+    // BeforeToolCallAsync is inherited from IDurableToolInterceptor<AgentToolContext>:
+    //   Task<DurableToolDecision> BeforeToolCallAsync(AgentToolContext context, CancellationToken cancellationToken)
 }

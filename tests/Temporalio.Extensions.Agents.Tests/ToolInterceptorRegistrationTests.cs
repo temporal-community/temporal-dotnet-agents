@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Temporalio.Extensions.Agents.Workflows;
+using Temporalio.Extensions.AI;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;
@@ -13,10 +14,10 @@ public class ToolInterceptorRegistrationTests
 {
     private sealed class StubInterceptor : IAgentToolInterceptor
     {
-        public Task<AgentToolDecision> BeforeToolCallAsync(
+        public Task<DurableToolDecision> BeforeToolCallAsync(
             AgentToolContext context,
             CancellationToken cancellationToken) =>
-            Task.FromResult(AgentToolDecision.Proceed());
+            Task.FromResult(DurableToolDecision.Proceed());
     }
 
     private static DurableAgentRegistration BuildRegistration(

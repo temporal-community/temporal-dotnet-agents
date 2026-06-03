@@ -8,6 +8,7 @@
 //   • Everything else          → PauseForApproval (enriched description for the reviewer)
 
 using Temporalio.Extensions.Agents;
+using Temporalio.Extensions.AI;
 
 namespace ToolInterceptor;
 
@@ -20,13 +21,13 @@ public sealed class OrderInterceptor(FakeOrderService orderService) : IAgentTool
     private const string RefundTool = "apply_refund";
     private const decimal AutoApprovalLimit = 500m;
 
-    public Task<AgentToolDecision> BeforeToolCallAsync(
+    public Task<DurableToolDecision> BeforeToolCallAsync(
         AgentToolContext context,
         CancellationToken cancellationToken)
     {
         // All tools other than apply_refund proceed without inspection.
         if (!string.Equals(context.ToolName, RefundTool, StringComparison.OrdinalIgnoreCase))
-            return Task.FromResult(AgentToolDecision.Proceed());
+            return Task.FromResult(DurableToolDecision.Proceed());
 
         // Extract order_id argument.
         var orderId = context.Arguments.TryGetValue("orderId", out var id)
@@ -44,7 +45,7 @@ public sealed class OrderInterceptor(FakeOrderService orderService) : IAgentTool
         if (string.IsNullOrWhiteSpace(orderId))
         {
             return Task.FromResult(
-                AgentToolDecision.Skip("Order ID was not provided. No refund was processed."));
+                DurableToolDecision.Skip("Order ID was not provided. No refund was processed."));
         }
 
         // Decision path 1 — order not found → Skip.
@@ -52,7 +53,7 @@ public sealed class OrderInterceptor(FakeOrderService orderService) : IAgentTool
         if (order is null)
         {
             return Task.FromResult(
-                AgentToolDecision.Skip($"Order {orderId} was not found. No refund was processed."));
+                DurableToolDecision.Skip($"Order {orderId} was not found. No refund was processed."));
         }
 
         // Extract amount argument.
@@ -66,7 +67,7 @@ public sealed class OrderInterceptor(FakeOrderService orderService) : IAgentTool
         if (amount > AutoApprovalLimit)
         {
             return Task.FromResult(
-                AgentToolDecision.Block(
+                DurableToolDecision.Block(
                     $"Refund amount ${amount:F2} exceeds the ${AutoApprovalLimit:F0} " +
                     $"automatic approval limit. Please contact a supervisor."));
         }
@@ -76,6 +77,6 @@ public sealed class OrderInterceptor(FakeOrderService orderService) : IAgentTool
             $"Apply refund of ${amount:F2} for {order.CustomerName} " +
             $"— {order.ProductName}, Order {order.OrderId}";
 
-        return Task.FromResult(AgentToolDecision.PauseForApproval(description));
+        return Task.FromResult(DurableToolDecision.PauseForApproval(description));
     }
 }

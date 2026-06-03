@@ -443,14 +443,14 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             // ── Feature L — Phase 1: Fan out interceptor activities in parallel ────────────
             // Build interceptor results for all tool calls. Tools opted out (SkipInterceptor)
             // or when no interceptor is configured get a synthetic Proceed.
-            AgentToolInterceptorResult[]? interceptorResults = null;
+            DurableToolInterceptorResult[]? interceptorResults = null;
             var interceptorOpts = _input!.InterceptorActivityOptions;
             var interceptorToolOpts = _input!.InterceptorToolActivityOptions;
             var skippedTools = _input!.InterceptorSkippedTools;
 
             if (interceptorOpts is not null)
             {
-                var interceptorTasks = new List<Task<AgentToolInterceptorResult>>(toolCalls.Count);
+                var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
                 foreach (var tc in toolCalls)
                 {
                     var isSkipped = skippedTools is not null
@@ -459,11 +459,11 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                     if (isSkipped)
                     {
                         interceptorTasks.Add(Task.FromResult(
-                            new AgentToolInterceptorResult { Outcome = AgentToolOutcome.Proceed }));
+                            new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
                     }
                     else
                     {
-                        var interceptorInput = new AgentToolInterceptorInput
+                        var interceptorInput = new DurableToolInterceptorInput
                         {
                             AgentName = _input!.AgentName,
                             ToolName = tc.Name,
@@ -519,7 +519,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 var interceptorResult = interceptorResults?[i];
 
                 // Determine effective outcome.
-                var outcome = interceptorResult?.Outcome ?? AgentToolOutcome.Proceed;
+                var outcome = interceptorResult?.Outcome ?? DurableToolOutcome.Proceed;
 
                 // Rule 2: RequireApproval is an absolute floor. Block is strictly stricter than
                 // approval and is honoured as-is; every other outcome (Proceed, Skip,
@@ -528,14 +528,14 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 var toolRequiresApproval = requiresApprovalTools is not null
                     && requiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
 
-                if (toolRequiresApproval && outcome != AgentToolOutcome.Block)
+                if (toolRequiresApproval && outcome != DurableToolOutcome.Block)
                 {
-                    outcome = AgentToolOutcome.PauseForApproval;
+                    outcome = DurableToolOutcome.PauseForApproval;
                 }
 
                 switch (outcome)
                 {
-                    case AgentToolOutcome.Proceed:
+                    case DurableToolOutcome.Proceed:
                         // Buffer for dispatch after all approval waits resolve (BLOCK-4).
                         var effectiveArgs = interceptorResult?.ModifiedArguments is { } modArgs
                             ? modArgs
@@ -549,7 +549,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                         }, ResolveDurableToolActivityOptions(tc.Name)));
                         break;
 
-                    case AgentToolOutcome.PauseForApproval:
+                    case DurableToolOutcome.PauseForApproval:
                         // Feature A: park the turn loop; wait for a human decision via
                         // the DurableApprovalMixin (compute-free durable wait).
                         var approvalDescription = interceptorResult?.EnrichedDescription
@@ -602,11 +602,11 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                         }
                         break;
 
-                    case AgentToolOutcome.Skip:
+                    case DurableToolOutcome.Skip:
                         syntheticResults[i] = interceptorResult?.Message ?? string.Empty;
                         break;
 
-                    case AgentToolOutcome.Block:
+                    case DurableToolOutcome.Block:
                     default:
                         syntheticResults[i] = $"[Blocked] {interceptorResult?.Message ?? "Tool execution was blocked."}";
                         break;

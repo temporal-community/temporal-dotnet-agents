@@ -1,19 +1,27 @@
+using Temporalio.Extensions.AI;
 using Xunit;
 
-namespace Temporalio.Extensions.Agents.Tests;
+namespace Temporalio.Extensions.AI.Tests;
 
 /// <summary>
-/// Tests for <see cref="AgentToolDecision"/> and its four inner outcome types.
+/// Tests for <see cref="DurableToolDecision"/> and its four inner outcome types.
 /// </summary>
-public class AgentToolDecisionTests
+/// <remarks>
+/// <c>DurableToolDecision</c> is the developer-facing discriminated union — it is not
+/// wire-serialized across the Temporal workflow/activity boundary. The internal
+/// <c>DurableToolInterceptorResult</c> DTO (in <c>Temporalio.Extensions.Agents</c>) is the
+/// serialized form; its round-trip coverage lives in
+/// <c>AgentToolInterceptorResultSerializationTests</c> in the Agents test project.
+/// </remarks>
+public class DurableToolDecisionTests
 {
     // ── Proceed ──────────────────────────────────────────────────────────────
 
     [Fact]
     public void Proceed_NoArgs_ReturnsDefaultProceedDecision()
     {
-        var d = AgentToolDecision.Proceed();
-        var proceed = Assert.IsType<AgentToolDecision.ProceedDecision>(d);
+        var d = DurableToolDecision.Proceed();
+        var proceed = Assert.IsType<DurableToolDecision.ProceedDecision>(d);
         Assert.Null(proceed.EnrichedDescription);
         Assert.Null(proceed.ModifiedArguments);
         Assert.Null(proceed.Metadata);
@@ -24,8 +32,8 @@ public class AgentToolDecisionTests
     {
         var args = new Dictionary<string, object?> { ["x"] = 42 };
         var meta = new Dictionary<string, string> { ["key"] = "value" };
-        var d = AgentToolDecision.Proceed("enriched", args, meta);
-        var proceed = Assert.IsType<AgentToolDecision.ProceedDecision>(d);
+        var d = DurableToolDecision.Proceed("enriched", args, meta);
+        var proceed = Assert.IsType<DurableToolDecision.ProceedDecision>(d);
         Assert.Equal("enriched", proceed.EnrichedDescription);
         Assert.Same(args, proceed.ModifiedArguments);
         Assert.Same(meta, proceed.Metadata);
@@ -36,8 +44,8 @@ public class AgentToolDecisionTests
     [Fact]
     public void PauseForApproval_ReturnsApprovalRequiredDecision()
     {
-        var d = AgentToolDecision.PauseForApproval("needs approval");
-        var approval = Assert.IsType<AgentToolDecision.ApprovalRequiredDecision>(d);
+        var d = DurableToolDecision.PauseForApproval("needs approval");
+        var approval = Assert.IsType<DurableToolDecision.ApprovalRequiredDecision>(d);
         Assert.Equal("needs approval", approval.Description);
         Assert.Null(approval.Metadata);
     }
@@ -46,16 +54,16 @@ public class AgentToolDecisionTests
     public void PauseForApproval_WithMetadata_ReturnsMetadata()
     {
         var meta = new Dictionary<string, string> { ["risk"] = "high" };
-        var d = AgentToolDecision.PauseForApproval("needs review", meta);
-        var approval = Assert.IsType<AgentToolDecision.ApprovalRequiredDecision>(d);
+        var d = DurableToolDecision.PauseForApproval("needs review", meta);
+        var approval = Assert.IsType<DurableToolDecision.ApprovalRequiredDecision>(d);
         Assert.Same(meta, approval.Metadata);
     }
 
     [Fact]
     public void PauseForApproval_NullOrEmptyDescription_Throws()
     {
-        Assert.Throws<ArgumentException>(() => AgentToolDecision.PauseForApproval(string.Empty));
-        Assert.Throws<ArgumentException>(() => AgentToolDecision.PauseForApproval(""));
+        Assert.Throws<ArgumentException>(() => DurableToolDecision.PauseForApproval(string.Empty));
+        Assert.Throws<ArgumentException>(() => DurableToolDecision.PauseForApproval(""));
     }
 
     // ── Skip ─────────────────────────────────────────────────────────────────
@@ -63,8 +71,8 @@ public class AgentToolDecisionTests
     [Fact]
     public void Skip_ReturnsSyntheticResult()
     {
-        var d = AgentToolDecision.Skip("cached result");
-        var skip = Assert.IsType<AgentToolDecision.SkipDecision>(d);
+        var d = DurableToolDecision.Skip("cached result");
+        var skip = Assert.IsType<DurableToolDecision.SkipDecision>(d);
         Assert.Equal("cached result", skip.SyntheticResult);
         Assert.Null(skip.Metadata);
     }
@@ -73,15 +81,15 @@ public class AgentToolDecisionTests
     public void Skip_EmptyString_IsAllowed()
     {
         // Empty synthetic result is valid (tool produces no output).
-        var d = AgentToolDecision.Skip(string.Empty);
-        var skip = Assert.IsType<AgentToolDecision.SkipDecision>(d);
+        var d = DurableToolDecision.Skip(string.Empty);
+        var skip = Assert.IsType<DurableToolDecision.SkipDecision>(d);
         Assert.Equal(string.Empty, skip.SyntheticResult);
     }
 
     [Fact]
     public void Skip_NullSyntheticResult_Throws()
     {
-        Assert.Throws<ArgumentNullException>(() => AgentToolDecision.Skip(null!));
+        Assert.Throws<ArgumentNullException>(() => DurableToolDecision.Skip(null!));
     }
 
     // ── Block ─────────────────────────────────────────────────────────────────
@@ -89,8 +97,8 @@ public class AgentToolDecisionTests
     [Fact]
     public void Block_ReturnsBlockDecision()
     {
-        var d = AgentToolDecision.Block("policy violation");
-        var block = Assert.IsType<AgentToolDecision.BlockDecision>(d);
+        var d = DurableToolDecision.Block("policy violation");
+        var block = Assert.IsType<DurableToolDecision.BlockDecision>(d);
         Assert.Equal("policy violation", block.Reason);
         Assert.Null(block.Metadata);
     }
@@ -98,7 +106,7 @@ public class AgentToolDecisionTests
     [Fact]
     public void Block_NullOrEmptyReason_Throws()
     {
-        Assert.Throws<ArgumentException>(() => AgentToolDecision.Block(string.Empty));
+        Assert.Throws<ArgumentException>(() => DurableToolDecision.Block(string.Empty));
     }
 
     // ── Type discrimination ────────────────────────────────────────────────────
@@ -106,14 +114,14 @@ public class AgentToolDecisionTests
     [Fact]
     public void AllOutcomes_AreDistinctTypes()
     {
-        AgentToolDecision proceed = AgentToolDecision.Proceed();
-        AgentToolDecision approval = AgentToolDecision.PauseForApproval("desc");
-        AgentToolDecision skip = AgentToolDecision.Skip("result");
-        AgentToolDecision block = AgentToolDecision.Block("reason");
+        DurableToolDecision proceed = DurableToolDecision.Proceed();
+        DurableToolDecision approval = DurableToolDecision.PauseForApproval("desc");
+        DurableToolDecision skip = DurableToolDecision.Skip("result");
+        DurableToolDecision block = DurableToolDecision.Block("reason");
 
-        Assert.IsType<AgentToolDecision.ProceedDecision>(proceed);
-        Assert.IsType<AgentToolDecision.ApprovalRequiredDecision>(approval);
-        Assert.IsType<AgentToolDecision.SkipDecision>(skip);
-        Assert.IsType<AgentToolDecision.BlockDecision>(block);
+        Assert.IsType<DurableToolDecision.ProceedDecision>(proceed);
+        Assert.IsType<DurableToolDecision.ApprovalRequiredDecision>(approval);
+        Assert.IsType<DurableToolDecision.SkipDecision>(skip);
+        Assert.IsType<DurableToolDecision.BlockDecision>(block);
     }
 }

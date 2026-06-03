@@ -1,13 +1,14 @@
 using System.Text.Json;
 using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Agents.Workflows;
+using Temporalio.Extensions.AI;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;
 
 /// <summary>
-/// Round-trip serialization tests for <see cref="AgentToolInterceptorResult"/> and
-/// <see cref="AgentToolInterceptorInput"/> via <see cref="AgentSessionJsonContext"/>.
+/// Round-trip serialization tests for <see cref="DurableToolInterceptorResult"/> and
+/// <see cref="DurableToolInterceptorInput"/> via <see cref="AgentSessionJsonContext"/>.
 /// These types cross the workflow/activity boundary — they must survive source-gen JSON.
 /// </summary>
 public class AgentToolInterceptorResultSerializationTests
@@ -16,32 +17,32 @@ public class AgentToolInterceptorResultSerializationTests
         AgentSessionJsonContext.Default.Options;
 
     [Fact]
-    public void AgentToolOutcome_Enum_RoundTrips()
+    public void DurableToolOutcome_Enum_RoundTrips()
     {
-        foreach (var value in Enum.GetValues<AgentToolOutcome>())
+        foreach (var value in Enum.GetValues<DurableToolOutcome>())
         {
             var json = JsonSerializer.Serialize(value, s_opts);
-            var deserialized = JsonSerializer.Deserialize<AgentToolOutcome>(json, s_opts);
+            var deserialized = JsonSerializer.Deserialize<DurableToolOutcome>(json, s_opts);
             Assert.Equal(value, deserialized);
         }
     }
 
     [Fact]
-    public void AgentToolInterceptorResult_Proceed_RoundTrips()
+    public void DurableToolInterceptorResult_Proceed_RoundTrips()
     {
-        var result = new AgentToolInterceptorResult
+        var result = new DurableToolInterceptorResult
         {
-            Outcome = AgentToolOutcome.Proceed,
+            Outcome = DurableToolOutcome.Proceed,
             EnrichedDescription = "enriched desc",
             ModifiedArguments = new Dictionary<string, object?> { ["x"] = 42 },
             Metadata = new Dictionary<string, string> { ["audit.id"] = "abc" },
         };
 
         var json = JsonSerializer.Serialize(result, s_opts);
-        var rt = JsonSerializer.Deserialize<AgentToolInterceptorResult>(json, s_opts);
+        var rt = JsonSerializer.Deserialize<DurableToolInterceptorResult>(json, s_opts);
 
         Assert.NotNull(rt);
-        Assert.Equal(AgentToolOutcome.Proceed, rt!.Outcome);
+        Assert.Equal(DurableToolOutcome.Proceed, rt!.Outcome);
         Assert.Equal("enriched desc", rt.EnrichedDescription);
         Assert.NotNull(rt.ModifiedArguments);
         Assert.NotNull(rt.Metadata);
@@ -49,19 +50,19 @@ public class AgentToolInterceptorResultSerializationTests
     }
 
     [Fact]
-    public void AgentToolInterceptorResult_Block_RoundTrips()
+    public void DurableToolInterceptorResult_Block_RoundTrips()
     {
-        var result = new AgentToolInterceptorResult
+        var result = new DurableToolInterceptorResult
         {
-            Outcome = AgentToolOutcome.Block,
+            Outcome = DurableToolOutcome.Block,
             Message = "policy violation",
         };
 
         var json = JsonSerializer.Serialize(result, s_opts);
-        var rt = JsonSerializer.Deserialize<AgentToolInterceptorResult>(json, s_opts);
+        var rt = JsonSerializer.Deserialize<DurableToolInterceptorResult>(json, s_opts);
 
         Assert.NotNull(rt);
-        Assert.Equal(AgentToolOutcome.Block, rt!.Outcome);
+        Assert.Equal(DurableToolOutcome.Block, rt!.Outcome);
         Assert.Equal("policy violation", rt.Message);
         Assert.Null(rt.EnrichedDescription);
         Assert.Null(rt.ModifiedArguments);
@@ -69,44 +70,44 @@ public class AgentToolInterceptorResultSerializationTests
     }
 
     [Fact]
-    public void AgentToolInterceptorResult_Skip_RoundTrips()
+    public void DurableToolInterceptorResult_Skip_RoundTrips()
     {
-        var result = new AgentToolInterceptorResult
+        var result = new DurableToolInterceptorResult
         {
-            Outcome = AgentToolOutcome.Skip,
+            Outcome = DurableToolOutcome.Skip,
             Message = "cached value",
         };
 
         var json = JsonSerializer.Serialize(result, s_opts);
-        var rt = JsonSerializer.Deserialize<AgentToolInterceptorResult>(json, s_opts);
+        var rt = JsonSerializer.Deserialize<DurableToolInterceptorResult>(json, s_opts);
 
         Assert.NotNull(rt);
-        Assert.Equal(AgentToolOutcome.Skip, rt!.Outcome);
+        Assert.Equal(DurableToolOutcome.Skip, rt!.Outcome);
         Assert.Equal("cached value", rt.Message);
     }
 
     [Fact]
-    public void AgentToolInterceptorResult_PauseForApproval_RoundTrips()
+    public void DurableToolInterceptorResult_PauseForApproval_RoundTrips()
     {
-        var result = new AgentToolInterceptorResult
+        var result = new DurableToolInterceptorResult
         {
-            Outcome = AgentToolOutcome.PauseForApproval,
+            Outcome = DurableToolOutcome.PauseForApproval,
             EnrichedDescription = "Approve refund for Jane Doe",
             Message = "Approve refund for Jane Doe",
         };
 
         var json = JsonSerializer.Serialize(result, s_opts);
-        var rt = JsonSerializer.Deserialize<AgentToolInterceptorResult>(json, s_opts);
+        var rt = JsonSerializer.Deserialize<DurableToolInterceptorResult>(json, s_opts);
 
         Assert.NotNull(rt);
-        Assert.Equal(AgentToolOutcome.PauseForApproval, rt!.Outcome);
+        Assert.Equal(DurableToolOutcome.PauseForApproval, rt!.Outcome);
         Assert.Equal("Approve refund for Jane Doe", rt.EnrichedDescription);
     }
 
     [Fact]
-    public void AgentToolInterceptorInput_RoundTrips()
+    public void DurableToolInterceptorInput_RoundTrips()
     {
-        var input = new AgentToolInterceptorInput
+        var input = new DurableToolInterceptorInput
         {
             AgentName = "myAgent",
             ToolName = "refund",
@@ -116,7 +117,7 @@ public class AgentToolInterceptorResultSerializationTests
         };
 
         var json = JsonSerializer.Serialize(input, s_opts);
-        var rt = JsonSerializer.Deserialize<AgentToolInterceptorInput>(json, s_opts);
+        var rt = JsonSerializer.Deserialize<DurableToolInterceptorInput>(json, s_opts);
 
         Assert.NotNull(rt);
         Assert.Equal("myAgent", rt!.AgentName);
@@ -126,9 +127,9 @@ public class AgentToolInterceptorResultSerializationTests
     }
 
     [Fact]
-    public void AgentToolInterceptorInput_NullArguments_RoundTrips()
+    public void DurableToolInterceptorInput_NullArguments_RoundTrips()
     {
-        var input = new AgentToolInterceptorInput
+        var input = new DurableToolInterceptorInput
         {
             AgentName = "agent",
             ToolName = "ping",
@@ -137,7 +138,7 @@ public class AgentToolInterceptorResultSerializationTests
         };
 
         var json = JsonSerializer.Serialize(input, s_opts);
-        var rt = JsonSerializer.Deserialize<AgentToolInterceptorInput>(json, s_opts);
+        var rt = JsonSerializer.Deserialize<DurableToolInterceptorInput>(json, s_opts);
 
         Assert.NotNull(rt);
         Assert.Null(rt!.Arguments);

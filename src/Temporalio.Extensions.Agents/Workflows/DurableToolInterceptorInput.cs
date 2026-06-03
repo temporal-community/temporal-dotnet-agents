@@ -6,7 +6,12 @@ namespace Temporalio.Extensions.Agents.Workflows;
 /// Input for the <c>RunToolInterceptor</c> activity.
 /// Carries enough context for the interceptor to make a pre-tool decision.
 /// </summary>
-internal sealed class AgentToolInterceptorInput
+/// <remarks>
+/// JSON property names on this type must NOT change — Temporal serializes by value and existing
+/// workflow history must replay cleanly. Only the .NET class name changed from
+/// <c>AgentToolInterceptorInput</c> to <c>DurableToolInterceptorInput</c>.
+/// </remarks>
+internal sealed class DurableToolInterceptorInput
 {
     /// <summary>Name of the agent that owns this tool call.</summary>
     public required string AgentName { get; init; }

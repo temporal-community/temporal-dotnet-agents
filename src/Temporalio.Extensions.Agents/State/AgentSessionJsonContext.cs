@@ -26,9 +26,9 @@ namespace Temporalio.Extensions.Agents.State;
 [JsonSerializable(typeof(IReadOnlyList<DurableSessionEntry>))]
 [JsonSerializable(typeof(List<DurableSessionEntry>))]
 // Feature L — tool interceptor I/O
-[JsonSerializable(typeof(AgentToolInterceptorInput))]
-[JsonSerializable(typeof(AgentToolInterceptorResult))]
-[JsonSerializable(typeof(AgentToolOutcome))]
+[JsonSerializable(typeof(DurableToolInterceptorInput))]
+[JsonSerializable(typeof(DurableToolInterceptorResult))]
+[JsonSerializable(typeof(DurableToolOutcome))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 // Function call and result content
 [JsonSerializable(typeof(Dictionary<string, object>))]

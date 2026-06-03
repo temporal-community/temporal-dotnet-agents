@@ -901,10 +901,10 @@ internal sealed class AgentActivities(
     /// Pre-tool lifecycle activity. Fires before <c>InvokeAgentTool</c> for each tool call in a
     /// turn. Resolves the agent's <see cref="IAgentToolInterceptor"/> (per-agent or worker default),
     /// calls <see cref="IAgentToolInterceptor.BeforeToolCallAsync"/>, and returns a serializable
-    /// <see cref="AgentToolInterceptorResult"/> DTO for the workflow to act on.
+    /// <see cref="DurableToolInterceptorResult"/> DTO for the workflow to act on.
     /// </summary>
     [Activity("Temporalio.Extensions.Agents.RunToolInterceptor")]
-    public async Task<AgentToolInterceptorResult> RunToolInterceptorAsync(AgentToolInterceptorInput input)
+    public async Task<DurableToolInterceptorResult> RunToolInterceptorAsync(DurableToolInterceptorInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
 
@@ -922,7 +922,7 @@ internal sealed class AgentActivities(
                 "RunToolInterceptor dispatched for agent '{AgentName}' tool '{ToolName}' " +
                 "but no IAgentToolInterceptor is resolved. Defaulting to Proceed.",
                 input.AgentName, input.ToolName);
-            return new AgentToolInterceptorResult { Outcome = AgentToolOutcome.Proceed };
+            return new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed };
         }
 
         ctx.Heartbeat($"intercepting tool '{input.ToolName}'");
@@ -949,10 +949,11 @@ internal sealed class AgentActivities(
                 ? new Dictionary<string, object?>()
                 : new Dictionary<string, object?>(input.Arguments),
             CallId = input.CallId,
+            SessionId = ctx.Info.WorkflowId,
             StateBag = stateBag,
         };
 
-        AgentToolDecision decision;
+        DurableToolDecision decision;
         try
         {
             decision = await cached.ToolInterceptor
@@ -965,18 +966,18 @@ internal sealed class AgentActivities(
                 "IAgentToolInterceptor.BeforeToolCallAsync threw for agent '{AgentName}' tool '{ToolName}'. " +
                 "Defaulting to Block.",
                 input.AgentName, input.ToolName);
-            return new AgentToolInterceptorResult
+            return new DurableToolInterceptorResult
             {
-                Outcome = AgentToolOutcome.Block,
+                Outcome = DurableToolOutcome.Block,
                 Message = $"Interceptor threw an exception: {ex.Message}",
             };
         }
 
         return decision switch
         {
-            AgentToolDecision.ProceedDecision p => new AgentToolInterceptorResult
+            DurableToolDecision.ProceedDecision p => new DurableToolInterceptorResult
             {
-                Outcome = AgentToolOutcome.Proceed,
+                Outcome = DurableToolOutcome.Proceed,
                 EnrichedDescription = p.EnrichedDescription,
                 ModifiedArguments = p.ModifiedArguments is null
                     ? null
@@ -985,32 +986,32 @@ internal sealed class AgentActivities(
                     ? null
                     : new Dictionary<string, string>(p.Metadata),
             },
-            AgentToolDecision.ApprovalRequiredDecision a => new AgentToolInterceptorResult
+            DurableToolDecision.ApprovalRequiredDecision a => new DurableToolInterceptorResult
             {
-                Outcome = AgentToolOutcome.PauseForApproval,
+                Outcome = DurableToolOutcome.PauseForApproval,
                 EnrichedDescription = a.Description,
                 Message = a.Description,
                 Metadata = a.Metadata is null
                     ? null
                     : new Dictionary<string, string>(a.Metadata),
             },
-            AgentToolDecision.SkipDecision s => new AgentToolInterceptorResult
+            DurableToolDecision.SkipDecision s => new DurableToolInterceptorResult
             {
-                Outcome = AgentToolOutcome.Skip,
+                Outcome = DurableToolOutcome.Skip,
                 Message = s.SyntheticResult,
                 Metadata = s.Metadata is null
                     ? null
                     : new Dictionary<string, string>(s.Metadata),
             },
-            AgentToolDecision.BlockDecision b => new AgentToolInterceptorResult
+            DurableToolDecision.BlockDecision b => new DurableToolInterceptorResult
             {
-                Outcome = AgentToolOutcome.Block,
+                Outcome = DurableToolOutcome.Block,
                 Message = b.Reason,
                 Metadata = b.Metadata is null
                     ? null
                     : new Dictionary<string, string>(b.Metadata),
             },
-            _ => new AgentToolInterceptorResult { Outcome = AgentToolOutcome.Proceed },
+            _ => new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed },
         };
     }
 

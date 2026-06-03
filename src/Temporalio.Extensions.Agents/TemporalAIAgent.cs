@@ -255,10 +255,10 @@ public sealed class TemporalAIAgent : AIAgent
             var toolCalls = stepResult.ToolCalls;
 
             // Feature L: Phase 1 — fan out interceptor activities if configured.
-            AgentToolInterceptorResult[]? interceptorResults = null;
+            DurableToolInterceptorResult[]? interceptorResults = null;
             if (_interceptorActivityOptions is { } interceptorOpts)
             {
-                var interceptorTasks = new List<Task<AgentToolInterceptorResult>>(toolCalls.Count);
+                var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
                 foreach (var tc in toolCalls)
                 {
                     var isSkipped = _interceptorSkippedTools is not null
@@ -271,11 +271,11 @@ public sealed class TemporalAIAgent : AIAgent
                     if (isSkipped)
                     {
                         interceptorTasks.Add(Task.FromResult(
-                            new AgentToolInterceptorResult { Outcome = AgentToolOutcome.Proceed }));
+                            new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
                     }
                     else
                     {
-                        var interceptorInput = new AgentToolInterceptorInput
+                        var interceptorInput = new DurableToolInterceptorInput
                         {
                             AgentName = _agentName,
                             ToolName = tc.Name,
@@ -306,7 +306,7 @@ public sealed class TemporalAIAgent : AIAgent
             {
                 var tc = toolCalls[i];
                 var interceptorResult = interceptorResults?[i];
-                var outcome = interceptorResult?.Outcome ?? AgentToolOutcome.Proceed;
+                var outcome = interceptorResult?.Outcome ?? DurableToolOutcome.Proceed;
 
                 // Rule 2: RequireApproval is an absolute floor. Block is strictly stricter than
                 // approval and is honoured as-is; every other outcome (Proceed, Skip,
@@ -314,14 +314,14 @@ public sealed class TemporalAIAgent : AIAgent
                 // cannot be bypassed by an interceptor returning Skip (BLOCK-3 fix).
                 var toolRequiresApproval = _requiresApprovalTools is not null
                     && _requiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
-                if (toolRequiresApproval && outcome != AgentToolOutcome.Block)
+                if (toolRequiresApproval && outcome != DurableToolOutcome.Block)
                 {
-                    outcome = AgentToolOutcome.PauseForApproval;
+                    outcome = DurableToolOutcome.PauseForApproval;
                 }
 
                 switch (outcome)
                 {
-                    case AgentToolOutcome.Proceed:
+                    case DurableToolOutcome.Proceed:
                         var effectiveArgs = interceptorResult?.ModifiedArguments is { } mArgs
                             ? mArgs
                             : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
@@ -343,7 +343,7 @@ public sealed class TemporalAIAgent : AIAgent
                             toolDispatchOpts));
                         break;
 
-                    case AgentToolOutcome.PauseForApproval:
+                    case DurableToolOutcome.PauseForApproval:
                         // TemporalAIAgent is a sub-agent inside an orchestrating workflow and
                         // has no DurableApprovalMixin — degrade to Block with a warning.
                         Workflow.Logger.LogWarning(
@@ -354,12 +354,12 @@ public sealed class TemporalAIAgent : AIAgent
                         toolTasks.Add(null);
                         break;
 
-                    case AgentToolOutcome.Skip:
+                    case DurableToolOutcome.Skip:
                         syntheticResults[i] = interceptorResult?.Message ?? string.Empty;
                         toolTasks.Add(null);
                         break;
 
-                    case AgentToolOutcome.Block:
+                    case DurableToolOutcome.Block:
                     default:
                         syntheticResults[i] = $"[Blocked] {interceptorResult?.Message ?? "Tool execution was blocked."}";
                         toolTasks.Add(null);

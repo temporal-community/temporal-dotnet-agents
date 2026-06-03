@@ -1,31 +1,22 @@
 using Microsoft.Agents.AI;
+using Temporalio.Extensions.AI;
 
 namespace Temporalio.Extensions.Agents;
 
 /// <summary>
-/// Context supplied to <see cref="IAgentToolInterceptor.BeforeToolCallAsync"/>. Describes the
-/// tool call that the turn loop is about to dispatch as a Temporal activity.
+/// Context supplied to <see cref="IAgentToolInterceptor.BeforeToolCallAsync"/>. Extends
+/// <see cref="DurableToolContext"/> with MAF-specific fields for agent sessions.
 /// </summary>
-public sealed class AgentToolContext
+/// <remarks>
+/// The base class (<see cref="DurableToolContext"/>) provides the cross-library fields:
+/// <c>ToolName</c>, <c>Arguments</c>, <c>CallId</c>, <c>SessionId</c>, and additional
+/// optional context fields. This class adds <c>AgentName</c> and <c>StateBag</c>, which are
+/// specific to Microsoft Agent Framework sessions.
+/// </remarks>
+public sealed class AgentToolContext : DurableToolContext
 {
     /// <summary>Gets the name of the agent that owns this tool call.</summary>
     public required string AgentName { get; init; }
-
-    /// <summary>Gets the name of the tool being invoked.</summary>
-    public required string ToolName { get; init; }
-
-    /// <summary>
-    /// Gets the arguments the LLM supplied for this tool call.
-    /// Keys and values mirror the LLM's <c>FunctionCallContent.Arguments</c> dictionary.
-    /// </summary>
-    public required IReadOnlyDictionary<string, object?> Arguments { get; init; }
-
-    /// <summary>
-    /// Gets the LLM-assigned call identifier, used to correlate this call with its result
-    /// in the chat message history. May be <see langword="null"/> for models that do not
-    /// emit call IDs.
-    /// </summary>
-    public required string? CallId { get; init; }
 
     /// <summary>
     /// Gets a read-only snapshot of the agent's session state at turn start.
