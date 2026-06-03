@@ -216,23 +216,188 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
 
             var toolCalls = stepResult.ToolCalls;
 
-            // Fan-out: dispatch one InvokeFunctionAsync activity per tool call, in parallel.
-            var toolTasks = new List<Task<DurableFunctionOutput>>(toolCalls.Count);
-            foreach (var tc in toolCalls)
-            {
-                var toolInput = new DurableFunctionInput
-                {
-                    FunctionName = tc.Name,
-                    Arguments = tc.Arguments is null
-                        ? null
-                        : new Dictionary<string, object?>(tc.Arguments),
-                };
+            // ── Phase 1: Fan out interceptor activities in parallel ────────────────────────
+            // Build interceptor results for all tool calls. Tools opted out (SkipInterceptor)
+            // or when no interceptor is configured get a synthetic Proceed.
+            DurableToolInterceptorResult[]? interceptorResults = null;
+            var interceptorActivityOpts = RequiredInput.InterceptorActivityOptions;
+            var interceptorToolOpts = RequiredInput.InterceptorToolActivityOptions;
+            var skippedTools = RequiredInput.InterceptorSkippedTools;
 
-                toolTasks.Add(Workflow.ExecuteActivityAsync(
-                    (DurableFunctionActivities a) => a.InvokeFunctionAsync(toolInput),
-                    ResolveToolActivityOptions(tc.Name)));
+            if (interceptorActivityOpts is not null)
+            {
+                var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
+                foreach (var tc in toolCalls)
+                {
+                    var isSkipped = skippedTools is not null
+                        && skippedTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
+
+                    if (isSkipped)
+                    {
+                        interceptorTasks.Add(Task.FromResult(
+                            new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
+                    }
+                    else
+                    {
+                        var interceptorInput = new DurableToolInterceptorInput
+                        {
+                            ToolName = tc.Name,
+                            Arguments = tc.Arguments is null
+                                ? null
+                                : new Dictionary<string, object?>(tc.Arguments),
+                            CallId = tc.CallId,
+                            ConversationId = meta.ConversationId,
+                            CorrelationId = requestEntry.CorrelationId,
+                            TurnNumber = CurrentTurnNumber,
+                        };
+
+                        // Use per-tool interceptor timeout when set; fall back to shared opts.
+                        var baseOpts = interceptorToolOpts is not null
+                            && interceptorToolOpts.TryGetValue(tc.Name, out var toolSpecific)
+                                ? toolSpecific
+                                : interceptorActivityOpts;
+                        var perToolInterceptorOpts = new ActivityOptions
+                        {
+                            StartToCloseTimeout = baseOpts.StartToCloseTimeout,
+                            HeartbeatTimeout = baseOpts.HeartbeatTimeout,
+                            RetryPolicy = baseOpts.RetryPolicy,
+                            Summary = $"intercept:{tc.Name}",
+                        };
+
+                        interceptorTasks.Add(Workflow.ExecuteActivityAsync(
+                            (DurableChatActivities a) => a.RunToolInterceptorAsync(interceptorInput),
+                            perToolInterceptorOpts));
+                    }
+                }
+
+                interceptorResults = await Workflow.WhenAllAsync(interceptorTasks).ConfigureAwait(true);
             }
 
+            // ── Phase 2: Process decisions, park for approvals ────────────────────────────
+            //
+            // Safety invariant (BLOCK-4): NO tool activity is dispatched until ALL approval
+            // waits in this turn are fully resolved. Proceed-outcome tool inputs are buffered
+            // in pendingToolDispatches and dispatched in Phase 2.5, after the approval loop
+            // completes. This prevents a write-style tool (e.g. send_email, apply_refund) from
+            // executing concurrently with a human review window opened by another tool in the
+            // same turn.
+            //
+            var toolTasks = new Task<DurableFunctionOutput>?[toolCalls.Count];
+            var syntheticResults = new string?[toolCalls.Count]; // null = real tool result
+
+            // Buffered dispatches: populated during Phase 2, dispatched in Phase 2.5.
+            var pendingToolDispatches = new List<(int Index, DurableFunctionInput Input, ActivityOptions Options)>(toolCalls.Count);
+
+            var requiresApprovalTools = RequiredInput.RequiresApprovalTools;
+
+            for (var i = 0; i < toolCalls.Count; i++)
+            {
+                var tc = toolCalls[i];
+                var interceptorResult = interceptorResults?[i];
+
+                // Determine effective outcome.
+                var outcome = interceptorResult?.Outcome ?? DurableToolOutcome.Proceed;
+
+                // Rule 2: RequireApproval is an absolute floor. Block is strictly stricter than
+                // approval and is honoured as-is; every other outcome (Proceed, Skip,
+                // PauseForApproval) is overridden to PauseForApproval so the approval gate
+                // cannot be bypassed by an interceptor returning Skip (BLOCK-3 fix).
+                var toolRequiresApproval = requiresApprovalTools is not null
+                    && requiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
+
+                if (toolRequiresApproval && outcome != DurableToolOutcome.Block)
+                {
+                    outcome = DurableToolOutcome.PauseForApproval;
+                }
+
+                switch (outcome)
+                {
+                    case DurableToolOutcome.Proceed:
+                    {
+                        // Buffer for dispatch after all approval waits resolve (BLOCK-4).
+                        var effectiveArgs = interceptorResult?.ModifiedArguments is { } modArgs
+                            ? modArgs
+                            : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
+                        pendingToolDispatches.Add((i, new DurableFunctionInput
+                        {
+                            FunctionName = tc.Name,
+                            Arguments = effectiveArgs,
+                        }, ResolveToolActivityOptions(tc.Name)));
+                        break;
+                    }
+
+                    case DurableToolOutcome.PauseForApproval:
+                    {
+                        // Park the turn loop; wait for a human decision via DurableApprovalMixin
+                        // (compute-free durable wait).
+                        var approvalDescription = interceptorResult?.EnrichedDescription
+                            ?? interceptorResult?.Message
+                            ?? $"Approve invocation of tool '{tc.Name}'";
+
+                        var approvalRequest = new DurableApprovalRequest
+                        {
+                            RequestId = $"{tc.CallId ?? tc.Name}-{Workflow.NewGuid():N}",
+                            FunctionName = tc.Name,
+                            CallId = tc.CallId,
+                            Description = approvalDescription,
+                        };
+
+                        // Sequential: the mixin enforces one pending approval at a time.
+                        var decision = await RequestApprovalFromTurnLoopAsync(
+                            approvalRequest,
+                            RequiredInput.ApprovalTimeout,
+                            onRequested: req => Workflow.Logger.LogInformation(
+                                "[{SessionId}] Approval requested for tool '{ToolName}' (RequestId: {RequestId})",
+                                Workflow.Info.WorkflowId, req.FunctionName, req.RequestId),
+                            onResolved: dec => Workflow.Logger.LogInformation(
+                                "[{SessionId}] Approval resolved for tool '{ToolName}' (RequestId: {RequestId}, Approved: {Approved})",
+                                Workflow.Info.WorkflowId, approvalRequest.FunctionName, dec.RequestId, dec.Approved))
+                            .ConfigureAwait(true);
+
+                        if (decision.Approved)
+                        {
+                            // Buffer the approved tool for dispatch in Phase 2.5.
+                            var approvedArgs = interceptorResult?.ModifiedArguments is { } mArgs
+                                ? mArgs
+                                : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
+                            pendingToolDispatches.Add((i, new DurableFunctionInput
+                            {
+                                FunctionName = tc.Name,
+                                Arguments = approvedArgs,
+                            }, ResolveToolActivityOptions(tc.Name)));
+                        }
+                        else
+                        {
+                            // Denied or timed out — inject an error result.
+                            var denialReason = string.IsNullOrEmpty(decision.Reason)
+                                ? "Tool call was denied or timed out."
+                                : decision.Reason;
+                            syntheticResults[i] = $"[Denied] {denialReason}";
+                        }
+                        break;
+                    }
+
+                    case DurableToolOutcome.Skip:
+                        syntheticResults[i] = interceptorResult?.Message ?? string.Empty;
+                        break;
+
+                    case DurableToolOutcome.Block:
+                    default:
+                        syntheticResults[i] = $"[Blocked] {interceptorResult?.Message ?? "Tool execution was blocked."}";
+                        break;
+                }
+            }
+
+            // ── Phase 2.5: Dispatch all buffered tool activities ──────────────────────────
+            // All approval waits are resolved before any InvokeFunction activity starts.
+            foreach (var (idx, funcInput, opts) in pendingToolDispatches)
+            {
+                toolTasks[idx] = Workflow.ExecuteActivityAsync(
+                    (DurableFunctionActivities a) => a.InvokeFunctionAsync(funcInput),
+                    opts);
+            }
+
+            // ── Phase 3: Wait for all dispatched tool activities ──────────────────────────
             // Inspect each task individually after WhenAllAsync. Never use ContinueWith inside
             // a workflow — it's non-deterministic on replay. WhenAllAsync throws if any task
             // faults; we swallow application failures here and look at each task's terminal state.
@@ -241,32 +406,57 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             // (b) Temporal delivers a cancelled activity as a Faulted task (ActivityFailureException
             //     wrapping a cancellation cause), not as a Cancelled task — caught by the bare catch
             //     below and re-detected via Workflow.CancellationToken.IsCancellationRequested.
-            try
+            var pendingRealTasks = toolTasks
+                .Where(t => t is not null)
+                .Cast<Task<DurableFunctionOutput>>()
+                .ToList();
+
+            if (pendingRealTasks.Count > 0)
             {
-                await Workflow.WhenAllAsync(toolTasks).ConfigureAwait(true);
-            }
-            catch (OperationCanceledException) when (Workflow.CancellationToken.IsCancellationRequested)
-            {
-                throw; // workflow cancellation as OCE — do not classify as an application error
-            }
-            catch
-            {
-                // If the workflow is being cancelled, faulted activity tasks may represent
-                // Temporal-delivered cancellations rather than application errors.
-                if (Workflow.CancellationToken.IsCancellationRequested)
+                try
                 {
-                    throw new OperationCanceledException(
-                        "Workflow cancelled during tool fan-out; propagating cancellation.");
+                    await Workflow.WhenAllAsync(pendingRealTasks).ConfigureAwait(true);
                 }
-                // Per-task inspection below handles application-level failures.
+                catch (OperationCanceledException) when (Workflow.CancellationToken.IsCancellationRequested)
+                {
+                    throw; // workflow cancellation as OCE — do not classify as an application error
+                }
+                catch
+                {
+                    // If the workflow is being cancelled, faulted activity tasks may represent
+                    // Temporal-delivered cancellations rather than application errors.
+                    if (Workflow.CancellationToken.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException(
+                            "Workflow cancelled during tool fan-out; propagating cancellation.");
+                    }
+                    // Per-task inspection below handles application-level failures.
+                }
             }
 
+            // Assemble final results in original order (synthetic and real interleaved by index).
             var functionResultContents = new List<AIContent>(toolCalls.Count);
             var hadError = false;
             for (var i = 0; i < toolCalls.Count; i++)
             {
                 var tc = toolCalls[i];
+
+                if (syntheticResults[i] is { } synthetic)
+                {
+                    // Skip or Block outcome — inject synthetic result directly.
+                    functionResultContents.Add(new FunctionResultContent(tc.CallId, synthetic));
+                    continue;
+                }
+
                 var task = toolTasks[i];
+                if (task is null)
+                {
+                    // Tool was denied (PauseForApproval + denial): syntheticResults[i] was set,
+                    // so we should have hit the branch above. This is a defensive fallback.
+                    functionResultContents.Add(new FunctionResultContent(tc.CallId, "[Denied] Tool call was denied."));
+                    continue;
+                }
+
                 if (task.IsCompletedSuccessfully)
                 {
                     functionResultContents.Add(new FunctionResultContent(tc.CallId, task.Result.Result));
@@ -363,7 +553,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         // Carry the Pattern 3 activation marker AND the iteration cap forward so the next
         // run preserves the activation decision and configured loop behavior. Per-tool
         // option freezes ensure mid-CAN drift cannot change the activation state of an
-        // already-active session.
+        // already-active session. Interceptor config is also carried forward verbatim.
         var carried = new DurableChatWorkflowInput
         {
             TimeToLive = input.TimeToLive,
@@ -380,6 +570,10 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             MaximumConsecutiveErrorsPerRequest =
                 Input?.MaximumConsecutiveErrorsPerRequest ?? input.MaximumConsecutiveErrorsPerRequest,
             IncludeDetailedErrors = Input?.IncludeDetailedErrors ?? input.IncludeDetailedErrors,
+            InterceptorActivityOptions = Input?.InterceptorActivityOptions ?? input.InterceptorActivityOptions,
+            InterceptorToolActivityOptions = Input?.InterceptorToolActivityOptions ?? input.InterceptorToolActivityOptions,
+            InterceptorSkippedTools = Input?.InterceptorSkippedTools ?? input.InterceptorSkippedTools,
+            RequiresApprovalTools = Input?.RequiresApprovalTools ?? input.RequiresApprovalTools,
         };
         return Workflow.CreateContinueAsNewException(
             (DurableChatWorkflow wf) => wf.RunAsync(carried));
