@@ -1,6 +1,6 @@
 # ToolInterceptor
 
-Demonstrates `IDurableToolInterceptor<DurableToolContext>` (Feature L) and workflow-parked HITL approval via `RequireApproval()` (Feature A) using a customer refund agent.
+Demonstrates `IAgentToolInterceptor` (Feature L) and workflow-parked HITL approval via `RequireApproval()` (Feature A) using a customer refund agent.
 
 ## Overview
 
@@ -16,7 +16,7 @@ The sample registers an `OrderInterceptor` that fires before every `apply_refund
 
 ## What it demonstrates
 
-- `IDurableToolInterceptor<DurableToolContext>` — the base-library interface registered directly in a MAF agent. `OrderInterceptor` only needs `ToolName` and `Arguments` (base context fields), so there is no reason to use the richer `IAgentToolInterceptor`. The same class could be registered in a MEAI session without modification.
+- `IAgentToolInterceptor.BeforeToolCallAsync` — all four decision outcomes in one coherent flow
 - `DurableToolDecision.Skip` — synthetic result injected; tool activity never dispatched
 - `DurableToolDecision.Block` — error result injected; tool activity never dispatched
 - `DurableToolDecision.PauseForApproval` — enriched description provided to the reviewer
@@ -24,9 +24,9 @@ The sample registers an `OrderInterceptor` that fires before every `apply_refund
 - `DurableToolOptions.SkipInterceptor()` — opt read-only `lookup_order` out of the interceptor
 - `ITemporalAgentClient.GetPendingApprovalAsync` / `SubmitApprovalAsync` — approval poll/submit loop
 
-> **When to use `IAgentToolInterceptor` instead:** If your interceptor needs MAF-specific data — `context.AgentName` to vary behaviour by registered agent, or `context.StateBag` to carry session state across turns — implement `IAgentToolInterceptor` (which extends `IDurableToolInterceptor<AgentToolContext>`). The MAF-specific context is only available through that sub-interface.
-
 > **Library split:** `DurableToolDecision`, `DurableToolContext`, and `IDurableToolInterceptor<TContext>` are defined in `Temporalio.Extensions.AI`. `IAgentToolInterceptor` and `AgentToolContext` remain in `Temporalio.Extensions.Agents`. Add `using Temporalio.Extensions.AI;` to any file that references `DurableToolDecision` directly.
+
+> **`IDurableToolInterceptor<DurableToolContext>` sample** — a dedicated MEAI sample demonstrating the base-library interface will be added in Phase 2 when `DurableChatWorkflow.ExecutePattern3TurnAsync` gains interceptor support.
 
 ## Prerequisites
 
