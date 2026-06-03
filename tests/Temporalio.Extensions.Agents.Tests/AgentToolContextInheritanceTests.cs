@@ -64,14 +64,40 @@ public class AgentToolContextInheritanceTests
     [Fact]
     public void IDurableToolInterceptor_Contravariance_Allows_BaseContextInterceptor()
     {
-        // Due to the 'in TContext' variance, IDurableToolInterceptor<DurableToolContext>
-        // is assignable to IDurableToolInterceptor<AgentToolContext>.
-        // This is the contravariance bonus from the 'in' annotation.
+        // With 'in TContext', IDurableToolInterceptor<DurableToolContext> is assignable
+        // to IDurableToolInterceptor<AgentToolContext> — NOT the other direction.
+        // A base-context interceptor handles both the base and all derived contexts.
         var baseInterceptor = new StubBaseInterceptor();
 
-        // Assign IDurableToolInterceptor<DurableToolContext> to IDurableToolInterceptor<AgentToolContext>
+        // Correct contravariance direction: the base-typed interceptor can be assigned
+        // to a variable of the more-derived context type.
         IDurableToolInterceptor<AgentToolContext> agentInterceptor = baseInterceptor;
         Assert.NotNull(agentInterceptor);
+
+        // The reverse does NOT hold — an AgentToolContext interceptor is NOT assignable
+        // to IDurableToolInterceptor<DurableToolContext>.
+        Assert.False(
+            typeof(IDurableToolInterceptor<DurableToolContext>)
+                .IsAssignableFrom(typeof(IAgentToolInterceptor)));
+    }
+
+    [Fact]
+    public void BaseContextInterceptor_CanBeRegistered_ViaAddToolInterceptor()
+    {
+        // Widened AddToolInterceptor overload accepts IDurableToolInterceptor<AgentToolContext>.
+        // Since IDurableToolInterceptor<DurableToolContext> IS-A IDurableToolInterceptor<AgentToolContext>
+        // via contravariance, a base-context interceptor can be registered directly.
+        var builder = new DurableAgentBuilder("TestAgent");
+        builder.ChatClient = _ => new StubChatClient();
+
+        // This compiles only because AddToolInterceptor accepts
+        // Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>,
+        // and StubBaseInterceptor (: IDurableToolInterceptor<DurableToolContext>) is
+        // assignable to IDurableToolInterceptor<AgentToolContext> via contravariance.
+        builder.AddToolInterceptor(_ => new StubBaseInterceptor());
+
+        var registration = builder.ToRegistration();
+        Assert.NotNull(registration.ToolInterceptorFactory);
     }
 
     private sealed class StubBaseInterceptor : IDurableToolInterceptor<DurableToolContext>
@@ -80,5 +106,23 @@ public class AgentToolContextInheritanceTests
             DurableToolContext context,
             CancellationToken cancellationToken) =>
             Task.FromResult(DurableToolDecision.Proceed());
+    }
+
+    private sealed class StubChatClient : Microsoft.Extensions.AI.IChatClient
+    {
+        public Microsoft.Extensions.AI.ChatClientMetadata Metadata => new("stub");
+        public Task<Microsoft.Extensions.AI.ChatResponse> GetResponseAsync(
+            System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.ChatMessage> messages,
+            Microsoft.Extensions.AI.ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new Microsoft.Extensions.AI.ChatResponse([]));
+        public System.Collections.Generic.IAsyncEnumerable<Microsoft.Extensions.AI.ChatResponseUpdate> GetStreamingResponseAsync(
+            System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.ChatMessage> messages,
+            Microsoft.Extensions.AI.ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            System.Linq.AsyncEnumerable.Empty<Microsoft.Extensions.AI.ChatResponseUpdate>();
+        public TService? GetService<TService>(object? key = null) where TService : class => null;
+        public object? GetService(System.Type serviceType, object? key = null) => null;
+        public void Dispose() { }
     }
 }

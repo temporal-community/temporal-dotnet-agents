@@ -49,7 +49,7 @@ internal sealed record CachedDurableAgent(
     string? CompactionStrategyKey,
     Compaction.ICompactionStrategy? CompactionStrategy,
     IReadOnlyList<AITool> ToolsAsAITools,
-    IAgentToolInterceptor? ToolInterceptor = null);
+    IDurableToolInterceptor<AgentToolContext>? ToolInterceptor = null);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.

@@ -30,4 +30,4 @@ internal sealed record DurableAgentRegistration(
     Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer,
     Action<AIAgentBuilder>? ConfigureAgentPipeline,
     string? CompactionStrategyKey,
-    Func<IServiceProvider, IAgentToolInterceptor>? ToolInterceptorFactory = null);
+    Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? ToolInterceptorFactory = null);

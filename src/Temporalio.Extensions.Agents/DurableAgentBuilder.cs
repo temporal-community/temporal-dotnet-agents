@@ -51,7 +51,7 @@ public sealed class DurableAgentBuilder
     private readonly List<DurableToolRegistration> _tools = new();
     private readonly HashSet<string> _toolNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Func<IServiceProvider, AIContextProvider>> _contextProviders = new();
-    private Func<IServiceProvider, IAgentToolInterceptor>? _toolInterceptorFactory;
+    private Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? _toolInterceptorFactory;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DurableAgentBuilder"/> class with the given agent
@@ -376,6 +376,26 @@ public sealed class DurableAgentBuilder
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
     public DurableAgentBuilder AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        // Wrap to the wider type — IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContext>.
+        _toolInterceptorFactory = sp => factory(sp);
+        return this;
+    }
+
+    /// <summary>
+    /// Registers a per-agent <see cref="IDurableToolInterceptor{TContext}"/> factory using
+    /// <see cref="AgentToolContext"/> as the context type. Use this overload when implementing
+    /// <c>IDurableToolInterceptor&lt;DurableToolContext&gt;</c> — contravariance makes it
+    /// assignable to <c>IDurableToolInterceptor&lt;AgentToolContext&gt;</c> so a base-context
+    /// interceptor works directly in the MAF activity without implementing
+    /// <see cref="IAgentToolInterceptor"/>.
+    /// </summary>
+    /// <param name="factory">Factory that produces the interceptor.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
+    public DurableAgentBuilder AddToolInterceptor(
+        Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
         _toolInterceptorFactory = factory;

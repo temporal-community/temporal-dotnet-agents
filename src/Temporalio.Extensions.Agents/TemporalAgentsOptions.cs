@@ -126,7 +126,11 @@ public sealed class TemporalAgentsOptions
     public string? DefaultCompactionStrategy { get; set; }
 
     /// <summary>
-    /// Gets or sets the worker-level default <see cref="IAgentToolInterceptor"/> factory.
+    /// Gets or sets the worker-level default interceptor factory. Accepts any factory that
+    /// produces an <see cref="IDurableToolInterceptor{TContext}"/> for
+    /// <see cref="AgentToolContext"/> — including factories that return
+    /// <see cref="IAgentToolInterceptor"/> (a sub-interface) or any interceptor implementing
+    /// <c>IDurableToolInterceptor&lt;DurableToolContext&gt;</c> (assignable via contravariance).
     /// When a per-agent interceptor is not registered via
     /// <see cref="DurableAgentBuilder.AddToolInterceptor"/>, the agent inherits this value.
     /// The H1 rule applies: per-agent registration always wins over this worker default.
@@ -135,7 +139,7 @@ public sealed class TemporalAgentsOptions
     /// The factory is invoked once at first activity dispatch and the resolved instance is
     /// cached for the lifetime of the worker process.
     /// </remarks>
-    public Func<IServiceProvider, IAgentToolInterceptor>? DefaultToolInterceptor { get; set; }
+    public Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? DefaultToolInterceptor { get; set; }
 
     /// <summary>
     /// Gets or sets the worker-level default agent-pipeline configuration callback. When an agent
