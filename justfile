@@ -523,7 +523,8 @@ test-samples-meai: build _sample-preflight
         "DurableTools:samples/MEAI/DurableTools:90" \
         "DurableEmbeddings:samples/MEAI/DurableEmbeddings:180" \
         "CustomWorkflow:samples/MEAI/CustomWorkflow:90" \
-        "OpenTelemetry:samples/MEAI/OpenTelemetry:90" ; do
+        "OpenTelemetry:samples/MEAI/OpenTelemetry:90" \
+        "ToolInterceptor:samples/MEAI/ToolInterceptor:120" ; do
         IFS=':' read -r name dir cap <<< "$entry"
         echo "═══ MEAI/$name (cap ${cap}s) ═══"
         start=$(date +%s)

@@ -16,6 +16,7 @@
     <Project Path="samples/MEAI/HumanInTheLoop/HumanInTheLoop.csproj" />
     <Project Path="samples/MEAI/DurableEmbeddings/DurableEmbeddings.csproj" />
     <Project Path="samples/MEAI/CustomWorkflow/CustomWorkflow.csproj" />
+    <Project Path="samples/MEAI/ToolInterceptor/ToolInterceptor.csproj" />
   </Folder>
   <Folder Name="/samples/" />
   <Folder Name="/samples/MAF/">
