@@ -370,6 +370,111 @@ internal sealed class DurableChatActivities(
     /// <c>nameof(DurableToolsNotWrappedException)</c> so catch blocks can still match on
     /// the typed name via <see cref="ApplicationFailureException.ErrorType"/>.
     /// </remarks>
+    /// <summary>
+    /// Runs the <see cref="IDurableToolInterceptor{TContext}"/> before a Pattern 3 tool is
+    /// dispatched. Resolves the interceptor from DI; if none is registered, logs a warning
+    /// and returns <see cref="DurableToolOutcome.Proceed"/> so the tool still runs.
+    /// </summary>
+    [Activity("Temporalio.Extensions.AI.RunToolInterceptor")]
+    public async Task<DurableToolInterceptorResult> RunToolInterceptorAsync(
+        DurableToolInterceptorInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var ctx = ActivityExecutionContext.Current;
+        var ct = ctx.CancellationToken;
+
+        var interceptor = services.GetService<IDurableToolInterceptor<DurableToolContext>>();
+        if (interceptor is null)
+        {
+            // Interceptor was removed between workflow dispatch and activity execution
+            // (e.g. worker restart without re-registration). Degrade to Proceed so the
+            // tool still runs rather than silently blocking the session.
+            _logger.LogWarning(
+                "RunToolInterceptor dispatched for tool '{ToolName}' but no " +
+                "IDurableToolInterceptor<DurableToolContext> is registered in DI. " +
+                "Defaulting to Proceed.",
+                input.ToolName);
+            return new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed };
+        }
+
+        ctx.Heartbeat($"intercepting tool '{input.ToolName}'");
+
+        var toolContext = new DurableToolContext
+        {
+            ToolName = input.ToolName,
+            Arguments = input.Arguments is null
+                ? new Dictionary<string, object?>()
+                : new Dictionary<string, object?>(input.Arguments),
+            CallId = input.CallId,
+            SessionId = ctx.Info.WorkflowId,
+            ConversationId = input.ConversationId,
+            CorrelationId = input.CorrelationId,
+            TurnNumber = input.TurnNumber,
+        };
+
+        DurableToolDecision decision;
+        try
+        {
+            decision = await interceptor
+                .BeforeToolCallAsync(toolContext, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "IDurableToolInterceptor.BeforeToolCallAsync threw for tool '{ToolName}'. " +
+                "Defaulting to Block.",
+                input.ToolName);
+            return new DurableToolInterceptorResult
+            {
+                Outcome = DurableToolOutcome.Block,
+                Message = $"Interceptor threw an exception: {ex.Message}",
+            };
+        }
+
+        return decision switch
+        {
+            DurableToolDecision.ProceedDecision p => new DurableToolInterceptorResult
+            {
+                Outcome = DurableToolOutcome.Proceed,
+                EnrichedDescription = p.EnrichedDescription,
+                ModifiedArguments = p.ModifiedArguments is null
+                    ? null
+                    : new Dictionary<string, object?>(p.ModifiedArguments),
+                Metadata = p.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(p.Metadata),
+            },
+            DurableToolDecision.ApprovalRequiredDecision a => new DurableToolInterceptorResult
+            {
+                Outcome = DurableToolOutcome.PauseForApproval,
+                EnrichedDescription = a.Description,
+                Message = a.Description,
+                Metadata = a.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(a.Metadata),
+            },
+            DurableToolDecision.SkipDecision s => new DurableToolInterceptorResult
+            {
+                Outcome = DurableToolOutcome.Skip,
+                Message = s.SyntheticResult,
+                Metadata = s.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(s.Metadata),
+            },
+            DurableToolDecision.BlockDecision b => new DurableToolInterceptorResult
+            {
+                Outcome = DurableToolOutcome.Block,
+                Message = b.Reason,
+                Metadata = b.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(b.Metadata),
+            },
+            _ => new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed },
+        };
+    }
+
     private void EnsureToolDispatchHandlerWired(IChatClient chatClient, ChatResponse response)
     {
         var registry = services.GetService<DurableFunctionRegistry>();
