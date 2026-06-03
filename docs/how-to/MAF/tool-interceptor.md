@@ -33,15 +33,22 @@ For a comparison of the two approval flavors, see [HITL Patterns](./hitl-pattern
 ## The interface
 
 ```csharp
-public interface IAgentToolInterceptor
+using Temporalio.Extensions.AI;    // DurableToolDecision, IDurableToolInterceptor
+using Temporalio.Extensions.Agents; // IAgentToolInterceptor, AgentToolContext
+
+public interface IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContext>
 {
-    Task<AgentToolDecision> BeforeToolCallAsync(
+    Task<DurableToolDecision> BeforeToolCallAsync(
         AgentToolContext context,
         CancellationToken cancellationToken);
 }
 ```
 
-`BeforeToolCallAsync` is called once per tool call per turn. Return an `AgentToolDecision` to control what happens next.
+`BeforeToolCallAsync` is called once per tool call per turn. Return a `DurableToolDecision` to control what happens next.
+
+> **Library split:** `DurableToolDecision`, `DurableToolContext`, and `IDurableToolInterceptor<TContext>` are
+> defined in `Temporalio.Extensions.AI`. `IAgentToolInterceptor` and `AgentToolContext` remain in
+> `Temporalio.Extensions.Agents`. Implementors need `using Temporalio.Extensions.AI;` for the decision type.
 
 `AfterToolCallAsync` is named and reserved for a follow-on release. When it ships, the interface will add a default implementation so existing interceptors are not broken.
 
@@ -50,12 +57,20 @@ public interface IAgentToolInterceptor
 ## AgentToolContext
 
 ```csharp
-public sealed class AgentToolContext
+// DurableToolContext (Temporalio.Extensions.AI) — cross-library base
+public class DurableToolContext
 {
-    public required string AgentName { get; init; }
     public required string ToolName { get; init; }
     public required IReadOnlyDictionary<string, object?> Arguments { get; init; }
-    public required string? CallId { get; init; }
+    public string? CallId { get; init; }
+    public string? SessionId { get; init; }
+    // + ConversationId, CorrelationId, TurnNumber, Metadata (Phase 2)
+}
+
+// AgentToolContext (Temporalio.Extensions.Agents) — MAF-specific extension
+public sealed class AgentToolContext : DurableToolContext
+{
+    public required string AgentName { get; init; }
     public AgentSessionStateBag? StateBag { get; init; }
 }
 ```
@@ -72,14 +87,16 @@ public sealed class AgentToolContext
 
 ## The four decision outcomes
 
-Use the static factory methods on `AgentToolDecision` to construct instances.
+Use the static factory methods on `DurableToolDecision` (from `Temporalio.Extensions.AI`) to construct instances.
 
 ### `Proceed`
 
 Dispatch the tool normally.
 
 ```csharp
-return AgentToolDecision.Proceed(
+using Temporalio.Extensions.AI;
+
+return DurableToolDecision.Proceed(
     enrichedDescription: $"Looked up order #{orderId} — value $240.00",
     metadata: new Dictionary<string, string> { ["risk_score"] = "0.1" });
 ```
@@ -95,7 +112,7 @@ Optional parameters:
 Park the turn loop and wait for a human to approve before the tool runs.
 
 ```csharp
-return AgentToolDecision.PauseForApproval(
+return DurableToolDecision.PauseForApproval(
     $"Tool '{context.ToolName}' requested on agent '{context.AgentName}'. " +
     $"Arguments: {JsonSerializer.Serialize(context.Arguments)}");
 ```
@@ -111,7 +128,7 @@ For the full approval dashboard API and testing patterns, see [HITL Patterns —
 Do not dispatch the tool. Inject `syntheticResult` as a `FunctionResultContent` so the LLM receives a well-formed tool result without the activity executing.
 
 ```csharp
-return AgentToolDecision.Skip(
+return DurableToolDecision.Skip(
     "Order ORD-999 not found. No action taken.",
     metadata: new Dictionary<string, string> { ["reason"] = "order_not_found" });
 ```
@@ -123,7 +140,7 @@ Use this for pre-flight validation failures where the LLM should receive a plaus
 Do not dispatch the tool. Inject an error result carrying `reason` so the LLM is informed the call was blocked.
 
 ```csharp
-return AgentToolDecision.Block(
+return DurableToolDecision.Block(
     "Policy violation: bulk_delete is not permitted during off-hours.",
     metadata: new Dictionary<string, string> { ["policy"] = "off-hours-write-block" });
 ```
@@ -244,23 +261,26 @@ If an interceptor may return `PauseForApproval`, use it only with session-backed
 Load order details from the database so the reviewer sees meaningful context rather than raw LLM arguments.
 
 ```csharp
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents;
+
 public class OrderApprovalInterceptor(OrderRepository repo) : IAgentToolInterceptor
 {
-    public async Task<AgentToolDecision> BeforeToolCallAsync(
+    public async Task<DurableToolDecision> BeforeToolCallAsync(
         AgentToolContext ctx, CancellationToken ct)
     {
         if (ctx.ToolName is not "cancel_order")
-            return AgentToolDecision.Proceed();
+            return DurableToolDecision.Proceed();
 
         var orderId = ctx.Arguments.TryGetValue("orderId", out var id) ? id?.ToString() : null;
         if (orderId is null)
-            return AgentToolDecision.Skip("Missing orderId argument.");
+            return DurableToolDecision.Skip("Missing orderId argument.");
 
         var order = await repo.GetAsync(orderId, ct);
         if (order is null)
-            return AgentToolDecision.Skip($"Order {orderId} not found.");
+            return DurableToolDecision.Skip($"Order {orderId} not found.");
 
-        return AgentToolDecision.PauseForApproval(
+        return DurableToolDecision.PauseForApproval(
             $"Cancel order {orderId} — customer {order.CustomerName}, " +
             $"total ${order.Total:F2}, placed {order.PlacedAt:d}.");
     }
@@ -272,21 +292,24 @@ public class OrderApprovalInterceptor(OrderRepository repo) : IAgentToolIntercep
 Call an external risk API and block if the score exceeds a threshold.
 
 ```csharp
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents;
+
 public class RiskScoringInterceptor(IRiskService riskService) : IAgentToolInterceptor
 {
     private const double BlockThreshold = 0.8;
 
-    public async Task<AgentToolDecision> BeforeToolCallAsync(
+    public async Task<DurableToolDecision> BeforeToolCallAsync(
         AgentToolContext ctx, CancellationToken ct)
     {
         var score = await riskService.ScoreAsync(ctx.AgentName, ctx.ToolName, ctx.Arguments, ct);
 
         if (score >= BlockThreshold)
-            return AgentToolDecision.Block(
+            return DurableToolDecision.Block(
                 $"Tool '{ctx.ToolName}' blocked by risk policy (score {score:F2} >= {BlockThreshold}).",
                 metadata: new Dictionary<string, string> { ["risk_score"] = $"{score:F2}" });
 
-        return AgentToolDecision.Proceed(
+        return DurableToolDecision.Proceed(
             metadata: new Dictionary<string, string> { ["risk_score"] = $"{score:F2}" });
     }
 }
@@ -297,13 +320,16 @@ public class RiskScoringInterceptor(IRiskService riskService) : IAgentToolInterc
 Tokenize a sensitive field before it reaches the tool, keeping PII out of the `InvokeAgentTool` activity event.
 
 ```csharp
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents;
+
 public class PiiScrubbingInterceptor(IPiiVault vault) : IAgentToolInterceptor
 {
-    public async Task<AgentToolDecision> BeforeToolCallAsync(
+    public async Task<DurableToolDecision> BeforeToolCallAsync(
         AgentToolContext ctx, CancellationToken ct)
     {
         if (!ctx.Arguments.TryGetValue("ssn", out var raw) || raw is null)
-            return AgentToolDecision.Proceed();
+            return DurableToolDecision.Proceed();
 
         var token = await vault.TokenizeAsync(raw.ToString()!, ct);
 
@@ -312,7 +338,7 @@ public class PiiScrubbingInterceptor(IPiiVault vault) : IAgentToolInterceptor
             ["ssn"] = token,
         };
 
-        return AgentToolDecision.Proceed(modifiedArguments: scrubbed);
+        return DurableToolDecision.Proceed(modifiedArguments: scrubbed);
     }
 }
 ```

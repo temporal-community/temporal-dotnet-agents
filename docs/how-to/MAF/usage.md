@@ -70,7 +70,7 @@ builder.Services
 | `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
 | `HistoryStore` | Per-agent `IAgentHistoryStore` factory. `null` inherits `opts.HistoryStore`; if both are `null`, history is carried in workflow state. |
 | `CompactionStrategyKey` | Keyed-DI name of the `ICompactionStrategy` to use for in-session compaction. `null` inherits `opts.DefaultCompactionStrategy`; both `null` disables compaction. Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"`. Requires an external history store. `[Experimental("TA002")]`. See [`compaction.md`](./compaction.md). |
-| `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `AgentToolDecision`: `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
+| `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `Temporalio.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
 
 ### `DurableToolOptions` reference
 
@@ -779,7 +779,7 @@ workflow-parked flavor: the turn loop itself parks, no activity is held open, an
 `SubmitApprovalAsync` is called. Triggered two ways:
 
 - `agent.AddTool(tool, opts => opts.RequireApproval())` — absolute floor; always parks before the tool runs.
-- `IAgentToolInterceptor` returning `AgentToolDecision.PauseForApproval(description)` — dynamic, interceptor-driven.
+- `IAgentToolInterceptor` returning `DurableToolDecision.PauseForApproval(description)` — dynamic, interceptor-driven.
 
 Register an interceptor per agent (`agent.AddToolInterceptor(sp => ...)`) or as a worker-level default
 (`opts.DefaultToolInterceptor`). `SubmitApprovalAsync` is the same external API for both flavors.

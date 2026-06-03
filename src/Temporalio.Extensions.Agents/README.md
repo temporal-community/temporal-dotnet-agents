@@ -28,7 +28,7 @@ Key benefits over in-memory agent frameworks:
 - MCP tool integration via async agent factory
 - External memory with `AIContextProvider` and `AgentSessionStateBag` persistence
 - Streaming responses via `IAgentResponseHandler`
-- Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes
+- Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `Temporalio.Extensions.AI`)
 - `WorkingSetContextProvider` — `AIContextProvider` subclass that extracts recently-referenced file paths and injects a working-set note before each LLM call
 - OpenTelemetry distributed tracing (two-layer span hierarchy; search attributes opt-in via `EnableSearchAttributes`)
 - Plugin composition — `.AddWorkerPlugin()` / `.AddClientPlugin()` available via the `Temporalio.Extensions.AI` dependency (same worker builder, chains after `.AddTemporalAgents()`)
@@ -180,7 +180,7 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 - **`ITemporalAgentClient`** — Update-based client with routing, scheduling, and HITL support
 - **`TemporalAgentContext`** — Async-local context for agent tools running inside activities
 - **`StructuredOutputExtensions`** — `RunAsync<T>` with markdown fence stripping and retry
-- **`IAgentToolInterceptor`** — pre-tool lifecycle hook; return `AgentToolDecision.Proceed/PauseForApproval/Skip/Block`
+- **`IAgentToolInterceptor`** — pre-tool lifecycle hook; extends `IDurableToolInterceptor<AgentToolContext>` from `Temporalio.Extensions.AI`; return `DurableToolDecision.Proceed/PauseForApproval/Skip/Block`
 - **`WorkingSetContextProvider`** — `AIContextProvider` that injects a compact file-reference note before each LLM call
 
 ### Dependency on Temporalio.Extensions.AI

@@ -368,19 +368,22 @@ opts.AddDurableAgent("DataAgent", agent =>
 Register an interceptor that evaluates each tool call and decides dynamically whether to pause:
 
 ```csharp
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents;
+
 public class RiskyToolInterceptor : IAgentToolInterceptor
 {
-    public Task<AgentToolDecision> BeforeToolCallAsync(
+    public Task<DurableToolDecision> BeforeToolCallAsync(
         AgentToolContext context, CancellationToken cancellationToken)
     {
         // Park for approval on any destructive tool call
         if (context.ToolName.StartsWith("delete_") || context.ToolName.StartsWith("send_"))
         {
-            return Task.FromResult(AgentToolDecision.PauseForApproval(
+            return Task.FromResult(DurableToolDecision.PauseForApproval(
                 $"Tool '{context.ToolName}' requires human approval. Arguments: {context.Arguments}"));
         }
 
-        return Task.FromResult(AgentToolDecision.Proceed());
+        return Task.FromResult(DurableToolDecision.Proceed());
     }
 }
 
@@ -394,6 +397,12 @@ opts.AddDurableAgent("DataAgent", agent =>
 // Or as a worker-level default (applies to all agents that don't override):
 opts.DefaultToolInterceptor = sp => new RiskyToolInterceptor();
 ```
+
+> **Rename only:** Returning `DurableToolDecision.PauseForApproval(description)` from an interceptor is a rename
+> of the former `AgentToolDecision.PauseForApproval` — the approval flow is identical. The `description` still
+> becomes `DurableApprovalRequest.Description` on the reviewer's side. `SubmitApprovalAsync`,
+> `GetPendingApprovalAsync`, `DurableApprovalRequest`, and `DurableApprovalDecision` are all unchanged;
+> only the interceptor outcome type name changed (it now lives in `Temporalio.Extensions.AI`).
 
 > **Note:** `PauseForApproval` is only supported on `AgentWorkflow`-backed agents (sessions and sub-agents inside workflows). On `AgentJobWorkflow` (`AddScheduledAgentRun`, `ScheduleAgentAsync`) the decision degrades to `Block` with a warning logged, because scheduled jobs have no persistent session to resume.
 
