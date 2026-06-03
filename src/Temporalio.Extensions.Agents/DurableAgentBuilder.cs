@@ -1,9 +1,12 @@
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
 using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Agents.HistoryStore;
+using Temporalio.Extensions.Agents.Skills;
 
 namespace Temporalio.Extensions.Agents;
 
@@ -364,6 +367,149 @@ public sealed class DurableAgentBuilder
     {
         ArgumentNullException.ThrowIfNull(factory);
         _contextProviders.Add(factory);
+        return this;
+    }
+
+    /// <summary>
+    /// Registers progressive-disclosure skills support for this agent. Internally creates a
+    /// <see cref="SkillsContextProvider"/> (registered via <see cref="AddContextProvider(AIContextProvider)"/>)
+    /// and the skill tools <c>load_skill</c>, <c>read_skill_resource</c>, and optionally
+    /// <c>run_skill_script</c> (when <see cref="SkillsBuilder.EnableScriptExecution"/> is called).
+    /// </summary>
+    /// <param name="configure">Callback to register skills and configure options.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>How it works.</b> The skill index (name + description per skill, ~100 tokens per skill)
+    /// is injected as a system message on every LLM call via <see cref="SkillsContextProvider"/>.
+    /// The index is built on first use and cached in <c>AgentSessionStateBag["temporal.skills_index"]</c>
+    /// so it survives continue-as-new transitions. Full skill content is loaded on demand by the
+    /// <c>load_skill</c> tool — each invocation is a separate <c>InvokeAgentTool</c> Temporal
+    /// activity visible in the Web UI.
+    /// </para>
+    /// <para>
+    /// <b>Script execution.</b> Script support is disabled by default. Call
+    /// <see cref="SkillsBuilder.EnableScriptExecution"/> to register <c>run_skill_script</c>
+    /// with a <c>RequireApproval()</c> gate. File-based scripts additionally need a runner
+    /// supplied to <see cref="SkillsBuilder.AddSkillsFromDirectory"/>.
+    /// </para>
+    /// <para>
+    /// <b>File-skill drift.</b> <see cref="SkillResolver"/> re-materialises from file sources
+    /// on first use after a worker restart or continue-as-new. If the directory contents have
+    /// changed, the resolver reflects the new state while the StateBag still holds the old index.
+    /// Treat file skill sources as immutable for the lifetime of a session.
+    /// </para>
+    /// </remarks>
+    public DurableAgentBuilder UseSkills(Action<SkillsBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(configure);
+
+        var builder = new SkillsBuilder();
+        configure(builder);
+        var resolver = builder.BuildResolver();
+        bool scriptsEnabled = builder.ScriptsEnabled;
+
+        // 1. Register the provider (injects skill index as system message each LLM call).
+        AddContextProvider(new SkillsContextProvider(resolver, scriptsEnabled));
+
+        // 2. Register load_skill with SkipInterceptor — read-only, no side effects.
+        AddTool(
+            "load_skill",
+            _ => AIFunctionFactory.Create(
+                async ([Description("Skill name")] string name, CancellationToken ct) =>
+                {
+                    var skill = await resolver.FindByNameAsync(name, ct).ConfigureAwait(false);
+                    if (skill is null)
+                    {
+                        return $"Skill '{name}' not found.";
+                    }
+
+                    var content = skill.Content;
+                    if (!scriptsEnabled && content.Contains("<scripts>", StringComparison.Ordinal))
+                    {
+                        content = SkillsContextProvider.StripScriptsSection(content);
+                    }
+
+                    return content;
+                },
+                name: "load_skill",
+                description: "Load the full instructions for a skill by name."),
+            opts => opts.SkipInterceptor());
+
+        // 3. Register read_skill_resource — no SkipInterceptor by default; resource delegates
+        //    can be side-effectful and users may want interceptor coverage.
+        AddTool(
+            "read_skill_resource",
+            sp => AIFunctionFactory.Create(
+                async (
+                    [Description("Skill name")] string skillName,
+                    [Description("Resource name")] string resourceName,
+                    CancellationToken ct) =>
+                {
+                    var skill = await resolver.FindByNameAsync(skillName, ct).ConfigureAwait(false);
+                    if (skill is null)
+                    {
+                        return $"Skill '{skillName}' not found.";
+                    }
+
+                    var resource = skill.Resources?.FirstOrDefault(
+                        r => r.Name.Equals(resourceName, StringComparison.OrdinalIgnoreCase));
+                    if (resource is null)
+                    {
+                        return $"Resource '{resourceName}' not found in '{skillName}'.";
+                    }
+
+                    return await resource.ReadAsync(sp, ct).ConfigureAwait(false);
+                },
+                name: "read_skill_resource",
+                description: "Read a supplementary resource file from a skill."));
+
+        // 4. Register run_skill_script only when EnableScriptExecution() was called.
+        if (scriptsEnabled)
+        {
+            AddTool(
+                "run_skill_script",
+                sp => AIFunctionFactory.Create(
+                    async (
+                        [Description("Skill name")] string skillName,
+                        [Description("Script name")] string scriptName,
+                        [Description("JSON arguments object")] string argumentsJson,
+                        CancellationToken ct) =>
+                    {
+                        var skill = await resolver.FindByNameAsync(skillName, ct).ConfigureAwait(false);
+                        if (skill is null)
+                        {
+                            return $"Skill '{skillName}' not found.";
+                        }
+
+                        var script = skill.Scripts?.FirstOrDefault(
+                            s => s.Name.Equals(scriptName, StringComparison.OrdinalIgnoreCase));
+                        if (script is null)
+                        {
+                            return $"Script '{scriptName}' not found in '{skillName}'.";
+                        }
+
+                        Dictionary<string, object?>? rawArgs = null;
+                        try
+                        {
+                            rawArgs = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                                argumentsJson, AIJsonUtilities.DefaultOptions);
+                        }
+                        catch (JsonException ex)
+                        {
+                            return $"Invalid arguments JSON: {ex.Message}";
+                        }
+
+                        var args = new AIFunctionArguments(
+                            rawArgs ?? new Dictionary<string, object?>());
+                        return await script.RunAsync(skill, args, ct).ConfigureAwait(false);
+                    },
+                    name: "run_skill_script",
+                    description: "Execute a script from a skill."),
+                opts => opts.NoRetry().RequireApproval());
+        }
+
         return this;
     }
 
