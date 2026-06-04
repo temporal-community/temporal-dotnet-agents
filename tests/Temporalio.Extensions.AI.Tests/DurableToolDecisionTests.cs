@@ -9,7 +9,7 @@ namespace Temporalio.Extensions.AI.Tests;
 /// <remarks>
 /// <c>DurableToolDecision</c> is the developer-facing discriminated union — it is not
 /// wire-serialized across the Temporal workflow/activity boundary. The internal
-/// <c>DurableToolInterceptorResult</c> DTO (in <c>Temporalio.Extensions.Agents</c>) is the
+/// <c>DurableToolInterceptorResult</c> DTO (in <c>Temporalio.Extensions.AI</c>) is the
 /// serialized form; its round-trip coverage lives in
 /// <c>AgentToolInterceptorResultSerializationTests</c> in the Agents test project.
 /// </remarks>
