@@ -86,10 +86,14 @@ builder.Services
             agent.UseSkills(s =>
             {
                 // File-based: scans skill-catalog/ for SKILL.md files up to 2 levels deep.
+                // Anchored to AppContext.BaseDirectory so the path resolves correctly
+                // regardless of the caller's working directory (dotnet run from repo root,
+                // IDE debugger, or the sample-canary recipe all work the same way).
                 // Note: the directory is named "skill-catalog" (not "skills") to avoid a
                 // case-insensitive filesystem collision with the compiled "Skills" executable
                 // on macOS. Frontmatter name/description values must be unquoted strings.
-                s.AddSkillsFromDirectory("skill-catalog");
+                s.AddSkillsFromDirectory(
+                    Path.Combine(AppContext.BaseDirectory, "skill-catalog"));
 
                 // Inline: registered directly — no file I/O, content is a C# string.
                 s.AddSkill(meetingSummarySkill);
