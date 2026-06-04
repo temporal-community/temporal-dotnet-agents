@@ -171,12 +171,12 @@ public sealed class SkillsBuilder
     /// <remarks>
     /// <para>
     /// When enabled, the <c>run_skill_script</c> tool is registered and will always require
-    /// human approval before dispatching (Rule 2 floor). The approval gate does not eliminate
-    /// execution risk for file-based scripts — callers should ensure a script runner is
-    /// supplied to <see cref="AddSkillsFromDirectory"/> when file scripts are present.
-    /// </para>
-    /// <para>
-    /// Inline and class-based scripts are delegate-backed and do not require a runner.
+    /// human approval before dispatching (Rule 2 floor). File-backed scripts are <b>not</b>
+    /// supported by the native SKILL.md scanner — <see cref="AddSkillsFromDirectory"/> throws
+    /// <see cref="NotSupportedException"/> when a runner is supplied. Script execution applies
+    /// only to inline (<see cref="AgentInlineSkill"/>) and class-based
+    /// (<see cref="AgentClassSkill{TSelf}"/>) skills, or to skills provided by a custom
+    /// <see cref="AgentSkillsSource"/> registered via <see cref="AddSkillsSource"/>.
     /// </para>
     /// </remarks>
     public SkillsBuilder EnableScriptExecution()
