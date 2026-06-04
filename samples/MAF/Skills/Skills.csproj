@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Samples don't need strict warning enforcement -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <UserSecretsId>a7d2c9e1-5f3b-4a08-b6e4-1c8d0f4b7e23</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Temporalio.Extensions.Agents/Temporalio.Extensions.Agents.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Generic host: CreateApplicationBuilder, IHostedService, etc. -->
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.3.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Copy skill-catalog/ tree to the output directory, preserving the folder structure.
+       Uses an explicit Copy task with MakeDir because the output directory name (skill-catalog)
+       differs from the assembly name (Skills) so no case-insensitive collision occurs on macOS. -->
+  <ItemGroup>
+    <SkillCatalogFiles Include="skill-catalog\**\*" />
+  </ItemGroup>
+
+  <Target Name="CopySkillCatalogToOutput" AfterTargets="Build">
+    <MakeDir Directories="@(SkillCatalogFiles->'$(MSBuildProjectDirectory)/$(OutputPath)%(RelativeDir)')" />
+    <Copy
+      SourceFiles="@(SkillCatalogFiles)"
+      DestinationFiles="@(SkillCatalogFiles->'$(MSBuildProjectDirectory)/$(OutputPath)%(Identity)')"
+      SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

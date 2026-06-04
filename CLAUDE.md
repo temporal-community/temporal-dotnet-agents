@@ -28,11 +28,11 @@ TemporalAgents/
 │   └── Temporalio.Extensions.AI/       # MEAI IChatClient middleware (no Agent Framework)
 ├── tests/                     # Four projects: {Agents,AI} × {Tests, IntegrationTests}
 └── samples/
-    ├── MAF/                   # 13 samples: BasicAgent, SplitWorkerClient, WorkflowOrchestration,
+    ├── MAF/                   # 14 samples: BasicAgent, SplitWorkerClient, WorkflowOrchestration,
     │                          # EvaluatorOptimizer, MultiAgentRouting, HumanInTheLoop,
     │                          # WorkflowRouting, AmbientAgent, ConfigurableAgent,
     │                          # ExternalHistoryStore, PerToolActivities, Compaction,
-    │                          # ContextProviders
+    │                          # ContextProviders, Skills
     └── MEAI/                  # 6 samples: DurableChat, DurableTools, OpenTelemetry
                                # (DurableOpenTelemetry.csproj), HumanInTheLoop,
                                # DurableEmbeddings, CustomWorkflow
@@ -304,6 +304,7 @@ dotnet run --project samples/MAF/ExternalHistoryStore/ExternalHistoryStore.cspro
 dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj         # per-tool Temporal activities with write-tool no-retry
 dotnet run --project samples/MAF/Compaction/Compaction.csproj                       # UseCompaction("summarization") + GDPR erasure cascade demo
 dotnet run --project samples/MAF/ContextProviders/ContextProviders.csproj           # TodoProvider + AgentModeProvider via AddContextProvider
+dotnet run --project samples/MAF/Skills/Skills.csproj                               # UseSkills: file-based + inline skills with progressive-disclosure load_skill
 
 # SplitWorkerClient — Worker first, then Client in a separate terminal
 dotnet run --project samples/MAF/SplitWorkerClient/Worker/Worker.csproj
