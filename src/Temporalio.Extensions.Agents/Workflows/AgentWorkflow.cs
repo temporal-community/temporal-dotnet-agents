@@ -456,10 +456,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
                 foreach (var tc in toolCalls)
                 {
-                    var isSkipped = skippedTools is not null
-                        && skippedTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
-
-                    if (isSkipped)
+                    if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, skippedTools))
                     {
                         interceptorTasks.Add(Task.FromResult(
                             new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
@@ -477,22 +474,10 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             SerializedStateBag = _currentStateBag,
                         };
 
-                        // Use per-tool interceptor timeout when set; fall back to shared opts.
-                        var baseOpts = interceptorToolOpts is not null
-                            && interceptorToolOpts.TryGetValue(tc.Name, out var toolSpecific)
-                                ? toolSpecific
-                                : interceptorOpts;
-                        var perToolInterceptorOpts = new ActivityOptions
-                        {
-                            StartToCloseTimeout = baseOpts.StartToCloseTimeout,
-                            HeartbeatTimeout = baseOpts.HeartbeatTimeout,
-                            RetryPolicy = baseOpts.RetryPolicy,
-                            Summary = $"intercept:{tc.Name}",
-                        };
-
+                        // See also: DurableChatWorkflow.ExecutePattern3TurnAsync (MEAI path) — parallel typed dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
-                            perToolInterceptorOpts));
+                            DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(tc.Name, interceptorOpts, interceptorToolOpts)));
                     }
                 }
 
@@ -521,33 +506,19 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 var tc = toolCalls[i];
                 var interceptorResult = interceptorResults?[i];
 
-                // Determine effective outcome.
-                var outcome = interceptorResult?.Outcome ?? DurableToolOutcome.Proceed;
-
-                // Rule 2: RequireApproval is an absolute floor. Block is strictly stricter than
-                // approval and is honoured as-is; every other outcome (Proceed, Skip,
-                // PauseForApproval) is overridden to PauseForApproval so the approval gate
-                // cannot be bypassed by an interceptor returning Skip (BLOCK-3 fix).
-                var toolRequiresApproval = requiresApprovalTools is not null
-                    && requiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
-
-                if (toolRequiresApproval && outcome != DurableToolOutcome.Block)
-                {
-                    outcome = DurableToolOutcome.PauseForApproval;
-                }
+                // Determine effective outcome (Rule 2: RequireApproval floor, Block never overridden).
+                var outcome = DurableToolDecisionPolicy.GetEffectiveOutcome(
+                    interceptorResult?.Outcome, tc.Name, requiresApprovalTools);
 
                 switch (outcome)
                 {
                     case DurableToolOutcome.Proceed:
                         // Buffer for dispatch after all approval waits resolve (BLOCK-4).
-                        var effectiveArgs = interceptorResult?.ModifiedArguments is { } modArgs
-                            ? modArgs
-                            : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
                         pendingToolDispatches.Add((i, new InvokeAgentToolInput
                         {
                             AgentName = _input!.AgentName,
                             ToolName = tc.Name,
-                            Arguments = effectiveArgs,
+                            Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
                         }, ResolveDurableToolActivityOptions(tc.Name)));
                         break;
@@ -555,16 +526,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                     case DurableToolOutcome.PauseForApproval:
                         // Feature A: park the turn loop; wait for a human decision via
                         // the DurableApprovalMixin (compute-free durable wait).
-                        var approvalDescription = interceptorResult?.EnrichedDescription
-                            ?? interceptorResult?.Message
-                            ?? $"Approve invocation of tool '{tc.Name}'";
-
                         var approvalRequest = new DurableApprovalRequest
                         {
                             RequestId = $"{tc.CallId ?? tc.Name}-{Workflow.NewGuid():N}",
                             FunctionName = tc.Name,
                             CallId = tc.CallId,
-                            Description = approvalDescription,
+                            Description = DurableToolDecisionPolicy.GetApprovalDescription(interceptorResult, tc.Name),
                         };
 
                         // Sequential: the mixin enforces one pending approval at a time.
@@ -584,14 +551,11 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                         if (decision.Approved)
                         {
                             // Buffer the approved tool for dispatch in Phase 2.5.
-                            var approvedArgs = interceptorResult?.ModifiedArguments is { } mArgs
-                                ? mArgs
-                                : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
                             pendingToolDispatches.Add((i, new InvokeAgentToolInput
                             {
                                 AgentName = _input!.AgentName,
                                 ToolName = tc.Name,
-                                Arguments = approvedArgs,
+                                Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                                 CallId = tc.CallId,
                             }, ResolveDurableToolActivityOptions(tc.Name)));
                         }
@@ -601,17 +565,17 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             var denialReason = string.IsNullOrEmpty(decision.Reason)
                                 ? "Tool call was denied or timed out."
                                 : decision.Reason;
-                            syntheticResults[i] = $"[Denied] {denialReason}";
+                            syntheticResults[i] = DurableToolDecisionPolicy.DenialMessage(denialReason);
                         }
                         break;
 
                     case DurableToolOutcome.Skip:
-                        syntheticResults[i] = interceptorResult?.Message ?? string.Empty;
+                        syntheticResults[i] = DurableToolDecisionPolicy.SkipMessage(interceptorResult?.Message);
                         break;
 
                     case DurableToolOutcome.Block:
                     default:
-                        syntheticResults[i] = $"[Blocked] {interceptorResult?.Message ?? "Tool execution was blocked."}";
+                        syntheticResults[i] = DurableToolDecisionPolicy.BlockMessage(interceptorResult?.Message);
                         break;
                 }
             }

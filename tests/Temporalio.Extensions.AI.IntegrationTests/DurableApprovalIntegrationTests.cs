@@ -4,7 +4,8 @@ using Xunit;
 
 namespace Temporalio.Extensions.AI.IntegrationTests;
 
-public class DurableApprovalIntegrationTests : IClassFixture<IntegrationTestFixture>
+[Collection("AI Integration Tests")]
+public class DurableApprovalIntegrationTests
 {
     private readonly IntegrationTestFixture _fixture;
 

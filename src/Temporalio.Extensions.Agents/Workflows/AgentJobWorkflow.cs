@@ -76,10 +76,7 @@ internal sealed class AgentJobWorkflow
 
                 foreach (var tc in toolCalls)
                 {
-                    var isSkipped = skippedTools is not null
-                        && skippedTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
-
-                    if (isSkipped)
+                    if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, skippedTools))
                     {
                         interceptorTasks.Add(Task.FromResult(
                             new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
@@ -94,19 +91,10 @@ internal sealed class AgentJobWorkflow
                             CallId = tc.CallId,
                             SerializedStateBag = null,
                         };
-                        var baseOpts = interceptorToolOpts is not null
-                            && interceptorToolOpts.TryGetValue(tc.Name, out var toolSpecific)
-                                ? toolSpecific
-                                : interceptorOpts;
+                        // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel typed dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
-                            new ActivityOptions
-                            {
-                                StartToCloseTimeout = baseOpts.StartToCloseTimeout,
-                                HeartbeatTimeout = baseOpts.HeartbeatTimeout,
-                                RetryPolicy = baseOpts.RetryPolicy,
-                                Summary = $"intercept:{tc.Name}",
-                            }));
+                            DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(tc.Name, interceptorOpts, interceptorToolOpts)));
                     }
                 }
 
@@ -121,31 +109,19 @@ internal sealed class AgentJobWorkflow
             {
                 var tc = toolCalls[i];
                 var interceptorResult = interceptorResults?[i];
-                var outcome = interceptorResult?.Outcome ?? DurableToolOutcome.Proceed;
-
-                // Rule 2: RequireApproval is an absolute floor. Block is strictly stricter than
-                // approval and is honoured as-is; every other outcome (Proceed, Skip,
-                // PauseForApproval) is overridden to PauseForApproval so the approval gate
-                // cannot be bypassed by an interceptor returning Skip (BLOCK-3 fix).
-                var toolRequiresApproval = input.RequiresApprovalTools is not null
-                    && input.RequiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
-                if (toolRequiresApproval && outcome != DurableToolOutcome.Block)
-                {
-                    outcome = DurableToolOutcome.PauseForApproval;
-                }
+                // Determine effective outcome (Rule 2: RequireApproval floor, Block never overridden).
+                var outcome = DurableToolDecisionPolicy.GetEffectiveOutcome(
+                    interceptorResult?.Outcome, tc.Name, input.RequiresApprovalTools);
 
                 switch (outcome)
                 {
                     case DurableToolOutcome.Proceed:
-                        var effectiveArgs = interceptorResult?.ModifiedArguments is { } mArgs
-                            ? mArgs
-                            : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
                         var toolOptions = ResolveDurableToolActivityOptions(input, tc.Name);
                         var toolInput = new InvokeAgentToolInput
                         {
                             AgentName = input.AgentName,
                             ToolName = tc.Name,
-                            Arguments = effectiveArgs,
+                            Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
                         };
                         toolTasks.Add(Workflow.ExecuteActivityAsync(
@@ -164,13 +140,13 @@ internal sealed class AgentJobWorkflow
                         break;
 
                     case DurableToolOutcome.Skip:
-                        syntheticResults[i] = interceptorResult?.Message ?? string.Empty;
+                        syntheticResults[i] = DurableToolDecisionPolicy.SkipMessage(interceptorResult?.Message);
                         toolTasks.Add(null);
                         break;
 
                     case DurableToolOutcome.Block:
                     default:
-                        syntheticResults[i] = $"[Blocked] {interceptorResult?.Message ?? "Tool execution was blocked."}";
+                        syntheticResults[i] = DurableToolDecisionPolicy.BlockMessage(interceptorResult?.Message);
                         toolTasks.Add(null);
                         break;
                 }

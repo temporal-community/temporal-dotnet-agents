@@ -265,14 +265,7 @@ public sealed class TemporalAIAgent : AIAgent
                 var interceptorTasks = new List<Task<AgentsInterceptorResult>>(toolCalls.Count);
                 foreach (var tc in toolCalls)
                 {
-                    var isSkipped = _interceptorSkippedTools is not null
-                        && _interceptorSkippedTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
-                    var baseInterceptorOpts = _interceptorToolActivityOptions is not null
-                        && _interceptorToolActivityOptions.TryGetValue(tc.Name, out var toolSpecific)
-                            ? toolSpecific
-                            : interceptorOpts;
-
-                    if (isSkipped)
+                    if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, _interceptorSkippedTools))
                     {
                         interceptorTasks.Add(Task.FromResult(
                             new AgentsInterceptorResult { Outcome = AgentsToolOutcome.Proceed }));
@@ -287,15 +280,10 @@ public sealed class TemporalAIAgent : AIAgent
                             CallId = tc.CallId,
                             SerializedStateBag = null,
                         };
+                        // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel typed dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
-                            new ActivityOptions
-                            {
-                                StartToCloseTimeout = baseInterceptorOpts.StartToCloseTimeout,
-                                HeartbeatTimeout = baseInterceptorOpts.HeartbeatTimeout,
-                                RetryPolicy = baseInterceptorOpts.RetryPolicy,
-                                Summary = $"intercept:{tc.Name}",
-                            }));
+                            DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(tc.Name, interceptorOpts, _interceptorToolActivityOptions)));
                     }
                 }
                 interceptorResults = await Workflow.WhenAllAsync(interceptorTasks).ConfigureAwait(true);
@@ -310,30 +298,18 @@ public sealed class TemporalAIAgent : AIAgent
             {
                 var tc = toolCalls[i];
                 var interceptorResult = interceptorResults?[i];
-                var outcome = interceptorResult?.Outcome ?? AgentsToolOutcome.Proceed;
-
-                // Rule 2: RequireApproval is an absolute floor. Block is strictly stricter than
-                // approval and is honoured as-is; every other outcome (Proceed, Skip,
-                // PauseForApproval) is overridden to PauseForApproval so the approval gate
-                // cannot be bypassed by an interceptor returning Skip (BLOCK-3 fix).
-                var toolRequiresApproval = _requiresApprovalTools is not null
-                    && _requiresApprovalTools.Contains(tc.Name, StringComparer.OrdinalIgnoreCase);
-                if (toolRequiresApproval && outcome != AgentsToolOutcome.Block)
-                {
-                    outcome = AgentsToolOutcome.PauseForApproval;
-                }
+                // Determine effective outcome (Rule 2: RequireApproval floor, Block never overridden).
+                var outcome = DurableToolDecisionPolicy.GetEffectiveOutcome(
+                    interceptorResult?.Outcome, tc.Name, _requiresApprovalTools);
 
                 switch (outcome)
                 {
                     case AgentsToolOutcome.Proceed:
-                        var effectiveArgs = interceptorResult?.ModifiedArguments is { } mArgs
-                            ? mArgs
-                            : (tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments));
                         var toolInput = new InvokeAgentToolInput
                         {
                             AgentName = _agentName,
                             ToolName = tc.Name,
-                            Arguments = effectiveArgs,
+                            Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
                         };
                         // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)
@@ -359,13 +335,13 @@ public sealed class TemporalAIAgent : AIAgent
                         break;
 
                     case AgentsToolOutcome.Skip:
-                        syntheticResults[i] = interceptorResult?.Message ?? string.Empty;
+                        syntheticResults[i] = DurableToolDecisionPolicy.SkipMessage(interceptorResult?.Message);
                         toolTasks.Add(null);
                         break;
 
                     case AgentsToolOutcome.Block:
                     default:
-                        syntheticResults[i] = $"[Blocked] {interceptorResult?.Message ?? "Tool execution was blocked."}";
+                        syntheticResults[i] = DurableToolDecisionPolicy.BlockMessage(interceptorResult?.Message);
                         toolTasks.Add(null);
                         break;
                 }

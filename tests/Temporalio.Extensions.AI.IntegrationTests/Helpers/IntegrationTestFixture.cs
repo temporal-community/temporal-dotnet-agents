@@ -7,6 +7,9 @@ using Xunit;
 
 namespace Temporalio.Extensions.AI.IntegrationTests.Helpers;
 
+[CollectionDefinition("AI Integration Tests")]
+public sealed class AiIntegrationTestCollection : ICollectionFixture<IntegrationTestFixture> { }
+
 /// <summary>
 /// Shared xunit fixture that manages:
 /// <list type="bullet">
