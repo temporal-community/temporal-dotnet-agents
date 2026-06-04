@@ -25,12 +25,10 @@ namespace Temporalio.Extensions.Agents.State;
 [JsonSerializable(typeof(CompactHistoryInput))]
 [JsonSerializable(typeof(IReadOnlyList<DurableSessionEntry>))]
 [JsonSerializable(typeof(List<DurableSessionEntry>))]
-// Feature L — tool interceptor I/O (Agents-specific wire types; fully qualified to avoid
-// ambiguity with the identically-named types in Temporalio.Extensions.AI that were added
-// in Phase 2 for the MEAI interceptor path).
+// Feature L — tool interceptor I/O. DurableToolInterceptorResult/DurableToolOutcome live in
+// Temporalio.Extensions.AI (DurableAIJsonContext already registers them); only the
+// Agents-specific input type needs registration here.
 [JsonSerializable(typeof(Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorInput))]
-[JsonSerializable(typeof(Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorResult))]
-[JsonSerializable(typeof(Temporalio.Extensions.Agents.Workflows.DurableToolOutcome))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 // Function call and result content
 [JsonSerializable(typeof(Dictionary<string, object>))]

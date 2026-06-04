@@ -9,12 +9,9 @@ using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Workflows;
 
-// Aliases to resolve ambiguity with the identically-named types added to
-// Temporalio.Extensions.AI in Phase 2. This file belongs to the Agents library
-// and must always reference the Agents-internal wire types.
 using AgentsInterceptorInput = Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorInput;
-using AgentsInterceptorResult = Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorResult;
-using AgentsToolOutcome = Temporalio.Extensions.Agents.Workflows.DurableToolOutcome;
+using AgentsInterceptorResult = Temporalio.Extensions.AI.DurableToolInterceptorResult;
+using AgentsToolOutcome = Temporalio.Extensions.AI.DurableToolOutcome;
 
 namespace Temporalio.Extensions.Agents;
 

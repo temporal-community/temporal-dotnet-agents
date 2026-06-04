@@ -7,6 +7,56 @@ namespace Temporalio.Extensions.AI;
 /// </summary>
 internal sealed class DurableToolInterceptorResult
 {
+    /// <summary>
+    /// Maps a <see cref="DurableToolDecision"/> discriminated union to a serializable
+    /// <see cref="DurableToolInterceptorResult"/> DTO. This factory is the single source of
+    /// truth for the decision-to-DTO mapping; both the MEAI and MAF activity paths delegate here.
+    /// </summary>
+    /// <param name="decision">The interceptor decision to convert.</param>
+    /// <returns>A populated <see cref="DurableToolInterceptorResult"/>.</returns>
+    internal static DurableToolInterceptorResult FromDecision(DurableToolDecision decision) =>
+        decision switch
+        {
+            DurableToolDecision.ProceedDecision p => new DurableToolInterceptorResult
+            {
+                Outcome = DurableToolOutcome.Proceed,
+                EnrichedDescription = p.EnrichedDescription,
+                ModifiedArguments = p.ModifiedArguments is null
+                    ? null
+                    : new Dictionary<string, object?>(p.ModifiedArguments),
+                Metadata = p.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(p.Metadata),
+            },
+            DurableToolDecision.ApprovalRequiredDecision a => new DurableToolInterceptorResult
+            {
+                Outcome = DurableToolOutcome.PauseForApproval,
+                EnrichedDescription = a.Description,
+                Message = a.Description,
+                Metadata = a.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(a.Metadata),
+            },
+            DurableToolDecision.SkipDecision s => new DurableToolInterceptorResult
+            {
+                Outcome = DurableToolOutcome.Skip,
+                Message = s.SyntheticResult,
+                Metadata = s.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(s.Metadata),
+            },
+            DurableToolDecision.BlockDecision b => new DurableToolInterceptorResult
+            {
+                Outcome = DurableToolOutcome.Block,
+                Message = b.Reason,
+                Metadata = b.Metadata is null
+                    ? null
+                    : new Dictionary<string, string>(b.Metadata),
+            },
+            _ => new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed },
+        };
+
+
     /// <summary>The outcome decided by the interceptor.</summary>
     public DurableToolOutcome Outcome { get; init; }
 

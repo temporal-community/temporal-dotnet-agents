@@ -73,4 +73,27 @@ public interface IDurableChatSessionClient
         string conversationId,
         DurableApprovalDecision decision,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends a graceful shutdown signal to the session workflow, causing it to exit its
+    /// session loop rather than sitting parked until the configured <c>SessionTimeToLive</c>.
+    /// </summary>
+    /// <param name="conversationId">The conversation identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// Equivalent to signalling <see cref="DurableChatWorkflowBase{TOutput}.ShutdownSignalName"/>
+    /// on the workflow handle, but keeps the caller free of the raw workflow handle and
+    /// workflow ID prefix details.
+    /// </remarks>
+    Task ShutdownAsync(string conversationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generates the Temporal workflow ID for a given conversation ID using the configured
+    /// <c>WorkflowIdPrefix</c>. Use this when external code needs to address the workflow
+    /// directly (e.g. to attach a custom signal) while staying in sync with the session
+    /// client's prefix configuration.
+    /// </summary>
+    /// <param name="conversationId">The conversation identifier.</param>
+    /// <returns>The workflow ID used by the session workflow for this conversation.</returns>
+    string GetWorkflowId(string conversationId);
 }

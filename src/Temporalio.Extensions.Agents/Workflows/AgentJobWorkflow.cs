@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using Temporalio.Extensions.AI;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents.Workflows;

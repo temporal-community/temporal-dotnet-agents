@@ -288,7 +288,7 @@ internal sealed class DefaultTemporalAgentClient(
         {
             if (toolReg.Options.RequireApprovalFlag)
             {
-                (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
+                (requiresApprovalTools ??= []).Add(toolReg.Name);
             }
         }
 
@@ -307,7 +307,7 @@ internal sealed class DefaultTemporalAgentClient(
             {
                 if (toolReg.Options.SkipInterceptorFlag)
                 {
-                    (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
+                    (interceptorSkippedTools ??= []).Add(toolReg.Name);
                 }
 
                 // Wire per-tool interceptor timeout when set (F2 fix).

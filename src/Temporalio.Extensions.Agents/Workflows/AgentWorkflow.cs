@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -143,9 +144,11 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
     {
-        // activityOptions from the base is intentionally not used — AgentWorkflow constructs its own
-        // ActivityOptions from _input.RetryPolicy to apply MAF-specific retry policy and summary.
-        // If the base class gains new required fields in activityOptions, revisit this override.
+        // Signal to the reader that this override intentionally reconstructs activity options.
+        // If DurableChatWorkflowBase.RunTurnAsync starts populating activityOptions.RetryPolicy
+        // or other fields that AgentWorkflow also sets, this assert will fire in debug builds.
+        Debug.Assert(activityOptions.RetryPolicy is null,
+            "Base class now sets RetryPolicy on activityOptions — revisit AgentWorkflow.ExecuteTurnAsync.");
         _ = activityOptions;
         var agentRequestEntry = (AgentSessionRequest)requestEntry;
         var runRequest = ToRunRequest(agentRequestEntry);

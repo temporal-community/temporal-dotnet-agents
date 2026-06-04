@@ -1,27 +1,25 @@
 using System.Text.Json;
-using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.AI;
 using Xunit;
 
-// Aliases to resolve ambiguity with the identically-named types added to
-// Temporalio.Extensions.AI in Phase 2.  This test file exercises the Agents-library
-// wire types specifically, so it must always reference those.
 using AgentsInterceptorInput = Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorInput;
-using AgentsInterceptorResult = Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorResult;
-using AgentsToolOutcome = Temporalio.Extensions.Agents.Workflows.DurableToolOutcome;
+using AgentsInterceptorResult = Temporalio.Extensions.AI.DurableToolInterceptorResult;
+using AgentsToolOutcome = Temporalio.Extensions.AI.DurableToolOutcome;
 
 namespace Temporalio.Extensions.Agents.Tests;
 
 /// <summary>
 /// Round-trip serialization tests for <see cref="AgentsInterceptorResult"/> and
-/// <see cref="AgentsInterceptorInput"/> via <see cref="AgentSessionJsonContext"/>.
+/// <see cref="AgentsInterceptorInput"/> via <see cref="TemporalAgentJsonUtilities.DefaultOptions"/>,
+/// which chains <see cref="DurableAIJsonContext"/> (registers the AI-lib wire types) over
+/// <see cref="State.AgentSessionJsonContext"/> (registers the Agents-lib wire types).
 /// These types cross the workflow/activity boundary — they must survive source-gen JSON.
 /// </summary>
 public class AgentToolInterceptorResultSerializationTests
 {
     private static readonly JsonSerializerOptions s_opts =
-        AgentSessionJsonContext.Default.Options;
+        TemporalAgentJsonUtilities.DefaultOptions;
 
     [Fact]
     public void AgentsToolOutcome_Enum_RoundTrips()

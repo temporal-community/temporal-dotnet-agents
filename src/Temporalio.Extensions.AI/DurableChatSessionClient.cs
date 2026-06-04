@@ -244,6 +244,22 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     }
 
     /// <summary>
+    /// Sends a graceful shutdown signal to the session workflow so it exits its session loop
+    /// rather than sitting parked until <see cref="DurableExecutionOptions.SessionTimeToLive"/>.
+    /// </summary>
+    public async Task ShutdownAsync(string conversationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+
+        var handle = _client.GetWorkflowHandle(GetWorkflowId(conversationId));
+        await handle.SignalAsync(
+            DurableChatWorkflowBase<ChatResponse>.ShutdownSignalName,
+            Array.Empty<object>(),
+            new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Generates the workflow ID from a conversation ID using the configured
     /// <see cref="DurableExecutionOptions.WorkflowIdPrefix"/>. Use this in tool
     /// closures or external code that needs to address the workflow directly (e.g.,

@@ -15,6 +15,13 @@ namespace Temporalio.Extensions.AI;
 /// <typeparam name="TOutput">The type returned from each completed chat turn.</typeparam>
 public abstract class DurableChatWorkflowBase<TOutput>
 {
+    /// <summary>
+    /// The name of the workflow signal used to request graceful shutdown of a session.
+    /// Use this constant when signalling shutdown externally rather than hard-coding the
+    /// string <c>"Shutdown"</c> — keeping caller and handler in sync if the name ever changes.
+    /// </summary>
+    /// <seealso cref="IDurableChatSessionClient.ShutdownAsync"/>
+    public const string ShutdownSignalName = "Shutdown";
     private List<DurableSessionEntry> _history = new(16);
     private readonly DurableApprovalMixin _approvalMixin = new();
     private bool _isProcessing;
@@ -403,7 +410,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// <summary>
     /// Requests graceful shutdown of this session.
     /// </summary>
-    [WorkflowSignal("Shutdown")]
+    [WorkflowSignal(ShutdownSignalName)]
     public Task RequestShutdownAsync()
     {
         _shutdownRequested = true;
