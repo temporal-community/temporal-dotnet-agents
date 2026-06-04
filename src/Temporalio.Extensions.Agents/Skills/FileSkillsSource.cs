@@ -37,7 +37,7 @@ namespace Temporalio.Extensions.Agents.Skills;
 /// <b>Not supported.</b> resources, scripts, extension filters, script runners.
 /// </para>
 /// </remarks>
-internal sealed class FileSkillsSource : AgentSkillsSource
+public sealed class FileSkillsSource : AgentSkillsSource
 {
     // AgentFileSkill has an internal constructor in MAF 1.3.0. We cache the ConstructorInfo
     // once per type so the reflection cost is paid only on the first scan.
