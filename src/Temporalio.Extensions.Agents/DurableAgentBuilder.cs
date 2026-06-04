@@ -391,8 +391,12 @@ public sealed class DurableAgentBuilder
     /// <para>
     /// <b>Script execution.</b> Script support is disabled by default. Call
     /// <see cref="SkillsBuilder.EnableScriptExecution"/> to register <c>run_skill_script</c>
-    /// with a <c>RequireApproval()</c> gate. File-based scripts additionally need a runner
-    /// supplied to <see cref="SkillsBuilder.AddSkillsFromDirectory"/>.
+    /// with a <c>RequireApproval()</c> gate. File-backed scripts are <b>not</b> supported by
+    /// the native SKILL.md scanner — <see cref="SkillsBuilder.AddSkillsFromDirectory"/> throws
+    /// <see cref="NotSupportedException"/> when a runner is supplied. Script execution is only
+    /// available for inline and class-based skills, or via a custom
+    /// <see cref="AgentSkillsSource"/> registered through
+    /// <see cref="SkillsBuilder.AddSkillsSource"/>.
     /// </para>
     /// <para>
     /// <b>File-skill drift.</b> <see cref="SkillResolver"/> re-materialises from file sources

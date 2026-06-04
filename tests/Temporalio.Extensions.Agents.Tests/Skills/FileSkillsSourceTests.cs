@@ -369,27 +369,52 @@ public class FileSkillsSourceTests
     // ---------------------------------------------------------------------------
 
     [Fact]
-    public async Task GetSkillsAsync_IOException_OnFileRead_SkipsFileNotWholeDirectory()
+    public async Task GetSkillsAsync_UnauthorizedSkillMd_SkippedAndWarningLogged()
     {
-        // FileSkillsSource wraps IOException inline (per-file), not at directory level.
-        // We simulate this by using a custom source that throws on a specific path.
-        // Here we test that a good sibling in the same directory is still returned.
+        // File.ReadAllTextAsync throws UnauthorizedAccessException when the file has no read
+        // permissions. This verifies the per-file catch (not the per-directory catch) fires:
+        // the bad file is skipped but the good sibling in the same directory is still returned.
+        //
+        // Skipped on Windows (permission semantics differ) and when running as root
+        // (root bypasses permission checks).
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return;
+
+        // Running as root? Can't reliably revoke access.
+        if (Environment.UserName is "root")
+            return;
+
         var root = MakeTempDir();
+        var logMessages = new List<string>();
+        var logger = new CollectingLogger(logMessages);
+        string? noReadFile = null;
         try
         {
-            WriteSkill(root, "good-skill");
-            // We can't easily force IOException on an existing file without platform tricks,
-            // so we verify the source handles a second good file — which demonstrates the
-            // loop continues rather than aborting.
-            var dir2 = Path.Combine(root, "also-good");
-            WriteSkill(dir2, "also-good-skill");
+            // Good skill in root.
+            WriteSkill(root, "accessible-skill");
 
-            var source = new FileSkillsSource(root);
+            // Write a SKILL.md file and then remove all permissions from it.
+            var badDir = Path.Combine(root, "no-read-skill");
+            Directory.CreateDirectory(badDir);
+            noReadFile = Path.Combine(badDir, "SKILL.md");
+            File.WriteAllText(noReadFile, "---\nname: no-read-skill\ndescription: Test.\n---\n## Body");
+            File.SetUnixFileMode(noReadFile, UnixFileMode.None); // removes all permissions
+
+            var source = new FileSkillsSource(root, logger: logger);
             var skills = await source.GetSkillsAsync();
-            Assert.Equal(2, skills.Count);
+
+            // Only the accessible skill is returned; the unreadable file is skipped.
+            var single = Assert.Single(skills);
+            Assert.Equal("accessible-skill", single.Frontmatter.Name);
+
+            // A warning was logged for the unreadable file.
+            Assert.Contains(logMessages, m => m.Contains("no-read-skill") || m.Contains("could not read"));
         }
         finally
         {
+            // Restore permissions before deleting so Directory.Delete can remove the file.
+            if (noReadFile is not null && File.Exists(noReadFile))
+                File.SetUnixFileMode(noReadFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }

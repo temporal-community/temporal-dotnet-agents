@@ -27,9 +27,12 @@ namespace Temporalio.Extensions.Agents.Skills;
 /// <para>
 /// <b>Script execution.</b> Call <see cref="EnableScriptExecution"/> to opt in to
 /// <c>run_skill_script</c> registration with a built-in <c>RequireApproval()</c> gate.
-/// Script execution is disabled by default because file-based scripts require a runner
-/// delegate (supplied via <see cref="AddSkillsFromDirectory"/>'s <paramref name="runner"/>
-/// parameter) and because arbitrary script execution carries side-effect risk.
+/// Script execution is disabled by default. File-backed scripts are <b>not</b> supported
+/// by the native SKILL.md scanner — <see cref="AddSkillsFromDirectory"/> throws
+/// <see cref="NotSupportedException"/> when a runner is supplied. Script execution
+/// works only for inline (<see cref="AgentInlineSkill"/>) and class-based
+/// (<see cref="AgentClassSkill{TSelf}"/>) skills, or when a custom
+/// <see cref="AgentSkillsSource"/> is registered via <see cref="AddSkillsSource"/>.
 /// Without <see cref="EnableScriptExecution"/>, <c>run_skill_script</c> is not registered
 /// and the skill index does not mention script invocation.
 /// </para>
