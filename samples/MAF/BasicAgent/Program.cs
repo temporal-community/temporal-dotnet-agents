@@ -15,6 +15,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using Temporalio.Extensions.Agents;
+using Temporalio.Extensions.Agents.Session;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -102,7 +103,16 @@ Console.WriteLine("User : What is the weather like there right now?");
 var r3 = await proxy.RunAsync("What is the weather like there right now?", session);
 Console.WriteLine($"Agent: {r3.Text ?? "(no response)"}\n");
 
-// ── Step 9: Graceful shutdown ────────────────────────────────────────────────
+// ── Step 9: Signal Shutdown to the agent workflow ────────────────────────────
+// Signal Shutdown so the workflow exits its session loop rather than sitting parked for TimeToLive.
+if (session is TemporalAgentSession temporalSession)
+{
+    var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
+    await agentClient.ShutdownAsync(temporalSession.SessionId);
+    Console.WriteLine("Shutdown signal sent to agent workflow.\n");
+}
+
+// ── Step 10: Graceful shutdown ───────────────────────────────────────────────
 // The Temporal hosted worker cancels its poll loop on shutdown, which may surface as
 // OperationCanceledException through BackgroundService. Swallow it: it is expected.
 try

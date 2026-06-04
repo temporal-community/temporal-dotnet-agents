@@ -15,7 +15,6 @@ public class DurableExecutionOptionsTests
         Assert.Null(options.RetryPolicy);
         Assert.Equal("chat-", options.WorkflowIdPrefix);
         Assert.Equal(TimeSpan.FromDays(14), options.SessionTimeToLive);
-        Assert.False(options.EnableSessionManagement);
         Assert.Equal(TimeSpan.FromMinutes(2), options.HeartbeatTimeout);
     }
 
@@ -56,7 +55,6 @@ public class DurableExecutionOptionsTests
             RetryPolicy = retryPolicy,
             WorkflowIdPrefix = "custom-",
             SessionTimeToLive = TimeSpan.FromDays(7),
-            EnableSessionManagement = true,
             HeartbeatTimeout = TimeSpan.FromMinutes(5),
         };
 
@@ -65,7 +63,6 @@ public class DurableExecutionOptionsTests
         Assert.Same(retryPolicy, options.RetryPolicy);
         Assert.Equal("custom-", options.WorkflowIdPrefix);
         Assert.Equal(TimeSpan.FromDays(7), options.SessionTimeToLive);
-        Assert.True(options.EnableSessionManagement);
         Assert.Equal(TimeSpan.FromMinutes(5), options.HeartbeatTimeout);
     }
 

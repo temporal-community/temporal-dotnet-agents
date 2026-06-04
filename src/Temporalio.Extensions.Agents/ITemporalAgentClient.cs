@@ -149,4 +149,16 @@ public interface ITemporalAgentClient
     /// </summary>
     /// <param name="scheduleId">The schedule ID passed to <see cref="ScheduleAgentAsync"/>.</param>
     ScheduleHandle GetAgentScheduleHandle(string scheduleId);
+
+    /// <summary>
+    /// Sends a graceful shutdown signal to the agent session workflow, causing it to exit its
+    /// session loop rather than sitting parked until the configured <c>TimeToLive</c>.
+    /// </summary>
+    /// <param name="sessionId">The agent session ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// Equivalent to signalling <c>"Shutdown"</c> on the workflow handle directly, but
+    /// keeps the caller free of the raw workflow ID and signal name details.
+    /// </remarks>
+    Task ShutdownAsync(TemporalAgentSessionId sessionId, CancellationToken cancellationToken = default);
 }

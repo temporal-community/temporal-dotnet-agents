@@ -153,8 +153,7 @@ foreach (var conversationId in conversationIds)
 {
     try
     {
-        var handle = temporalClient.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
-        await handle.SignalAsync("Shutdown", Array.Empty<object>());
+        await sessionClient.ShutdownAsync(conversationId);
     }
     catch (Exception ex)
     {

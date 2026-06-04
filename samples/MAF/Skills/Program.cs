@@ -130,13 +130,12 @@ var r2 = await proxy.RunAsync(turn2, session);
 Console.WriteLine($"Agent: {r2.Text ?? "(no response)"}\n");
 
 // ── Step 9: Signal Shutdown to the agent workflow ─────────────────────────────
-// The Shutdown signal tells the workflow's run loop to stop accepting new turns
-// and complete cleanly. Without it the workflow remains open for the full TTL.
+// ShutdownAsync tells the workflow's run loop to stop accepting new turns and
+// complete cleanly. Without it the workflow remains open for the full TTL.
 if (session is TemporalAgentSession temporalSession)
 {
-    var temporalClient = host.Services.GetRequiredService<ITemporalClient>();
-    var workflowHandle = temporalClient.GetWorkflowHandle(temporalSession.SessionId.WorkflowId);
-    await workflowHandle.SignalAsync("Shutdown", Array.Empty<object?>());
+    var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
+    await agentClient.ShutdownAsync(temporalSession.SessionId);
     Console.WriteLine("Shutdown signal sent to agent workflow.\n");
 }
 

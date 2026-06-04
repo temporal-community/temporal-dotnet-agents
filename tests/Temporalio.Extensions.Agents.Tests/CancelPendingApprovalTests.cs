@@ -121,5 +121,8 @@ public class CancelPendingApprovalTests
 
         public ScheduleHandle GetAgentScheduleHandle(string scheduleId) =>
             throw new NotImplementedException();
+
+        public Task ShutdownAsync(TemporalAgentSessionId sessionId, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
     }
 }

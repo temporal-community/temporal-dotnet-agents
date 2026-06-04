@@ -76,6 +76,7 @@ Use `Glob` / `ls` to discover specific files. Notable types and their locations 
 - `IChatClient` must be registered in DI **before** `AddDurableAI` (constructor-injected on activity).
 - Use `AddChatClient(innerClient).UseFunctionInvocation().Build()` (idiomatic MEAI DI) over `AddSingleton<IChatClient>`. `UseDurableExecution()` chains onto the same builder.
 - `IChatClient` resolution is layered: per-call `ChatOptions.WithChatClientKey("k")` → worker-level `DurableExecutionOptions.DefaultChatClientKey` → unkeyed fallback.
+- **Options naming asymmetry** (intentional — do not rename): `DurableExecutionOptions` properties use unprefixed names (e.g. `ActivityTimeout`, `HeartbeatTimeout`, `RetryPolicy`). `TemporalAgentsOptions` worker-level defaults use the `Default*` prefix (e.g. `DefaultActivityTimeout`, `DefaultHeartbeatTimeout`, `DefaultRetryPolicy`). The prefix distinguishes worker-level defaults from per-agent overrides on `DurableAgentBuilder`, which use the unprefixed names.
 
 For full API surface, see `docs/how-to/MEAI/usage.md`.
 

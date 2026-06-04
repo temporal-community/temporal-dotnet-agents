@@ -10,7 +10,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
-using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Extensions.AI;
 
@@ -138,7 +137,6 @@ await host.StartAsync();
 Console.WriteLine("Worker started.\n");
 
 var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
-var temporalClient = host.Services.GetRequiredService<ITemporalClient>();
 
 // Track every conversation we start so we can signal Shutdown to each running
 // workflow before the host exits (see "Shutdown" block below).
@@ -161,8 +159,7 @@ foreach (var conversationId in conversationIds)
 {
     try
     {
-        var handle = temporalClient.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
-        await handle.SignalAsync("Shutdown", Array.Empty<object>());
+        await sessionClient.ShutdownAsync(conversationId);
     }
     catch (Exception ex)
     {

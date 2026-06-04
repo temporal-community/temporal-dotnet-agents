@@ -1,3 +1,4 @@
+// Keep in sync with tests/Temporalio.Extensions.AI.IntegrationTests/Helpers/ScriptedChatClient.cs
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 
@@ -32,6 +33,19 @@ internal sealed class ScriptedChatClient : IChatClient
     {
         ArgumentNullException.ThrowIfNull(scriptedResponses);
         _scripted = new Queue<ChatResponse>(scriptedResponses);
+    }
+
+    /// <summary>
+    /// Append an additional response to the script after construction.
+    /// Useful for tests that build the script across multiple steps.
+    /// </summary>
+    public void Enqueue(ChatResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        lock (_gate)
+        {
+            _scripted.Enqueue(response);
+        }
     }
 
     /// <summary>Gets the captured calls in arrival order.</summary>
@@ -109,6 +123,28 @@ internal sealed class ScriptedChatClient : IChatClient
             new ChatResponse(assistantWithToolCalls),
             new ChatResponse(assistantFinal),
         ]);
+    }
+
+    /// <summary>
+    /// Builds a script with two assistant turns that each request a single tool call,
+    /// followed by a final text answer. Useful for asserting error-counter resets and
+    /// repeated tool dispatch.
+    /// </summary>
+    public static ScriptedChatClient WithRepeatingToolThenFinal(
+        Func<int, FunctionCallContent> toolCallForTurn,
+        int repeatCount,
+        string finalText)
+    {
+        ArgumentNullException.ThrowIfNull(toolCallForTurn);
+        if (repeatCount < 0) throw new ArgumentOutOfRangeException(nameof(repeatCount));
+
+        var responses = new List<ChatResponse>(repeatCount + 1);
+        for (var i = 0; i < repeatCount; i++)
+        {
+            responses.Add(new ChatResponse(new ChatMessage(ChatRole.Assistant, [toolCallForTurn(i)])));
+        }
+        responses.Add(new ChatResponse(new ChatMessage(ChatRole.Assistant, finalText)));
+        return new ScriptedChatClient(responses);
     }
 
     /// <summary>Snapshot of a single LLM call captured during the test.</summary>

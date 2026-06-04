@@ -230,6 +230,6 @@ public class TemporalAgentsOptionsTests
         var options = new TemporalAgentsOptions();
         options.AddAgentProxy("Agent");
 
-        Assert.Throws<ArgumentException>(() => options.AddAgentProxy("Agent"));
+        Assert.Throws<InvalidOperationException>(() => options.AddAgentProxy("Agent"));
     }
 }

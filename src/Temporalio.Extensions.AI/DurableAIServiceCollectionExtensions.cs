@@ -181,7 +181,7 @@ internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>
 // The same CS8644 caveat as DurableFunctionRegistry above — Dictionary<TKey, TValue> already
 // implements IReadOnlyDictionary<TKey, TValue>; re-declaring it would trigger the nullability
 // mismatch warning. Don't add the interface back to this class declaration.
-public sealed class DurableChatToolOptionsRegistry
+internal sealed class DurableChatToolOptionsRegistry
     : Dictionary<string, DurableChatToolOptions>
 {
     /// <summary>
@@ -190,7 +190,7 @@ public sealed class DurableChatToolOptionsRegistry
     /// by <see cref="DurableAIServiceCollectionExtensions.AddDurableTools(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction, System.Action{DurableChatToolOptions}?)"/>
     /// and resolved as a service-collection enumerable.
     /// </summary>
-    public DurableChatToolOptionsRegistry(
+    internal DurableChatToolOptionsRegistry(
         IEnumerable<Action<DurableChatToolOptionsRegistry>>? configurators = null)
         : base(StringComparer.OrdinalIgnoreCase)
     {

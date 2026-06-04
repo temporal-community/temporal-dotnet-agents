@@ -217,6 +217,19 @@ internal sealed class DefaultTemporalAgentClient(
         return client.GetScheduleHandle(scheduleId);
     }
 
+    /// <inheritdoc/>
+    public async Task ShutdownAsync(
+        TemporalAgentSessionId sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        var handle = client.GetWorkflowHandle(sessionId.WorkflowId);
+        await handle.SignalAsync(
+            DurableChatWorkflowBase<AgentResponse>.ShutdownSignalName,
+            Array.Empty<object>(),
+            new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Constructs the <see cref="AgentWorkflowInput"/> for a session by resolving every per-agent
     /// scalar via the inheritance rule: <c>effective = registration.X ?? options.DefaultX</c>.

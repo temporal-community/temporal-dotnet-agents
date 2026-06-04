@@ -13,6 +13,14 @@ namespace Temporalio.Extensions.Agents;
 /// <see cref="AddDurableAgent(string, Action{DurableAgentBuilder})"/>; the v0.2 surface
 /// (<c>AddAIAgent</c>, <c>AddAIAgentFactory</c>, etc.) was removed in v0.3.
 /// </summary>
+/// <remarks>
+/// Worker-level default properties on this class use the <c>Default*</c> prefix
+/// (e.g. <c>DefaultActivityTimeout</c>) to distinguish them from per-agent overrides on
+/// <see cref="DurableAgentBuilder"/>, which use unprefixed names. The MEAI counterpart
+/// <see cref="DurableExecutionOptions"/> uses unprefixed names throughout.
+/// This asymmetry is intentional — do not rename properties on either class.
+/// </remarks>
+/// <seealso cref="DurableExecutionOptions"/>
 public sealed class TemporalAgentsOptions
 {
     // Agent names are case-insensitive across the durable-agent and proxy namespaces.
@@ -254,8 +262,9 @@ public sealed class TemporalAgentsOptions
 
         if (_durableAgentRegistrations.ContainsKey(name) || _proxyDeclarations.ContainsKey(name))
         {
-            throw new ArgumentException(
-                $"An agent with name '{name}' has already been registered.", nameof(name));
+            throw new InvalidOperationException(
+                $"An agent with name '{name}' has already been registered. Agent names must be unique " +
+                "across AddDurableAgent and AddAgentProxy.");
         }
 
         _proxyDeclarations.Add(name, timeToLive);

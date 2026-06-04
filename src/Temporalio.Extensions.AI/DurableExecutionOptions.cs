@@ -6,6 +6,13 @@ namespace Temporalio.Extensions.AI;
 /// <summary>
 /// Configuration options for durable AI execution via Temporal.
 /// </summary>
+/// <remarks>
+/// Property names on this class are unprefixed (e.g. <c>ActivityTimeout</c>). The MAF
+/// counterpart <c>Temporalio.Extensions.Agents.TemporalAgentsOptions</c> uses
+/// <c>Default*</c>-prefixed names for worker-level defaults (e.g. <c>DefaultActivityTimeout</c>).
+/// This asymmetry is intentional — do not rename properties on either class.
+/// </remarks>
+/// <seealso cref="global::Temporalio.Extensions.Agents.TemporalAgentsOptions"/>
 public sealed class DurableExecutionOptions
 {
     /// <summary>
@@ -33,19 +40,6 @@ public sealed class DurableExecutionOptions
     /// Gets or sets the session time-to-live. Defaults to 14 days.
     /// </summary>
     public TimeSpan SessionTimeToLive { get; set; } = TimeSpan.FromDays(14);
-
-    /// <summary>
-    /// Gets or sets whether session management (workflow-backed conversations) is enabled.
-    /// When false, the middleware only wraps individual calls as activities.
-    /// Defaults to false.
-    /// </summary>
-    /// <remarks>
-    /// Reserved for future use. This property currently has no effect — the session client and
-    /// default workflow registration are controlled by <see cref="RegisterDefaultWorkflow"/>, not
-    /// by this flag. To suppress the default workflow and session client, set
-    /// <see cref="RegisterDefaultWorkflow"/> to <see langword="false"/> instead.
-    /// </remarks>
-    public bool EnableSessionManagement { get; set; }
 
     /// <summary>
     /// Gets or sets the activity heartbeat timeout. Defaults to 2 minutes.

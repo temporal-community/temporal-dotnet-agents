@@ -39,10 +39,10 @@ public sealed class DurableToolOptions
     public RetryPolicy? RetryPolicy { get; set; }
 
     /// <summary>
-    /// Gets a value indicating whether the configured <see cref="IAgentToolInterceptor"/> should
-    /// be skipped for this tool. When <see langword="true"/>, the interceptor activity is not
-    /// dispatched and the tool proceeds directly to <c>InvokeAgentTool</c>.
-    /// Default is <see langword="false"/>.
+    /// Read-only observable state. Set only via <see cref="SkipInterceptor()"/>. Do not set this property directly.
+    /// When <see langword="true"/>, the configured <see cref="IAgentToolInterceptor"/> is skipped for
+    /// this tool: the interceptor activity is not dispatched and the tool proceeds directly to
+    /// <c>InvokeAgentTool</c>. Default is <see langword="false"/>.
     /// </summary>
     public bool SkipInterceptorFlag { get; private set; }
 
@@ -54,8 +54,9 @@ public sealed class DurableToolOptions
     public TimeSpan? InterceptorTimeout { get; set; }
 
     /// <summary>
-    /// Gets a value indicating whether a human approval is always required before this tool
-    /// is dispatched, regardless of what the <see cref="IAgentToolInterceptor"/> returns.
+    /// Read-only observable state. Set only via <see cref="RequireApproval()"/>. Do not set this property directly.
+    /// When <see langword="true"/>, human approval is always required before this tool is dispatched,
+    /// regardless of what the <see cref="IAgentToolInterceptor"/> returns.
     /// This is Rule 2 — an absolute configuration-time floor.
     /// </summary>
     public bool RequireApprovalFlag { get; private set; }

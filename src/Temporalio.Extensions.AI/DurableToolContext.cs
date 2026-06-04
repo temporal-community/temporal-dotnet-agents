@@ -36,20 +36,26 @@ public class DurableToolContext
     public string? SessionId { get; init; }
 
     /// <summary>
-    /// Gets the conversation identifier, if available. Populated on the MEAI path (Phase 2).
-    /// <see langword="null"/> in the current release.
+    /// Gets the conversation identifier, if available. Populated on the MEAI path (set by
+    /// <c>DurableChatActivities.RunToolInterceptorAsync</c>); <see langword="null"/> on the
+    /// MAF path (where <c>AgentToolContext</c> in <c>Temporalio.Extensions.Agents</c> provides
+    /// MAF-specific fields instead).
     /// </summary>
     public string? ConversationId { get; init; }
 
     /// <summary>
-    /// Gets the correlation identifier, if available. Populated on the MEAI path (Phase 2).
-    /// <see langword="null"/> in the current release.
+    /// Gets the correlation identifier, if available. Populated on the MEAI path (set by
+    /// <c>DurableChatActivities.RunToolInterceptorAsync</c>); <see langword="null"/> on the
+    /// MAF path (where <c>AgentToolContext</c> in <c>Temporalio.Extensions.Agents</c> provides
+    /// MAF-specific fields instead).
     /// </summary>
     public string? CorrelationId { get; init; }
 
     /// <summary>
-    /// Gets the turn number within the current session, if available.
-    /// <see langword="null"/> in the current release.
+    /// Gets the turn number within the current session, if available. Populated on the MEAI
+    /// path (set by <c>DurableChatActivities.RunToolInterceptorAsync</c>);
+    /// <see langword="null"/> on the MAF path (where <c>AgentToolContext</c> in
+    /// <c>Temporalio.Extensions.Agents</c> provides MAF-specific fields instead).
     /// </summary>
     public int? TurnNumber { get; init; }
 

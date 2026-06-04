@@ -29,7 +29,8 @@ public sealed class AgentNotRegisteredException : InvalidOperationException
     private static string GetMessage(string agentName)
     {
         ArgumentException.ThrowIfNullOrEmpty(agentName);
-        return $"No agent named '{agentName}' was registered. Ensure the agent is registered using " +
-               "AddTemporalAgents() on the worker builder before using it.";
+        return $"No agent named '{agentName}' was registered. " +
+               $"Ensure the agent is registered via opts.AddDurableAgent(\"{agentName}\", ...) " +
+               "inside the AddTemporalAgents(opts => ...) call.";
     }
 }
