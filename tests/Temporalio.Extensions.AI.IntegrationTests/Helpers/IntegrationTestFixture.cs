@@ -16,7 +16,7 @@ public sealed class AiIntegrationTestCollection : ICollectionFixture<Integration
 ///   <item>A local Temporal test server</item>
 ///   <item>A .NET Generic Host with the Temporal worker, durable chat workflow, and activities</item>
 /// </list>
-/// Shared across tests via <see cref="IClassFixture{T}"/>.
+/// Shared across the "AI Integration Tests" collection via <see cref="ICollectionFixture{T}"/>.
 /// </summary>
 public sealed class IntegrationTestFixture : IAsyncLifetime
 {
