@@ -136,7 +136,8 @@ agent.UseSkills(s =>
     s.AddSkillsFromDirectory("./skills");
 
     // File-based with explicit depth: 0 = root only, 1 = root + children.
-    s.AddSkillsFromDirectory("./core-skills", maxDepth: 0);
+    // AddSkillsFromDirectory does not expose maxDepth — use FileSkillsSource directly.
+    s.AddSkillsSource(new FileSkillsSource("./core-skills", maxDepth: 0));
 
     // Inline: single skill defined in code.
     s.AddSkill(new AgentInlineSkill(
@@ -240,7 +241,7 @@ agent.UseSkills(s =>
     skill.AddResource(
         name: "status-codes",
         description: "Canonical invoice status code definitions.",
-        readDelegate: async (sp, ct) =>
+        method: async (sp, ct) =>
         {
             var db = sp.GetRequiredService<InvoiceDb>();
             return await db.GetStatusCodeReferenceAsync(ct);
