@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.Agents.AI;
 
 namespace Temporalio.Extensions.Agents.Skills;
@@ -51,40 +50,65 @@ public sealed class SkillsBuilder
     /// </summary>
     /// <param name="path">
     /// Path to scan for SKILL.md files. Each subdirectory containing a SKILL.md becomes
-    /// a separate skill.
+    /// a separate skill. Directories are scanned up to 2 levels deep by default
+    /// (root + children + grandchildren).
     /// </param>
     /// <param name="runner">
-    /// Optional runner for file-based scripts. Required only when the scanned skills contain
-    /// script files AND <see cref="EnableScriptExecution"/> is called. Inline and class-based
-    /// scripts are delegate-backed and do not require a runner. If a file script is invoked
-    /// without a runner, MAF throws <see cref="InvalidOperationException"/> at execution time.
+    /// Not supported by the native SKILL.md scanner. Must be <see langword="null"/>.
+    /// Use inline or class-based skills for script execution.
     /// </param>
     /// <param name="configure">
-    /// Optional callback to configure <see cref="AgentFileSkillsSourceOptions"/> (allowed
-    /// resource/script extensions, script directories, etc.).
+    /// Not supported by the native SKILL.md scanner. Must be <see langword="null"/>.
     /// </param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="path"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is whitespace.</exception>
+    /// <exception cref="NotSupportedException">
+    /// Thrown when <paramref name="runner"/> or <paramref name="configure"/> is non-<see langword="null"/>.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Supported frontmatter fields:</b> <c>name</c>, <c>description</c>, <c>license</c>,
+    /// <c>compatibility</c>. The raw SKILL.md content is passed as the skill's
+    /// <c>Content</c> property (returned verbatim by <c>load_skill</c>).
+    /// </para>
+    /// <para>
+    /// <b>Not supported:</b> resources, scripts, extension filters, script runners. For
+    /// skills that require these features, use <see cref="AddSkillsSource"/> with a
+    /// custom <see cref="AgentSkillsSource"/> implementation.
+    /// </para>
+    /// <para>
+    /// <b>Frontmatter values must be unquoted strings.</b> A value like
+    /// <c>name: "expense-report"</c> (with quotes) will include the literal quote
+    /// characters, which will fail MAF name validation and cause the skill to be
+    /// silently skipped during the directory scan.
+    /// </para>
+    /// <para>
+    /// <b>Malformed or invalid SKILL.md files are silently skipped</b> (no diagnostics)
+    /// unless a logger is injected by constructing a <see cref="FileSkillsSource"/> directly
+    /// and passing it to <see cref="AddSkillsSource"/>.
+    /// </para>
+    /// </remarks>
     public SkillsBuilder AddSkillsFromDirectory(
         string path,
         AgentFileSkillScriptRunner? runner = null,
         Action<AgentFileSkillsSourceOptions>? configure = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-
-        AgentFileSkillsSourceOptions? options = null;
-        if (configure is not null)
+        if (runner is not null)
         {
-            options = new AgentFileSkillsSourceOptions();
-            configure(options);
+            throw new NotSupportedException(
+                "File-backed script execution is not supported by the native SKILL.md scanner. " +
+                "Use inline or class-based skills for script execution.");
         }
 
-        // AgentFileSkillsSource is internal in MAF 1.3.0. We build an AgentSkillsProvider
-        // with the path constructor (which creates an AgentFileSkillsSource internally)
-        // and wrap it in an AgentSkillsSource adapter for SkillResolver.
-        var provider = new AgentSkillsProvider(path, runner, options, null, null);
-        _sources.Add(new ProviderBackedSkillsSource(provider));
+        if (configure is not null)
+        {
+            throw new NotSupportedException(
+                "AgentFileSkillsSourceOptions is not supported by the native SKILL.md scanner.");
+        }
+
+        _sources.Add(new FileSkillsSource(path));
         return this;
     }
 
@@ -164,53 +188,4 @@ public sealed class SkillsBuilder
     /// </summary>
     internal SkillResolver BuildResolver() =>
         new SkillResolver(_skills.AsReadOnly(), _sources.AsReadOnly());
-
-    /// <summary>
-    /// Adapts an <see cref="AgentSkillsProvider"/> (which is an <see cref="AIContextProvider"/>,
-    /// not an <see cref="AgentSkillsSource"/>) to the <see cref="AgentSkillsSource"/> interface
-    /// by extracting its internal source via reflection.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Why reflection?</b> <c>AgentFileSkillsSource</c> is internal in MAF 1.3.0, so we
-    /// cannot instantiate it directly. <c>AgentSkillsProvider(string path, ...)</c> creates
-    /// one internally and stores it in <c>_source : AgentSkillsSource</c>. We extract that
-    /// field once per instance to forward <see cref="GetSkillsAsync"/> calls.
-    /// </para>
-    /// <para>
-    /// This reflection access is isolated to this private class and protected by a null-check
-    /// fallback. If the MAF internal field is renamed in a future version, <c>GetSkillsAsync</c>
-    /// will throw <see cref="InvalidOperationException"/> with a clear diagnostic.
-    /// </para>
-    /// </remarks>
-    private sealed class ProviderBackedSkillsSource : AgentSkillsSource
-    {
-        // Lazily cache the FieldInfo so reflection happens once per type, not per instance.
-        private static readonly FieldInfo? s_sourceField =
-            typeof(AgentSkillsProvider).GetField("_source",
-                BindingFlags.NonPublic | BindingFlags.Instance);
-
-        private readonly AgentSkillsSource _inner;
-
-        internal ProviderBackedSkillsSource(AgentSkillsProvider provider)
-        {
-            if (s_sourceField is null)
-            {
-                throw new InvalidOperationException(
-                    "SkillsBuilder.AddSkillsFromDirectory: could not locate the internal " +
-                    "_source field on AgentSkillsProvider. This may indicate a breaking " +
-                    "change in the Microsoft.Agents.AI library. Please report this issue.");
-            }
-
-            var inner = s_sourceField.GetValue(provider) as AgentSkillsSource;
-            _inner = inner ?? throw new InvalidOperationException(
-                "SkillsBuilder.AddSkillsFromDirectory: AgentSkillsProvider._source was null " +
-                "or not an AgentSkillsSource. This may indicate a breaking change in the " +
-                "Microsoft.Agents.AI library.");
-        }
-
-        public override Task<IList<AgentSkill>> GetSkillsAsync(
-            CancellationToken cancellationToken = default) =>
-            _inner.GetSkillsAsync(cancellationToken);
-    }
 }
