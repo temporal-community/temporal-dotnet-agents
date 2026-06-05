@@ -11,12 +11,13 @@ A pre-tool lifecycle hook that runs as a Temporal activity before each `InvokeAg
 3. [AgentToolContext](#agenttoolcontext)
 4. [The four decision outcomes](#the-four-decision-outcomes)
 5. [RequireApproval — the configuration-time floor](#requireapproval--the-configuration-time-floor)
-6. [Registration](#registration)
-7. [Per-tool opt-out](#per-tool-opt-out)
-8. [Interceptor activity timeout](#interceptor-activity-timeout)
-9. [Batch fan-out and safety guarantee](#batch-fan-out-and-safety-guarantee)
-10. [PauseForApproval on scheduled and sub-agent paths](#pauseforapproval-on-scheduled-and-sub-agent-paths)
-11. [Implementation examples](#implementation-examples)
+6. [Approval scope records](#approval-scope-records)
+7. [Registration](#registration)
+8. [Per-tool opt-out](#per-tool-opt-out)
+9. [Interceptor activity timeout](#interceptor-activity-timeout)
+10. [Batch fan-out and safety guarantee](#batch-fan-out-and-safety-guarantee)
+11. [PauseForApproval on scheduled and sub-agent paths](#pauseforapproval-on-scheduled-and-sub-agent-paths)
+12. [Implementation examples](#implementation-examples)
 
 ---
 
@@ -162,6 +163,105 @@ agent.AddTool(
 ```
 
 When both `RequireApproval()` and an interceptor are active, the interceptor's `EnrichedDescription` (from a `Proceed` decision) is used as the approval request description. This lets the interceptor contribute context — for example, a risk score or entity summary — to the reviewer's approval UI even when the gate itself is unconditional.
+
+---
+
+## Approval scope records
+
+When an agent is configured with `UseApprovalScopes()` and a reviewer submits a `DurableApprovalDecision` with `Scope = ApprovalScope.Session` or `Scope = ApprovalScope.Always`, the workflow writes a scope record so future calls to the same tool can proceed automatically without another human review.
+
+### Where scope records live
+
+**Session scope** records are serialized as a `List<ApprovalScopeRecord>` into the session `StateBag` under the key `"temporal.approval_scopes.session"`. They survive `continue-as-new` because the StateBag is carried forward in `AgentWorkflowInput.CarriedStateBag`.
+
+**Always scope** records are appended to an external `IApprovalScopeStore` via the `AppendAlwaysScope` activity. At the start of each workflow run, the `LoadAlwaysScopes` activity reads them back and caches them in StateBag under the key configured in `ApprovalScopesOptions.AlwaysScopesStoreKey` (default: `"temporal.approval_scopes.always"`).
+
+### ApprovalScopeRecord
+
+```csharp
+// Namespace: Temporalio.Extensions.Agents
+public sealed class ApprovalScopeRecord
+{
+    public required string ToolName { get; init; }
+    public ApprovalScopePattern? Pattern { get; init; }   // null = match any call of this tool
+    public required DateTimeOffset GrantedAt { get; init; }
+    public required string OriginatingRequestId { get; init; }
+}
+```
+
+`Pattern` is `null` when the reviewer approved without argument constraints. When the reviewer supplies a `ScopePattern` on the `DurableApprovalDecision`, the scope record carries the pattern and `TryMatchScope` evaluates it on every future call.
+
+### Reading scope records from a custom interceptor
+
+`ApprovalScopeHelpers.TryMatchScope` is the safe, public API for consulting scope records from inside an interceptor. It deserializes the list from StateBag, evaluates tool name (case-insensitive) and optional argument patterns, and returns the first matching record:
+
+```csharp
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents;
+
+public class PolicyInterceptor : IAgentToolInterceptor
+{
+    public Task<DurableToolDecision> BeforeToolCallAsync(
+        AgentToolContext ctx, CancellationToken ct)
+    {
+        // Check whether a session-scope record already covers this call.
+        if (ApprovalScopeHelpers.TryMatchScope(
+                ctx.ToolName,
+                ctx.Arguments,
+                ctx.StateBag,
+                "temporal.approval_scopes.session",
+                out var match))
+        {
+            return Task.FromResult(DurableToolDecision.Proceed(
+                enrichedDescription: $"Auto-approved by scope record {match!.OriginatingRequestId}."));
+        }
+
+        // No scope match — apply your policy.
+        return Task.FromResult(DurableToolDecision.PauseForApproval(
+            $"Tool '{ctx.ToolName}' requires approval."));
+    }
+}
+```
+
+`TryMatchScope` is safe to call when `StateBag` is `null` (returns `false` immediately). It catches deserialization errors and treats them as no-match rather than throwing — a malformed scope cache never blocks a tool.
+
+Signature:
+
+```csharp
+public static bool TryMatchScope(
+    string toolName,
+    IReadOnlyDictionary<string, object?> arguments,
+    AgentSessionStateBag? bag,
+    string storeKey,
+    out ApprovalScopeRecord? match);
+```
+
+### Pattern matching
+
+When `ApprovalScopeRecord.Pattern` is set, `TryMatchScope` evaluates the argument value against the pattern:
+
+| `PatternMatchType` | Behavior |
+|---|---|
+| `Exact` | Exact string comparison (`StringComparison.Ordinal`) |
+| `Glob` | Glob match: `*` matches any sequence except `/`; `**` matches including `/` |
+| `Regex` | .NET `Regex.IsMatch` with a 100 ms timeout (ReDoS protection) |
+
+When `ApprovalScopePattern.Parameter` is set, the pattern is matched against the value of that single argument. When `Parameter` is `null`, the pattern is matched against the canonical JSON of the entire arguments dictionary.
+
+### One-turn lag
+
+> **Scope records written in the same turn are NOT visible to that turn's interceptors.**
+>
+> The turn loop runs in two phases:
+>
+> 1. **Phase 1 (fan-out):** All `RunToolInterceptor` activities for the current turn are dispatched in parallel and their results are frozen in workflow history.
+> 2. **Phase 2 (sequential dispatch):** Each interceptor result is evaluated. If `PauseForApproval` was returned, the workflow blocks for human input; when the reviewer approves with `Scope = Session`, the scope record is written to StateBag.
+>
+> Because Phase 1 completes before any approval is processed in Phase 2, a scope record written when Call A is approved during turn N does **not** retroactively satisfy Call B's already-recorded Phase 1 result in the same turn. Call B still requires its own approval in turn N.
+>
+> The scope IS visible starting from turn N+1, where a fresh Phase 1 snapshot consults the updated StateBag.
+>
+> **Practical rule:** If two tool calls for the same scope-aware tool appear in one LLM response, both will pause for human approval in turn N. In turn N+1 and beyond, only one human review is needed per tool per scope lifetime.
 
 ---
 
@@ -356,4 +456,4 @@ The tool receives the token instead of the raw SSN. `ModifiedArguments` affects 
 
 ---
 
-_Last updated: 2026-06-02_
+_Last updated: 2026-06-05_

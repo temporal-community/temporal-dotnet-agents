@@ -14,9 +14,10 @@ How to implement approval gates, build approval dashboards, handle timeouts, and
 6. [Multi-Step Approval Chains](#multi-step-approval-chains)
 7. [Error Handling and Rejection](#error-handling-and-rejection)
 8. [Workflow-Parked Approval (Feature A)](#workflow-parked-approval-feature-a)
-9. [Testing HITL Flows](#testing-hitl-flows)
-10. [Types Reference](#types-reference)
-11. [Complete Example: Email Approval](#complete-example-email-approval)
+9. [Approval Scopes (Feature B)](#approval-scopes-feature-b)
+10. [Testing HITL Flows](#testing-hitl-flows)
+11. [Types Reference](#types-reference)
+12. [Complete Example: Email Approval](#complete-example-email-approval)
 
 ---
 
@@ -433,6 +434,166 @@ If approved, the tool executes normally. If rejected, the tool is skipped and th
 
 ---
 
+## Approval Scopes (Feature B)
+
+Approval scopes let a reviewer's decision carry forward automatically so the same tool does not require human review on every subsequent call. Instead of blocking for approval each time, the workflow consults a scope record written when a previous approval was granted and proceeds without interruption.
+
+Three scope lifetimes are available:
+
+| `ApprovalScope` | Lifetime | Storage |
+|---|---|---|
+| `ThisCallOnly` | Single call — no record written (default) | — |
+| `Session` | Remainder of the current session; survives `continue-as-new` | `AgentSessionStateBag` |
+| `Always` | Across all sessions for this agent | External `IApprovalScopeStore` |
+
+### Registering a scope-aware tool
+
+Opt a tool into scope-aware auto-approval with `.RequireApproval().ScopeAware()` and call `UseApprovalScopes()` on the agent builder:
+
+```csharp
+builder.Services
+    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddTemporalAgents(opts =>
+    {
+        opts.AddDurableAgent("FileAgent", agent =>
+        {
+            agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+
+            agent.AddTool(
+                sp => AIFunctionFactory.Create(
+                    ([Description("Path to write")] string path) => $"Wrote {path}",
+                    new AIFunctionFactoryOptions { Name = "write_file" }),
+                opts => opts.RequireApproval().ScopeAware());
+
+            // Installs the built-in ScopedApprovalInterceptor for this agent.
+            agent.UseApprovalScopes();
+        });
+    });
+```
+
+Without `.ScopeAware()`, a `RequireApproval()` tool always pauses for human review regardless of previously granted scopes. Without `UseApprovalScopes()`, the `.ScopeAware()` flag has no effect (no interceptor consults scope records) and worker startup throws `InvalidOperationException`.
+
+### Submitting a decision with a scope
+
+The reviewer calls `SubmitApprovalAsync` with the desired `Scope` field populated:
+
+```csharp
+await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+{
+    RequestId = pending.RequestId,
+    Approved  = true,
+    Scope     = ApprovalScope.Session,   // or ApprovalScope.Always
+});
+```
+
+When `Scope = ThisCallOnly` (the default when the field is omitted), no scope record is written and the next call to the same tool will pause again.
+
+### Scoping by argument pattern
+
+To scope approval to a specific argument value rather than the entire tool, set `ScopePattern` on the decision:
+
+```csharp
+await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+{
+    RequestId    = pending.RequestId,
+    Approved     = true,
+    Scope        = ApprovalScope.Session,
+    ScopePattern = new ApprovalScopePattern
+    {
+        Type      = PatternMatchType.Glob,
+        Parameter = "path",
+        Pattern   = "/tmp/*",
+    },
+});
+```
+
+With this decision, only future calls to `write_file` where the `path` argument matches `/tmp/*` are auto-approved. Calls with `/prod/*` paths still pause for review. When `ScopePattern` is `null`, the scope covers any call to the named tool regardless of arguments.
+
+`PatternMatchType` values:
+
+| Value | Behavior |
+|---|---|
+| `Exact` | Exact string comparison (`Ordinal`) |
+| `Glob` | `*` matches any sequence except `/`; `**` matches including `/` |
+| `Regex` | .NET `Regex.IsMatch` with a 100 ms timeout (ReDoS protection) |
+
+### Configuring `IApprovalScopeStore` for always-scope persistence
+
+`ApprovalScope.Always` requires an external store to persist scope records across sessions. Configure it at the worker level or per agent:
+
+```csharp
+// Worker-level default — applies to every UseApprovalScopes() agent unless overridden.
+opts.ApprovalScopeStore = sp => new MyApprovalScopeStore(
+    sp.GetRequiredService<IDbConnection>());
+
+// Or per-agent inside the builder:
+agent.UseApprovalScopes(scopes =>
+{
+    scopes.ApprovalScopeStore = sp => new MyApprovalScopeStore(
+        sp.GetRequiredService<IDbConnection>());
+});
+```
+
+`IApprovalScopeStore` (namespace `Temporalio.Extensions.Agents.HistoryStore`) has two methods:
+
+```csharp
+Task<IReadOnlyList<ApprovalScopeRecord>> LoadAsync(
+    string agentName, string storeKey, CancellationToken ct = default);
+
+Task AppendAsync(
+    string agentName, string storeKey, ApprovalScopeRecord record,
+    CancellationToken ct = default);
+```
+
+Both are called from Temporal activities — Temporal's built-in retry policy handles transient failures. `AppendAsync` must be idempotent: if a record with the same `OriginatingRequestId` already exists for the agent/key pair, the operation is a no-op.
+
+When no store is configured, `ApprovalScope.Always` degrades to `ApprovalScope.Session` and a `LogWarning` is emitted. The scope record is written to StateBag instead and lost when the session ends.
+
+### Always-scope cache
+
+At the start of each workflow run (and after `continue-as-new`), the workflow dispatches a `LoadAlwaysScopes` activity to read persisted records from the store and cache them in StateBag. This means:
+
+- Always-scope lookups during the turn loop are in-memory (no store I/O per tool call).
+- New always-scopes written during a session become visible immediately via StateBag; they are also visible to fresh sessions that load the store at startup.
+
+The cache is bounded by `ApprovalScopesOptions.MaxAlwaysScopeCacheRecords` (default: 256) and `MaxAlwaysScopeCacheBytes` (default: 32 KiB). Records beyond the budget are not cached; the first 256 records (by store order) are cached and the rest are dropped from the in-memory view.
+
+### Customizing scope options per agent
+
+```csharp
+agent.UseApprovalScopes(scopes =>
+{
+    // Key under which always-scopes are stored and loaded.
+    // Must not equal "temporal.approval_scopes.session" (reserved).
+    scopes.AlwaysScopesStoreKey = "temporal.approval_scopes.always";   // default
+
+    // Disable auto-loading at session start (manage via your own UI/policy).
+    scopes.ApplyAlwaysScopesAtSessionStart = false;
+
+    // Budget limits for the always-scope StateBag cache.
+    scopes.MaxAlwaysScopeCacheRecords = 128;
+    scopes.MaxAlwaysScopeCacheBytes   = 16 * 1024;
+
+    // Timeouts for the LoadAlwaysScopes / AppendAlwaysScope activities.
+    scopes.ApprovalScopeActivityTimeout     = TimeSpan.FromSeconds(10);
+    scopes.ApprovalScopeActivityMaximumAttempts = 2;
+});
+```
+
+### Degradation on unsupported execution paths
+
+`ApprovalScope.Session` and `ApprovalScope.Always` require a persistent session — the workflow must have an active `AgentWorkflow` instance where scope records can be stored.
+
+| Execution path | Scope behavior |
+|---|---|
+| `TemporalAIAgentProxy` → `AgentWorkflow` | Full support: Session and Always scopes work as documented |
+| `AgentJobWorkflow` (scheduled jobs, `ScheduleAgentAsync`) | Session scope: `LogWarning`, record dropped. Always scope: `LogWarning`, record not persisted (store call skipped) |
+| `TemporalAIAgent` (sub-agent via `GetAgent()`) | Same as `AgentJobWorkflow` — no persistent session |
+
+For scheduled jobs and sub-agents, configure `RequireApproval()` tools without `.ScopeAware()` if you do not want silent scope-record failures.
+
+---
+
 ## Testing HITL Flows
 
 ### Integration Tests
@@ -516,6 +677,34 @@ public sealed record DurableApprovalDecision
     public string RequestId { get; init; } = string.Empty;     // must match pending request
     public bool Approved { get; init; }
     public string? Reason { get; init; }                       // reviewer note or timeout message
+    public ApprovalScope Scope { get; init; }                  // default: ThisCallOnly (no scope record written)
+    public ApprovalScopePattern? ScopePattern { get; init; }   // optional argument-level pattern constraint
+}
+```
+
+`Scope` and `ScopePattern` are serialized with `JsonIgnoreCondition.WhenWritingDefault` / `WhenWritingNull`, so legacy JSON without these fields deserializes as `ThisCallOnly` with no pattern — no breaking change for existing approval integrations.
+
+### ApprovalScopePattern
+
+```csharp
+// Namespace: Temporalio.Extensions.AI
+public sealed class ApprovalScopePattern
+{
+    public PatternMatchType Type { get; init; }    // Exact | Glob | Regex
+    public required string Pattern { get; init; }
+    public string? Parameter { get; init; }        // null = match against full argument JSON
+}
+```
+
+### ApprovalScope
+
+```csharp
+// Namespace: Temporalio.Extensions.AI
+public enum ApprovalScope
+{
+    ThisCallOnly,   // default — no scope record written
+    Session,        // scoped to the current session; survives continue-as-new
+    Always,         // persisted to IApprovalScopeStore; applies across all sessions
 }
 ```
 
@@ -603,13 +792,20 @@ dotnet run --project samples/MAF/HumanInTheLoop
 ## References
 
 - `src/Temporalio.Extensions.AI/DurableApprovalRequest.cs` — request type
-- `src/Temporalio.Extensions.AI/DurableApprovalDecision.cs` — decision and outcome type
-- `src/Temporalio.Extensions.Agents/AgentWorkflow.cs` — HITL update/query handlers
+- `src/Temporalio.Extensions.AI/DurableApprovalDecision.cs` — decision and outcome type (includes `Scope`, `ScopePattern`)
+- `src/Temporalio.Extensions.AI/ApprovalScope.cs` — `ApprovalScope` enum
+- `src/Temporalio.Extensions.AI/ApprovalScopePattern.cs` — `ApprovalScopePattern` and `PatternMatchType`
+- `src/Temporalio.Extensions.Agents/ApprovalScopeRecord.cs` — persisted scope record
+- `src/Temporalio.Extensions.Agents/ApprovalScopeHelpers.cs` — `TryMatchScope` public helper
+- `src/Temporalio.Extensions.Agents/ApprovalScopesOptions.cs` — per-agent scope configuration
+- `src/Temporalio.Extensions.Agents/HistoryStore/IApprovalScopeStore.cs` — always-scope store interface
+- `src/Temporalio.Extensions.Agents/AgentWorkflow.cs` — HITL update/query handlers, scope record write path
 - `src/Temporalio.Extensions.Agents/TemporalAgentContext.cs` — `RequestApprovalAsync` for tools
 - `samples/MAF/HumanInTheLoop/` — complete working example
+- [Tool Interceptor — Approval scope records](./tool-interceptor.md#approval-scope-records) — interceptor integration, one-turn lag
 - [Usage Guide — HITL](./usage.md#human-in-the-loop-hitl-approval-gates) — quick-start examples
 - [Testing Agents](./testing-agents.md) — integration test patterns
 
 ---
 
-_Last updated: 2026-03-13_
+_Last updated: 2026-06-05_
