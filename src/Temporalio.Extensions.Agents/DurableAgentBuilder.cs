@@ -55,6 +55,8 @@ public sealed class DurableAgentBuilder
     private readonly HashSet<string> _toolNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Func<IServiceProvider, AIContextProvider>> _contextProviders = new();
     private Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? _toolInterceptorFactory;
+    private bool _useApprovalScopes;
+    private ApprovalScopesOptions? _approvalScopesOptions;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DurableAgentBuilder"/> class with the given agent
@@ -534,11 +536,62 @@ public sealed class DurableAgentBuilder
     /// <param name="factory">Factory that produces the interceptor.</param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <see cref="UseApprovalScopes"/> has already been called. Approval scopes
+    /// install the built-in <c>ScopedApprovalInterceptor</c>, and scope-aware required tools have
+    /// been excluded from <c>RequiresApprovalTools</c> — replacing the interceptor would silently
+    /// bypass approval for those tools.
+    /// </exception>
     public DurableAgentBuilder AddToolInterceptor(
         Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
+
+        if (_useApprovalScopes)
+        {
+            throw new InvalidOperationException(
+                "Cannot register a custom tool interceptor after UseApprovalScopes() — scope-aware " +
+                "required tools have been excluded from RequiresApprovalTools and rely on " +
+                "ScopedApprovalInterceptor to enforce the approval gate. Replacing the interceptor " +
+                "would silently bypass approval for those tools.");
+        }
+
         _toolInterceptorFactory = factory;
+        return this;
+    }
+
+    /// <summary>
+    /// Registers the built-in scope-aware approval interceptor for this agent. The interceptor
+    /// checks session and always-scopes before parking the workflow for human approval; tools
+    /// that are not scope-annotated or have no matching scope record fall through to the standard
+    /// <see cref="DurableToolOptions.RequireApproval()"/> gate.
+    /// </summary>
+    /// <param name="configure">
+    /// Optional callback to configure <see cref="ApprovalScopesOptions"/>. When
+    /// <see langword="null"/>, default options are used.
+    /// </param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when <see cref="AddToolInterceptor"/> has already been called. Approval scopes
+    /// install the built-in <c>ScopedApprovalInterceptor</c>, and this release does not compose
+    /// approval scopes with custom tool interceptors.
+    /// </exception>
+    public DurableAgentBuilder UseApprovalScopes(Action<ApprovalScopesOptions>? configure = null)
+    {
+        if (_toolInterceptorFactory is not null)
+        {
+            throw new InvalidOperationException(
+                "UseApprovalScopes() cannot be combined with AddToolInterceptor(). Approval scopes " +
+                "install the built-in ScopedApprovalInterceptor, and this release does not compose " +
+                "approval scopes with custom tool interceptors.");
+        }
+
+        var opts = new ApprovalScopesOptions();
+        configure?.Invoke(opts);
+        _approvalScopesOptions = opts;
+        _useApprovalScopes = true;
+        _toolInterceptorFactory = _ => new ScopedApprovalInterceptor(opts);
+
         return this;
     }
 
@@ -564,6 +617,71 @@ public sealed class DurableAgentBuilder
                 $"DurableAgentBuilder for agent '{Name}' has no ChatClient set. Assign agent.ChatClient = sp => ... in the configure delegate.");
         }
 
+        // Builder-time validation for approval-scope related combinations.
+        if (_useApprovalScopes && _approvalScopesOptions is { } scopeOpts)
+        {
+            // Validate AlwaysScopesStoreKey.
+            if (string.IsNullOrWhiteSpace(scopeOpts.AlwaysScopesStoreKey))
+            {
+                throw new InvalidOperationException(
+                    $"ApprovalScopesOptions.AlwaysScopesStoreKey for agent '{Name}' must be non-null and non-whitespace.");
+            }
+
+            if (scopeOpts.AlwaysScopesStoreKey == "temporal.approval_scopes.session")
+            {
+                throw new InvalidOperationException(
+                    "ApprovalScopesOptions.AlwaysScopesStoreKey cannot be set to 'temporal.approval_scopes.session' — " +
+                    "that key is reserved for session-scope records managed by Feature B internally. Use a different store key.");
+            }
+
+            // Validate numeric bounds.
+            if (scopeOpts.MaxAlwaysScopeCacheRecords <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"ApprovalScopesOptions.MaxAlwaysScopeCacheRecords for agent '{Name}' must be a positive integer.");
+            }
+
+            if (scopeOpts.MaxAlwaysScopeCacheBytes <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"ApprovalScopesOptions.MaxAlwaysScopeCacheBytes for agent '{Name}' must be a positive integer.");
+            }
+
+            if (scopeOpts.ApprovalScopeActivityMaximumAttempts <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts for agent '{Name}' must be a positive integer.");
+            }
+
+            if (scopeOpts.ApprovalScopeActivityTimeout <= TimeSpan.Zero)
+            {
+                throw new InvalidOperationException(
+                    $"ApprovalScopesOptions.ApprovalScopeActivityTimeout for agent '{Name}' must be greater than TimeSpan.Zero.");
+            }
+        }
+
+        // Validate per-tool combinations.
+        foreach (var toolReg in _tools)
+        {
+            var opts = toolReg.Options;
+
+            // RequireApproval + ScopeAware requires UseApprovalScopes to be called.
+            if (opts.RequireApprovalFlag && opts.ScopeAwareFlag && !_useApprovalScopes)
+            {
+                throw new InvalidOperationException(
+                    $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{Name}'. " +
+                    "Call UseApprovalScopes() before registering scope-aware required tools.");
+            }
+
+            // RequireApproval + ScopeAware + SkipInterceptor is always invalid.
+            if (opts.RequireApprovalFlag && opts.ScopeAwareFlag && opts.SkipInterceptorFlag)
+            {
+                throw new InvalidOperationException(
+                    $"Tool '{toolReg.Name}' cannot combine RequireApproval(), ScopeAware(), and SkipInterceptor(); approval " +
+                    "scopes require the interceptor to enforce the missing-scope approval gate.");
+            }
+        }
+
         return new DurableAgentRegistration(
             Name: Name,
             Description: Description,
@@ -583,7 +701,9 @@ public sealed class DurableAgentBuilder
             HistoryReducer: HistoryReducer,
             ConfigureAgentPipeline: ConfigureAgentPipeline,
             CompactionStrategyKey: CompactionStrategyKey,
-            ToolInterceptorFactory: _toolInterceptorFactory);
+            ToolInterceptorFactory: _toolInterceptorFactory,
+            UseApprovalScopes: _useApprovalScopes,
+            ApprovalScopesOptions: _approvalScopesOptions);
     }
 
     private void AddToolCore(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure)

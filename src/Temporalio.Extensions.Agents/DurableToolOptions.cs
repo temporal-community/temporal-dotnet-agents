@@ -167,4 +167,32 @@ public sealed class DurableToolOptions
         RequireApprovalFlag = true;
         return this;
     }
+
+    /// <summary>
+    /// Read-only observable state. Set only via <see cref="ScopeAware()"/>. Do not set this property directly.
+    /// When <see langword="true"/>, this tool participates in scope-aware auto-approval. When a
+    /// matching scope record is present in the session StateBag (or in the always-scopes cache
+    /// loaded from the store), the interceptor returns <see cref="AI.DurableToolDecision.Proceed"/>
+    /// and the approval gate is bypassed. Default is <see langword="false"/>.
+    /// </summary>
+    public bool ScopeAwareFlag { get; private set; }
+
+    /// <summary>
+    /// Opts this tool into scope-aware auto-approval. When a matching scope record is present in
+    /// the session StateBag (or in the always-scopes cache loaded from the store), the interceptor
+    /// returns <see cref="AI.DurableToolDecision.Proceed"/> and the approval gate is bypassed.
+    /// </summary>
+    /// <returns>This instance, for fluent chaining.</returns>
+    /// <remarks>
+    /// When used without <c>.RequireApproval()</c>, this flag has no effect if no
+    /// <see cref="IAgentToolInterceptor"/> is configured — scope records are only consulted
+    /// inside the interceptor activity. When combined with <c>.RequireApproval()</c>, an
+    /// approval-scopes registration must be configured via <c>UseApprovalScopes()</c> or worker
+    /// startup throws <see cref="System.InvalidOperationException"/>.
+    /// </remarks>
+    public DurableToolOptions ScopeAware()
+    {
+        ScopeAwareFlag = true;
+        return this;
+    }
 }
