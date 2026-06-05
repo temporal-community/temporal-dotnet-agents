@@ -49,7 +49,8 @@ internal sealed record CachedDurableAgent(
     string? CompactionStrategyKey,
     Compaction.ICompactionStrategy? CompactionStrategy,
     IReadOnlyList<AITool> ToolsAsAITools,
-    IDurableToolInterceptor<AgentToolContext>? ToolInterceptor = null);
+    IDurableToolInterceptor<AgentToolContext>? ToolInterceptor = null,
+    HistoryStore.IApprovalScopeStore? ApprovalScopeStore = null);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
@@ -800,6 +801,17 @@ internal sealed class AgentActivities(
             ?? agentsOptions.DefaultToolInterceptor;
         var resolvedInterceptor = interceptorFactory?.Invoke(providerServices);
 
+        // Feature B: resolve approval-scope store only when this agent has opted into
+        // approval scopes. A worker-default store must not introduce construction side effects
+        // for agents that did not call UseApprovalScopes().
+        HistoryStore.IApprovalScopeStore? resolvedApprovalScopeStore = null;
+        if (registration.UseApprovalScopes && registration.ApprovalScopesOptions is not null)
+        {
+            var approvalScopeStoreFactory = registration.ApprovalScopesOptions.ApprovalScopeStore
+                ?? agentsOptions.ApprovalScopeStore;
+            resolvedApprovalScopeStore = approvalScopeStoreFactory?.Invoke(providerServices);
+        }
+
         return new CachedDurableAgent(
             agent,
             resolvedTools,
@@ -811,7 +823,8 @@ internal sealed class AgentActivities(
             effectiveCompactionKey,
             resolvedStrategy,
             toolsAsAITools,
-            resolvedInterceptor);
+            resolvedInterceptor,
+            resolvedApprovalScopeStore);
     }
 
     /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
@@ -1080,6 +1093,79 @@ internal sealed class AgentActivities(
         }
 
         return DurableToolInterceptorResult.FromDecision(decision);
+    }
+
+    /// <summary>
+    /// Loads all always-scope records for an agent and logical store key from the configured
+    /// <see cref="Temporalio.Extensions.Agents.HistoryStore.IApprovalScopeStore"/>.
+    /// When no store is configured, returns an empty result.
+    /// </summary>
+    /// <remarks>
+    /// Failure handling is delegated to the workflow: the activity itself throws on store errors,
+    /// and the workflow catches <see cref="Temporalio.Activities.ActivityFailureException"/> with
+    /// the <c>when (!IsActivityCancellation(ex))</c> filter to apply fail-open semantics.
+    /// </remarks>
+    [Activity("Temporalio.Extensions.Agents.LoadAlwaysScopes")]
+    public async Task<LoadAlwaysScopesResult> LoadAlwaysScopesAsync(LoadAlwaysScopesInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var ct = ActivityExecutionContext.Current.CancellationToken;
+        var cached = ResolveDurableAgent(input.AgentName);
+
+        if (cached.ApprovalScopeStore is null)
+        {
+            // No store configured — return empty result gracefully.
+            return new LoadAlwaysScopesResult { Scopes = [] };
+        }
+
+        var records = await cached.ApprovalScopeStore
+            .LoadAsync(input.AgentName, input.StoreKey, ct)
+            .ConfigureAwait(false);
+
+        return new LoadAlwaysScopesResult { Scopes = records ?? [] };
+    }
+
+    /// <summary>
+    /// Appends an always-scope record to the configured
+    /// <see cref="Temporalio.Extensions.Agents.HistoryStore.IApprovalScopeStore"/>.
+    /// Idempotent by <see cref="ApprovalScopeRecord.OriginatingRequestId"/>.
+    /// When no store is configured, logs a warning and returns without error.
+    /// </summary>
+    /// <remarks>
+    /// Failure handling is delegated to the workflow: the activity itself throws on store errors,
+    /// and the workflow catches <see cref="Temporalio.Activities.ActivityFailureException"/> with
+    /// the <c>when (!IsActivityCancellation(ex))</c> filter to apply fail-open semantics.
+    /// </remarks>
+    [Activity("Temporalio.Extensions.Agents.AppendAlwaysScope")]
+    public async Task AppendAlwaysScopeAsync(AppendAlwaysScopeInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var ct = ActivityExecutionContext.Current.CancellationToken;
+        var cached = ResolveDurableAgent(input.AgentName);
+
+        if (cached.ApprovalScopeStore is null)
+        {
+            _logger.LogWarning(
+                "[{SessionId}] AppendAlwaysScopeAsync: no IApprovalScopeStore is configured for agent " +
+                "'{AgentName}'. The always-scope record for tool '{ToolName}' (RequestId: {RequestId}) " +
+                "will not be persisted.",
+                input.SessionId, input.AgentName, input.ToolName, input.OriginatingRequestId);
+            return;
+        }
+
+        var record = new ApprovalScopeRecord
+        {
+            ToolName = input.ToolName,
+            Pattern = input.Pattern,
+            GrantedAt = input.GrantedAt,
+            OriginatingRequestId = input.OriginatingRequestId,
+        };
+
+        await cached.ApprovalScopeStore
+            .AppendAsync(input.AgentName, input.StoreKey, record, ct)
+            .ConfigureAwait(false);
     }
 
     [Activity("Temporalio.Extensions.Agents.InvokeAgentTool")]
