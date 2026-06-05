@@ -10,7 +10,9 @@ namespace Temporalio.Extensions.AI;
 /// Uses <see cref="AIJsonUtilities.DefaultOptions"/> as the base to correctly
 /// handle <see cref="AIContent"/> polymorphism (TextContent, FunctionCallContent, etc.).
 /// </summary>
-[JsonSerializable(typeof(ApprovalScope))]
+// ApprovalScope is NOT registered standalone here — registering it standalone in source-gen
+// would generate a plain integer-based enum info that ignores the [JsonConverter] attribute,
+// bypassing ApprovalScopeJsonConverter. It is inferred from DurableApprovalDecision's property.
 // PatternMatchType is NOT registered standalone here — registering it standalone in source-gen
 // would generate a plain integer-based enum info that ignores the [JsonConverter] attribute,
 // bypassing PatternMatchTypeJsonConverter. It is inferred from ApprovalScopePattern's property.
@@ -75,11 +77,15 @@ public static class DurableAIJsonUtilities
         // of the activity contract (or a downstream consumer that reuses DurableAIDataConverter
         // for its own embedding closures) gets correct wrapper-property handling for free. Cost
         // is one line + tiny metadata footprint per closure.
-        // PatternMatchType uses a custom JsonStringEnumConverter with allowIntegerValues: false.
-        // Register in Converters in addition to the [JsonConverter] attribute on the enum to
-        // guarantee string serialization with integer values rejected in source-gen chain contexts
-        // where the [JsonConverter] attribute may not be honoured for all code paths.
-        options.Converters.Add(new PatternMatchTypeJsonConverter());
+        // ApprovalScope uses a custom converter that enforces integer-only serialization, overriding
+        // the global JsonStringEnumConverter from AIJsonUtilities.DefaultOptions. The inherited
+        // JsonStringEnumConverter (copied from AIJsonUtilities.DefaultOptions) handles all enums
+        // and sits at index 0. Insert at index 0 so ApprovalScopeJsonConverter is checked FIRST,
+        // before the catch-all JsonStringEnumConverter claims the type. Same pattern for
+        // PatternMatchTypeJsonConverter, though it derives from JsonStringEnumConverter<T> and
+        // already wins the exact-type match; inserting first is the safe, consistent approach.
+        options.Converters.Insert(0, new PatternMatchTypeJsonConverter());
+        options.Converters.Insert(0, new ApprovalScopeJsonConverter());
 
         options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<float>>());
         options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<double>>());

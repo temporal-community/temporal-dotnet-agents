@@ -43,43 +43,25 @@ public class SerializationSpikeTests
     }
 
     /// <summary>
-    /// Test case 3a (SPIKE FINDING): Confirms the actual integer rejection behavior.
+    /// Test case 3a: integer values for PatternMatchType are rejected with JsonException.
     ///
-    /// SPIKE FINDING (2026-06-05): JsonStringEnumConverter with allowIntegerValues: false does NOT
-    /// reject integer tokens for PatternMatchType when source-gen type info is in use. Source-gen
-    /// generates its own enum deserialization that casts integers natively, bypassing the
-    /// allowIntegerValues guard entirely — for both valid values (Type:0 → Exact) and undefined ones
-    /// (Type:99 → (PatternMatchType)99).
-    ///
-    /// The spec's claim that "Type":0 fails at the data converter boundary is INCORRECT for .NET 10
-    /// source-gen. The actual enforced protection is:
-    /// 1. Unknown strings throw JsonException (working — tested in test case 3b below).
-    /// 2. NormalizeApprovalScopeForPersistence (Group 6) must validate PatternMatchType via
-    ///    Enum.IsDefined to catch any undefined integer values that pass through deserialization.
-    ///
-    /// ACTION: Raise this as spec revision. The invariant "integer PatternMatchType values fail at
-    /// the data converter boundary" cannot be achieved with .NET 10 source-gen. The protection must
-    /// be pushed to workflow-level normalization (NormalizeApprovalScopeForPersistence).
-    ///
-    /// This test documents the ACTUAL behavior (integer does not throw) so future implementers
-    /// are not surprised. It is marked as a known limitation, not as a passing requirement.
+    /// PatternMatchTypeJsonConverter is now registered with priority in options.Converters
+    /// (inserted at index 0, before the global JsonStringEnumConverter from AIJsonUtilities).
+    /// The allowIntegerValues:false constraint is therefore correctly enforced at the
+    /// data converter boundary for both defined and undefined integer values.
     /// </summary>
     [Fact]
-    public void PatternMatchType_IntegerValue_DoesNotThrow_SourceGenLimitation()
+    public void PatternMatchType_IntegerValue_ThrowsJsonException()
     {
-        // KNOWN LIMITATION: Source-gen bypasses allowIntegerValues: false for PatternMatchType.
-        // Integer values do NOT throw — they pass through as (PatternMatchType)value.
-        // Protection is provided by NormalizeApprovalScopeForPersistence for undefined integers.
+        // Integer 0 is rejected — PatternMatchTypeJsonConverter (allowIntegerValues:false) wins.
         const string jsonValid = """{"Type":0,"Pattern":"/tmp/foo"}""";
-        var result = JsonSerializer.Deserialize<ApprovalScopePattern>(jsonValid, DurableAIJsonUtilities.DefaultOptions);
-        Assert.NotNull(result);
-        Assert.Equal(PatternMatchType.Exact, result.Type); // 0 → Exact (valid cast)
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<ApprovalScopePattern>(jsonValid, DurableAIJsonUtilities.DefaultOptions));
 
+        // Integer 99 is also rejected.
         const string jsonUndefined = """{"Type":99,"Pattern":"/tmp/foo"}""";
-        var resultUndefined = JsonSerializer.Deserialize<ApprovalScopePattern>(jsonUndefined, DurableAIJsonUtilities.DefaultOptions);
-        Assert.NotNull(resultUndefined);
-        Assert.Equal((PatternMatchType)99, resultUndefined.Type); // undefined integer passes through
-        // NormalizeApprovalScopeForPersistence must check Enum.IsDefined for this case
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<ApprovalScopePattern>(jsonUndefined, DurableAIJsonUtilities.DefaultOptions));
     }
 
     /// <summary>

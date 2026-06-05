@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace Temporalio.Extensions.AI;
 
 /// <summary>
@@ -6,7 +9,10 @@ namespace Temporalio.Extensions.AI;
 /// <remarks>
 /// Serialized as an integer for compactness and replay safety.
 /// Do not add <c>JsonStringEnumConverter</c> — integer serialization is the wire contract.
+/// The per-type <see cref="ApprovalScopeJsonConverter"/> enforces this and overrides the global
+/// <c>JsonStringEnumConverter</c> present in <see cref="Microsoft.Extensions.AI.AIJsonUtilities.DefaultOptions"/>.
 /// </remarks>
+[JsonConverter(typeof(ApprovalScopeJsonConverter))]
 public enum ApprovalScope
 {
     /// <summary>
@@ -30,4 +36,34 @@ public enum ApprovalScope
     /// <see cref="ThisCallOnly"/>.
     /// </summary>
     Always = 2,
+}
+
+/// <summary>
+/// Custom JSON converter for <see cref="ApprovalScope"/> that enforces integer-only
+/// serialization and rejects string enum values.
+/// </summary>
+/// <remarks>
+/// This converter overrides the global <c>JsonStringEnumConverter</c> present in
+/// <see cref="Microsoft.Extensions.AI.AIJsonUtilities.DefaultOptions"/>.
+/// <see cref="ApprovalScope"/> is part of the durable wire contract; string values
+/// (e.g. <c>"Session"</c>) must be rejected to prevent payload drift across worker versions.
+/// </remarks>
+public sealed class ApprovalScopeJsonConverter : JsonConverter<ApprovalScope>
+{
+    /// <inheritdoc/>
+    public override ApprovalScope Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType != JsonTokenType.Number)
+        {
+            throw new JsonException("ApprovalScope must be a JSON integer.");
+        }
+
+        return (ApprovalScope)reader.GetInt32();
+    }
+
+    /// <inheritdoc/>
+    public override void Write(Utf8JsonWriter writer, ApprovalScope value, JsonSerializerOptions options)
+    {
+        writer.WriteNumberValue((int)value);
+    }
 }

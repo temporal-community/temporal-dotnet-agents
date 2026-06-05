@@ -101,36 +101,31 @@ public class ApprovalScopeSerializationTests
     }
 
     /// <summary>
-    /// Defined numeric PatternMatchType token (e.g. "Type": 0) deserializes to the corresponding
-    /// enum member (Exact) without throwing. .NET 10 source-gen does NOT enforce allowIntegerValues:false
-    /// for integer tokens — this is documented behavior.
+    /// Defined numeric PatternMatchType token (e.g. "Type": 0) throws JsonException.
+    /// PatternMatchTypeJsonConverter is now registered with priority over the global
+    /// JsonStringEnumConverter, so allowIntegerValues:false is correctly enforced.
     /// </summary>
     [Fact]
-    public void PatternMatchType_DefinedNumericValue_DeserializesAsEnumMember()
+    public void PatternMatchType_DefinedNumericValue_ThrowsJsonException()
     {
-        // Integer 0 → Exact. Per .NET 10 source-gen limitation, this does not throw.
+        // Integer 0 is rejected — PatternMatchTypeJsonConverter (allowIntegerValues:false) wins.
         const string json = """{"Type":0,"Pattern":"/tmp/foo"}""";
-        var result = JsonSerializer.Deserialize<ApprovalScopePattern>(json, DurableAIJsonUtilities.DefaultOptions);
-
-        Assert.NotNull(result);
-        Assert.Equal(PatternMatchType.Exact, result.Type);
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<ApprovalScopePattern>(json, DurableAIJsonUtilities.DefaultOptions));
     }
 
     /// <summary>
-    /// Undefined numeric PatternMatchType token (e.g. "Type": 99) does NOT throw at the converter
-    /// boundary — it deserializes as (PatternMatchType)99 and is caught later by
-    /// NormalizeApprovalScopeForPersistence via Enum.IsDefined.
+    /// Undefined numeric PatternMatchType token (e.g. "Type": 99) throws JsonException.
+    /// PatternMatchTypeJsonConverter is now registered with priority over the global
+    /// JsonStringEnumConverter, so allowIntegerValues:false is correctly enforced.
     /// </summary>
     [Fact]
-    public void PatternMatchType_UndefinedNumericValue_PassesThroughWithoutThrow()
+    public void PatternMatchType_UndefinedNumericValue_ThrowsJsonException()
     {
+        // Integer 99 is rejected — PatternMatchTypeJsonConverter (allowIntegerValues:false) wins.
         const string json = """{"Type":99,"Pattern":"/tmp/foo"}""";
-        var result = JsonSerializer.Deserialize<ApprovalScopePattern>(json, DurableAIJsonUtilities.DefaultOptions);
-
-        Assert.NotNull(result);
-        Assert.Equal((PatternMatchType)99, result.Type);
-        // Enum.IsDefined must return false for this value.
-        Assert.False(Enum.IsDefined(typeof(PatternMatchType), result.Type));
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<ApprovalScopePattern>(json, DurableAIJsonUtilities.DefaultOptions));
     }
 
     /// <summary>
@@ -145,35 +140,32 @@ public class ApprovalScopeSerializationTests
             JsonSerializer.Deserialize<ApprovalScopePattern>(json, DurableAIJsonUtilities.DefaultOptions));
     }
 
-    // ── ApprovalScope string serialization (via AIJsonUtilities global converter) ────
+    // ── ApprovalScope integer serialization (enforced by ApprovalScopeJsonConverter) ──
 
     /// <summary>
-    /// ApprovalScope serializes as a string via AIJsonUtilities.DefaultOptions' global
-    /// JsonStringEnumConverter. DurableAIJsonUtilities.DefaultOptions inherits this converter
-    /// because it is constructed from AIJsonUtilities.DefaultOptions.
+    /// ApprovalScope serializes as an integer via ApprovalScopeJsonConverter, which overrides the
+    /// global JsonStringEnumConverter present in AIJsonUtilities.DefaultOptions.
     /// </summary>
     [Theory]
-    [InlineData(ApprovalScope.ThisCallOnly, "\"ThisCallOnly\"")]
-    [InlineData(ApprovalScope.Session, "\"Session\"")]
-    [InlineData(ApprovalScope.Always, "\"Always\"")]
-    public void ApprovalScope_SerializesAsString(ApprovalScope scope, string expectedJson)
+    [InlineData(ApprovalScope.ThisCallOnly, "0")]
+    [InlineData(ApprovalScope.Session, "1")]
+    [InlineData(ApprovalScope.Always, "2")]
+    public void ApprovalScope_SerializesAsInteger(ApprovalScope scope, string expectedJson)
     {
         var json = JsonSerializer.Serialize(scope, DurableAIJsonUtilities.DefaultOptions);
         Assert.Equal(expectedJson, json);
     }
 
     /// <summary>
-    /// ApprovalScope with string value in JSON round-trips correctly because
-    /// AIJsonUtilities.DefaultOptions includes a global JsonStringEnumConverter.
+    /// ApprovalScope wire contract is integer-only; string values must be rejected.
     /// </summary>
     [Fact]
-    public void ApprovalScope_StringValueInJson_RoundTrips()
+    public void ApprovalScope_StringValueInJson_ThrowsJsonException()
     {
-        // ApprovalScope inherits string serialization from AIJsonUtilities.DefaultOptions.
+        // ApprovalScope wire contract is integer-only; string values must be rejected.
         const string json = """{"RequestId":"req-001","Approved":true,"Scope":"Session"}""";
-        var restored = JsonSerializer.Deserialize<DurableApprovalDecision>(json, DurableAIJsonUtilities.DefaultOptions);
-        Assert.NotNull(restored);
-        Assert.Equal(ApprovalScope.Session, restored!.Scope);
+        Assert.Throws<JsonException>(() =>
+            JsonSerializer.Deserialize<DurableApprovalDecision>(json, DurableAIJsonUtilities.DefaultOptions));
     }
 
     // ── WhenWritingDefault / WhenWritingNull omission ───────────────────────
