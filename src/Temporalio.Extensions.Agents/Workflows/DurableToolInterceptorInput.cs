@@ -34,4 +34,33 @@ internal sealed class DurableToolInterceptorInput
     /// Uses the same <c>FromStateBag</c> pattern as <c>RunDurableAgentStep</c>.
     /// </summary>
     public JsonElement? SerializedStateBag { get; init; }
+
+    /// <summary>
+    /// When <see langword="true"/>, the tool was registered with
+    /// <see cref="DurableToolOptions.ScopeAware()"/> and the interceptor should consult
+    /// session and always-scope records before deciding.
+    /// </summary>
+    /// <remarks>
+    /// Wire-compatibility: existing workflow history lacks this field and deserializes with
+    /// <see langword="false"/> (C# default). JSON property name must never change.
+    /// </remarks>
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ScopeAware { get; init; }
+
+    /// <summary>
+    /// When <see langword="true"/>, the tool was registered with
+    /// <see cref="DurableToolOptions.RequireApproval()"/>. This is true for both scope-aware
+    /// and non-scope-aware required tools.
+    /// </summary>
+    /// <remarks>
+    /// This is intentionally broader than <c>ProxyResolvedWorkerConfig.RequiresApprovalTools</c>,
+    /// which excludes scope-aware tools. The interceptor needs this flag so it can return
+    /// <c>PauseForApproval</c> when no matching scope record is found.
+    /// Wire-compatibility: existing workflow history lacks this field and deserializes with
+    /// <see langword="false"/> (C# default). JSON property name must never change.
+    /// </remarks>
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool RequiresApproval { get; init; }
 }

@@ -472,6 +472,11 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                                 : new Dictionary<string, object?>(tc.Arguments),
                             CallId = tc.CallId,
                             SerializedStateBag = _currentStateBag,
+                            // Feature B: populate scope-aware fields so the interceptor can
+                            // consult scope records and enforce the approval gate.
+                            ScopeAware = _input!.ScopeAwareTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
+                            RequiresApproval = _input!.RequiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true
+                                || _input!.ScopeAwareApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
                         };
 
                         // See also: DurableChatWorkflow.ExecutePattern3TurnAsync (MEAI path) — parallel typed dispatch

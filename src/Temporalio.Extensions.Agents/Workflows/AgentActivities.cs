@@ -1002,7 +1002,24 @@ internal sealed class AgentActivities(
         if (cached.ToolInterceptor is null)
         {
             // Interceptor was removed between workflow dispatch and activity execution
-            // (e.g. worker restart without interceptor re-registration). Degrade to Proceed
+            // (e.g. worker restart without interceptor re-registration).
+            // Scope-aware required tools must not silently proceed — they were excluded from
+            // RequiresApprovalTools and rely on the interceptor for the approval gate.
+            if (input.ScopeAware && input.RequiresApproval)
+            {
+                _logger.LogWarning(
+                    "RunToolInterceptor dispatched for agent '{AgentName}' tool '{ToolName}' " +
+                    "(ScopeAware+RequiresApproval) but no IAgentToolInterceptor is resolved. " +
+                    "Returning PauseForApproval to enforce the approval gate.",
+                    input.AgentName, input.ToolName);
+                return new DurableToolInterceptorResult
+                {
+                    Outcome = DurableToolOutcome.PauseForApproval,
+                    Message = $"Tool '{input.ToolName}' requires approval. No interceptor resolved — defaulting to approval gate.",
+                };
+            }
+
+            // Non-required or non-scope-aware: degrade to Proceed
             // so the tool still runs rather than silently blocking the session.
             _logger.LogWarning(
                 "RunToolInterceptor dispatched for agent '{AgentName}' tool '{ToolName}' " +
@@ -1037,6 +1054,9 @@ internal sealed class AgentActivities(
             CallId = input.CallId,
             SessionId = ctx.Info.WorkflowId,
             StateBag = stateBag,
+            // Feature B: pass through scope-aware fields so the interceptor can consult scope records.
+            ScopeAware = input.ScopeAware,
+            RequiresApproval = input.RequiresApproval,
         };
 
         DurableToolDecision decision;

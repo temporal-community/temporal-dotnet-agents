@@ -27,4 +27,19 @@ public sealed class AgentToolContext : DurableToolContext
     /// May be <see langword="null"/> when no state has been accumulated yet.
     /// </summary>
     public AgentSessionStateBag? StateBag { get; init; }
+
+    /// <summary>
+    /// When <see langword="true"/>, the tool was registered with
+    /// <see cref="DurableToolOptions.ScopeAware()"/>. The interceptor may consult
+    /// session and always-scope records in <see cref="StateBag"/> before deciding.
+    /// </summary>
+    public bool ScopeAware { get; init; }
+
+    /// <summary>
+    /// When <see langword="true"/>, the tool was registered with
+    /// <see cref="DurableToolOptions.RequireApproval()"/>. This is true for both scope-aware
+    /// and non-scope-aware required tools so the built-in interceptor can return
+    /// <c>PauseForApproval</c> when no matching scope record is found.
+    /// </summary>
+    public bool RequiresApproval { get; init; }
 }
