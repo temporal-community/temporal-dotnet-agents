@@ -51,6 +51,9 @@ public sealed class TemporalAIAgent : AIAgent
     private IReadOnlyDictionary<string, ActivityOptions>? _interceptorToolActivityOptions;
     private IReadOnlyList<string>? _interceptorSkippedTools;
     private IReadOnlyList<string>? _requiresApprovalTools;
+    // Feature B: scope-aware tool lists captured from first-step resolved config (Task 4.7).
+    private IReadOnlyList<string>? _scopeAwareTools;
+    private IReadOnlyList<string>? _scopeAwareApprovalTools;
 
     internal TemporalAIAgent(string agentName, ActivityOptions? activityOptions = null)
     {
@@ -212,6 +215,28 @@ public sealed class TemporalAIAgent : AIAgent
                 _interceptorToolActivityOptions = resolvedConfig.InterceptorToolActivityOptions;
                 _interceptorSkippedTools = resolvedConfig.InterceptorSkippedTools;
                 _requiresApprovalTools = resolvedConfig.RequiresApprovalTools;
+                // Feature B (Task 4.7): capture scope-aware tool lists.
+                _scopeAwareTools = resolvedConfig.ScopeAwareTools;
+                _scopeAwareApprovalTools = resolvedConfig.ScopeAwareApprovalTools;
+
+                // Feature B — Task 7.2: warn when scope-aware required tools are present.
+                // TemporalAIAgent has no DurableApprovalMixin so workflow-parked approval is
+                // not supported. When the interceptor returns PauseForApproval for a
+                // scope-aware required tool (because no matching scope record exists), the
+                // decision degrades to Block below. Emitting a LogWarning here after the first
+                // step's ResolvedWorkerConfig arrives makes this degradation visible before
+                // the tool call rather than silently at block time.
+                // Note: SerializedStateBag is always null in TemporalAIAgent's interceptor
+                // input (constructed below) — scope records from StateBag are never consulted
+                // on this path.
+                if (resolvedConfig.ScopeAwareApprovalTools is { Count: > 0 } scopeApprovalTools)
+                {
+                    var names = string.Join(", ", scopeApprovalTools);
+                    Workflow.Logger.LogWarning(
+                        "Tool(s) '{ToolNames}' are configured with RequireApproval().ScopeAware() but this execution " +
+                        "context does not support workflow-parked approval. Unapproved calls will be blocked.",
+                        names);
+                }
             }
 
             if (stepResult.Usage is not null)
@@ -278,7 +303,13 @@ public sealed class TemporalAIAgent : AIAgent
                             ToolName = tc.Name,
                             Arguments = tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments),
                             CallId = tc.CallId,
+                            // SerializedStateBag is always null on this path — TemporalAIAgent
+                            // has no StateBag and scope records from StateBag are never consulted.
                             SerializedStateBag = null,
+                            // Feature B (Task 4.7): populate scope-aware fields.
+                            ScopeAware = _scopeAwareTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
+                            RequiresApproval = _requiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true
+                                || _scopeAwareApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
                         };
                         // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel typed dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
