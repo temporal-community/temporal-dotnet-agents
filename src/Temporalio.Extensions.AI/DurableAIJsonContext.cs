@@ -10,6 +10,11 @@ namespace Temporalio.Extensions.AI;
 /// Uses <see cref="AIJsonUtilities.DefaultOptions"/> as the base to correctly
 /// handle <see cref="AIContent"/> polymorphism (TextContent, FunctionCallContent, etc.).
 /// </summary>
+[JsonSerializable(typeof(ApprovalScope))]
+// PatternMatchType is NOT registered standalone here — registering it standalone in source-gen
+// would generate a plain integer-based enum info that ignores the [JsonConverter] attribute,
+// bypassing PatternMatchTypeJsonConverter. It is inferred from ApprovalScopePattern's property.
+[JsonSerializable(typeof(ApprovalScopePattern))]
 [JsonSerializable(typeof(DurableChatInput))]
 [JsonSerializable(typeof(DurableFunctionInput))]
 [JsonSerializable(typeof(DurableFunctionOutput))]
@@ -70,6 +75,12 @@ public static class DurableAIJsonUtilities
         // of the activity contract (or a downstream consumer that reuses DurableAIDataConverter
         // for its own embedding closures) gets correct wrapper-property handling for free. Cost
         // is one line + tiny metadata footprint per closure.
+        // PatternMatchType uses a custom JsonStringEnumConverter with allowIntegerValues: false.
+        // Register in Converters in addition to the [JsonConverter] attribute on the enum to
+        // guarantee string serialization with integer values rejected in source-gen chain contexts
+        // where the [JsonConverter] attribute may not be honoured for all code paths.
+        options.Converters.Add(new PatternMatchTypeJsonConverter());
+
         options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<float>>());
         options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<double>>());
         options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<Half>>());

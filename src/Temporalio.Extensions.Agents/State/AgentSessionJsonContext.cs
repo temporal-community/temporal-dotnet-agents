@@ -7,6 +7,10 @@ using Temporalio.Extensions.AI;
 namespace Temporalio.Extensions.Agents.State;
 
 [JsonSourceGenerationOptions(WriteIndented = false)]
+// Feature B — approval scope types
+[JsonSerializable(typeof(Temporalio.Extensions.Agents.ApprovalScopeRecord))]
+[JsonSerializable(typeof(List<Temporalio.Extensions.Agents.ApprovalScopeRecord>))]
+[JsonSerializable(typeof(IReadOnlyList<Temporalio.Extensions.Agents.ApprovalScopeRecord>))]
 [JsonSerializable(typeof(DurableSessionEntry))]
 [JsonSerializable(typeof(DurableSessionRequest))]
 [JsonSerializable(typeof(DurableSessionResponse))]
