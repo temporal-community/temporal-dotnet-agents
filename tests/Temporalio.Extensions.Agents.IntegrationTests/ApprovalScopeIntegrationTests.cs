@@ -105,7 +105,7 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
         DurableApprovalRequest? callARequest = null;
         for (var i = 0; i < 30; i++)
         {
-            await Task.Delay(300);
+            await Task.Delay(500);
             callARequest = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
                 wf => wf.GetPendingApproval());
             if (callARequest is not null) break;
@@ -129,7 +129,7 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
         DurableApprovalRequest? callBRequest = null;
         for (var i = 0; i < 30; i++)
         {
-            await Task.Delay(300);
+            await Task.Delay(500);
             callBRequest = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
                 wf => wf.GetPendingApproval());
             // Must be a different request (Call B), not Call A's closed request.

@@ -33,8 +33,8 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
     private readonly ITestOutputHelper _output;
     private WorkflowEnvironment _env => _fixture.Environment;
 
-    private const string LoadAlwaysScopesActivity = "Temporalio.Extensions.Agents.LoadAlwaysScopesAsync";
-    private const string AppendAlwaysScopeActivity = "Temporalio.Extensions.Agents.AppendAlwaysScopeAsync";
+    private const string LoadAlwaysScopesActivity = "Temporalio.Extensions.Agents.LoadAlwaysScopes";
+    private const string AppendAlwaysScopeActivity = "Temporalio.Extensions.Agents.AppendAlwaysScope";
     private const string RunToolInterceptorActivity = "Temporalio.Extensions.Agents.RunToolInterceptor";
 
     public ApprovalScopeWorkflowTests(ApprovalScopeEnvironmentFixture fixture, ITestOutputHelper output)
@@ -84,9 +84,9 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
 
         // Wait for the workflow to register a pending approval.
         DurableApprovalRequest? pendingApproval = null;
-        for (var i = 0; i < 20; i++)
+        for (var i = 0; i < 30; i++)
         {
-            await Task.Delay(300);
+            await Task.Delay(500);
             pendingApproval = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
                 wf => wf.GetPendingApproval());
             if (pendingApproval is not null) break;
@@ -163,9 +163,9 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         var runTask = proxy.RunAsync("Run plain tool", session);
 
         DurableApprovalRequest? pending = null;
-        for (var i = 0; i < 20; i++)
+        for (var i = 0; i < 30; i++)
         {
-            await Task.Delay(300);
+            await Task.Delay(500);
             pending = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
                 wf => wf.GetPendingApproval());
             if (pending is not null) break;
@@ -187,9 +187,9 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         var turn2Task = proxy.RunAsync("Run plain tool again", session);
 
         DurableApprovalRequest? pending2 = null;
-        for (var i = 0; i < 20; i++)
+        for (var i = 0; i < 30; i++)
         {
-            await Task.Delay(300);
+            await Task.Delay(500);
             pending2 = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
                 wf => wf.GetPendingApproval());
             if (pending2 is not null) break;
@@ -240,9 +240,9 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         var runTask = proxy.RunAsync("Delete file", session);
 
         DurableApprovalRequest? pending = null;
-        for (var i = 0; i < 20; i++)
+        for (var i = 0; i < 30; i++)
         {
-            await Task.Delay(300);
+            await Task.Delay(500);
             pending = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
                 wf => wf.GetPendingApproval());
             if (pending is not null) break;

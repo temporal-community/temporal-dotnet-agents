@@ -39,6 +39,10 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     // GAP 6: StateBag persisted across turns so AIContextProvider state survives replay.
     private JsonElement? _currentStateBag;
 
+    // Feature B: tracks whether the always-scopes load has happened in this workflow run.
+    // Resets automatically on each continue-as-new (new workflow instance). Not serialized.
+    private bool _alwaysScopesLoadedThisRun;
+
     [WorkflowRun]
     public async Task RunAsync(AgentWorkflowInput input)
     {
@@ -47,44 +51,6 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         _currentStateBag = input.CarriedStateBag;
 
         Workflow.Logger.LogWorkflowStarted(input.AgentName, Workflow.Info.WorkflowId, input.TimeToLive);
-
-        // Feature B — Sub-section A: load always-scopes at direct-start session start.
-        // Guard: UseApprovalScopes && UseApprovalScopeStoreMode && ApplyAlwaysScopesAtSessionStart.
-        // For proxy-start workflows, ResolvedWorkerConfig is null here and all three forwarding
-        // properties resolve to false/null — this block is skipped entirely.
-        // Placed after LogWorkflowStarted and before the try { base.RunAsync } block so that the
-        // load happens before the main turn loop but after the started log entry.
-        if (_input!.UseApprovalScopes == true &&
-            _input!.UseApprovalScopeStoreMode == true &&
-            _input!.ApplyAlwaysScopesAtSessionStart == true)
-        {
-            try
-            {
-                var loaded = await Workflow.ExecuteActivityAsync(
-                    (AgentActivities a) => a.LoadAlwaysScopesAsync(new LoadAlwaysScopesInput
-                    {
-                        AgentName = input.AgentName,
-                        StoreKey = _input!.AlwaysScopesStoreKey!,
-                    }),
-                    ApprovalScopeActivityOptions()).ConfigureAwait(true);
-
-                if (loaded?.Scopes is { Count: > 0 } &&
-                    IsWithinAlwaysScopeCacheBudget(
-                        loaded.Scopes,
-                        _input!.MaxAlwaysScopeCacheRecords,
-                        _input!.MaxAlwaysScopeCacheBytes))
-                {
-                    MergeAlwaysScopesIntoStateBag(loaded.Scopes);
-                }
-            }
-            catch (ActivityFailureException ex) when (!IsActivityCancellation(ex))
-            {
-                Workflow.Logger.LogWarning(
-                    "[{SessionId}] LoadAlwaysScopesAsync failed after retries exhausted. Always-scope cache not " +
-                    "populated. Scope-aware tools will require normal approval this session. {Exception}",
-                    Workflow.Info.WorkflowId, ex);
-            }
-        }
 
         // Detect "external history mode" from the resolved agent input — when ANY history
         // store is configured (worker default or per-agent override), the workflow strips
@@ -445,6 +411,56 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                         "[{SessionId}] LoadAlwaysScopesAsync failed after retries exhausted. Always-scope cache not " +
                         "populated. Scope-aware tools will require normal approval this session. {Exception}",
                         Workflow.Info.WorkflowId, ex);
+                }
+                finally
+                {
+                    _alwaysScopesLoadedThisRun = true;
+                }
+            }
+
+            // Feature B — Sub-section A: load always-scopes at direct-start session start.
+            // Guard: first step of the first turn (!needsResolution means direct-start or post-CAN),
+            // not already loaded this run, and all three approval-scope flags true.
+            // This path fires for direct-start workflows (WorkerSettingsResolved == true) where
+            // the load cannot happen before base.RunAsync because that would create a window where
+            // DurableChatWorkflowBase.Input is not yet set (causing RequiredInput failures when
+            // the RunAgentAsync update handler fires between the first await and base.RunAsync).
+            if (!needsResolution &&
+                !_alwaysScopesLoadedThisRun &&
+                iteration == 0 &&
+                _input!.UseApprovalScopes == true &&
+                _input!.UseApprovalScopeStoreMode == true &&
+                _input!.ApplyAlwaysScopesAtSessionStart == true)
+            {
+                try
+                {
+                    var loaded = await Workflow.ExecuteActivityAsync(
+                        (AgentActivities a) => a.LoadAlwaysScopesAsync(new LoadAlwaysScopesInput
+                        {
+                            AgentName = _input!.AgentName,
+                            StoreKey = _input!.AlwaysScopesStoreKey!,
+                        }),
+                        ApprovalScopeActivityOptions()).ConfigureAwait(true);
+
+                    if (loaded?.Scopes is { Count: > 0 } &&
+                        IsWithinAlwaysScopeCacheBudget(
+                            loaded.Scopes,
+                            _input!.MaxAlwaysScopeCacheRecords,
+                            _input!.MaxAlwaysScopeCacheBytes))
+                    {
+                        MergeAlwaysScopesIntoStateBag(loaded.Scopes);
+                    }
+                }
+                catch (ActivityFailureException ex) when (!IsActivityCancellation(ex))
+                {
+                    Workflow.Logger.LogWarning(
+                        "[{SessionId}] LoadAlwaysScopesAsync failed after retries exhausted. Always-scope cache not " +
+                        "populated. Scope-aware tools will require normal approval this session. {Exception}",
+                        Workflow.Info.WorkflowId, ex);
+                }
+                finally
+                {
+                    _alwaysScopesLoadedThisRun = true;
                 }
             }
 
