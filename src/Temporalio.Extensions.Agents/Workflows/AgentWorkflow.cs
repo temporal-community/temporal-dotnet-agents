@@ -933,49 +933,68 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         DurableApprovalDecision decision,
         string toolName)
     {
+        var (result, reason) = EvaluateScopeNormalization(decision);
+        if (result == ApprovalScope.ThisCallOnly && reason is not null)
+        {
+            Workflow.Logger.LogWarning(
+                "[{SessionId}] {Reason} Treating as ThisCallOnly.",
+                Workflow.Info.WorkflowId, reason);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Pure, static normalization logic — extracted for unit testability.
+    /// Returns the effective <see cref="ApprovalScope"/> and an optional warning reason string
+    /// when the scope is degraded to <see cref="ApprovalScope.ThisCallOnly"/>.
+    /// </summary>
+    /// <remarks>
+    /// Does not log or access workflow context. The instance method
+    /// <see cref="NormalizeApprovalScopeForPersistence"/> delegates here and handles logging.
+    /// </remarks>
+    internal static (ApprovalScope Scope, string? DegradationReason) EvaluateScopeNormalization(
+        DurableApprovalDecision decision)
+    {
         var scope = decision.Scope;
 
         // Undefined integer value (e.g. Scope = 99)
         if (!Enum.IsDefined(typeof(ApprovalScope), scope))
         {
-            Workflow.Logger.LogWarning(
-                "[{SessionId}] Undefined ApprovalScope value {Value} for tool '{ToolName}'. " +
-                "Treating as ThisCallOnly.",
-                Workflow.Info.WorkflowId, (int)scope, toolName);
-            return ApprovalScope.ThisCallOnly;
+            return (ApprovalScope.ThisCallOnly,
+                $"Undefined ApprovalScope value {(int)scope} for tool '{decision.Scope}'.");
         }
 
         if (scope == ApprovalScope.ThisCallOnly)
-        {
-            return ApprovalScope.ThisCallOnly;
-        }
+            return (ApprovalScope.ThisCallOnly, null);
 
         // scope == Session or Always: validate the ScopePattern if non-null.
         var pattern = decision.ScopePattern;
         if (pattern is null)
         {
             // Null pattern = wildcard; valid for Session and Always.
-            return scope;
+            return (scope, null);
         }
 
         // Pattern string must not be null, empty, or whitespace.
         if (string.IsNullOrWhiteSpace(pattern.Pattern))
         {
-            Workflow.Logger.LogWarning(
-                "[{SessionId}] ApprovalScope {Scope} for tool '{ToolName}' has an empty or " +
-                "whitespace-only Pattern. Treating as ThisCallOnly.",
-                Workflow.Info.WorkflowId, scope, toolName);
-            return ApprovalScope.ThisCallOnly;
+            return (ApprovalScope.ThisCallOnly,
+                $"ApprovalScope {scope} has an empty or whitespace-only Pattern.");
         }
 
         // Parameter must be null (wildcard) or non-whitespace.
         if (pattern.Parameter is not null && string.IsNullOrWhiteSpace(pattern.Parameter))
         {
-            Workflow.Logger.LogWarning(
-                "[{SessionId}] ApprovalScope {Scope} for tool '{ToolName}' has a whitespace-only " +
-                "Parameter. Treating as ThisCallOnly.",
-                Workflow.Info.WorkflowId, scope, toolName);
-            return ApprovalScope.ThisCallOnly;
+            return (ApprovalScope.ThisCallOnly,
+                $"ApprovalScope {scope} has a whitespace-only Parameter.");
+        }
+
+        // Check for undefined PatternMatchType integer values (e.g. integer 99 passed through source-gen).
+        if (!Enum.IsDefined(typeof(PatternMatchType), pattern.Type))
+        {
+            return (ApprovalScope.ThisCallOnly,
+                $"ApprovalScope {scope} has an undefined PatternMatchType value {(int)pattern.Type}.");
         }
 
         // For Regex: pattern must also compile.
@@ -987,25 +1006,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             }
             catch (ArgumentException)
             {
-                Workflow.Logger.LogWarning(
-                    "[{SessionId}] ApprovalScope {Scope} for tool '{ToolName}' has an invalid " +
-                    "Regex pattern '{Pattern}'. Treating as ThisCallOnly.",
-                    Workflow.Info.WorkflowId, scope, toolName, pattern.Pattern);
-                return ApprovalScope.ThisCallOnly;
+                return (ApprovalScope.ThisCallOnly,
+                    $"ApprovalScope {scope} has an invalid Regex pattern '{pattern.Pattern}'.");
             }
         }
 
-        // Check for undefined PatternMatchType integer values.
-        if (!Enum.IsDefined(typeof(PatternMatchType), pattern.Type))
-        {
-            Workflow.Logger.LogWarning(
-                "[{SessionId}] ApprovalScope {Scope} for tool '{ToolName}' has an undefined " +
-                "PatternMatchType value {TypeValue}. Treating as ThisCallOnly.",
-                Workflow.Info.WorkflowId, scope, toolName, (int)pattern.Type);
-            return ApprovalScope.ThisCallOnly;
-        }
-
-        return scope;
+        return (scope, null);
     }
 
     /// <summary>
