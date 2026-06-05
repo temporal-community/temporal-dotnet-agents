@@ -291,17 +291,35 @@ internal sealed class DefaultTemporalAgentClient(
         // Feature L: pre-compute interceptor config (interceptor presence + skip/require-approval lists).
         // requiresApprovalTools is populated unconditionally — RequireApproval() is an absolute
         // floor that must be enforced even when no tool interceptor is registered (BLOCK-2 fix).
+        // Feature B: scope-aware required tools (RequireApproval + ScopeAware) are excluded from
+        // requiresApprovalTools and added to scopeAwareApprovalTools instead so GetEffectiveOutcome
+        // does not enforce Rule 2 for them (the interceptor is responsible for approval gating).
         var hasInterceptor = registration.ToolInterceptorFactory is not null
                            || options.DefaultToolInterceptor is not null;
         ActivityOptions? interceptorActivityOpts = null;
         List<string>? interceptorSkippedTools = null;
         List<string>? requiresApprovalTools = null;
+        List<string>? scopeAwareTools = null;
+        List<string>? scopeAwareApprovalTools = null;
 
         foreach (var toolReg in registration.Tools)
         {
-            if (toolReg.Options.RequireApprovalFlag)
+            var toolOpts = toolReg.Options;
+            // RequiresApprovalTools exclusion guard (Task 3.4 / spec Section 13):
+            // Only non-scope-aware required tools enter the absolute approval floor.
+            if (toolOpts.RequireApprovalFlag && !toolOpts.ScopeAwareFlag)
             {
                 (requiresApprovalTools ??= []).Add(toolReg.Name);
+            }
+
+            // Scope-aware tool lists.
+            if (toolOpts.ScopeAwareFlag)
+            {
+                (scopeAwareTools ??= []).Add(toolReg.Name);
+                if (toolOpts.RequireApprovalFlag)
+                {
+                    (scopeAwareApprovalTools ??= []).Add(toolReg.Name);
+                }
             }
         }
 
@@ -337,6 +355,70 @@ internal sealed class DefaultTemporalAgentClient(
             }
         }
 
+        // Feature B: resolve approval-scopes config.
+        var useApprovalScopes = registration.UseApprovalScopes;
+        bool useApprovalScopeStoreMode = false;
+        string? alwaysScopesStoreKey = null;
+        bool applyAlwaysScopesAtSessionStart = false;
+        int maxAlwaysScopeCacheRecords = 0;
+        int maxAlwaysScopeCacheBytes = 0;
+        TimeSpan approvalScopeActivityTimeout = TimeSpan.Zero;
+        int approvalScopeActivityMaximumAttempts = 0;
+
+        if (useApprovalScopes)
+        {
+            // DefaultToolInterceptor incompatibility check (spec Section 8 / Task 3.4).
+            if (options.DefaultToolInterceptor is not null)
+            {
+                throw new InvalidOperationException(
+                    "UseApprovalScopes() cannot be combined with TemporalAgentsOptions.DefaultToolInterceptor. " +
+                    "This release does not compose approval scopes with worker-default tool interceptors. " +
+                    "Remove DefaultToolInterceptor from TemporalAgentsOptions or do not call UseApprovalScopes() on this agent.");
+            }
+
+            var scopeOpts = registration.ApprovalScopesOptions!;
+
+            // Options validation (positive bounds).
+            if (scopeOpts.MaxAlwaysScopeCacheRecords <= 0)
+                throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheRecords for agent '{agentName}' must be a positive integer.");
+            if (scopeOpts.MaxAlwaysScopeCacheBytes <= 0)
+                throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheBytes for agent '{agentName}' must be a positive integer.");
+            if (scopeOpts.ApprovalScopeActivityMaximumAttempts <= 0)
+                throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts for agent '{agentName}' must be a positive integer.");
+            if (scopeOpts.ApprovalScopeActivityTimeout <= TimeSpan.Zero)
+                throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityTimeout for agent '{agentName}' must be greater than TimeSpan.Zero.");
+
+            var hasScopeStore = scopeOpts.ApprovalScopeStore is not null
+                             || options.ApprovalScopeStore is not null;
+            useApprovalScopeStoreMode = hasScopeStore;
+            alwaysScopesStoreKey = scopeOpts.AlwaysScopesStoreKey;
+            applyAlwaysScopesAtSessionStart = scopeOpts.ApplyAlwaysScopesAtSessionStart;
+            maxAlwaysScopeCacheRecords = scopeOpts.MaxAlwaysScopeCacheRecords;
+            maxAlwaysScopeCacheBytes = scopeOpts.MaxAlwaysScopeCacheBytes;
+            approvalScopeActivityTimeout = scopeOpts.ApprovalScopeActivityTimeout;
+            approvalScopeActivityMaximumAttempts = scopeOpts.ApprovalScopeActivityMaximumAttempts;
+        }
+
+        // Startup validation for scope-aware required tools without UseApprovalScopes.
+        // (Also enforced in DurableAgentBuilder.ToRegistration but validated again here as defense-in-depth.)
+        foreach (var toolReg in registration.Tools)
+        {
+            var toolOpts = toolReg.Options;
+            if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && !useApprovalScopes)
+            {
+                throw new InvalidOperationException(
+                    $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{agentName}'. " +
+                    "Call UseApprovalScopes() before registering scope-aware required tools.");
+            }
+
+            if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && toolOpts.SkipInterceptorFlag)
+            {
+                throw new InvalidOperationException(
+                    $"Tool '{toolReg.Name}' cannot combine RequireApproval(), ScopeAware(), and SkipInterceptor(); approval " +
+                    "scopes require the interceptor to enforce the missing-scope approval gate.");
+            }
+        }
+
         return new AgentWorkflowInput
         {
             AgentName = agentName,
@@ -360,6 +442,16 @@ internal sealed class DefaultTemporalAgentClient(
                 InterceptorToolActivityOptions = perToolInterceptorOpts,
                 InterceptorSkippedTools = interceptorSkippedTools,
                 RequiresApprovalTools = requiresApprovalTools,
+                ScopeAwareTools = scopeAwareTools,
+                ScopeAwareApprovalTools = scopeAwareApprovalTools,
+                UseApprovalScopes = useApprovalScopes,
+                UseApprovalScopeStoreMode = useApprovalScopeStoreMode,
+                AlwaysScopesStoreKey = alwaysScopesStoreKey,
+                ApplyAlwaysScopesAtSessionStart = applyAlwaysScopesAtSessionStart,
+                MaxAlwaysScopeCacheRecords = maxAlwaysScopeCacheRecords,
+                MaxAlwaysScopeCacheBytes = maxAlwaysScopeCacheBytes,
+                ApprovalScopeActivityTimeout = approvalScopeActivityTimeout,
+                ApprovalScopeActivityMaximumAttempts = approvalScopeActivityMaximumAttempts,
             },
         };
     }
@@ -383,6 +475,8 @@ internal sealed class DefaultTemporalAgentClient(
         Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
         List<string>? interceptorSkippedTools = null;
         List<string>? requiresApprovalTools = null;
+        List<string>? scopeAwareTools = null;
+        List<string>? scopeAwareApprovalTools = null;
 
         if (options.DurableAgentRegistrations.TryGetValue(agentName, out var registration))
         {
@@ -392,10 +486,48 @@ internal sealed class DefaultTemporalAgentClient(
             toolActivityOptions = BuildDurableAgentToolActivityOptions(
                 registration, effectiveActivityTimeout, effectiveHeartbeatTimeout, effectiveRetryPolicy);
 
+            // Feature B: RequiresApprovalTools exclusion guard — scope-aware required tools
+            // go into scopeAwareApprovalTools, NOT requiresApprovalTools.
             foreach (var toolReg in registration.Tools)
             {
-                if (toolReg.Options.RequireApprovalFlag)
+                var toolOpts = toolReg.Options;
+                if (toolOpts.RequireApprovalFlag && !toolOpts.ScopeAwareFlag)
                     (requiresApprovalTools ??= []).Add(toolReg.Name);
+
+                if (toolOpts.ScopeAwareFlag)
+                {
+                    (scopeAwareTools ??= []).Add(toolReg.Name);
+                    if (toolOpts.RequireApprovalFlag)
+                        (scopeAwareApprovalTools ??= []).Add(toolReg.Name);
+                }
+            }
+
+            // Feature B: DefaultToolInterceptor incompatibility check (same as workflow input path).
+            if (registration.UseApprovalScopes && options.DefaultToolInterceptor is not null)
+            {
+                throw new InvalidOperationException(
+                    "UseApprovalScopes() cannot be combined with TemporalAgentsOptions.DefaultToolInterceptor. " +
+                    "This release does not compose approval scopes with worker-default tool interceptors. " +
+                    "Remove DefaultToolInterceptor from TemporalAgentsOptions or do not call UseApprovalScopes() on this agent.");
+            }
+
+            // Feature B: startup validation for scope-aware required tools.
+            foreach (var toolReg in registration.Tools)
+            {
+                var toolOpts = toolReg.Options;
+                if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && !registration.UseApprovalScopes)
+                {
+                    throw new InvalidOperationException(
+                        $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{agentName}'. " +
+                        "Call UseApprovalScopes() before registering scope-aware required tools.");
+                }
+
+                if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && toolOpts.SkipInterceptorFlag)
+                {
+                    throw new InvalidOperationException(
+                        $"Tool '{toolReg.Name}' cannot combine RequireApproval(), ScopeAware(), and SkipInterceptor(); approval " +
+                        "scopes require the interceptor to enforce the missing-scope approval gate.");
+                }
             }
 
             var hasInterceptor = registration.ToolInterceptorFactory is not null
@@ -442,6 +574,8 @@ internal sealed class DefaultTemporalAgentClient(
             InterceptorToolActivityOptions = perToolInterceptorOpts,
             InterceptorSkippedTools = interceptorSkippedTools,
             RequiresApprovalTools = requiresApprovalTools,
+            ScopeAwareTools = scopeAwareTools,
+            ScopeAwareApprovalTools = scopeAwareApprovalTools,
         };
     }
 

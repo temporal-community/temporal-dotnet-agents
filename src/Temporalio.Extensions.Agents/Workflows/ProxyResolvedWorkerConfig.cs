@@ -106,7 +106,8 @@ internal sealed record ProxyResolvedWorkerConfig
     public IReadOnlyList<string>? InterceptorSkippedTools { get; init; }
 
     /// <summary>
-    /// Names of tools that have <see cref="DurableToolOptions.RequireApprovalFlag"/> set.
+    /// Names of tools that have <see cref="DurableToolOptions.RequireApprovalFlag"/> set
+    /// and <see cref="DurableToolOptions.ScopeAwareFlag"/> NOT set.
     /// The workflow forces a workflow-parked approval for these tools even if the interceptor
     /// returns <c>Proceed</c> (Rule 2 — absolute configuration-time floor).
     /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> is
@@ -114,4 +115,80 @@ internal sealed record ProxyResolvedWorkerConfig
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? RequiresApprovalTools { get; init; }
+
+    // ── Feature B — Approval Scopes ──────────────────────────────────────────
+
+    /// <summary>
+    /// When <see langword="true"/>, the agent has approval scopes enabled via
+    /// <c>UseApprovalScopes()</c>. The workflow loads always-scopes at session start and
+    /// writes scope records after approved decisions.
+    /// </summary>
+    public bool UseApprovalScopes { get; init; }
+
+    /// <summary>
+    /// When <see langword="true"/>, the agent has an <see cref="HistoryStore.IApprovalScopeStore"/>
+    /// configured (per-agent or worker-level) AND <see cref="UseApprovalScopes"/> is true.
+    /// The workflow dispatches <c>AppendAlwaysScopeAsync</c> and <c>LoadAlwaysScopesAsync</c>
+    /// activities. Independent from <see cref="UseExternalStoreMode"/> (conversation history store).
+    /// </summary>
+    public bool UseApprovalScopeStoreMode { get; init; }
+
+    /// <summary>
+    /// The logical store key for always-scope records in <see cref="HistoryStore.IApprovalScopeStore"/>.
+    /// Configured via <see cref="ApprovalScopesOptions.AlwaysScopesStoreKey"/>.
+    /// <see langword="null"/> when approval scopes are not enabled.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? AlwaysScopesStoreKey { get; init; }
+
+    /// <summary>
+    /// When <see langword="true"/>, always-scopes are loaded from the store at session start
+    /// and cached in StateBag. Configured via
+    /// <see cref="ApprovalScopesOptions.ApplyAlwaysScopesAtSessionStart"/>.
+    /// </summary>
+    public bool ApplyAlwaysScopesAtSessionStart { get; init; }
+
+    /// <summary>
+    /// Maximum number of always-scope records that may be cached into workflow StateBag.
+    /// Configured via <see cref="ApprovalScopesOptions.MaxAlwaysScopeCacheRecords"/>.
+    /// </summary>
+    public int MaxAlwaysScopeCacheRecords { get; init; }
+
+    /// <summary>
+    /// Maximum serialized byte size for the always-scope StateBag cache value.
+    /// Configured via <see cref="ApprovalScopesOptions.MaxAlwaysScopeCacheBytes"/>.
+    /// </summary>
+    public int MaxAlwaysScopeCacheBytes { get; init; }
+
+    /// <summary>
+    /// Start-to-close timeout for approval-scope store activities.
+    /// Configured via <see cref="ApprovalScopesOptions.ApprovalScopeActivityTimeout"/>.
+    /// </summary>
+    public TimeSpan ApprovalScopeActivityTimeout { get; init; }
+
+    /// <summary>
+    /// Maximum attempts for approval-scope store activities.
+    /// Configured via <see cref="ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts"/>.
+    /// </summary>
+    public int ApprovalScopeActivityMaximumAttempts { get; init; }
+
+    /// <summary>
+    /// Names of tools registered with <see cref="DurableToolOptions.ScopeAware()"/>.
+    /// The workflow passes <c>ScopeAware = true</c> on the interceptor input for these tools.
+    /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> is
+    /// equivalent to an empty list.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ScopeAwareTools { get; init; }
+
+    /// <summary>
+    /// Names of tools registered with both <see cref="DurableToolOptions.ScopeAware()"/> and
+    /// <see cref="DurableToolOptions.RequireApproval()"/>. These tools are NOT in
+    /// <see cref="RequiresApprovalTools"/> — the interceptor is responsible for enforcing the
+    /// approval gate when no matching scope record exists.
+    /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> is
+    /// equivalent to an empty list.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ScopeAwareApprovalTools { get; init; }
 }

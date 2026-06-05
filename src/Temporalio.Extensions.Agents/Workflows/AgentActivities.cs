@@ -423,15 +423,57 @@ internal sealed class AgentActivities(
                 ActivityOptions? interceptorActivityOpts = null;
                 List<string>? interceptorSkippedTools = null;
                 List<string>? requiresApprovalTools = null;
+                List<string>? scopeAwareTools = null;
+                List<string>? scopeAwareApprovalTools = null;
 
                 // requiresApprovalTools is populated unconditionally — RequireApproval() is an
                 // absolute floor that must be enforced even when no tool interceptor is registered
                 // (BLOCK-2 fix). Only interceptorActivityOpts and the skip list need the interceptor guard.
+                // Feature B: RequiresApprovalTools exclusion guard — scope-aware required tools go into
+                // scopeAwareApprovalTools, NOT requiresApprovalTools (spec Section 13, critical guard).
                 foreach (var toolReg in cached.Registration.Tools)
                 {
-                    if (toolReg.Options.RequireApprovalFlag)
+                    var toolOpts = toolReg.Options;
+                    if (toolOpts.RequireApprovalFlag && !toolOpts.ScopeAwareFlag)
                     {
                         (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
+                    }
+
+                    if (toolOpts.ScopeAwareFlag)
+                    {
+                        (scopeAwareTools ??= new List<string>()).Add(toolReg.Name);
+                        if (toolOpts.RequireApprovalFlag)
+                        {
+                            (scopeAwareApprovalTools ??= new List<string>()).Add(toolReg.Name);
+                        }
+                    }
+                }
+
+                // Feature B: DefaultToolInterceptor incompatibility check at proxy-start resolution.
+                if (cached.Registration.UseApprovalScopes && cached.AgentsOptions.DefaultToolInterceptor is not null)
+                {
+                    throw new InvalidOperationException(
+                        "UseApprovalScopes() cannot be combined with TemporalAgentsOptions.DefaultToolInterceptor. " +
+                        "This release does not compose approval scopes with worker-default tool interceptors. " +
+                        "Remove DefaultToolInterceptor from TemporalAgentsOptions or do not call UseApprovalScopes() on this agent.");
+                }
+
+                // Feature B: startup validation for scope-aware required tools at proxy-start resolution.
+                foreach (var toolReg in cached.Registration.Tools)
+                {
+                    var toolOpts = toolReg.Options;
+                    if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && !cached.Registration.UseApprovalScopes)
+                    {
+                        throw new InvalidOperationException(
+                            $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{cached.Registration.Name}'. " +
+                            "Call UseApprovalScopes() before registering scope-aware required tools.");
+                    }
+
+                    if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && toolOpts.SkipInterceptorFlag)
+                    {
+                        throw new InvalidOperationException(
+                            $"Tool '{toolReg.Name}' cannot combine RequireApproval(), ScopeAware(), and SkipInterceptor(); approval " +
+                            "scopes require the interceptor to enforce the missing-scope approval gate.");
                     }
                 }
 
@@ -475,6 +517,40 @@ internal sealed class AgentActivities(
                     }
                 }
 
+                // Feature B: resolve approval-scopes config for proxy-start resolution.
+                var useApprovalScopes = cached.Registration.UseApprovalScopes;
+                bool useApprovalScopeStoreMode = false;
+                string? alwaysScopesStoreKey = null;
+                bool applyAlwaysScopesAtSessionStart = false;
+                int maxAlwaysScopeCacheRecords = 0;
+                int maxAlwaysScopeCacheBytes = 0;
+                TimeSpan approvalScopeActivityTimeout = TimeSpan.Zero;
+                int approvalScopeActivityMaximumAttempts = 0;
+
+                if (useApprovalScopes)
+                {
+                    var scopeOpts = cached.Registration.ApprovalScopesOptions!;
+
+                    // Options validation (positive bounds) — same as direct-start path.
+                    if (scopeOpts.MaxAlwaysScopeCacheRecords <= 0)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheRecords for agent '{cached.Registration.Name}' must be a positive integer.");
+                    if (scopeOpts.MaxAlwaysScopeCacheBytes <= 0)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheBytes for agent '{cached.Registration.Name}' must be a positive integer.");
+                    if (scopeOpts.ApprovalScopeActivityMaximumAttempts <= 0)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts for agent '{cached.Registration.Name}' must be a positive integer.");
+                    if (scopeOpts.ApprovalScopeActivityTimeout <= TimeSpan.Zero)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityTimeout for agent '{cached.Registration.Name}' must be greater than TimeSpan.Zero.");
+
+                    useApprovalScopeStoreMode = scopeOpts.ApprovalScopeStore is not null
+                                             || cached.AgentsOptions.ApprovalScopeStore is not null;
+                    alwaysScopesStoreKey = scopeOpts.AlwaysScopesStoreKey;
+                    applyAlwaysScopesAtSessionStart = scopeOpts.ApplyAlwaysScopesAtSessionStart;
+                    maxAlwaysScopeCacheRecords = scopeOpts.MaxAlwaysScopeCacheRecords;
+                    maxAlwaysScopeCacheBytes = scopeOpts.MaxAlwaysScopeCacheBytes;
+                    approvalScopeActivityTimeout = scopeOpts.ApprovalScopeActivityTimeout;
+                    approvalScopeActivityMaximumAttempts = scopeOpts.ApprovalScopeActivityMaximumAttempts;
+                }
+
                 resolvedConfig = new ProxyResolvedWorkerConfig
                 {
                     MaxToolCallsPerTurn = resolvedMaxToolCalls ?? cached.Registration.MaxToolCallsPerTurn,
@@ -485,6 +561,16 @@ internal sealed class AgentActivities(
                     InterceptorToolActivityOptions = perToolInterceptorOpts,
                     InterceptorSkippedTools = interceptorSkippedTools,
                     RequiresApprovalTools = requiresApprovalTools,
+                    ScopeAwareTools = scopeAwareTools,
+                    ScopeAwareApprovalTools = scopeAwareApprovalTools,
+                    UseApprovalScopes = useApprovalScopes,
+                    UseApprovalScopeStoreMode = useApprovalScopeStoreMode,
+                    AlwaysScopesStoreKey = alwaysScopesStoreKey,
+                    ApplyAlwaysScopesAtSessionStart = applyAlwaysScopesAtSessionStart,
+                    MaxAlwaysScopeCacheRecords = maxAlwaysScopeCacheRecords,
+                    MaxAlwaysScopeCacheBytes = maxAlwaysScopeCacheBytes,
+                    ApprovalScopeActivityTimeout = approvalScopeActivityTimeout,
+                    ApprovalScopeActivityMaximumAttempts = approvalScopeActivityMaximumAttempts,
                 };
             }
 

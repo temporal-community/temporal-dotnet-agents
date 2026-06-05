@@ -85,8 +85,30 @@ internal sealed record AgentJobInput
 
     /// <summary>
     /// Names of tools that require approval even when the interceptor returns Proceed.
+    /// Only non-scope-aware required tools appear here (Rule 2 — absolute approval floor).
     /// <see langword="null"/> is equivalent to an empty list.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? RequiresApprovalTools { get; init; }
+
+    // Feature B — scope-aware tool lists for AgentJobWorkflow interceptor dispatch.
+
+    /// <summary>
+    /// Names of tools registered with <c>ScopeAware()</c>. The workflow passes
+    /// <c>ScopeAware = true</c> on the interceptor input for these tools.
+    /// <see langword="null"/> is equivalent to an empty list.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ScopeAwareTools { get; init; }
+
+    /// <summary>
+    /// Names of tools registered with both <c>ScopeAware()</c> and <c>RequireApproval()</c>.
+    /// These tools are NOT in <see cref="RequiresApprovalTools"/> — the interceptor is responsible
+    /// for enforcing the approval gate. Only meaningful for <see cref="AgentJobWorkflow"/> as a
+    /// diagnostic: since job workflows have no HITL loop, <c>PauseForApproval</c> from the
+    /// interceptor degrades to <c>Block</c>.
+    /// <see langword="null"/> is equivalent to an empty list.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ScopeAwareApprovalTools { get; init; }
 }
