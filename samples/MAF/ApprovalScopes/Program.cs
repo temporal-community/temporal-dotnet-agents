@@ -16,8 +16,10 @@ using Microsoft.Extensions.Logging;
 using OpenAI;
 using ApprovalScopes;
 using Temporalio.Extensions.Agents;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 
 // OpenAI.Chat also defines ChatMessage and ChatRole; pin to the MEAI versions
 // throughout this file so the conversation loop types remain unambiguous.

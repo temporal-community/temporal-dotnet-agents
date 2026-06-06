@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.HistoryStore;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.AI;
 
 namespace ApprovalScopes;
