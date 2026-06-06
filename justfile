@@ -586,6 +586,7 @@ test-samples-maf: build _sample-preflight
         fi
     done
     echo "Skipped (interactive):    MAF/HumanInTheLoop — run manually."
+    echo "Skipped (interactive):    MAF/ApprovalScopes — run manually."
     echo "Skipped (two-process):    MAF/SplitWorkerClient — run Worker then Client."
     echo "----- MAF Summary: $PASS pass / $FAIL fail / $HANG hang -----"
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
@@ -601,6 +602,7 @@ test-samples: test-samples-meai test-samples-maf
 #   - samples/MEAI/HumanInTheLoop  (interactive Console.ReadLine)
 #   - samples/MAF/HumanInTheLoop   (interactive Console.ReadLine)
 #   - samples/MAF/SplitWorkerClient (two-process — Worker + Client)
+#   - samples/MAF/ApprovalScopes   (interactive Console.ReadLine — scope selector)
 verify-sample-coverage:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -623,6 +625,7 @@ verify-sample-coverage:
         -not -name 'bin' -not -name 'obj' \
         -not -name 'HumanInTheLoop' \
         -not -name 'SplitWorkerClient' \
+        -not -name 'ApprovalScopes' \
         | sort -u)
     missing_maf=$(comm -23 <(echo "$actual_maf") <(echo "$declared_maf"))
     if [ -n "$missing_maf" ]; then

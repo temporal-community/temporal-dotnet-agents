@@ -653,7 +653,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                         if (decision.Approved)
                         {
                             // Feature B — Task 6.6: persist scope before dispatching the tool.
-                            var scope = NormalizeApprovalScopeForPersistence(decision, tc.Name);
+                            var scope = NormalizeApprovalScopeForPersistence(decision);
                             var isScopeAwareTool = _input!.ScopeAwareTools?.Contains(
                                 tc.Name, StringComparer.OrdinalIgnoreCase) == true;
 
@@ -945,9 +945,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     /// <see cref="DurableApprovalDecision"/>, applying all validation rules from spec
     /// Section 4. Returns <see cref="ApprovalScope.ThisCallOnly"/> for any invalid input.
     /// </summary>
-    private ApprovalScope NormalizeApprovalScopeForPersistence(
-        DurableApprovalDecision decision,
-        string toolName)
+    private ApprovalScope NormalizeApprovalScopeForPersistence(DurableApprovalDecision decision)
     {
         var (result, reason) = EvaluateScopeNormalization(decision);
         if (result == ApprovalScope.ThisCallOnly && reason is not null)
@@ -978,7 +976,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         if (!Enum.IsDefined(typeof(ApprovalScope), scope))
         {
             return (ApprovalScope.ThisCallOnly,
-                $"Undefined ApprovalScope value {(int)scope} for tool '{decision.Scope}'.");
+                $"Undefined ApprovalScope value {(int)scope}.");
         }
 
         if (scope == ApprovalScope.ThisCallOnly)
@@ -1006,7 +1004,8 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 $"ApprovalScope {scope} has a whitespace-only Parameter.");
         }
 
-        // Check for undefined PatternMatchType integer values (e.g. integer 99 passed through source-gen).
+        // Defense-in-depth for non-standard deserializer paths; normal Temporal payloads reject
+        // numeric PatternMatchType values at the converter boundary.
         if (!Enum.IsDefined(typeof(PatternMatchType), pattern.Type))
         {
             return (ApprovalScope.ThisCallOnly,

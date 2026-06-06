@@ -9,8 +9,9 @@ namespace Temporalio.Extensions.AI;
 /// <remarks>
 /// Serialized as an integer for compactness and replay safety.
 /// Do not add <c>JsonStringEnumConverter</c> — integer serialization is the wire contract.
-/// The per-type <see cref="ApprovalScopeJsonConverter"/> enforces this and overrides the global
-/// <c>JsonStringEnumConverter</c> present in <see cref="Microsoft.Extensions.AI.AIJsonUtilities.DefaultOptions"/>.
+/// <see cref="Temporalio.Extensions.AI.DurableAIJsonUtilities.DefaultOptions"/> inserts
+/// <see cref="ApprovalScopeJsonConverter"/> before the global <c>JsonStringEnumConverter</c>
+/// inherited from <see cref="Microsoft.Extensions.AI.AIJsonUtilities.DefaultOptions"/>.
 /// </remarks>
 [JsonConverter(typeof(ApprovalScopeJsonConverter))]
 public enum ApprovalScope
@@ -43,7 +44,8 @@ public enum ApprovalScope
 /// serialization and rejects string enum values.
 /// </summary>
 /// <remarks>
-/// This converter overrides the global <c>JsonStringEnumConverter</c> present in
+/// <see cref="DurableAIJsonUtilities.DefaultOptions"/> inserts this converter before the global
+/// <c>JsonStringEnumConverter</c> inherited from
 /// <see cref="Microsoft.Extensions.AI.AIJsonUtilities.DefaultOptions"/>.
 /// <see cref="ApprovalScope"/> is part of the durable wire contract; string values
 /// (e.g. <c>"Session"</c>) must be rejected to prevent payload drift across worker versions.
