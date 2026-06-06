@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Approvals;
 
 /// <summary>
 /// Serializable approval request stored in workflow state.

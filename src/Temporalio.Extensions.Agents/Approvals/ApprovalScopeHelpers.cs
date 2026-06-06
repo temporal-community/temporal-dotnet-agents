@@ -6,8 +6,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Approvals;
 
 /// <summary>
 /// Public static helpers for working with approval scope records stored in

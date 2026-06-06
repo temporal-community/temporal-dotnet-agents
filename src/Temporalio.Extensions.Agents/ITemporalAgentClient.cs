@@ -1,8 +1,9 @@
 using Microsoft.Agents.AI;
 using Temporalio.Client.Schedules;
+using Temporalio.Extensions.Agents.Approvals;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.Session;
-using Temporalio.Extensions.Agents.Workflows;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 
 namespace Temporalio.Extensions.Agents;
 

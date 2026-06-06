@@ -1,7 +1,7 @@
 using Microsoft.Extensions.AI;
 using Temporalio.Workflows;
 
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Session;
 
 /// <summary>
 /// Concrete <see cref="DurableSessionEntry"/> representing a request turn — the inbound

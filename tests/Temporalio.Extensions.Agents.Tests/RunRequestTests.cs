@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.Workflows;
 using Xunit;
 
@@ -178,8 +181,8 @@ public class RunRequestTests
     public void AgentWorkflowInput_HistoryReducerIsNotSerialized()
     {
         // HistoryReducer is [JsonIgnore] — delegate must not round-trip through JSON
-        Func<IList<Temporalio.Extensions.AI.DurableSessionEntry>,
-             IList<Temporalio.Extensions.AI.DurableSessionEntry>> reducer = h => h;
+        Func<IList<DurableSessionEntry>,
+             IList<DurableSessionEntry>> reducer = h => h;
         var input = new AgentWorkflowInput { AgentName = "test", TaskQueue = "q", HistoryReducer = reducer };
         var json = JsonSerializer.Serialize(input);
         var deserialized = JsonSerializer.Deserialize<AgentWorkflowInput>(json);

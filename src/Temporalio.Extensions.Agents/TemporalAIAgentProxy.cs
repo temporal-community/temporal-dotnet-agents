@@ -3,6 +3,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.Workflows;
 

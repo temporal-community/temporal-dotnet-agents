@@ -1,8 +1,11 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.Agents.HistoryStore;
+using Temporalio.Extensions.Agents.Tools;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 
 namespace Temporalio.Extensions.Agents;
 

@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Temporalio.Workflows;
 
-namespace Temporalio.Extensions.Agents.Workflows;
+namespace Temporalio.Extensions.Agents.Scheduling;
 
 /// <summary>
 /// Represents a request to run an agent with a specific message and configuration.

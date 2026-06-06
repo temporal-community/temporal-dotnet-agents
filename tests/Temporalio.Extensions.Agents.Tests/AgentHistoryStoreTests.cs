@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.HistoryStore;
 using Temporalio.Extensions.Agents.Workflows;
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;
@@ -106,20 +108,20 @@ public class AgentHistoryStoreTests
     /// </summary>
     private sealed class FakeHistoryStore : IAgentHistoryStore
     {
-        public Task<IReadOnlyList<Temporalio.Extensions.AI.DurableSessionEntry>> LoadAsync(
+        public Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
             string sessionId,
             bool applyCompaction,
             CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<Temporalio.Extensions.AI.DurableSessionEntry>>([]);
+            Task.FromResult<IReadOnlyList<DurableSessionEntry>>([]);
 
         public Task AppendAsync(
             string sessionId,
-            IReadOnlyList<Temporalio.Extensions.AI.DurableSessionEntry> entries,
+            IReadOnlyList<DurableSessionEntry> entries,
             CancellationToken cancellationToken = default) => Task.CompletedTask;
 
         public Task ReplaceAsync(
             string sessionId,
-            IReadOnlyList<Temporalio.Extensions.AI.DurableSessionEntry> reducedEntries,
+            IReadOnlyList<DurableSessionEntry> reducedEntries,
             CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 }

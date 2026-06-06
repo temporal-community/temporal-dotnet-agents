@@ -5,5 +5,5 @@
 // The global-using directives below redirect the unqualified names in all Agents-library
 // files to the canonical AI-library types, preserving compilation without widespread renames.
 
-global using DurableToolInterceptorResult = Temporalio.Extensions.AI.DurableToolInterceptorResult;
-global using DurableToolOutcome = Temporalio.Extensions.AI.DurableToolOutcome;
+global using DurableToolInterceptorResult = Temporalio.Extensions.AI.Tools.DurableToolInterceptorResult;
+global using DurableToolOutcome = Temporalio.Extensions.AI.Tools.DurableToolOutcome;

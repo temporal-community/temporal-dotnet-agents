@@ -1,6 +1,7 @@
 using FakeItEasy;
 using Temporalio.Client;
 using Temporalio.Client.Schedules;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.Workflows;
 using Xunit;

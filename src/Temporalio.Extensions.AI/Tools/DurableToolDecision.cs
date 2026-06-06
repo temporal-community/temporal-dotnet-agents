@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Tools;
 
 /// <summary>
 /// Discriminated union returned by <see cref="IDurableToolInterceptor{TContext}.BeforeToolCallAsync"/>

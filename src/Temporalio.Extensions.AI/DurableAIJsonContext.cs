@@ -1,6 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.AI;

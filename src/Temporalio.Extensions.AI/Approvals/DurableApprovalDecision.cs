@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Approvals;
 
 /// <summary>
 /// A human's decision on a pending tool approval request.

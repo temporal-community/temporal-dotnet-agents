@@ -1,3 +1,5 @@
+using Temporalio.Extensions.Agents.Approvals;
+
 namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>

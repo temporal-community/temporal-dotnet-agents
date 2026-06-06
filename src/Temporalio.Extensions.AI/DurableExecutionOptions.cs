@@ -1,5 +1,7 @@
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 
 namespace Temporalio.Extensions.AI;
 

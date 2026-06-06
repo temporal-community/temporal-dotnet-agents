@@ -3,8 +3,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.AI;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 
 namespace Temporalio.Extensions.Agents;
 

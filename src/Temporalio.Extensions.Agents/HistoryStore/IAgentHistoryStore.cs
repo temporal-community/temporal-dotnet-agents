@@ -1,4 +1,4 @@
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 
 namespace Temporalio.Extensions.Agents.HistoryStore;
 

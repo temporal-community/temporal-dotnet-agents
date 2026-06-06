@@ -3,15 +3,20 @@ using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents.Approvals;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.Agents.Tools;
 using Temporalio.Extensions.Agents.Workflows;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 using Temporalio.Workflows;
 
 using AgentsInterceptorInput = Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorInput;
-using AgentsInterceptorResult = Temporalio.Extensions.AI.DurableToolInterceptorResult;
-using AgentsToolOutcome = Temporalio.Extensions.AI.DurableToolOutcome;
+using AgentsInterceptorResult = Temporalio.Extensions.AI.Tools.DurableToolInterceptorResult;
+using AgentsToolOutcome = Temporalio.Extensions.AI.Tools.DurableToolOutcome;
 
 namespace Temporalio.Extensions.Agents;
 

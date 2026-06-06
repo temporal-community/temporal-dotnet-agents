@@ -1,6 +1,6 @@
 using Temporalio.Workflows;
 
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Approvals;
 
 /// <summary>
 /// Internal helper that encapsulates the shared HITL approval state machine.

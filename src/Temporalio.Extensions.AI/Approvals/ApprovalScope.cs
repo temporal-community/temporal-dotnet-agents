@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Approvals;
 
 /// <summary>
 /// Controls how far an approval decision carries forward when a tool call is approved.
@@ -48,7 +48,7 @@ public enum ApprovalScope
 /// <see cref="ApprovalScope"/> is part of the durable wire contract; string values
 /// (e.g. <c>"Session"</c>) must be rejected to prevent payload drift across worker versions.
 /// </remarks>
-public sealed class ApprovalScopeJsonConverter : JsonConverter<ApprovalScope>
+internal sealed class ApprovalScopeJsonConverter : JsonConverter<ApprovalScope>
 {
     /// <inheritdoc/>
     public override ApprovalScope Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

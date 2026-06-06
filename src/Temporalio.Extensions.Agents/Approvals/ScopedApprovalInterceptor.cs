@@ -1,7 +1,9 @@
 using System.Text;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents.Tools;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Tools;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Approvals;
 
 /// <summary>
 /// Built-in interceptor installed by <see cref="DurableAgentBuilder.UseApprovalScopes"/>.
