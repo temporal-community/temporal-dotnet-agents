@@ -216,7 +216,7 @@ The example below runs an analysis immediately, then schedules a follow-up compa
 ```csharp
 using Temporalio.Activities;
 using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Workflows;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Workflows;
 using static Temporalio.Extensions.Agents.TemporalWorkflowExtensions;
 

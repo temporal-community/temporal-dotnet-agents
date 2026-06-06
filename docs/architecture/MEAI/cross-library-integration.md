@@ -30,10 +30,10 @@ Temporalio.Extensions.AI
 
 ## What Crosses the Boundary
 
-Two types cross the boundary between the libraries: `DurableApprovalRequest` and `DurableApprovalDecision`. Both are defined in `Temporalio.Extensions.AI` and used by `Temporalio.Extensions.Agents`.
+Two types cross the boundary between the libraries: `DurableApprovalRequest` and `DurableApprovalDecision`. Both are defined in `Temporalio.Extensions.AI.Approvals` and used by `Temporalio.Extensions.Agents`.
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI
+// Namespace: Temporalio.Extensions.AI.Approvals
 // Used by both DurableChatWorkflow (Extensions.AI) and AgentWorkflow (Extensions.Agents)
 public sealed record DurableApprovalRequest
 {

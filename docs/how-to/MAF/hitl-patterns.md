@@ -369,8 +369,8 @@ opts.AddDurableAgent("DataAgent", agent =>
 Register an interceptor that evaluates each tool call and decides dynamically whether to pause:
 
 ```csharp
-using Temporalio.Extensions.AI;
-using Temporalio.Extensions.Agents;
+using Temporalio.Extensions.AI.Tools;     // DurableToolDecision
+using Temporalio.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
 
 public class RiskyToolInterceptor : IAgentToolInterceptor
 {
@@ -403,7 +403,7 @@ opts.DefaultToolInterceptor = sp => new RiskyToolInterceptor();
 > of the former `AgentToolDecision.PauseForApproval` — the approval flow is identical. The `description` still
 > becomes `DurableApprovalRequest.Description` on the reviewer's side. `SubmitApprovalAsync`,
 > `GetPendingApprovalAsync`, `DurableApprovalRequest`, and `DurableApprovalDecision` are all unchanged;
-> only the interceptor outcome type name changed (it now lives in `Temporalio.Extensions.AI`).
+> only the interceptor outcome type name changed (it now lives in `Temporalio.Extensions.AI.Tools`).
 
 > **Note:** `PauseForApproval` is only supported on `AgentWorkflow`-backed agents (sessions and sub-agents inside workflows). On `AgentJobWorkflow` (`AddScheduledAgentRun`, `ScheduleAgentAsync`) the decision degrades to `Block` with a warning logged, because scheduled jobs have no persistent session to resume.
 
@@ -534,7 +534,7 @@ agent.UseApprovalScopes(scopes =>
 });
 ```
 
-`IApprovalScopeStore` (namespace `Temporalio.Extensions.Agents.HistoryStore`) has two methods:
+`IApprovalScopeStore` (namespace `Temporalio.Extensions.Agents.Approvals`) has two methods:
 
 ```csharp
 Task<IReadOnlyList<ApprovalScopeRecord>> LoadAsync(
@@ -655,7 +655,7 @@ See [Testing Agents](./testing-agents.md) for the full integration test fixture 
 ### DurableApprovalRequest
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI
+// Namespace: Temporalio.Extensions.AI.Approvals
 public sealed record DurableApprovalRequest
 {
     public required string RequestId { get; init; }            // must be set explicitly, e.g. Guid.NewGuid().ToString("N")
@@ -670,7 +670,7 @@ public sealed record DurableApprovalRequest
 ### DurableApprovalDecision
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI
+// Namespace: Temporalio.Extensions.AI.Approvals
 // Used for both the submitted decision and the returned outcome
 public sealed record DurableApprovalDecision
 {
@@ -687,7 +687,7 @@ public sealed record DurableApprovalDecision
 ### ApprovalScopePattern
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI
+// Namespace: Temporalio.Extensions.AI.Approvals
 public sealed class ApprovalScopePattern
 {
     public PatternMatchType Type { get; init; }    // Exact | Glob | Regex
@@ -699,7 +699,7 @@ public sealed class ApprovalScopePattern
 ### ApprovalScope
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI
+// Namespace: Temporalio.Extensions.AI.Approvals
 public enum ApprovalScope
 {
     ThisCallOnly,   // default — no scope record written
@@ -798,7 +798,7 @@ dotnet run --project samples/MAF/HumanInTheLoop
 - `src/Temporalio.Extensions.Agents/ApprovalScopeRecord.cs` — persisted scope record
 - `src/Temporalio.Extensions.Agents/ApprovalScopeHelpers.cs` — `TryMatchScope` public helper
 - `src/Temporalio.Extensions.Agents/ApprovalScopesOptions.cs` — per-agent scope configuration
-- `src/Temporalio.Extensions.Agents/HistoryStore/IApprovalScopeStore.cs` — always-scope store interface
+- `src/Temporalio.Extensions.Agents/Approvals/IApprovalScopeStore.cs` — always-scope store interface
 - `src/Temporalio.Extensions.Agents/AgentWorkflow.cs` — HITL update/query handlers, scope record write path
 - `src/Temporalio.Extensions.Agents/TemporalAgentContext.cs` — `RequestApprovalAsync` for tools
 - `samples/MAF/HumanInTheLoop/` — complete working example
