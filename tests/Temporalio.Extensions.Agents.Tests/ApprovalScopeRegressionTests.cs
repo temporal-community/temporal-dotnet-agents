@@ -1,6 +1,9 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.Agents.Tools;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Tools;
 using Xunit;
 using AgentsInterceptorInput = Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorInput;
 

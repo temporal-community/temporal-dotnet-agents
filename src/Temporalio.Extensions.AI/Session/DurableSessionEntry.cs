@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Session;
 
 /// <summary>
 /// Wire shape for durable session history entries shared across both

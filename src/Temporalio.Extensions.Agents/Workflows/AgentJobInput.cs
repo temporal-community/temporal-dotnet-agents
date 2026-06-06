@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Temporalio.Common;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents.Workflows;

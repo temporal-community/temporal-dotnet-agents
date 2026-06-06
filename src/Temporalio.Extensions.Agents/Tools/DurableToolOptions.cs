@@ -1,6 +1,6 @@
 using Temporalio.Common;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Tools;
 
 /// <summary>
 /// Per-tool Temporal activity overrides applied when a <see cref="DurableAgentBuilder"/>-registered

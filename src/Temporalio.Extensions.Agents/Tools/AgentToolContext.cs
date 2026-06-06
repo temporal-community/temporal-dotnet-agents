@@ -1,7 +1,7 @@
 using Microsoft.Agents.AI;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Tools;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Tools;
 
 /// <summary>
 /// Context supplied to <see cref="IAgentToolInterceptor.BeforeToolCallAsync"/>. Extends

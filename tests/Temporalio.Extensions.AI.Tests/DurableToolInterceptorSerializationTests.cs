@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Temporalio.Extensions.AI.Tools;
 using Xunit;
 
 namespace Temporalio.Extensions.AI.Tests;

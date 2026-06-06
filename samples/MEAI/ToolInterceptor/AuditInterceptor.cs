@@ -13,6 +13,7 @@
 //                    Proceed carries an "audit" metadata tag to show the metadata parameter.
 
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Tools;
 
 /// <summary>
 /// Pre-tool interceptor that enforces a policy on file operations:

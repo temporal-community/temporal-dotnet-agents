@@ -1,3 +1,4 @@
+using Temporalio.Extensions.Agents.Tools;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;

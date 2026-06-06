@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Tools;
 
 /// <summary>
 /// Concrete DTO returned from the <c>RunToolInterceptor</c> activity on the MEAI path.

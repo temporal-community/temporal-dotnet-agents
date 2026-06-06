@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using Temporalio.Extensions.Agents.Scheduling;
 
 namespace Temporalio.Extensions.Agents.Workflows;
 

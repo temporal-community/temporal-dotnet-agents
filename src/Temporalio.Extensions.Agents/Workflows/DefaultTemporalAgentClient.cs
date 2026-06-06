@@ -6,8 +6,11 @@ using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using Temporalio.Client.Schedules;
 using Temporalio.Common;
+using Temporalio.Extensions.Agents.Approvals;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents.Workflows;

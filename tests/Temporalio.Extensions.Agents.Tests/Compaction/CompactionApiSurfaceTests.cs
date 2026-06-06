@@ -2,6 +2,8 @@
 
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 using Temporalio.Extensions.Agents.Compaction;
 using Xunit;
 
@@ -64,7 +66,7 @@ public class CompactionApiSurfaceTests
     public void CompactionResult_RequiresMarker()
     {
         // Compile-time required-field guard — Marker is required.
-        var marker = new Temporalio.Extensions.AI.CompactionMarkerEntry
+        var marker = new CompactionMarkerEntry
         {
             CorrelationId = "m1",
             CreatedAt = DateTimeOffset.UtcNow,
@@ -80,7 +82,7 @@ public class CompactionApiSurfaceTests
     [Fact]
     public void CompactionContext_RequiresAllFields()
     {
-        var rawEntries = Array.Empty<Temporalio.Extensions.AI.DurableSessionEntry>();
+        var rawEntries = Array.Empty<DurableSessionEntry>();
         var ctx = new CompactionContext
         {
             RawEntries = rawEntries,
@@ -130,13 +132,13 @@ public class CompactionApiSurfaceTests
     private sealed class StubStrategy : ICompactionStrategy
     {
         public IReadOnlyList<string>? EvaluateTrigger(
-            IReadOnlyList<Temporalio.Extensions.AI.DurableSessionEntry> history) => null;
+            IReadOnlyList<DurableSessionEntry> history) => null;
 
         public Task<CompactionResult> CompactAsync(
             CompactionContext context, CancellationToken cancellationToken = default) =>
             Task.FromResult(new CompactionResult
             {
-                Marker = new Temporalio.Extensions.AI.CompactionMarkerEntry
+                Marker = new CompactionMarkerEntry
                 {
                     CorrelationId = "stub",
                     CreatedAt = DateTimeOffset.UtcNow,

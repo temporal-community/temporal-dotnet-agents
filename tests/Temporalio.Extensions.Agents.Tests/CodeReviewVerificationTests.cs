@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Testing;

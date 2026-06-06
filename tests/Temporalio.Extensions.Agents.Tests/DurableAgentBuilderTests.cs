@@ -1,5 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;
@@ -231,7 +233,7 @@ public class DurableAgentBuilderTests
     public void ToRegistration_FlattensState()
     {
         var chatClient = new TestChatClient();
-        var reducer = new Func<IList<Temporalio.Extensions.AI.DurableSessionEntry>, IList<Temporalio.Extensions.AI.DurableSessionEntry>>(list => list);
+        var reducer = new Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>(list => list);
         var provider = new TestContextProvider();
 
         var builder = NewBuilder("Agent42");

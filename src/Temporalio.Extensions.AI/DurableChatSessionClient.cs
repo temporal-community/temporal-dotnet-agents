@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Session;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.AI;

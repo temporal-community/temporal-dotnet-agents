@@ -7,8 +7,14 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Temporalio.Common;
 using Temporalio.Exceptions;
+using Temporalio.Extensions.Agents.Approvals;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.Agents.Tools;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents.Workflows;

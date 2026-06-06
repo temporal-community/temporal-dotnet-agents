@@ -1,6 +1,6 @@
 using Temporalio.Common;
 
-namespace Temporalio.Extensions.Agents.Workflows;
+namespace Temporalio.Extensions.Agents.Scheduling;
 
 /// <summary>
 /// Describes a single deferred agent run to be scheduled from inside an orchestrating workflow

@@ -1,5 +1,5 @@
 using Microsoft.Extensions.AI;
-using Temporalio.Extensions.Agents.HistoryStore;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.AI;
 using Xunit;
 

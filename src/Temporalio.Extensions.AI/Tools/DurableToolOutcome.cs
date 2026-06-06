@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Tools;
 
 /// <summary>
 /// Outcome of a <c>RunToolInterceptor</c> activity, transported across the workflow/activity

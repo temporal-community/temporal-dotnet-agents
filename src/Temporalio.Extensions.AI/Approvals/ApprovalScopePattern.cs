@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Approvals;
 
 /// <summary>
 /// Supported pattern-match strategies for approval scope argument matching.
@@ -43,7 +43,7 @@ public enum PatternMatchType
 /// case-insensitively, so <c>"exact"</c>, <c>"Exact"</c>, and <c>"EXACT"</c> all map to
 /// <see cref="PatternMatchType.Exact"/>.
 /// </remarks>
-public sealed class PatternMatchTypeJsonConverter : JsonStringEnumConverter<PatternMatchType>
+internal sealed class PatternMatchTypeJsonConverter : JsonStringEnumConverter<PatternMatchType>
 {
     /// <summary>
     /// Initializes a new instance of <see cref="PatternMatchTypeJsonConverter"/> with

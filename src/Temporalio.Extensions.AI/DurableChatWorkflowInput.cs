@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Temporalio.Extensions.AI.Session;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.AI;

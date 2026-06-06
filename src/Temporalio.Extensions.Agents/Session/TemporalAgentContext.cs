@@ -2,8 +2,8 @@ using System.Linq.Expressions;
 using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Client;
 using Temporalio.Exceptions;
-using Temporalio.Extensions.AI;
 using Temporalio.Extensions.Agents.Workflows;
+using Temporalio.Extensions.AI.Approvals;
 
 namespace Temporalio.Extensions.Agents.Session;
 

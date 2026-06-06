@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Temporalio.Extensions.AI.Approvals;
 
 namespace Temporalio.Extensions.Agents.Workflows;
 
@@ -30,7 +31,7 @@ internal sealed class AppendAlwaysScopeInput
     /// regardless of arguments.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public AI.ApprovalScopePattern? Pattern { get; init; }
+    public ApprovalScopePattern? Pattern { get; init; }
 
     /// <summary>When the scope was granted (workflow-minted UTC timestamp via <c>Workflow.UtcNow</c>).</summary>
     public required DateTimeOffset GrantedAt { get; init; }

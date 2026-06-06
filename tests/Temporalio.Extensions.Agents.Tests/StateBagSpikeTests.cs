@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI;
 using Temporalio.Extensions.Agents;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.AI;
 using Xunit;
 

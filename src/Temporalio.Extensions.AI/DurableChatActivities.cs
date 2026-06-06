@@ -5,6 +5,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
 using Temporalio.Exceptions;
 using Temporalio.Extensions.AI.Exceptions;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 
 namespace Temporalio.Extensions.AI;
 

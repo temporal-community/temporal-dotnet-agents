@@ -5,6 +5,8 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Temporalio.Converters;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.State;
 using Temporalio.Extensions.Agents.Workflows;
 using Xunit;

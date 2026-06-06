@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 using Temporalio.Extensions.Agents.Compaction;
 using Temporalio.Extensions.Agents.State;
 using Xunit;

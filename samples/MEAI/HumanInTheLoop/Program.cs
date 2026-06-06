@@ -14,6 +14,7 @@ using OpenAI;
 using Temporalio.Activities;
 using Temporalio.Client;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

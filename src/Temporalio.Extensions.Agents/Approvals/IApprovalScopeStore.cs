@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.Agents.HistoryStore;
+namespace Temporalio.Extensions.Agents.Approvals;
 
 /// <summary>
 /// Durable storage abstraction for always-scope approval records.

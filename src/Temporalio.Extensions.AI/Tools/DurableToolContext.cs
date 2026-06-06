@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Tools;
 
 /// <summary>
 /// Base context supplied to <see cref="IDurableToolInterceptor{TContext}.BeforeToolCallAsync"/>.

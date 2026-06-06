@@ -4,6 +4,7 @@ using Temporalio.Client;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 using Xunit;
 using Xunit.Abstractions;
 

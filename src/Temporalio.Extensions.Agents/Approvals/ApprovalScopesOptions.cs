@@ -1,6 +1,4 @@
-using Temporalio.Extensions.Agents.HistoryStore;
-
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Approvals;
 
 /// <summary>
 /// Per-agent configuration for scope-aware approval behavior. Passed to

@@ -1,5 +1,9 @@
 using Microsoft.Agents.AI;
+using Temporalio.Extensions.Agents.Approvals;
+using Temporalio.Extensions.Agents.Tools;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Tools;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;

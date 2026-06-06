@@ -6,12 +6,16 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.Agents.HistoryStore;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.State;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents.Tools;
+using Temporalio.Extensions.AI.Approvals;
 using Temporalio.Extensions.AI.Exceptions;
 using Temporalio.Extensions.AI.Internal;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents.Workflows;
@@ -50,7 +54,7 @@ internal sealed record CachedDurableAgent(
     Compaction.ICompactionStrategy? CompactionStrategy,
     IReadOnlyList<AITool> ToolsAsAITools,
     IDurableToolInterceptor<AgentToolContext>? ToolInterceptor = null,
-    HistoryStore.IApprovalScopeStore? ApprovalScopeStore = null);
+    IApprovalScopeStore? ApprovalScopeStore = null);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
@@ -804,7 +808,7 @@ internal sealed class AgentActivities(
         // Feature B: resolve approval-scope store only when this agent has opted into
         // approval scopes. A worker-default store must not introduce construction side effects
         // for agents that did not call UseApprovalScopes().
-        HistoryStore.IApprovalScopeStore? resolvedApprovalScopeStore = null;
+        IApprovalScopeStore? resolvedApprovalScopeStore = null;
         if (registration.UseApprovalScopes && registration.ApprovalScopesOptions is not null)
         {
             var approvalScopeStoreFactory = registration.ApprovalScopesOptions.ApprovalScopeStore

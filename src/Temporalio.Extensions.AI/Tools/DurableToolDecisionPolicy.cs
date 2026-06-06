@@ -1,6 +1,6 @@
 using Temporalio.Workflows;
 
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Tools;
 
 /// <summary>
 /// Shared policy helpers for the tool-interceptor dispatch loop.

@@ -1,4 +1,4 @@
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Tools;
 
 /// <summary>
 /// Cross-library pre-tool lifecycle hook. Fires as a Temporal activity before a durable tool is

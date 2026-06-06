@@ -2,6 +2,7 @@
 
 using Microsoft.Extensions.AI;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 using Temporalio.Extensions.Agents.HistoryStore;
 using Temporalio.Extensions.Agents.State;
 using Xunit;

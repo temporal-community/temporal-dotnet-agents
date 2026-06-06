@@ -21,6 +21,7 @@ using ToolInterceptor;
 using Temporalio.Extensions.Agents;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

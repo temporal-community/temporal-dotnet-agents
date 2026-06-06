@@ -1,6 +1,6 @@
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 
-namespace Temporalio.Extensions.Agents;
+namespace Temporalio.Extensions.Agents.Approvals;
 
 /// <summary>
 /// A persisted scope-approval record. Stored as a JSON array in session <see cref="Microsoft.Agents.AI.AgentSessionStateBag"/>
