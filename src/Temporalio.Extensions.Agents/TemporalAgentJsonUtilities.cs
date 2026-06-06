@@ -19,7 +19,7 @@ public static class TemporalAgentJsonUtilities
     /// <see cref="Microsoft.Extensions.AI.AIContent"/> polymorphism) and adds a runtime
     /// modifier that registers <see cref="AgentSessionRequest"/> /
     /// <see cref="AgentSessionResponse"/> as derived types of
-    /// <see cref="Temporalio.Extensions.AI.DurableSessionEntry"/>.
+    /// <see cref="Temporalio.Extensions.AI.Session.DurableSessionEntry"/>.
     /// </summary>
     public static JsonSerializerOptions DefaultOptions { get; } = CreateDefaultOptions();
 

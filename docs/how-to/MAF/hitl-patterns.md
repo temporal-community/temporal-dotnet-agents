@@ -791,13 +791,13 @@ dotnet run --project samples/MAF/HumanInTheLoop
 
 ## References
 
-- `src/Temporalio.Extensions.AI/DurableApprovalRequest.cs` — request type
-- `src/Temporalio.Extensions.AI/DurableApprovalDecision.cs` — decision and outcome type (includes `Scope`, `ScopePattern`)
-- `src/Temporalio.Extensions.AI/ApprovalScope.cs` — `ApprovalScope` enum
-- `src/Temporalio.Extensions.AI/ApprovalScopePattern.cs` — `ApprovalScopePattern` and `PatternMatchType`
-- `src/Temporalio.Extensions.Agents/ApprovalScopeRecord.cs` — persisted scope record
-- `src/Temporalio.Extensions.Agents/ApprovalScopeHelpers.cs` — `TryMatchScope` public helper
-- `src/Temporalio.Extensions.Agents/ApprovalScopesOptions.cs` — per-agent scope configuration
+- `src/Temporalio.Extensions.AI/Approvals/DurableApprovalRequest.cs` — request type
+- `src/Temporalio.Extensions.AI/Approvals/DurableApprovalDecision.cs` — decision and outcome type (includes `Scope`, `ScopePattern`)
+- `src/Temporalio.Extensions.AI/Approvals/ApprovalScope.cs` — `ApprovalScope` enum
+- `src/Temporalio.Extensions.AI/Approvals/ApprovalScopePattern.cs` — `ApprovalScopePattern` and `PatternMatchType`
+- `src/Temporalio.Extensions.Agents/Approvals/ApprovalScopeRecord.cs` — persisted scope record
+- `src/Temporalio.Extensions.Agents/Approvals/ApprovalScopeHelpers.cs` — `TryMatchScope` public helper
+- `src/Temporalio.Extensions.Agents/Approvals/ApprovalScopesOptions.cs` — per-agent scope configuration
 - `src/Temporalio.Extensions.Agents/Approvals/IApprovalScopeStore.cs` — always-scope store interface
 - `src/Temporalio.Extensions.Agents/AgentWorkflow.cs` — HITL update/query handlers, scope record write path
 - `src/Temporalio.Extensions.Agents/TemporalAgentContext.cs` — `RequestApprovalAsync` for tools

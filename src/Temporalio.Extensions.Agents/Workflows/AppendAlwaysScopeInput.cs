@@ -13,7 +13,7 @@ internal sealed class AppendAlwaysScopeInput
 
     /// <summary>
     /// The session ID (agent workflow ID). Used for activity-side logging and observability only;
-    /// NOT forwarded to <see cref="Temporalio.Extensions.Agents.HistoryStore.IApprovalScopeStore.AppendAsync"/>.
+    /// NOT forwarded to <see cref="Temporalio.Extensions.Agents.Approvals.IApprovalScopeStore.AppendAsync"/>.
     /// </summary>
     public required string SessionId { get; init; }
 

@@ -126,7 +126,7 @@ internal sealed record ProxyResolvedWorkerConfig
     public bool UseApprovalScopes { get; init; }
 
     /// <summary>
-    /// When <see langword="true"/>, the agent has an <see cref="HistoryStore.IApprovalScopeStore"/>
+    /// When <see langword="true"/>, the agent has an <see cref="Approvals.IApprovalScopeStore"/>
     /// configured (per-agent or worker-level) AND <see cref="UseApprovalScopes"/> is true.
     /// The workflow dispatches <c>AppendAlwaysScopeAsync</c> and <c>LoadAlwaysScopesAsync</c>
     /// activities. Independent from <see cref="UseExternalStoreMode"/> (conversation history store).

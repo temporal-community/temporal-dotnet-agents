@@ -5,6 +5,7 @@
 // Run:  dotnet run --project samples/MAF/ApprovalScopes/ApprovalScopes.csproj
 
 using System.ClientModel;
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Diagnostics;
 using Microsoft.Agents.AI;
@@ -49,7 +50,7 @@ var openAiClient = new OpenAIClient(
 
 // ── Fake in-memory filesystem ─────────────────────────────────────────────────
 // No real I/O — keeps the sample self-contained and portable.
-var fakeFs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+var fakeFs = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase)
 {
     ["/tmp/readme.txt"]   = "Temporal ApprovalScopes sample — try writing files here.",
     ["/docs/overview.md"] = "Project overview (pre-existing).",
@@ -290,4 +291,5 @@ while (true)
     Console.WriteLine();
 }
 
+try { await client.ShutdownAsync(sessionId); } catch (OperationCanceledException) { }
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
