@@ -296,7 +296,7 @@ The `tests/Temporalio.Extensions.AI.Tests/Compat/Snapshots/v0_3/discriminators.j
   - `Temporalio.Extensions.Agents.Compaction.CompactionContext`
   - `Temporalio.Extensions.Agents.Compaction.CompactionResult`
   - `Temporalio.Extensions.Agents.Compaction.{Truncation,SlidingWindow,Summarization}CompactionStrategy`
-  - `Temporalio.Extensions.AI.CompactionMarkerEntry`
+  - `Temporalio.Extensions.AI.Session.CompactionMarkerEntry`
   - `Temporalio.Extensions.AI.Exceptions.DurableCompactionMarkerException`
   - `Temporalio.Extensions.Agents.HistoryStore.CompactionAwareErasureHelper`
 - **External history store**: [`docs/how-to/MAF/external-history-store.md`](./external-history-store.md)
