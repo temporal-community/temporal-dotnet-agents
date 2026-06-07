@@ -1101,7 +1101,7 @@ internal sealed class AgentActivities(
 
     /// <summary>
     /// Loads all always-scope records for an agent and logical store key from the configured
-    /// <see cref="Temporalio.Extensions.Agents.HistoryStore.IApprovalScopeStore"/>.
+    /// <see cref="Temporalio.Extensions.Agents.Approvals.IApprovalScopeStore"/>.
     /// When no store is configured, returns an empty result.
     /// </summary>
     /// <remarks>
@@ -1132,7 +1132,7 @@ internal sealed class AgentActivities(
 
     /// <summary>
     /// Appends an always-scope record to the configured
-    /// <see cref="Temporalio.Extensions.Agents.HistoryStore.IApprovalScopeStore"/>.
+    /// <see cref="Temporalio.Extensions.Agents.Approvals.IApprovalScopeStore"/>.
     /// Idempotent by <see cref="ApprovalScopeRecord.OriginatingRequestId"/>.
     /// When no store is configured, logs a warning and returns without error.
     /// </summary>

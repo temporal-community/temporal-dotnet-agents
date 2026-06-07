@@ -799,8 +799,8 @@ dotnet run --project samples/MAF/HumanInTheLoop
 - `src/Temporalio.Extensions.Agents/Approvals/ApprovalScopeHelpers.cs` — `TryMatchScope` public helper
 - `src/Temporalio.Extensions.Agents/Approvals/ApprovalScopesOptions.cs` — per-agent scope configuration
 - `src/Temporalio.Extensions.Agents/Approvals/IApprovalScopeStore.cs` — always-scope store interface
-- `src/Temporalio.Extensions.Agents/AgentWorkflow.cs` — HITL update/query handlers, scope record write path
-- `src/Temporalio.Extensions.Agents/TemporalAgentContext.cs` — `RequestApprovalAsync` for tools
+- `src/Temporalio.Extensions.Agents/Workflows/AgentWorkflow.cs` — HITL update/query handlers, scope record write path
+- `src/Temporalio.Extensions.Agents/Session/TemporalAgentContext.cs` — `RequestApprovalAsync` for tools
 - `samples/MAF/HumanInTheLoop/` — complete working example
 - [Tool Interceptor — Approval scope records](./tool-interceptor.md#approval-scope-records) — interceptor integration, one-turn lag
 - [Usage Guide — HITL](./usage.md#human-in-the-loop-hitl-approval-gates) — quick-start examples

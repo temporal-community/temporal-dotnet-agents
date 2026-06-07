@@ -22,7 +22,7 @@ namespace Temporalio.Extensions.AI;
 /// Read-style tools generally inherit the default retry policy.
 /// </para>
 /// <para>
-/// This type mirrors <c>Temporalio.Extensions.Agents.DurableToolOptions</c> verbatim
+/// This type mirrors <c>Temporalio.Extensions.Agents.Tools.DurableToolOptions</c> verbatim
 /// for cross-library symmetry.
 /// </para>
 /// </remarks>

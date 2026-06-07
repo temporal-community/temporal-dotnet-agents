@@ -134,7 +134,7 @@ internal sealed record ProxyResolvedWorkerConfig
     public bool UseApprovalScopeStoreMode { get; init; }
 
     /// <summary>
-    /// The logical store key for always-scope records in <see cref="HistoryStore.IApprovalScopeStore"/>.
+    /// The logical store key for always-scope records in <see cref="Temporalio.Extensions.Agents.Approvals.IApprovalScopeStore"/>.
     /// Configured via <see cref="ApprovalScopesOptions.AlwaysScopesStoreKey"/>.
     /// <see langword="null"/> when approval scopes are not enabled.
     /// </summary>

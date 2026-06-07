@@ -291,5 +291,14 @@ while (true)
     Console.WriteLine();
 }
 
-try { await client.ShutdownAsync(sessionId); } catch (OperationCanceledException) { }
+try
+{
+    await client.ShutdownAsync(sessionId);
+}
+catch (Temporalio.Exceptions.RpcException ex)
+    when (ex.Code == Temporalio.Exceptions.RpcException.StatusCode.NotFound)
+{
+    // The user may quit before the first RunAsync starts the workflow.
+}
+catch (OperationCanceledException) { }
 try { await host.StopAsync(); } catch (OperationCanceledException) { }

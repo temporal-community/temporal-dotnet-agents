@@ -4,7 +4,7 @@ namespace Temporalio.Extensions.Agents.Approvals;
 
 /// <summary>
 /// A persisted scope-approval record. Stored as a JSON array in session <see cref="Microsoft.Agents.AI.AgentSessionStateBag"/>
-/// (session scope) or in the agent's configured <see cref="HistoryStore.IApprovalScopeStore"/>
+/// (session scope) or in the agent's configured <see cref="IApprovalScopeStore"/>
 /// (always scope).
 /// </summary>
 public sealed class ApprovalScopeRecord

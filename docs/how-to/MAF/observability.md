@@ -304,9 +304,9 @@ This is a doc-only pattern with no library opt-in flag. See [Per-LLM-Call Interc
 ## References
 
 - `src/Temporalio.Extensions.Agents/TemporalAgentTelemetry.cs` — all span and attribute constants
-- `src/Temporalio.Extensions.Agents/DefaultTemporalAgentClient.cs` — `agent.client.send` and scheduling spans
-- `src/Temporalio.Extensions.Agents/AgentActivities.cs` — `agent.turn` span with token metrics
-- `src/Temporalio.Extensions.Agents/AgentWorkflow.cs` — search attribute upserts
+- `src/Temporalio.Extensions.Agents/Workflows/DefaultTemporalAgentClient.cs` — `agent.client.send` and scheduling spans
+- `src/Temporalio.Extensions.Agents/Workflows/AgentActivities.cs` — `agent.turn` span with token metrics
+- `src/Temporalio.Extensions.Agents/Workflows/AgentWorkflow.cs` — search attribute upserts
 - `samples/MAF/MultiAgentRouting/Program.cs` — complete OTel setup example
 - [Temporal Visibility](https://docs.temporal.io/visibility) — search attribute documentation
 - [Temporalio.Extensions.OpenTelemetry](https://github.com/temporalio/sdk-dotnet) — SDK tracing interceptor

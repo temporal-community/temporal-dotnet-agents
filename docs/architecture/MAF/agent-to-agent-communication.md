@@ -420,7 +420,7 @@ public async Task<string> RunAsync(string question)
 
 - `src/Temporalio.Extensions.Agents/TemporalWorkflowExtensions.cs` — `GetAgent`, `ExecuteAgentsInParallelAsync`
 - `src/Temporalio.Extensions.Agents/TemporalAIAgent.cs` — workflow-safe agent with activity-based execution
-- `src/Temporalio.Extensions.Agents/TemporalAgentContext.cs` — async-local Temporal capabilities for tools
+- `src/Temporalio.Extensions.Agents/Session/TemporalAgentContext.cs` — async-local Temporal capabilities for tools
 - `samples/MAF/WorkflowOrchestration/` — Pattern 1 example
 - `samples/MAF/MultiAgentRouting/RoutingWorkflow.cs` — Pattern 2 example
 - `samples/MAF/EvaluatorOptimizer/EvaluatorOptimizerWorkflow.cs` — iterative agent communication

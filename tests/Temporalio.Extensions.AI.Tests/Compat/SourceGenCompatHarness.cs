@@ -247,7 +247,7 @@ internal static class SourceGenCompatHarness
     /// {
     ///   "snapshotName": "v0_3",
     ///   "baseTypes": {
-    ///     "Temporalio.Extensions.AI.DurableSessionEntry": ["ai_request", "ai_response"]
+    ///     "Temporalio.Extensions.AI.Session.DurableSessionEntry": ["ai_request", "ai_response"]
     ///   }
     /// }
     /// </code>
