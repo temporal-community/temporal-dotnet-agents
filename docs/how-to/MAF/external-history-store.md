@@ -72,6 +72,23 @@ The split:
 
 If you only register a custom `ChatHistoryProvider` without `IAgentHistoryStore`, the workflow still serializes history into the activity-scheduled event — the PII problem is unsolved. If you only configure `HistoryStore`, the library's built-in adapter handles the LLM-context-injection side automatically.
 
+> **⚠ Do not combine a third-party `ChatHistoryProvider` with `IAgentHistoryStore`**
+>
+> If you register a custom `ChatHistoryProvider` via `agent.AddContextProvider(...)` while
+> `UseExternalStoreMode` is active, the model receives conversation history **twice**: once from
+> the library's built-in `TemporalChatHistoryProvider` (which loads from `IAgentHistoryStore`)
+> and once from your registered provider. The result is a doubled conversation context that
+> inflates prompt size and can produce incoherent responses.
+>
+> Third-party MAF history providers such as `Microsoft.Agents.AI.Valkey`'s
+> `ValkeyChatHistoryProvider` are `ChatHistoryProvider` subclasses and fall into this category.
+> When using `IAgentHistoryStore`, do not also register a `ChatHistoryProvider` for the same
+> agent — the built-in adapter already handles LLM context injection.
+>
+> If you want a Valkey-backed persistent history store that works correctly with `UseExternalStoreMode`,
+> implement `IAgentHistoryStore` over `Valkey.Glide` directly rather than using
+> `ValkeyChatHistoryProvider`.
+
 ---
 
 ## Quick Start
