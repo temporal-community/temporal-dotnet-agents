@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Temporalio.Client;
 using Temporalio.Extensions.Agents.Compaction;
 using Temporalio.Extensions.Agents.Internal;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.Hosting;
 

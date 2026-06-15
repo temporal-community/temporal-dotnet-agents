@@ -1,5 +1,7 @@
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.Workflows;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;

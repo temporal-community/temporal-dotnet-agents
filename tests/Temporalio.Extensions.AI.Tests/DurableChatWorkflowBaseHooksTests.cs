@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 using Temporalio.Workflows;
 using Xunit;
 

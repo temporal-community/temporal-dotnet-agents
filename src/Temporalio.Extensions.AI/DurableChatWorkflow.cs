@@ -1,6 +1,9 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Temporalio.Exceptions;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.AI;

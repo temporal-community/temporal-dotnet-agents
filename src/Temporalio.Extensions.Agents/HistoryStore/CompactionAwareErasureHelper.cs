@@ -1,7 +1,7 @@
 #pragma warning disable TA002 // helper consumes the experimental compaction surface
 
 using System.Diagnostics.CodeAnalysis;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 
 namespace Temporalio.Extensions.Agents.HistoryStore;
 

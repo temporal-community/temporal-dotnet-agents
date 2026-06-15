@@ -1,12 +1,17 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.Agents.Workflows;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 
 namespace Temporalio.Extensions.Agents.State;
 
 [JsonSourceGenerationOptions(WriteIndented = false)]
+// Feature B — approval scope types
+[JsonSerializable(typeof(Temporalio.Extensions.Agents.Approvals.ApprovalScopeRecord))]
+[JsonSerializable(typeof(List<Temporalio.Extensions.Agents.Approvals.ApprovalScopeRecord>))]
+[JsonSerializable(typeof(IReadOnlyList<Temporalio.Extensions.Agents.Approvals.ApprovalScopeRecord>))]
 [JsonSerializable(typeof(DurableSessionEntry))]
 [JsonSerializable(typeof(DurableSessionRequest))]
 [JsonSerializable(typeof(DurableSessionResponse))]
@@ -29,6 +34,10 @@ namespace Temporalio.Extensions.Agents.State;
 // Temporalio.Extensions.AI (DurableAIJsonContext already registers them); only the
 // Agents-specific input type needs registration here.
 [JsonSerializable(typeof(Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorInput))]
+// Feature B — approval-scope store activity I/O
+[JsonSerializable(typeof(Temporalio.Extensions.Agents.Workflows.AppendAlwaysScopeInput))]
+[JsonSerializable(typeof(Temporalio.Extensions.Agents.Workflows.LoadAlwaysScopesInput))]
+[JsonSerializable(typeof(Temporalio.Extensions.Agents.Workflows.LoadAlwaysScopesResult))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 // Function call and result content
 [JsonSerializable(typeof(Dictionary<string, object>))]

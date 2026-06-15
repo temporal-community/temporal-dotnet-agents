@@ -3,8 +3,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.AI;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.Agents.State;
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 
 namespace Temporalio.Extensions.Agents;
 
@@ -17,7 +19,7 @@ public static class TemporalAgentJsonUtilities
     /// <see cref="Microsoft.Extensions.AI.AIContent"/> polymorphism) and adds a runtime
     /// modifier that registers <see cref="AgentSessionRequest"/> /
     /// <see cref="AgentSessionResponse"/> as derived types of
-    /// <see cref="Temporalio.Extensions.AI.DurableSessionEntry"/>.
+    /// <see cref="Temporalio.Extensions.AI.Session.DurableSessionEntry"/>.
     /// </summary>
     public static JsonSerializerOptions DefaultOptions { get; } = CreateDefaultOptions();
 

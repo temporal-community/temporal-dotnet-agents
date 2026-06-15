@@ -4,8 +4,8 @@ using Temporalio.Extensions.AI;
 using Xunit;
 
 using AgentsInterceptorInput = Temporalio.Extensions.Agents.Workflows.DurableToolInterceptorInput;
-using AgentsInterceptorResult = Temporalio.Extensions.AI.DurableToolInterceptorResult;
-using AgentsToolOutcome = Temporalio.Extensions.AI.DurableToolOutcome;
+using AgentsInterceptorResult = Temporalio.Extensions.AI.Tools.DurableToolInterceptorResult;
+using AgentsToolOutcome = Temporalio.Extensions.AI.Tools.DurableToolOutcome;
 
 namespace Temporalio.Extensions.Agents.Tests;
 

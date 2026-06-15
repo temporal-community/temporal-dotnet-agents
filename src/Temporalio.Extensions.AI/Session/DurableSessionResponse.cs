@@ -1,7 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 
-namespace Temporalio.Extensions.AI;
+namespace Temporalio.Extensions.AI.Session;
 
 /// <summary>
 /// Concrete <see cref="DurableSessionEntry"/> representing a response turn — the outbound

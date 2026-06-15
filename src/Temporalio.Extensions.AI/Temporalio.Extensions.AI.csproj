@@ -22,6 +22,7 @@
     <InternalsVisibleTo Include="Temporalio.Extensions.AI.IntegrationTests" />
     <InternalsVisibleTo Include="Temporalio.Extensions.Agents" />
     <InternalsVisibleTo Include="Temporalio.Extensions.Agents.Tests" />
+    <InternalsVisibleTo Include="Temporalio.Extensions.Agents.IntegrationTests" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Tools;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents.Workflows;
@@ -30,6 +30,24 @@ internal sealed class AgentJobWorkflow
     [WorkflowRun]
     public async Task RunAsync(AgentJobInput input)
     {
+        // Feature B — Task 7.1: warn early when scope-aware required tools are present.
+        // AgentJobWorkflow has no DurableApprovalMixin so workflow-parked approval is not
+        // supported. When the interceptor returns PauseForApproval for a scope-aware required
+        // tool (because no matching scope record exists), the decision degrades to Block below
+        // in Phase 2. Emitting a LogWarning here at workflow start makes this degradation
+        // visible before the tool call rather than silently at block time.
+        // Note: SerializedStateBag is always null in AgentJobWorkflow's interceptor input
+        // (see DurableToolInterceptorInput construction in Phase 1 below) — scope records
+        // from StateBag are never consulted on this path.
+        if (input.ScopeAwareApprovalTools is { Count: > 0 } scopeApprovalTools)
+        {
+            var names = string.Join(", ", scopeApprovalTools);
+            Workflow.Logger.LogWarning(
+                "Tool(s) '{ToolNames}' are configured with RequireApproval().ScopeAware() but this execution " +
+                "context does not support workflow-parked approval. Unapproved calls will be blocked.",
+                names);
+        }
+
         var stepActivityOptions = new ActivityOptions
         {
             StartToCloseTimeout = input.ActivityTimeout,
@@ -89,7 +107,14 @@ internal sealed class AgentJobWorkflow
                             ToolName = tc.Name,
                             Arguments = tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments),
                             CallId = tc.CallId,
+                            // SerializedStateBag is always null on this path — AgentJobWorkflow
+                            // has no StateBag and scope records are never consulted here.
                             SerializedStateBag = null,
+                            // Feature B: populate scope-aware fields so the interceptor can
+                            // enforce the approval gate for scope-aware tools (Task 4.7).
+                            ScopeAware = input.ScopeAwareTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
+                            RequiresApproval = input.RequiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true
+                                || input.ScopeAwareApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
                         };
                         // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel typed dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(

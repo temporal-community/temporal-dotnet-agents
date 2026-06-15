@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Temporalio.Extensions.AI;
 using Temporalio.Extensions.AI.Exceptions;
+using Temporalio.Extensions.AI.Session;
 using Xunit;
 
 namespace Temporalio.Extensions.AI.Tests.Compat;
@@ -245,7 +247,7 @@ internal static class SourceGenCompatHarness
     /// {
     ///   "snapshotName": "v0_3",
     ///   "baseTypes": {
-    ///     "Temporalio.Extensions.AI.DurableSessionEntry": ["ai_request", "ai_response"]
+    ///     "Temporalio.Extensions.AI.Session.DurableSessionEntry": ["ai_request", "ai_response"]
     ///   }
     /// }
     /// </code>

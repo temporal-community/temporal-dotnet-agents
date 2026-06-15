@@ -6,12 +6,16 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.Agents.HistoryStore;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.State;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents.Tools;
+using Temporalio.Extensions.AI.Approvals;
 using Temporalio.Extensions.AI.Exceptions;
 using Temporalio.Extensions.AI.Internal;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 using Temporalio.Workflows;
 
 namespace Temporalio.Extensions.Agents.Workflows;
@@ -49,7 +53,8 @@ internal sealed record CachedDurableAgent(
     string? CompactionStrategyKey,
     Compaction.ICompactionStrategy? CompactionStrategy,
     IReadOnlyList<AITool> ToolsAsAITools,
-    IDurableToolInterceptor<AgentToolContext>? ToolInterceptor = null);
+    IDurableToolInterceptor<AgentToolContext>? ToolInterceptor = null,
+    IApprovalScopeStore? ApprovalScopeStore = null);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
@@ -423,15 +428,57 @@ internal sealed class AgentActivities(
                 ActivityOptions? interceptorActivityOpts = null;
                 List<string>? interceptorSkippedTools = null;
                 List<string>? requiresApprovalTools = null;
+                List<string>? scopeAwareTools = null;
+                List<string>? scopeAwareApprovalTools = null;
 
                 // requiresApprovalTools is populated unconditionally — RequireApproval() is an
                 // absolute floor that must be enforced even when no tool interceptor is registered
                 // (BLOCK-2 fix). Only interceptorActivityOpts and the skip list need the interceptor guard.
+                // Feature B: RequiresApprovalTools exclusion guard — scope-aware required tools go into
+                // scopeAwareApprovalTools, NOT requiresApprovalTools (spec Section 13, critical guard).
                 foreach (var toolReg in cached.Registration.Tools)
                 {
-                    if (toolReg.Options.RequireApprovalFlag)
+                    var toolOpts = toolReg.Options;
+                    if (toolOpts.RequireApprovalFlag && !toolOpts.ScopeAwareFlag)
                     {
                         (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
+                    }
+
+                    if (toolOpts.ScopeAwareFlag)
+                    {
+                        (scopeAwareTools ??= new List<string>()).Add(toolReg.Name);
+                        if (toolOpts.RequireApprovalFlag)
+                        {
+                            (scopeAwareApprovalTools ??= new List<string>()).Add(toolReg.Name);
+                        }
+                    }
+                }
+
+                // Feature B: DefaultToolInterceptor incompatibility check at proxy-start resolution.
+                if (cached.Registration.UseApprovalScopes && cached.AgentsOptions.DefaultToolInterceptor is not null)
+                {
+                    throw new InvalidOperationException(
+                        "UseApprovalScopes() cannot be combined with TemporalAgentsOptions.DefaultToolInterceptor. " +
+                        "This release does not compose approval scopes with worker-default tool interceptors. " +
+                        "Remove DefaultToolInterceptor from TemporalAgentsOptions or do not call UseApprovalScopes() on this agent.");
+                }
+
+                // Feature B: startup validation for scope-aware required tools at proxy-start resolution.
+                foreach (var toolReg in cached.Registration.Tools)
+                {
+                    var toolOpts = toolReg.Options;
+                    if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && !cached.Registration.UseApprovalScopes)
+                    {
+                        throw new InvalidOperationException(
+                            $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{cached.Registration.Name}'. " +
+                            "Call UseApprovalScopes() before registering scope-aware required tools.");
+                    }
+
+                    if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && toolOpts.SkipInterceptorFlag)
+                    {
+                        throw new InvalidOperationException(
+                            $"Tool '{toolReg.Name}' cannot combine RequireApproval(), ScopeAware(), and SkipInterceptor(); approval " +
+                            "scopes require the interceptor to enforce the missing-scope approval gate.");
                     }
                 }
 
@@ -475,6 +522,40 @@ internal sealed class AgentActivities(
                     }
                 }
 
+                // Feature B: resolve approval-scopes config for proxy-start resolution.
+                var useApprovalScopes = cached.Registration.UseApprovalScopes;
+                bool useApprovalScopeStoreMode = false;
+                string? alwaysScopesStoreKey = null;
+                bool applyAlwaysScopesAtSessionStart = false;
+                int maxAlwaysScopeCacheRecords = 0;
+                int maxAlwaysScopeCacheBytes = 0;
+                TimeSpan approvalScopeActivityTimeout = TimeSpan.Zero;
+                int approvalScopeActivityMaximumAttempts = 0;
+
+                if (useApprovalScopes)
+                {
+                    var scopeOpts = cached.Registration.ApprovalScopesOptions!;
+
+                    // Options validation (positive bounds) — same as direct-start path.
+                    if (scopeOpts.MaxAlwaysScopeCacheRecords <= 0)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheRecords for agent '{cached.Registration.Name}' must be a positive integer.");
+                    if (scopeOpts.MaxAlwaysScopeCacheBytes <= 0)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheBytes for agent '{cached.Registration.Name}' must be a positive integer.");
+                    if (scopeOpts.ApprovalScopeActivityMaximumAttempts <= 0)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts for agent '{cached.Registration.Name}' must be a positive integer.");
+                    if (scopeOpts.ApprovalScopeActivityTimeout <= TimeSpan.Zero)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityTimeout for agent '{cached.Registration.Name}' must be greater than TimeSpan.Zero.");
+
+                    useApprovalScopeStoreMode = scopeOpts.ApprovalScopeStore is not null
+                                             || cached.AgentsOptions.ApprovalScopeStore is not null;
+                    alwaysScopesStoreKey = scopeOpts.AlwaysScopesStoreKey;
+                    applyAlwaysScopesAtSessionStart = scopeOpts.ApplyAlwaysScopesAtSessionStart;
+                    maxAlwaysScopeCacheRecords = scopeOpts.MaxAlwaysScopeCacheRecords;
+                    maxAlwaysScopeCacheBytes = scopeOpts.MaxAlwaysScopeCacheBytes;
+                    approvalScopeActivityTimeout = scopeOpts.ApprovalScopeActivityTimeout;
+                    approvalScopeActivityMaximumAttempts = scopeOpts.ApprovalScopeActivityMaximumAttempts;
+                }
+
                 resolvedConfig = new ProxyResolvedWorkerConfig
                 {
                     MaxToolCallsPerTurn = resolvedMaxToolCalls ?? cached.Registration.MaxToolCallsPerTurn,
@@ -485,6 +566,16 @@ internal sealed class AgentActivities(
                     InterceptorToolActivityOptions = perToolInterceptorOpts,
                     InterceptorSkippedTools = interceptorSkippedTools,
                     RequiresApprovalTools = requiresApprovalTools,
+                    ScopeAwareTools = scopeAwareTools,
+                    ScopeAwareApprovalTools = scopeAwareApprovalTools,
+                    UseApprovalScopes = useApprovalScopes,
+                    UseApprovalScopeStoreMode = useApprovalScopeStoreMode,
+                    AlwaysScopesStoreKey = alwaysScopesStoreKey,
+                    ApplyAlwaysScopesAtSessionStart = applyAlwaysScopesAtSessionStart,
+                    MaxAlwaysScopeCacheRecords = maxAlwaysScopeCacheRecords,
+                    MaxAlwaysScopeCacheBytes = maxAlwaysScopeCacheBytes,
+                    ApprovalScopeActivityTimeout = approvalScopeActivityTimeout,
+                    ApprovalScopeActivityMaximumAttempts = approvalScopeActivityMaximumAttempts,
                 };
             }
 
@@ -714,6 +805,17 @@ internal sealed class AgentActivities(
             ?? agentsOptions.DefaultToolInterceptor;
         var resolvedInterceptor = interceptorFactory?.Invoke(providerServices);
 
+        // Feature B: resolve approval-scope store only when this agent has opted into
+        // approval scopes. A worker-default store must not introduce construction side effects
+        // for agents that did not call UseApprovalScopes().
+        IApprovalScopeStore? resolvedApprovalScopeStore = null;
+        if (registration.UseApprovalScopes && registration.ApprovalScopesOptions is not null)
+        {
+            var approvalScopeStoreFactory = registration.ApprovalScopesOptions.ApprovalScopeStore
+                ?? agentsOptions.ApprovalScopeStore;
+            resolvedApprovalScopeStore = approvalScopeStoreFactory?.Invoke(providerServices);
+        }
+
         return new CachedDurableAgent(
             agent,
             resolvedTools,
@@ -725,7 +827,8 @@ internal sealed class AgentActivities(
             effectiveCompactionKey,
             resolvedStrategy,
             toolsAsAITools,
-            resolvedInterceptor);
+            resolvedInterceptor,
+            resolvedApprovalScopeStore);
     }
 
     /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
@@ -916,7 +1019,24 @@ internal sealed class AgentActivities(
         if (cached.ToolInterceptor is null)
         {
             // Interceptor was removed between workflow dispatch and activity execution
-            // (e.g. worker restart without interceptor re-registration). Degrade to Proceed
+            // (e.g. worker restart without interceptor re-registration).
+            // Scope-aware required tools must not silently proceed — they were excluded from
+            // RequiresApprovalTools and rely on the interceptor for the approval gate.
+            if (input.ScopeAware && input.RequiresApproval)
+            {
+                _logger.LogWarning(
+                    "RunToolInterceptor dispatched for agent '{AgentName}' tool '{ToolName}' " +
+                    "(ScopeAware+RequiresApproval) but no IAgentToolInterceptor is resolved. " +
+                    "Returning PauseForApproval to enforce the approval gate.",
+                    input.AgentName, input.ToolName);
+                return new DurableToolInterceptorResult
+                {
+                    Outcome = DurableToolOutcome.PauseForApproval,
+                    Message = $"Tool '{input.ToolName}' requires approval. No interceptor resolved — defaulting to approval gate.",
+                };
+            }
+
+            // Non-required or non-scope-aware: degrade to Proceed
             // so the tool still runs rather than silently blocking the session.
             _logger.LogWarning(
                 "RunToolInterceptor dispatched for agent '{AgentName}' tool '{ToolName}' " +
@@ -951,6 +1071,9 @@ internal sealed class AgentActivities(
             CallId = input.CallId,
             SessionId = ctx.Info.WorkflowId,
             StateBag = stateBag,
+            // Feature B: pass through scope-aware fields so the interceptor can consult scope records.
+            ScopeAware = input.ScopeAware,
+            RequiresApproval = input.RequiresApproval,
         };
 
         DurableToolDecision decision;
@@ -974,6 +1097,79 @@ internal sealed class AgentActivities(
         }
 
         return DurableToolInterceptorResult.FromDecision(decision);
+    }
+
+    /// <summary>
+    /// Loads all always-scope records for an agent and logical store key from the configured
+    /// <see cref="Temporalio.Extensions.Agents.Approvals.IApprovalScopeStore"/>.
+    /// When no store is configured, returns an empty result.
+    /// </summary>
+    /// <remarks>
+    /// Failure handling is delegated to the workflow: the activity itself throws on store errors,
+    /// and the workflow catches <see cref="Temporalio.Activities.ActivityFailureException"/> with
+    /// the <c>when (!IsActivityCancellation(ex))</c> filter to apply fail-open semantics.
+    /// </remarks>
+    [Activity("Temporalio.Extensions.Agents.LoadAlwaysScopes")]
+    public async Task<LoadAlwaysScopesResult> LoadAlwaysScopesAsync(LoadAlwaysScopesInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var ct = ActivityExecutionContext.Current.CancellationToken;
+        var cached = ResolveDurableAgent(input.AgentName);
+
+        if (cached.ApprovalScopeStore is null)
+        {
+            // No store configured — return empty result gracefully.
+            return new LoadAlwaysScopesResult { Scopes = [] };
+        }
+
+        var records = await cached.ApprovalScopeStore
+            .LoadAsync(input.AgentName, input.StoreKey, ct)
+            .ConfigureAwait(false);
+
+        return new LoadAlwaysScopesResult { Scopes = records ?? [] };
+    }
+
+    /// <summary>
+    /// Appends an always-scope record to the configured
+    /// <see cref="Temporalio.Extensions.Agents.Approvals.IApprovalScopeStore"/>.
+    /// Idempotent by <see cref="ApprovalScopeRecord.OriginatingRequestId"/>.
+    /// When no store is configured, logs a warning and returns without error.
+    /// </summary>
+    /// <remarks>
+    /// Failure handling is delegated to the workflow: the activity itself throws on store errors,
+    /// and the workflow catches <see cref="Temporalio.Activities.ActivityFailureException"/> with
+    /// the <c>when (!IsActivityCancellation(ex))</c> filter to apply fail-open semantics.
+    /// </remarks>
+    [Activity("Temporalio.Extensions.Agents.AppendAlwaysScope")]
+    public async Task AppendAlwaysScopeAsync(AppendAlwaysScopeInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var ct = ActivityExecutionContext.Current.CancellationToken;
+        var cached = ResolveDurableAgent(input.AgentName);
+
+        if (cached.ApprovalScopeStore is null)
+        {
+            _logger.LogWarning(
+                "[{SessionId}] AppendAlwaysScopeAsync: no IApprovalScopeStore is configured for agent " +
+                "'{AgentName}'. The always-scope record for tool '{ToolName}' (RequestId: {RequestId}) " +
+                "will not be persisted.",
+                input.SessionId, input.AgentName, input.ToolName, input.OriginatingRequestId);
+            return;
+        }
+
+        var record = new ApprovalScopeRecord
+        {
+            ToolName = input.ToolName,
+            Pattern = input.Pattern,
+            GrantedAt = input.GrantedAt,
+            OriginatingRequestId = input.OriginatingRequestId,
+        };
+
+        await cached.ApprovalScopeStore
+            .AppendAsync(input.AgentName, input.StoreKey, record, ct)
+            .ConfigureAwait(false);
     }
 
     [Activity("Temporalio.Extensions.Agents.InvokeAgentTool")]

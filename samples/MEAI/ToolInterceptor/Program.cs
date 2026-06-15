@@ -20,6 +20,8 @@ using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Exceptions;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Tools;
 
 // ── Setup: Build the application host ────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

@@ -28,14 +28,8 @@ TemporalAgents/
 │   └── Temporalio.Extensions.AI/       # MEAI IChatClient middleware (no Agent Framework)
 ├── tests/                     # Four projects: {Agents,AI} × {Tests, IntegrationTests}
 └── samples/
-    ├── MAF/                   # 14 samples: BasicAgent, SplitWorkerClient, WorkflowOrchestration,
-    │                          # EvaluatorOptimizer, MultiAgentRouting, HumanInTheLoop,
-    │                          # WorkflowRouting, AmbientAgent, ConfigurableAgent,
-    │                          # ExternalHistoryStore, PerToolActivities, Compaction,
-    │                          # ContextProviders, Skills
-    └── MEAI/                  # 6 samples: DurableChat, DurableTools, OpenTelemetry
-                               # (DurableOpenTelemetry.csproj), HumanInTheLoop,
-                               # DurableEmbeddings, CustomWorkflow
+    ├── MAF/                   # 14 samples — run: ls samples/MAF
+    └── MEAI/                  # 6 samples  — run: ls samples/MEAI
 ```
 
 Use `Glob` / `ls` to discover specific files. Notable types and their locations are documented inline elsewhere in this guide (Key Type Locations, JSON Serialization, etc.).
@@ -56,19 +50,9 @@ Use `Glob` / `ls` to discover specific files. Notable types and their locations 
 - `.WithActivityTimeout(TimeSpan)` / `.WithMaxRetryAttempts(int)` / `.WithHeartbeatTimeout(TimeSpan)` / `.WithChatClientKey(string)`
 - Keys are `public const string` constants on `TemporalChatOptionsExtensions`.
 
-**Durable tools**: `AddDurableTools(workerBuilder, params aiFunctions)` registers tools in `DurableFunctionRegistry` (resolved by name in `DurableFunctionActivities`). Or `aiFunction.AsDurable()` wraps as `DurableAIFunction` — passes through when `Workflow.InWorkflow == false`. A per-tool overload — `AddDurableTools(tool, opts => opts.NoRetry().WithTimeout(...))` — accepts a `DurableChatToolOptions` configuration callback that mirrors MAF's `DurableToolOptions` (`StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` properties + `NoRetry()` / `WithMaxAttempts(int)` / `WithTimeout(TimeSpan)` fluent methods).
-
-**Pattern 3 — Durable Tools in Chat Pipeline (v0.4+)**: Register tools via `AddDurableTools()` **without** `UseFunctionInvocation()`. `DurableChatWorkflow` automatically runs a per-tool dispatch loop: call LLM via `GetChatStepAsync` activity, fan out tool calls in parallel as `InvokeFunctionAsync` activities (via `Workflow.WhenAllAsync`), feed results back to the LLM, loop until `IsFinal` or `MaxToolCallsPerTurn` exceeded. Gives per-tool observability and retry without requiring a custom workflow. Activation is intent-based: `DurableFunctionRegistry.Count > 0` at session start → `DurableChatSessionClient` eagerly resolves per-tool `ActivityOptions` and freezes them in `DurableChatWorkflowInput.ToolActivityOptions` (replay-deterministic). Tool failures default to catch-and-feed-back to LLM (Pattern 1's `FunctionInvokingChatClient` behavior); set `DurableExecutionOptions.MaximumConsecutiveErrorsPerRequest = 0` for MAF-style immediate propagation. `MaxToolCallsPerTurn` (default 20), `MaximumConsecutiveErrorsPerRequest` (default 3), `IncludeDetailedErrors` (default false) all live on `DurableExecutionOptions`. Pattern 3 is exclusive to `DurableChatSessionClient` — middleware (`DurableChatClient`) cannot host a loop; custom workflows use Pattern 2 (`.AsDurable()`). Silent-failure footgun (custom workflow + `AddDurableTools` + no `.AsDurable()`) is caught at runtime by `DurableToolsNotWrappedException` in `GetResponseAsync`. See `docs/how-to/MEAI/tool-functions.md` for Models 1/2/3.
-
-**Context detection**: All middleware (`DurableChatClient`, `DurableAIFunction`, `DurableEmbeddingGenerator`) uses `Workflow.InWorkflow` as the dispatch guard. `false` = pass through; `true` = dispatch as Temporal activity.
+**Durable tools**: `AddDurableTools(workerBuilder, params aiFunctions)` registers tools in `DurableFunctionRegistry` (resolved by name in `DurableFunctionActivities`). Or `aiFunction.AsDurable()` wraps as `DurableAIFunction` — passes through when `Workflow.InWorkflow == false`. A per-tool overload — `AddDurableTools(tool, opts => opts.NoRetry().WithTimeout(...))` — accepts a `DurableChatToolOptions` configuration callback that mirrors MAF's `DurableToolOptions` (`StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` properties + `NoRetry()` / `WithMaxAttempts(int)` / `WithTimeout(TimeSpan)` fluent methods). Footgun: using a custom workflow with `AddDurableTools()` but without `.AsDurable()` on each function throws `DurableToolsNotWrappedException` at runtime — see `docs/how-to/MEAI/tool-functions.md` for Models 1/2/3.
 
 **HITL**: see `docs/how-to/MEAI/hitl-patterns.md`. Activity timeout on the underlying `[WorkflowUpdate]` must accommodate human review time.
-
-**Activity summaries** (auto-populated for the Temporal Web UI):
-- Chat: `chatOptions.ModelId`
-- Tool: function `Name`
-- Embedding: `EmbeddingGenerationOptions.ModelId`
-- HITL approval is a `[WorkflowUpdate]`, not an activity — no summary site.
 
 **Important notes**:
 - `DurableChatActivities` is `internal`; registered as `AddSingletonActivities`. Don't instantiate directly.
@@ -96,42 +80,13 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 - `TemporalAIAgent` — workflow-context sub-agent. Access via `TemporalWorkflowExtensions.GetAgent("Name")`.
 - `TemporalAIAgentProxy` — external-context proxy. Access via `services.GetTemporalAgentProxy("Name")`.
 
-**Workflow-based routing**: routing belongs inside a `[Workflow]` (durable, replay-cached decisions). Two patterns:
-- **Static**: classifier agent → `switch` → hardcoded specialist. Simple, fixed agent set.
-- **Dynamic**: an activity calls `TemporalAgentsOptions.GetRegisteredAgentNames()` to discover agents at runtime; the activity's result is cached in workflow history (replay-deterministic). See `samples/MAF/WorkflowRouting/DynamicRoutingWorkflow.cs`.
-- `AgentDescriptor` (`Name`, `Description`) lives in `Temporalio.Extensions.Agents.State` — routing activities can build their own description maps locally.
-- **Never** call `GetRegisteredAgentNames()` / `IsAgentRegistered()` directly inside a `[Workflow]` — wrap in an activity.
+**HITL**: see `docs/how-to/MAF/hitl-patterns.md`. Activity timeout must accommodate human review time.
 
-**Parallel agent execution** (workflow-only, uses `Workflow.WhenAllAsync`):
-```csharp
-var results = await TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync(new[]
-{
-    (researchAgent, messages, researchSession),
-    (summaryAgent,  messages, summarySession),
-});
-```
-
-**HITL**: see `docs/how-to/MAF/hitl-patterns.md`. Two flows — from inside a tool (activity context) via `TemporalAgentContext.Current.RequestApprovalAsync(...)`; from external systems via `client.GetPendingApprovalAsync` + `SubmitApprovalAsync`. Activity timeout must accommodate human review time.
-
-**StateBag persistence** (`AgentSessionStateBag` for `AIContextProvider` like `Mem0Provider`):
-- Serialized after each turn via `session.SerializeStateBag()`
-- Stored in `_currentStateBag` on `AgentWorkflow`; passed forward in `AgentWorkflowInput.CarriedStateBag`
-- Restored at activity start via `TemporalAgentSession.FromStateBag`
-- Empty bag (`StateBag.Count == 0`) returns `null` — no wasted serialization
-- **64 KB size guard**: `CreateContinueAsNewException` emits `LogWarning` when the serialized `CarriedStateBag` exceeds 64 KB. This is a signal to prune or externalize StateBag contents.
-
-**External history store** (opt-in for regulated workloads + long sessions): set `opts.HistoryStore = sp => sp.GetRequiredService<MyStore>()` (worker default) or `agent.HistoryStore = sp => ...` (per-agent). When configured, the workflow strips message payloads from in-workflow history entries (`ShouldStripMessagesFromHistoryEntry` returns true), the `RunDurableAgentStep` activity loads prior history from the store on the first step of a turn, and after the turn loop exits the workflow dispatches a separate `AppendAgentTurn` activity that appends the new entries to the store. Complementary to `AIContextProvider`, not a replacement. See `docs/how-to/MAF/external-history-store.md`.
+**StateBag persistence**: **64 KB size guard** — `CreateContinueAsNewException` emits `LogWarning` when the serialized `CarriedStateBag` exceeds 64 KB. Prune or externalize StateBag contents when this fires.
 
 **Per-tool Temporal activities** are the default behavior: every `AddDurableAgent` runs the durable loop (each LLM call is a `RunDurableAgentStep` activity; each tool call is a separately named `InvokeAgentTool` activity). Configure per-tool retry/timeout via the `DurableToolOptions` callback on `agent.AddTool(tool, opts => opts.NoRetry())` — write tools must call `.NoRetry()` (or set `MaximumAttempts = 1`) to prevent double-execution on retry. Cap loop iterations via `agent.MaxToolCallsPerTurn` (default 20). See `docs/how-to/MAF/durable-agents.md`.
 
-**OpenTelemetry**: SDK's `TracingInterceptor` handles Temporal protocol spans; `TemporalAgentTelemetry` handles agent-semantic spans. Composed hierarchy:
-```
-agent.client.send                     ← TemporalAgentTelemetry
-  UpdateWorkflow:RunAgent             ← TracingInterceptor
-    RunActivity:ExecuteAgent          ← TracingInterceptor
-      agent.turn                      ← TemporalAgentTelemetry (token counts, correlation ID)
-```
-Register all four sources with the tracer provider. **Never** call `ActivitySource.StartActivity()` inside `[Workflow]` — non-deterministic during replay; use `ActivitySourceExtensions.TrackWorkflowDiagnosticActivity` instead.
+**OpenTelemetry**: Register all four `ActivitySource` names with the tracer provider. **Never** call `ActivitySource.StartActivity()` inside `[Workflow]` — non-deterministic during replay; use `ActivitySourceExtensions.TrackWorkflowDiagnosticActivity` instead. See `docs/how-to/MAF/observability.md`.
 
 For full API surface, see `docs/how-to/MAF/usage.md`.
 
@@ -146,15 +101,13 @@ When a worker crashes:
 - ✅ `_currentStateBag` carries forward through `AgentWorkflowInput.CarriedStateBag`
 - ✅ Conversation history is serialized in workflow state across continue-as-new transitions
 
-As of Layer 3, `AgentWorkflow : DurableChatWorkflowBase<AgentResponse>`. The shared session loop (history accumulation, mutex, `[WorkflowSignal("Shutdown")]`, `[WorkflowQuery("GetHistory")]`, HITL approval handlers, continue-as-new trigger) lives on the base. `AgentWorkflow` overrides the abstract hooks (`ExecuteTurnAsync`, `BuildResponseEntry`, `CreateContinueAsNewException`, `UpsertCustomSearchAttributes`) and adds MAF-specific concerns (StateBag carry-forward, `AgentName` search attribute, fire-and-forget signal).
-
 ---
 
 ## Important Dependencies and Notes
 
 ### Microsoft Agent Framework
 - `Temporalio.Extensions.Agents` depends on `Temporalio.Extensions.AI` (which transitively brings in MEAI).
-- HITL types are MEAI-side: `DurableApprovalRequest` / `DurableApprovalDecision` (from `Temporalio.Extensions.AI`).
+- HITL types are MEAI-side: `DurableApprovalRequest` / `DurableApprovalDecision` (from `Temporalio.Extensions.AI.Approvals`).
 - `AgentResponse`, `AIAgent`, `DelegatingAIAgent`, `AgentRunOptions` → `Microsoft.Agents.AI`.
 - `ChatClientAgentRunOptions` → `Microsoft.Agents.AI` (not the Hosting package).
 - `AgentSessionStateBag.Count` available; `AgentSessionStateBag.Serialize()` uses its own `AgentAbstractionsJsonUtilities.DefaultOptions`.
@@ -170,12 +123,12 @@ As of Layer 3, `AgentWorkflow : DurableChatWorkflowBase<AgentResponse>`. The sha
 - `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException`, `DurableToolsNotWrappedException` — `Temporalio.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the others are stable.
 - `DurableChatStepResult` — `Temporalio.Extensions.AI` (internal sealed) — Pattern 3 activity return type from `GetChatStepAsync`; carries `IsFinal`, `AssistantMessage`, optional `ToolCalls` and `Usage`.
 - `DurableChatToolOptions` — `Temporalio.Extensions.AI` (public sealed) — per-tool options builder for Pattern 3; mirrors MAF's `DurableToolOptions` verbatim.
-- `IDurableToolInterceptor<in TContext>` — `Temporalio.Extensions.AI` — cross-library interceptor interface. `BeforeToolCallAsync(TContext, CancellationToken) → Task<DurableToolDecision>`. `in` variance: `IDurableToolInterceptor<DurableToolContext>` is assignable to `IDurableToolInterceptor<AgentToolContext>`.
-- `DurableToolDecision` — `Temporalio.Extensions.AI` — return type of `BeforeToolCallAsync`. Static factories: `Proceed(...)`, `PauseForApproval(description)`, `Skip(syntheticResult)`, `Block(reason)`. Not wire-serialized (internal DTO is the serialized form).
-- `DurableToolContext` — `Temporalio.Extensions.AI` — cross-library base context. Properties: `ToolName`, `Arguments`, `CallId`, `SessionId?`. Non-sealed — `AgentToolContext` extends it.
-- `IAgentToolInterceptor` — `Temporalio.Extensions.Agents` — convenience alias for `IDurableToolInterceptor<AgentToolContext>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`. Returns `DurableToolDecision` from the AI library.
-- `AgentToolContext` — `Temporalio.Extensions.Agents` — extends `DurableToolContext`. Adds `AgentName` (required) and `StateBag?` (read-only snapshot). The inherited `SessionId` is populated from `ActivityExecutionContext.Current.Info.WorkflowId` in the interceptor activity.
-- `WorkingSetContextProvider` — `Temporalio.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Register via `agent.AddContextProvider(sp => new WorkingSetContextProvider())`. Stores result in `AgentSessionStateBag["temporal.working_set"]`. Effectively a no-op for external-store sessions (sparse current-turn messages only).
+- `IDurableToolInterceptor<in TContext>` — `Temporalio.Extensions.AI.Tools` — cross-library interceptor interface. `BeforeToolCallAsync(TContext, CancellationToken) → Task<DurableToolDecision>`. `in` variance: `IDurableToolInterceptor<DurableToolContext>` is assignable to `IDurableToolInterceptor<AgentToolContext>`.
+- `DurableToolDecision` — `Temporalio.Extensions.AI.Tools` — return type of `BeforeToolCallAsync`. Static factories: `Proceed(...)`, `PauseForApproval(description)`, `Skip(syntheticResult)`, `Block(reason)`. Not wire-serialized (internal DTO is the serialized form).
+- `DurableToolContext` — `Temporalio.Extensions.AI.Tools` — cross-library base context. Properties: `ToolName`, `Arguments`, `CallId`, `SessionId?`. Non-sealed — `AgentToolContext` extends it.
+- `IAgentToolInterceptor` — `Temporalio.Extensions.Agents.Tools` — convenience alias for `IDurableToolInterceptor<AgentToolContext>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`. Returns `DurableToolDecision` from the AI library.
+- `AgentToolContext` — `Temporalio.Extensions.Agents.Tools` — extends `DurableToolContext`. Adds `AgentName` (required) and `StateBag?` (read-only snapshot). The inherited `SessionId` is populated from `ActivityExecutionContext.Current.Info.WorkflowId` in the interceptor activity.
+- `WorkingSetContextProvider` — `Temporalio.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Stores result in `AgentSessionStateBag["temporal.working_set"]`; effectively a no-op for external-store sessions (sparse current-turn messages only).
 
 ### DI Patterns
 - `TemporalAgentsOptions` has an **internal constructor** — always access via the `AddTemporalAgents(opts => ...)` delegate.
@@ -216,8 +169,6 @@ For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how
 - **Never** call `ActivitySource.StartActivity()` inside `[Workflow]` — non-deterministic on replay
 - Don't use wall-clock time in workflows (`DateTime.UtcNow`, `DateTimeOffset.Now`)
 - Don't use `Random` or `Guid.NewGuid()` in workflows
-- Don't call `builder.Build()` twice — assign `var host = builder.Build()` once
-- Don't commit real API keys to `appsettings.json` — use `dotnet user-secrets` or environment variables
 
 ---
 
@@ -321,10 +272,8 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 | "Cannot find Temporalio package" | Use NuGet, not project refs; `dotnet restore` |
 | "Agent not registered" | Verify `.AddTemporalAgents()` includes the agent |
 | `InvalidOperationException` from `TemporalAIAgent` (called outside workflow) | `TemporalAIAgent` is workflow-context only. Obtain it via `TemporalWorkflowExtensions.GetAgent` inside a `[Workflow]` method. For external callers, use `services.GetTemporalAgentProxy("Name")` instead. |
-| `Assert.Throws<ArgumentException>` fails | xUnit requires exact type — use `ArgumentNullException` for null, `ArgumentException` for empty |
 | `GetTypeInfo metadata not provided` for `TemporalAgentSession` | Don't serialize via `DefaultOptions`; use `StateBag.Serialize()` |
 | Activity timeout (HITL) | Increase `DefaultActivityTimeout` (or per-agent `ActivityTimeout`) to accommodate human review time |
-| OTel spans missing | Register all 4 `ActivitySource` names with the tracer provider |
 | Worker won't start | `temporal server start-dev` running on `localhost:7233`? |
 | Search attributes missing in UI | `opts.EnableSearchAttributes = true` (opt-in, default `false`); pre-register on production clusters |
 | Integration test "Unexpected workflow task failure" | Either set `EnableSearchAttributes = true` AND use `TestEnvironmentHelper.StartLocalAsync()`, or leave search attributes disabled |

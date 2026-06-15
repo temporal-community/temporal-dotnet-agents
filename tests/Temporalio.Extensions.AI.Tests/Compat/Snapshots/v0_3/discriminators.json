@@ -2,7 +2,7 @@
   "snapshotName": "v0_3",
   "_comment": "Snapshot of [JsonDerivedType] discriminators known to the v0.3 MEAI source-gen context (DurableAIJsonContext). Future steps that add new [JsonDerivedType] registrations to DurableSessionEntry MUST add a corresponding harness test asserting that older workers using this snapshot raise DurableReplayCompatibilityException for the new discriminator. See: artifacts/maf-gap-implementation-plan-v2.md, Step 2.",
   "baseTypes": {
-    "Temporalio.Extensions.AI.DurableSessionEntry": [
+    "Temporalio.Extensions.AI.Session.DurableSessionEntry": [
       "ai_request",
       "ai_response"
     ]

@@ -1,10 +1,13 @@
 using Microsoft.Agents.AI;
 using Temporalio.Client.Schedules;
 using Temporalio.Common;
-using Temporalio.Extensions.AI;
+using Temporalio.Extensions.Agents.Approvals;
 using Temporalio.Extensions.Agents.HistoryStore;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.State;
-using Temporalio.Extensions.Agents.Workflows;
+using Temporalio.Extensions.Agents.Tools;
+using Temporalio.Extensions.AI.Session;
+using Temporalio.Extensions.AI.Tools;
 
 namespace Temporalio.Extensions.Agents;
 
@@ -132,6 +135,19 @@ public sealed class TemporalAgentsOptions
     /// </remarks>
     [System.Diagnostics.CodeAnalysis.Experimental("TA002")]
     public string? DefaultCompactionStrategy { get; set; }
+
+    /// <summary>
+    /// Gets or sets the worker-level default <see cref="IApprovalScopeStore"/> factory for
+    /// always-scope persistence. When a per-agent <see cref="ApprovalScopesOptions.ApprovalScopeStore"/>
+    /// is unset, the agent inherits this value when <c>UseApprovalScopes()</c> is configured.
+    /// </summary>
+    /// <remarks>
+    /// A worker-level approval-scope store does not enable Feature B by itself. Approval scopes
+    /// are activated per agent by calling <c>UseApprovalScopes()</c> on the
+    /// <see cref="DurableAgentBuilder"/>. Agents that have not opted in will not invoke this
+    /// factory — even when it is configured.
+    /// </remarks>
+    public Func<IServiceProvider, IApprovalScopeStore>? ApprovalScopeStore { get; set; }
 
     /// <summary>
     /// Gets or sets the worker-level default interceptor factory. Accepts any factory that

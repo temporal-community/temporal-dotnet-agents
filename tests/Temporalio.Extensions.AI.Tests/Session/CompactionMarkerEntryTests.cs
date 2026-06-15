@@ -1,6 +1,8 @@
 #pragma warning disable TA002 // marker type is experimental but referenced by-name in tests
 
 using System.Text.Json;
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 using Temporalio.Extensions.AI.Tests.Compat;
 using Xunit;
 

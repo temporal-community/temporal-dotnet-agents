@@ -17,13 +17,13 @@ A [Temporal](https://temporal.io/) integration for [Microsoft.Extensions.AI (MEA
 
 Use this package when you want Temporal durability on top of a standard MEAI pipeline without adopting the full Agent Framework.
 
-> **Using both libraries together?** `Temporalio.Extensions.Agents` takes a package dependency on `Temporalio.Extensions.AI`, so you only need to reference `Temporalio.Extensions.Agents` in your project. The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) defined here are also used by Extensions.Agents, and `DurableAIDataConverter` is auto-wired by both `AddDurableAI()` and `AddTemporalAgents()` for the standard registration patterns.
+> **Using both libraries together?** `Temporalio.Extensions.Agents` takes a package dependency on `Temporalio.Extensions.AI`, so you only need to reference `Temporalio.Extensions.Agents` in your project. The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`, in `Temporalio.Extensions.AI.Approvals`) defined here are also used by Extensions.Agents, and `DurableAIDataConverter` is auto-wired by both `AddDurableAI()` and `AddTemporalAgents()` for the standard registration patterns.
 
 ## Feature Highlights
 
 - Durable multi-turn conversations — full history persisted in workflow state across turns and restarts
 - Durable tool functions — `AIFunction` invocations dispatched as individual Temporal activities
-- Pre-tool interception — `IDurableToolInterceptor<TContext>` / `DurableToolDecision` / `DurableToolContext` as the cross-library interceptor interface; `IAgentToolInterceptor` in `Temporalio.Extensions.Agents` extends it with MAF-specific context
+- Pre-tool interception — `IDurableToolInterceptor<TContext>` / `DurableToolDecision` / `DurableToolContext` (in `Temporalio.Extensions.AI.Tools`) as the cross-library interceptor interface; `IAgentToolInterceptor` in `Temporalio.Extensions.Agents.Tools` extends it with MAF-specific context
 - Durable embeddings — `IEmbeddingGenerator` wrapped for deterministic workflow execution
 - History reduction — chain any `IChatReducer` for a sliding LLM context window; full conversation history is preserved durably by the workflow and read via `GetHistoryAsync`
 - Human-in-the-loop (HITL) — approval gates via `[WorkflowUpdate]` that block until a human responds
@@ -502,9 +502,9 @@ services.AddHostedTemporalWorker(opts =>
 | `TemporalChatOptionsExtensions` | Per-request overrides via `ChatOptions` — `WithActivityTimeout`, `WithMaxRetryAttempts`, `WithHeartbeatTimeout`, `WithChatClientKey` |
 | `DurableApprovalRequest` | HITL — request sent to block the workflow pending human review |
 | `DurableApprovalDecision` | HITL — human decision that unblocks the workflow |
-| `IDurableToolInterceptor<TContext>` | Cross-library pre-tool hook — `BeforeToolCallAsync` returns `DurableToolDecision`; `TContext : DurableToolContext`; `in` variance enables base-context interceptors to work in MAF activities |
-| `DurableToolDecision` | Discriminated union returned by interceptors — `Proceed`, `PauseForApproval`, `Skip`, `Block` factories |
-| `DurableToolContext` | Non-sealed base context for interceptors — `ToolName`, `Arguments`, `CallId`, `SessionId`; extended by `AgentToolContext` in `Temporalio.Extensions.Agents` |
+| `IDurableToolInterceptor<TContext>` (`Temporalio.Extensions.AI.Tools`) | Cross-library pre-tool hook — `BeforeToolCallAsync` returns `DurableToolDecision`; `TContext : DurableToolContext`; `in` variance enables base-context interceptors to work in MAF activities |
+| `DurableToolDecision` (`Temporalio.Extensions.AI.Tools`) | Discriminated union returned by interceptors — `Proceed`, `PauseForApproval`, `Skip`, `Block` factories |
+| `DurableToolContext` (`Temporalio.Extensions.AI.Tools`) | Non-sealed base context for interceptors — `ToolName`, `Arguments`, `CallId`, `SessionId`; extended by `AgentToolContext` in `Temporalio.Extensions.Agents.Tools` |
 
 ## License
 

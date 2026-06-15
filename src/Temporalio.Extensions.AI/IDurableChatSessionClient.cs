@@ -1,4 +1,6 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
+using Temporalio.Extensions.AI.Session;
 
 namespace Temporalio.Extensions.AI;
 

@@ -365,8 +365,8 @@ Continue-as-New:
 
 ## References
 
-- `src/Temporalio.Extensions.Agents/AgentWorkflow.cs` — history storage and continue-as-new
-- `src/Temporalio.Extensions.Agents/AgentActivities.cs` — history rebuild and token logging
+- `src/Temporalio.Extensions.Agents/Workflows/AgentWorkflow.cs` — history storage and continue-as-new
+- `src/Temporalio.Extensions.Agents/Workflows/AgentActivities.cs` — history rebuild and token logging
 - `src/Temporalio.Extensions.Agents/State/` — serialization types for conversation history
 - [Session StateBag & Context Providers](../architecture/MAF/session-statebag-and-context-providers.md) — AIContextProvider deep dive
 - [Observability](./observability.md) — token usage monitoring via OTel spans

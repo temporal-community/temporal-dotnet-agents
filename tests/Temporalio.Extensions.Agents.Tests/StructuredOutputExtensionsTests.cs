@@ -2,6 +2,7 @@ using System.Text.Json;
 using FakeItEasy;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.Agents.Scheduling;
 using Temporalio.Extensions.Agents.Session;
 using Temporalio.Extensions.Agents.Workflows;
 using Xunit;

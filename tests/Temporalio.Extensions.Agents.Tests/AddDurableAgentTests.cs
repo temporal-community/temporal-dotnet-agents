@@ -1,5 +1,8 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Extensions.Agents.Tools;
 using Temporalio.Extensions.Agents.Workflows;
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Tools;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;
@@ -255,6 +258,263 @@ public class AddDurableAgentTests
 
         Assert.Throws<AgentNotRegisteredException>(() =>
             DefaultTemporalAgentClient.BuildAgentWorkflowInputCore("Missing", options, "tq"));
+    }
+
+    // ── Task 8.2: DurableToolOptions.ScopeAware() and invalid combinations ────
+
+    [Fact]
+    public void ScopeAware_FluentsSetsScopeAwareFlag()
+    {
+        var opts = new DurableToolOptions();
+        Assert.False(opts.ScopeAwareFlag);
+
+        var returned = opts.ScopeAware();
+
+        Assert.True(opts.ScopeAwareFlag);
+        Assert.Same(opts, returned);
+    }
+
+    [Fact]
+    public void UseApprovalScopes_NoExistingInterceptor_Succeeds()
+    {
+        var options = new TemporalAgentsOptions();
+        // Should not throw.
+        options.AddDurableAgent("ScopeAgent", a =>
+        {
+            a.ChatClient = _ => NewChatClient();
+            a.UseApprovalScopes();
+        });
+    }
+
+    [Fact]
+    public void UseApprovalScopes_AfterAddToolInterceptor_ThrowsInvalidOperationException()
+    {
+        var options = new TemporalAgentsOptions();
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("ScopeAgent2", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.AddToolInterceptor(_ => new StubInterceptorForBuilder());
+                a.UseApprovalScopes(); // Must throw
+            }));
+        Assert.Contains("UseApprovalScopes()", ex.Message);
+        Assert.Contains("AddToolInterceptor()", ex.Message);
+    }
+
+    [Fact]
+    public void AddToolInterceptor_AfterUseApprovalScopes_ThrowsInvalidOperationException()
+    {
+        var options = new TemporalAgentsOptions();
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("ScopeAgent3", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.UseApprovalScopes();
+                a.AddToolInterceptor(_ => new StubInterceptorForBuilder()); // Must throw
+            }));
+        Assert.Contains("ScopedApprovalInterceptor", ex.Message);
+    }
+
+    [Fact]
+    public void UseApprovalScopes_WithDefaultToolInterceptor_ThrowsAtStartupResolution()
+    {
+        // The DefaultToolInterceptor incompatibility is caught at resolution time, not builder time.
+        var options = new TemporalAgentsOptions();
+        options.DefaultToolInterceptor = _ => new StubInterceptorForBuilder();
+        options.AddDurableAgent("ScopeAgentIncompat", a =>
+        {
+            a.ChatClient = _ => NewChatClient();
+            a.UseApprovalScopes();
+        });
+
+        // Exception raised at resolution time: BuildAgentWorkflowInputCore.
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            DefaultTemporalAgentClient.BuildAgentWorkflowInputCore("ScopeAgentIncompat", options, "tq"));
+
+        Assert.Contains("UseApprovalScopes()", ex.Message);
+        Assert.Contains("DefaultToolInterceptor", ex.Message);
+        Assert.Contains("This release does not compose approval scopes", ex.Message);
+    }
+
+    [Fact]
+    public void NoUseApprovalScopes_WithDefaultToolInterceptor_AgentNotUsingScopes_Unchanged()
+    {
+        // Agents without UseApprovalScopes() plus a worker-default interceptor keep existing behavior.
+        var options = new TemporalAgentsOptions();
+        options.DefaultToolInterceptor = _ => new StubInterceptorForBuilder();
+        options.AddDurableAgent("NormalAgent", a =>
+        {
+            a.ChatClient = _ => NewChatClient();
+            // No UseApprovalScopes — no conflict
+        });
+
+        // Should not throw.
+        var input = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore("NormalAgent", options, "tq");
+        Assert.NotNull(input);
+        Assert.False(input.UseApprovalScopes);
+    }
+
+    [Fact]
+    public void RequireApprovalAndScopeAware_WithoutUseApprovalScopes_ThrowsAtRegistration()
+    {
+        // RequireApproval + ScopeAware without UseApprovalScopes is caught eagerly at
+        // AddDurableAgent → ToRegistration() time (early-failure design).
+        var options = new TemporalAgentsOptions();
+        var tool = AIFunctionFactory.Create(() => "result", "write_file");
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("BadAgent", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.AddTool(tool, opts => opts.RequireApproval().ScopeAware());
+            }));
+
+        Assert.Contains("ScopeAware()", ex.Message);
+        Assert.Contains("UseApprovalScopes()", ex.Message);
+    }
+
+    [Fact]
+    public void RequireApprovalScopeAwareSkipInterceptor_ThrowsAtRegistration()
+    {
+        // RequireApproval + ScopeAware + SkipInterceptor is caught eagerly at
+        // AddDurableAgent → ToRegistration() time. UseApprovalScopes must be called first
+        // to reach the SkipInterceptor check (ScopeAware+!UseApprovalScopes fires first otherwise).
+        var options = new TemporalAgentsOptions();
+        var tool = AIFunctionFactory.Create(() => "result", "write_file");
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("SkipScopeAgent", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.UseApprovalScopes();
+                a.AddTool(tool, opts => opts.RequireApproval().ScopeAware().SkipInterceptor());
+            }));
+
+        Assert.Contains("SkipInterceptor()", ex.Message);
+        Assert.Contains("RequireApproval()", ex.Message);
+        Assert.Contains("ScopeAware()", ex.Message);
+    }
+
+    [Fact]
+    public void ScopeAwareSkipInterceptor_WithoutRequireApproval_AcceptedAtRegistration()
+    {
+        // .ScopeAware().SkipInterceptor() without .RequireApproval() is valid.
+        var options = new TemporalAgentsOptions();
+        var tool = AIFunctionFactory.Create(() => "result", "read_file");
+        options.AddDurableAgent("SkipScopeNoApproval", a =>
+        {
+            a.ChatClient = _ => NewChatClient();
+            a.AddTool(tool, opts => opts.ScopeAware().SkipInterceptor());
+        });
+
+        // No exception at either builder or resolution time.
+        var input = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore("SkipScopeNoApproval", options, "tq");
+        Assert.NotNull(input);
+    }
+
+    [Fact]
+    public void AlwaysScopesStoreKey_Whitespace_ThrowsAtToRegistration()
+    {
+        var options = new TemporalAgentsOptions();
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("StoreKeyWhitespace", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.UseApprovalScopes(opts => opts.AlwaysScopesStoreKey = "   ");
+            }));
+        Assert.Contains("AlwaysScopesStoreKey", ex.Message);
+    }
+
+    [Fact]
+    public void AlwaysScopesStoreKey_ReservedSessionKey_ThrowsAtToRegistration()
+    {
+        var options = new TemporalAgentsOptions();
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("ReservedKey", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.UseApprovalScopes(opts => opts.AlwaysScopesStoreKey = "temporal.approval_scopes.session");
+            }));
+        Assert.Contains("temporal.approval_scopes.session", ex.Message);
+        Assert.Contains("reserved", ex.Message);
+    }
+
+    [Fact]
+    public void AlwaysScopesStoreKey_DefaultValue_NoException()
+    {
+        var options = new TemporalAgentsOptions();
+        // Default "temporal.approval_scopes.always" must pass validation.
+        options.AddDurableAgent("DefaultKey", a =>
+        {
+            a.ChatClient = _ => NewChatClient();
+            a.UseApprovalScopes();
+        });
+
+        // Should not throw.
+        var input = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore("DefaultKey", options, "tq");
+        Assert.NotNull(input);
+    }
+
+    [Fact]
+    public void MaxAlwaysScopeCacheRecords_Zero_ThrowsAtToRegistration()
+    {
+        var options = new TemporalAgentsOptions();
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("ZeroRecords", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.UseApprovalScopes(opts => opts.MaxAlwaysScopeCacheRecords = 0);
+            }));
+        Assert.Contains("MaxAlwaysScopeCacheRecords", ex.Message);
+    }
+
+    [Fact]
+    public void MaxAlwaysScopeCacheBytes_Zero_ThrowsAtToRegistration()
+    {
+        var options = new TemporalAgentsOptions();
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("ZeroBytes", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.UseApprovalScopes(opts => opts.MaxAlwaysScopeCacheBytes = 0);
+            }));
+        Assert.Contains("MaxAlwaysScopeCacheBytes", ex.Message);
+    }
+
+    [Fact]
+    public void ApprovalScopeActivityMaximumAttempts_Zero_ThrowsAtToRegistration()
+    {
+        var options = new TemporalAgentsOptions();
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("ZeroAttempts", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.UseApprovalScopes(opts => opts.ApprovalScopeActivityMaximumAttempts = 0);
+            }));
+        Assert.Contains("ApprovalScopeActivityMaximumAttempts", ex.Message);
+    }
+
+    [Fact]
+    public void ApprovalScopeActivityTimeout_Zero_ThrowsAtToRegistration()
+    {
+        var options = new TemporalAgentsOptions();
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            options.AddDurableAgent("ZeroTimeout", a =>
+            {
+                a.ChatClient = _ => NewChatClient();
+                a.UseApprovalScopes(opts => opts.ApprovalScopeActivityTimeout = TimeSpan.Zero);
+            }));
+        Assert.Contains("ApprovalScopeActivityTimeout", ex.Message);
+    }
+
+    // ── Internal stubs ──────────────────────────────────────────────────────
+
+    private sealed class StubInterceptorForBuilder : IAgentToolInterceptor
+    {
+        public Task<DurableToolDecision> BeforeToolCallAsync(
+            AgentToolContext context,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(DurableToolDecision.Proceed());
     }
 
     private sealed class TestChatClient : IChatClient

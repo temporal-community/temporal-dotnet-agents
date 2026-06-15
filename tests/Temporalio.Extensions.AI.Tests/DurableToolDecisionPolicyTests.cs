@@ -1,4 +1,5 @@
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Tools;
 using Temporalio.Workflows;
 using Xunit;
 
@@ -71,6 +72,43 @@ public class DurableToolDecisionPolicyTests
         var result = DurableToolDecisionPolicy.GetEffectiveOutcome(
             interceptorOutcome: null, "my-tool",
             requiresApprovalTools: ["my-tool"]);
+
+        Assert.Equal(DurableToolOutcome.PauseForApproval, result);
+    }
+
+    // ── GetEffectiveOutcome: Rule 2 exclusion (scope-aware required tools) ──
+
+    [Fact]
+    public void GetEffectiveOutcome_ScopeAwareRequiredTool_AbsentFromRequiresList_Proceed_ReturnsProceed()
+    {
+        // Load-bearing guarantee 2: scope-aware required tools are NOT in requiresApprovalTools.
+        // When the tool is absent from the requires list, Rule 2 does not fire.
+        var result = DurableToolDecisionPolicy.GetEffectiveOutcome(
+            DurableToolOutcome.Proceed, "WriteFile",
+            requiresApprovalTools: []); // scope-aware tool excluded from this list
+
+        Assert.Equal(DurableToolOutcome.Proceed, result);
+    }
+
+    [Fact]
+    public void GetEffectiveOutcome_ScopeAwareRequiredTool_AbsentFromRequiresList_PauseForApproval_StaysPauseForApproval()
+    {
+        // Interceptor already said PauseForApproval; Rule 2 is irrelevant, but
+        // still must not fire spuriously when the tool is absent from requires list.
+        var result = DurableToolDecisionPolicy.GetEffectiveOutcome(
+            DurableToolOutcome.PauseForApproval, "WriteFile",
+            requiresApprovalTools: []); // scope-aware tool excluded from this list
+
+        Assert.Equal(DurableToolOutcome.PauseForApproval, result);
+    }
+
+    [Fact]
+    public void GetEffectiveOutcome_NonScopeAwareRequiredTool_InRequiresList_Proceed_ReturnsPauseForApproval()
+    {
+        // Non-scope-aware required tool in requiresApprovalTools → Rule 2 unchanged.
+        var result = DurableToolDecisionPolicy.GetEffectiveOutcome(
+            DurableToolOutcome.Proceed, "ToolX",
+            requiresApprovalTools: ["ToolX"]);
 
         Assert.Equal(DurableToolOutcome.PauseForApproval, result);
     }

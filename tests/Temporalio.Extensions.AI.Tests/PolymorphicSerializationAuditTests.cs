@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Temporalio.Converters;
+using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Session;
 using Xunit;
 
 namespace Temporalio.Extensions.AI.Tests;

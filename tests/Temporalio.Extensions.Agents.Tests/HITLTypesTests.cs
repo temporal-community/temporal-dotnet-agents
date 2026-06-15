@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Temporalio.Extensions.AI;
+using Temporalio.Extensions.AI.Approvals;
 using Xunit;
 
 namespace Temporalio.Extensions.Agents.Tests;
@@ -80,5 +81,72 @@ public class HITLTypesTests
         Assert.Null(deserialized.FunctionName);
         Assert.Null(deserialized.CallId);
         Assert.Null(deserialized.Description);
+    }
+
+    // ── Feature B: scope-specific round-trip cases ──────────────────────────
+
+    /// <summary>
+    /// DurableApprovalDecision with Scope = Session round-trips via AIJsonUtilities.DefaultOptions.
+    /// </summary>
+    [Fact]
+    public void DurableApprovalDecision_SessionScope_RoundTrips()
+    {
+        var decision = new DurableApprovalDecision
+        {
+            RequestId = "req-scope-session",
+            Approved = true,
+            Scope = ApprovalScope.Session,
+        };
+
+        var json = JsonSerializer.Serialize(decision, AIJsonUtilities.DefaultOptions);
+        var restored = JsonSerializer.Deserialize<DurableApprovalDecision>(json, AIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(restored);
+        Assert.Equal(ApprovalScope.Session, restored.Scope);
+        Assert.Null(restored.ScopePattern);
+    }
+
+    /// <summary>
+    /// DurableApprovalDecision with ScopePattern containing PatternMatchType serialized as string.
+    /// Validates the Agents test project sees the scope types via AIJsonUtilities.DefaultOptions.
+    /// </summary>
+    [Fact]
+    public void DurableApprovalDecision_ScopePattern_TypeIsStringInJson()
+    {
+        var decision = new DurableApprovalDecision
+        {
+            RequestId = "req-scope-pattern",
+            Approved = true,
+            Scope = ApprovalScope.Always,
+            ScopePattern = new ApprovalScopePattern
+            {
+                Type = PatternMatchType.Glob,
+                Pattern = "/tmp/*",
+                Parameter = "path",
+            },
+        };
+
+        var json = JsonSerializer.Serialize(decision, AIJsonUtilities.DefaultOptions);
+
+        // Type must serialize as string "Glob", not integer 1.
+        Assert.Contains("\"Glob\"", json);
+
+        var restored = JsonSerializer.Deserialize<DurableApprovalDecision>(json, AIJsonUtilities.DefaultOptions);
+        Assert.NotNull(restored);
+        Assert.Equal(PatternMatchType.Glob, restored.ScopePattern?.Type);
+        Assert.Equal("/tmp/*", restored.ScopePattern?.Pattern);
+    }
+
+    /// <summary>
+    /// DurableApprovalDecision with default Scope (ThisCallOnly) omits both Scope and ScopePattern from JSON.
+    /// </summary>
+    [Fact]
+    public void DurableApprovalDecision_DefaultScope_FieldsOmittedFromJson()
+    {
+        var decision = new DurableApprovalDecision { RequestId = "req-def", Approved = true };
+        var json = JsonSerializer.Serialize(decision, AIJsonUtilities.DefaultOptions);
+
+        Assert.DoesNotContain("\"Scope\"", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"ScopePattern\"", json, StringComparison.OrdinalIgnoreCase);
     }
 }
