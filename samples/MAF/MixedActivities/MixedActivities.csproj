@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Samples don't need strict warning enforcement -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+    <UserSecretsId>b3e4f1d2-7a8c-4e6b-b9d0-3f5c2a1e8090</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Temporalio.Extensions.Agents/Temporalio.Extensions.Agents.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Generic host: CreateApplicationBuilder, IHostedService, etc. -->
+    <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.3.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

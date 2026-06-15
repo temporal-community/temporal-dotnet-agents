@@ -36,6 +36,7 @@
     <Project Path="samples/MAF/ContextProviders/ContextProviders.csproj" />
     <Project Path="samples/MAF/Skills/Skills.csproj" />
     <Project Path="samples/MAF/ApprovalScopes/ApprovalScopes.csproj" />
+    <Project Path="samples/MAF/MixedActivities/MixedActivities.csproj" />
   </Folder>
   <Folder Name="/samples/MAF/SplitWorkerClient/">
     <Project Path="samples/MAF/SplitWorkerClient/Client/Client.csproj" />
