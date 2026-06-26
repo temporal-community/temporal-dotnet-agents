@@ -378,6 +378,10 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 };
             }
 
+            // Context providers run inside the LLM-step activity and are trusted-tier by design
+            // (developer-registered, same trust as the workflow), so their StateBag output is
+            // applied unfiltered here — unlike tool/interceptor write-backs, which are deny-list
+            // filtered via StateBagMerge.
             _currentStateBag = stepResult.UpdatedStateBag;
 
             // Feature B — Sub-section B: load always-scopes at proxy-start session start.

@@ -204,7 +204,10 @@ public sealed class TemporalAIAgent : AIAgent
 
             // Persist the step's StateBag mutations so context-provider state (e.g.
             // WorkingSetContextProvider) survives across steps and turns. Mirrors
-            // AgentWorkflow.cs:381.
+            // AgentWorkflow.cs:381. Context providers run inside the LLM-step activity and are
+            // trusted-tier by design, so their StateBag output is applied unfiltered here —
+            // unlike tool/interceptor write-backs below, which are deny-list filtered via
+            // StateBagMerge.
             _currentStateBag = stepResult.UpdatedStateBag;
 
             if (stepResult.ResolvedWorkerConfig is not null)
