@@ -315,9 +315,14 @@ internal sealed class DurableChatActivities(
                 }
                 else
                 {
-                    _logger.LogWarning(
-                        "Tool '{ToolName}' not found in DurableFunctionRegistry; dropping from options.",
-                        placeholder.Name);
+                    // Configuration error, not transient: the placeholder name has no
+                    // registration, so the LLM would be told to use a tool it never
+                    // receives. Fail fast and non-retryably rather than silently dropping
+                    // it. ErrorType carries the typed name so workflow callers can match.
+                    throw new ApplicationFailureException(
+                        DurablePlaceholderToolNotRegisteredException.BuildMessage(placeholder.Name),
+                        errorType: nameof(DurablePlaceholderToolNotRegisteredException),
+                        nonRetryable: true);
                 }
             }
             else
