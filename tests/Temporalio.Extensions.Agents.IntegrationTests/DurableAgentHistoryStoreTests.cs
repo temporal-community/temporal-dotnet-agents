@@ -339,13 +339,12 @@ public class DurableAgentHistoryStoreTests
     [Fact]
     public async Task DurableAgent_HistoryStore_CustomReducer_AppliedAtContinueAsNew()
     {
-        // Use a very low history-event threshold so continue-as-new fires quickly.
-        // With ~5-8 events per turn (RunDurableAgentStep + AppendAgentTurn + workflow tasks)
-        // and threshold=15, CAN is expected after ~2 turns.
-        await using var env = await TestEnvironmentHelper.StartLocalAsync(
-            "--dynamic-config-value",
-            "limit.historyCount.suggestContinueAsNew=15");
+        // C-4 (deterministic): force CAN via the in-workflow count trigger
+        // (_history.Count >= MaxEntryCount) rather than the SDK ContinueAsNewSuggested heuristic.
+        // With MaxEntryCount=4, two turns (req+resp each = 4 entries) deterministically trip CAN.
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
         env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+        const int maxEntryCount = 4;
 
         var store = new IntegrationInMemoryHistoryStore();
 
@@ -376,6 +375,7 @@ public class DurableAgentHistoryStoreTests
                 {
                     agent.Instructions = "You are a helpful agent.";
                     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+                    agent.MaxEntryCount = maxEntryCount; // count-driven, deterministic CAN
                     agent.TimeToLive = TimeSpan.FromMinutes(10);
                 });
             });
@@ -394,11 +394,10 @@ public class DurableAgentHistoryStoreTests
             await proxy.RunAsync("Turn 1", session);
             var initialRunId = (await handle.DescribeAsync()).RunId;
 
-            // Run more turns until the run ID changes (CAN fired) or we exceed the limit.
-            // Each subsequent RunAsync call may fail with WorkflowUpdateFailedException
-            // if the CAN completes before the update; that failure itself proves CAN fired.
+            // Drive turns until the count trigger fires CAN (deterministic with MaxEntryCount=4).
+            // A WorkflowUpdateFailedException means CAN completed in flight — also proves CAN fired.
             var canObserved = false;
-            for (var i = 2; i <= 15 && !canObserved; i++)
+            for (var i = 2; i <= 8 && !canObserved; i++)
             {
                 try
                 {
@@ -406,41 +405,35 @@ public class DurableAgentHistoryStoreTests
                 }
                 catch (Temporalio.Exceptions.WorkflowUpdateFailedException)
                 {
-                    // CAN fired while this update was in flight.
                     canObserved = true;
                     break;
                 }
 
-                try
+                if ((await handle.DescribeAsync()).RunId != initialRunId)
                 {
-                    var currentRunId = (await handle.DescribeAsync()).RunId;
-                    if (currentRunId != initialRunId)
-                    {
-                        canObserved = true;
-                    }
+                    canObserved = true;
                 }
-                catch { /* workflow may be transitioning */ }
             }
+
+            // CAN is deterministic here — assert it fired rather than gating on it.
+            Assert.True(canObserved, "Count-driven CAN (MaxEntryCount=4) must fire within 8 turns.");
 
             // Give ReduceHistoryInStore activity time to complete (it runs in the CAN handler).
             await Task.Delay(TimeSpan.FromSeconds(3));
 
-            // The sentinel reducer keeps exactly 1 entry. If CAN fired, the store must have
-            // been reduced to 1. (Count-only trim without a custom reducer would keep up to
-            // MaxEntryCount entries, making this assertion specific to the custom reducer.)
-            if (canObserved)
-            {
-                var entries = store.Snapshot(session.SessionId.WorkflowId);
-                Assert.Single(entries);
-            }
-            else
-            {
-                // CAN did not fire — threshold may not have been reached in this environment.
-                // At minimum the store should have entries from the turns that completed.
-                var entries = store.Snapshot(session.SessionId.WorkflowId);
-                Assert.True(entries.Count > 0,
-                    "Expected at least one history store entry after running multiple turns.");
-            }
+            // The sentinel reducer (keep-last-1) ran at CAN: ReduceHistoryInStoreAsync applied the
+            // configured reducer to the store. Concretely this means (a) the store was trimmed to
+            // strictly fewer entries than were appended across all turns, and (b) the EARLY turns
+            // (Turn 1) were reduced away — they no longer appear in the store. A count-only trim
+            // that ignored the reducer would have kept far more (up to MaxEntryCount) entries and
+            // would still contain Turn 1.
+            var entries = store.Snapshot(session.SessionId.WorkflowId);
+            Assert.True(entries.Count < maxEntryCount,
+                $"Reducer must have trimmed the store below MaxEntryCount; found {entries.Count}.");
+            var allText = string.Join(" | ", entries.SelectMany(e => e.Messages).Select(m => m.Text));
+            // Turn 1's entries were reduced away by the keep-last-1 reducer at CAN. A count-only
+            // trim that ignored the reducer would still contain Turn 1.
+            Assert.DoesNotContain("Turn 1 done", allText);
         }
         finally
         {
