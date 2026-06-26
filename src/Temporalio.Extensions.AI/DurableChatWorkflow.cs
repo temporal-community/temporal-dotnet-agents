@@ -426,6 +426,9 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
 
                 if (task.IsCompletedSuccessfully)
                 {
+                    // S-X-6: task.Result.Result crosses the activity boundary as a JsonElement
+                    // (declared object?), so FunctionResultContent.Result holds a JsonElement here,
+                    // not the tool's domain type. Accepted limitation — see DurableFunctionOutput.Result.
                     functionResultContents.Add(new FunctionResultContent(tc.CallId, task.Result.Result));
                 }
                 else if (task.IsCanceled || Workflow.CancellationToken.IsCancellationRequested)

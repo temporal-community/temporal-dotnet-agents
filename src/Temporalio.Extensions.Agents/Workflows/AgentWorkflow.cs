@@ -792,6 +792,9 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 {
                     var toolResult = toolResults[pendingIdx++];
                     toolStateBagWriteBacks[i] = toolResult.UpdatedStateBag;
+                    // S-X-6: toolResult.Result crosses the activity boundary as a JsonElement
+                    // (declared object?), so FunctionResultContent.Result holds a JsonElement here,
+                    // not the tool's domain type. Accepted limitation — see InvokeAgentToolResult.Result.
                     functionResultContents.Add(new FunctionResultContent(
                         callId: toolCalls[i].CallId,
                         result: toolResult.Result));
