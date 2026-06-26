@@ -27,7 +27,7 @@ namespace Temporalio.Extensions.Agents.Skills;
 /// <c>DurableAgentBuilder.UseSkills()</c>.
 /// </para>
 /// </remarks>
-internal sealed class SkillResolver
+internal sealed class SkillResolver : IDisposable
 {
     private readonly IReadOnlyList<AgentSkill> _skills;
     private readonly IReadOnlyList<AgentSkillsSource> _sources;
@@ -164,5 +164,13 @@ internal sealed class SkillResolver
         return _loaded
                ?? throw new InvalidOperationException(
                    "SkillResolver has not been loaded yet. Call EnsureLoadedAsync first.");
+    }
+
+    /// <summary>
+    /// Disposes the <see cref="SemaphoreSlim"/> load gate. Safe to call multiple times.
+    /// </summary>
+    public void Dispose()
+    {
+        _loadGate.Dispose();
     }
 }
