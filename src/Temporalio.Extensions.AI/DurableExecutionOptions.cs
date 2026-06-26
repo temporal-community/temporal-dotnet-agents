@@ -238,5 +238,11 @@ public sealed class DurableExecutionOptions
             throw new InvalidOperationException(
                 $"{nameof(MaxEntryCount)} must be greater than zero in {nameof(DurableExecutionOptions)}.");
         }
+
+        if (MaxToolCallsPerTurn <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(MaxToolCallsPerTurn)} must be greater than zero in {nameof(DurableExecutionOptions)}.");
+        }
     }
 }
