@@ -128,7 +128,11 @@ public static class CompactionAwareErasureHelper
                     CompactedMessageIds = surviving,
                     Strategy = marker.Strategy,
                     ModelId = marker.ModelId,
-                    OriginatingTurnCorrelationIds = marker.OriginatingTurnCorrelationIds,
+                    // Apply the same survivor filter to the originating-turn IDs so the
+                    // rewritten marker does not retain references to erased turns
+                    // (store-consistency after GDPR erasure).
+                    OriginatingTurnCorrelationIds =
+                        ComputeSurvivors(marker.OriginatingTurnCorrelationIds, erasedMessageIds),
                 });
                 continue;
             }
