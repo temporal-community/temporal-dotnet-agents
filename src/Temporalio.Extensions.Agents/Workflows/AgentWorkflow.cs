@@ -1167,12 +1167,19 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     }
 
     /// <summary>
-    /// Deterministically merges a sequence of StateBag write-backs into <c>_currentStateBag</c>
-    /// in tool-call index order (later index wins). Delegates to <see cref="StateBagMerge.Merge"/>.
-    /// See that type for the full merge policy (X-1 / X-2).
+    /// Deterministically merges a sequence of untrusted tool/interceptor StateBag write-backs into
+    /// <c>_currentStateBag</c> in tool-call index order (later index wins). Delegates to
+    /// <see cref="StateBagMerge.Merge"/>, which applies the reserved approval-scope deny-list
+    /// (<see cref="StateBagMerge.ApprovalScopesReservedPrefix"/> + the agent's configured
+    /// always-scopes store key) so a write-back can never forge or clobber an approval grant.
+    /// See that type for the full merge policy (X-1 / X-2) and security rationale.
     /// </summary>
     private void MergeStateBagWriteBacks(IReadOnlyList<JsonElement?> updatedBags) =>
-        _currentStateBag = StateBagMerge.Merge(_currentStateBag, updatedBags);
+        _currentStateBag = StateBagMerge.Merge(
+            _currentStateBag,
+            updatedBags,
+            _input!.AlwaysScopesStoreKey,
+            Workflow.Logger);
 
     private List<ChatMessage> FlattenHistoryMessages()
     {

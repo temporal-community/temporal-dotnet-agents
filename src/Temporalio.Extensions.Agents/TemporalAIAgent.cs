@@ -428,7 +428,15 @@ public sealed class TemporalAIAgent : AIAgent
 
             // X-1: merge tool StateBag mutations back so the next RunDurableAgentStep sees them.
             // Post-result; does not re-run tools (.NoRetry() semantics unaffected).
-            _currentStateBag = StateBagMerge.Merge(_currentStateBag, toolStateBagWriteBacks);
+            // SECURITY: the merge applies the reserved approval-scope deny-list
+            // (StateBagMerge.ApprovalScopesReservedPrefix). TemporalAIAgent has no approval-scope
+            // store plumbing, so there is no custom always-scopes store key to pass — the prefix
+            // deny-list (covering the session key and default always key) is sufficient here.
+            _currentStateBag = StateBagMerge.Merge(
+                _currentStateBag,
+                toolStateBagWriteBacks,
+                alwaysScopesStoreKey: null,
+                Workflow.Logger);
 
             var toolResultMessage = new ChatMessage(ChatRole.Tool, functionResultContents);
             accumulated.Add(toolResultMessage);

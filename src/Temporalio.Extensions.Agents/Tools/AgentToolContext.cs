@@ -32,6 +32,14 @@ public sealed class AgentToolContext : DurableToolContext
     /// yet) there is nothing to mutate; an interceptor that needs to seed fresh state should do
     /// so via the LLM-step path. Concurrent interceptors in one turn are merged deterministically
     /// in tool-call index order (later index wins on key conflict).
+    /// <para>
+    /// <strong>Security:</strong> write-backs to reserved approval-scope keys are dropped by the
+    /// merge. An interceptor may <em>read</em> scope records (e.g. via
+    /// <c>ApprovalScopeHelpers.TryMatchScope</c>) but may never create, overwrite, or delete entries
+    /// under the <c>temporal.approval_scopes.*</c> namespace or the agent's configured always-scopes
+    /// store key — those are written exclusively by the trusted workflow thread. A dropped reserved
+    /// key is logged as a tampering signal.
+    /// </para>
     /// </remarks>
     public AgentSessionStateBag? StateBag { get; init; }
 
