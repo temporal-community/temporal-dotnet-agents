@@ -60,15 +60,6 @@ public static class TemporalAgentTelemetry
     /// <summary>Span emitted by <c>DefaultTemporalAgentClient.RunAgentAsync</c> when sending an update.</summary>
     public const string AgentClientSendSpanName = "agent.client.send";
 
-    /// <summary>
-    /// Step 5d: name of the span emitted by the <c>RunCompactionSummary</c> activity when
-    /// the <c>"summarization"</c> strategy dispatches an LLM call to produce a rollup. The
-    /// Step-6 2b-enriched suppression rule applies — if an <c>OpenTelemetryChatClient</c>
-    /// sits in the resolved summarization client's chain, the activity tags
-    /// <c>Activity.Current</c> with the correlation ID and skips emitting this span itself.
-    /// </summary>
-    public const string AgentCompactionSummarizeSpanName = "agent.compaction.summarize";
-
     /// <summary>Span emitted by <c>DefaultTemporalAgentClient.ScheduleAgentAsync</c> when creating a recurring schedule.</summary>
     public const string AgentScheduleCreateSpanName = "temporal.agent.schedule.create";
 

@@ -396,58 +396,6 @@ public class PolymorphicSerializationAuditTests
     // ─── Compaction wire types (Experimental TA002) ─────────────────────────────────────
 
     [Fact]
-    public void Audit_RunCompactionSummaryInput_Messages_RoundTrip()
-    {
-        var input = new RunCompactionSummaryInput
-        {
-            AgentName = "a",
-            SummarizationPrompt = new List<ChatMessage>
-            {
-                new(ChatRole.System, "Summarize:"),
-                new(ChatRole.User,
-                    [new TextContent("turn 1"), new TextReasoningContent("thinking")]),
-                new(ChatRole.Assistant,
-                    [new FunctionCallContent(callId: "x", name: "f")]),
-            },
-            ChatClientKey = "summarizer",
-            ModelIdOverride = "gpt-4o-mini",
-        };
-
-        var roundTripped = RoundTrip(input);
-
-        Assert.Equal(3, roundTripped.SummarizationPrompt.Count);
-        Assert.Equal(2, roundTripped.SummarizationPrompt[1].Contents.Count);
-        Assert.IsType<TextContent>(roundTripped.SummarizationPrompt[1].Contents[0]);
-        Assert.IsType<TextReasoningContent>(roundTripped.SummarizationPrompt[1].Contents[1]);
-        Assert.IsType<FunctionCallContent>(roundTripped.SummarizationPrompt[2].Contents[0]);
-        Assert.Equal("summarizer", roundTripped.ChatClientKey);
-    }
-
-    [Fact]
-    public void Audit_RunCompactionSummaryResult_SummaryMessages_RoundTrip()
-    {
-        var result = new RunCompactionSummaryResult
-        {
-            SummaryMessages = new List<ChatMessage>
-            {
-                new(ChatRole.Assistant,
-                    [new TextContent("rollup"), new TextReasoningContent("derivation")]),
-            },
-            ModelIdUsed = "gpt-4o-mini",
-            InputTokenCount = 500,
-            OutputTokenCount = 50,
-        };
-
-        var roundTripped = RoundTrip(result);
-
-        Assert.Single(roundTripped.SummaryMessages);
-        Assert.Equal(2, roundTripped.SummaryMessages[0].Contents.Count);
-        Assert.IsType<TextContent>(roundTripped.SummaryMessages[0].Contents[0]);
-        Assert.IsType<TextReasoningContent>(roundTripped.SummaryMessages[0].Contents[1]);
-        Assert.Equal(500, roundTripped.InputTokenCount);
-    }
-
-    [Fact]
     public void Audit_DurableSessionEntry_CompactionMarker_RoundTrip()
     {
         DurableSessionEntry original = new CompactionMarkerEntry

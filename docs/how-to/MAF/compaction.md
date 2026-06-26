@@ -261,7 +261,6 @@ The summarization strategy invokes the chat client inline within the `CompactHis
 
 - The activity emits its own span via Temporal's `TracingInterceptor` (`RunActivity:CompactHistory`).
 - The chat client's `OpenTelemetryChatClient` (if installed) produces the `gen_ai.client.send` span.
-- A dormant `RunCompactionSummary` activity exists in `AgentActivities` with span name `agent.compaction.summarize` and `gen_ai.usage.*` tags, available to custom strategies that want to dispatch summarization as a separately-tracked activity.
 
 `CompactHistory` activity heartbeats are emitted on every progress step (load → strategy → append) so long-running summarizations stay alive under heartbeat-timeout pressure.
 
@@ -283,7 +282,7 @@ The `tests/Temporalio.Extensions.AI.Tests/Compat/Snapshots/v0_3/discriminators.j
 - **No per-tool-call compaction.** Triggers fire only at end-of-turn (the `isFinal` step); mid-turn tool-call iterations are never compaction boundaries.
 - **Strategies receive the entire raw history.** For sessions with hundreds of thousands of entries, the `EvaluateTrigger` call could become expensive. Custom strategies that want to bound this should subscribe to a separate signal (e.g. a count cached in their own state).
 - **Marker re-compaction is not supported.** The built-in strategies skip pre-existing `CompactionMarkerEntry` entries when selecting compaction targets. Compacting a marker-of-markers would require strategy-specific merge logic not yet built.
-- **The `RunCompactionSummary` activity is dormant.** Built-in `SummarizationCompactionStrategy` invokes the chat client inline within `CompactHistory` rather than dispatching a separate `RunCompactionSummary` activity. The activity is registered and tested; custom strategies that want a separately-tracked LLM activity can dispatch it manually.
+- **Summarization runs inline within `CompactHistory`.** The built-in `SummarizationCompactionStrategy` invokes the chat client inside its `CompactAsync` body, which executes within the `CompactHistory` activity — so the LLM call is still hosted by an activity, not the workflow thread. There is no separate summarization activity (an activity cannot dispatch another activity).
 
 ---
 
