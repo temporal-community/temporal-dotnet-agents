@@ -2,16 +2,21 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Temporalio.Exceptions;
+using Temporalio.Extensions.AI.Exceptions;
 using Xunit;
 
 namespace Temporalio.Extensions.AI.Tests;
 
 /// <summary>
-/// Pins the SMITH-1 diagnostic: when <c>SwapPlaceholderTools</c> cannot find a
+/// Pins the S-X-7 contract: when <c>SwapPlaceholderTools</c> cannot resolve a
 /// <see cref="ToolNamePlaceholder"/> name in the <see cref="DurableFunctionRegistry"/>
-/// it should emit a <see cref="LogLevel.Warning"/> log entry naming the missing tool
-/// rather than silently dropping it. This verifies Neo's <c>_logger.LogWarning(...)</c>
-/// fix is present and fires with the correct tool name.
+/// it must fail fast with a non-retryable <see cref="ApplicationFailureException"/> whose
+/// <see cref="ApplicationFailureException.ErrorType"/> is
+/// <c>nameof(DurablePlaceholderToolNotRegisteredException)</c> and whose message names the
+/// missing tool — rather than warn-and-drop (which would silently ship the LLM request
+/// without the tool it was told to use). Non-retryable is deliberate: retrying a
+/// configuration error would loop forever. Supersedes the earlier SMITH-1 warn-and-drop behavior.
 /// </summary>
 public class DurableChatActivitiesSwapPlaceholderToolsTests
 {
@@ -27,7 +32,7 @@ public class DurableChatActivitiesSwapPlaceholderToolsTests
     private const string KnownToolName = "real-tool";
 
     [Fact]
-    public async Task SwapPlaceholderTools_UnknownName_EmitsLogWarningWithToolName()
+    public async Task SwapPlaceholderTools_UnknownName_ThrowsWithToolName()
     {
         // Arrange
         var logEntries = new List<LogEntry>();
@@ -55,7 +60,7 @@ public class DurableChatActivitiesSwapPlaceholderToolsTests
 
         // Build input with a ToolNamePlaceholder for the unknown tool name.
         // ChatOptions.Tools contains two entries: one that IS in the registry (known)
-        // and one that is NOT (ghost-tool). Only the missing one should trigger the warning.
+        // and one that is NOT (ghost-tool). The missing one must fail fast.
         var options = new ChatOptions
         {
             Tools =
@@ -69,31 +74,19 @@ public class DurableChatActivitiesSwapPlaceholderToolsTests
         {
             Messages = [new ChatMessage(ChatRole.User, "ping")],
             Options = options,
-            ConversationId = "conv-smith1-test",
+            ConversationId = "conv-sx7-test",
             TurnNumber = 1,
         };
 
-        // Act — GetChatStepAsync calls SwapPlaceholderTools on the Pattern 3 path.
-        // SwapPlaceholderTools is also called by GetResponseAsync, but GetChatStepAsync
-        // avoids the EnsureMixedPatternCheck / EnsureToolDispatchHandlerWired paths
-        // (no FunctionInvokingChatClient check required here).
-        await activities.GetChatStepAsync(input);
+        // Act + Assert — an unresolved placeholder must fail fast with a non-retryable
+        // ApplicationFailureException naming the missing tool, not silently drop it (S-X-7).
+        // GetChatStepAsync calls SwapPlaceholderTools on the Pattern 3 path.
+        var ex = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => activities.GetChatStepAsync(input));
 
-        // Assert
-        var warnings = logEntries
-            .Where(e => e.Level == LogLevel.Warning)
-            .ToList();
-
-        Assert.True(warnings.Count >= 1,
-            $"Expected at least one LogWarning entry; got {logEntries.Count} total entries " +
-            $"at levels: {string.Join(", ", logEntries.Select(e => e.Level))}");
-
-        var toolDropWarning = warnings.FirstOrDefault(e =>
-            e.Message.Contains(UnknownToolName, StringComparison.OrdinalIgnoreCase));
-
-        Assert.NotNull(toolDropWarning);
-        Assert.Equal(LogLevel.Warning, toolDropWarning!.Level);
-        Assert.Contains(UnknownToolName, toolDropWarning.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(ex.NonRetryable, "Placeholder-not-registered must be non-retryable.");
+        Assert.Equal(nameof(DurablePlaceholderToolNotRegisteredException), ex.ErrorType);
+        Assert.Contains(UnknownToolName, ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
