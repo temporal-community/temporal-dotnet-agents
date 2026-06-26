@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Temporalio.Common;
 using Temporalio.Extensions.AI.Session;
 using Temporalio.Workflows;
 
@@ -28,6 +29,20 @@ public class DurableChatWorkflowInput
     /// Heartbeat timeout for LLM call activities.
     /// </summary>
     public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Retry policy applied to dispatched activities (LLM calls and the Pattern 3 tool-dispatch
+    /// fallback). Resolved at session start from <c>DurableExecutionOptions.RetryPolicy</c>.
+    /// </summary>
+    /// <remarks>
+    /// When a Pattern 3 tool has no per-tool entry in <see cref="ToolActivityOptions"/>
+    /// (defensive fallback in <c>DurableChatWorkflow.ResolveToolActivityOptions</c>), this value
+    /// is applied so the tool activity does not fall back to Temporal's default policy
+    /// (unlimited retries). A non-idempotent unregistered tool would otherwise retry forever.
+    /// May be <see langword="null"/> when no policy was configured, in which case the per-tool
+    /// options dictionary already carries the resolved policy for every registered tool.
+    /// </remarks>
+    public RetryPolicy? RetryPolicy { get; init; }
 
     /// <summary>
     /// Maximum time to wait for a human to respond to a tool approval request.
