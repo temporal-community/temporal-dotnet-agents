@@ -590,6 +590,13 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 }
 
                 interceptorResults = await Workflow.WhenAllAsync(interceptorTasks).ConfigureAwait(true);
+
+                // X-2: merge any StateBag mutations the interceptors made back into the carried
+                // bag, BEFORE tool dispatch, so a tool sees interceptor-driven state changes.
+                // Interceptors fan out concurrently; merge in tool-call index order (later index
+                // wins) for replay determinism — never by completion order.
+                MergeStateBagWriteBacks(
+                    [.. interceptorResults.Select(r => r?.UpdatedStateBag)]);
             }
 
             // ── Feature L — Phase 2 & Feature A: Process decisions, park for approvals ────
@@ -1068,6 +1075,78 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             TemporalAgentJsonUtilities.DefaultOptions);
 
         _currentStateBag = bag.Serialize();
+    }
+
+    /// <summary>
+    /// Deterministically merges a sequence of StateBag write-backs (each a serialized
+    /// <see cref="AgentSessionStateBag"/> object, or <see langword="null"/> for "no change")
+    /// into <c>_currentStateBag</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Tool and interceptor activities fan out concurrently, so the order in which they
+    /// <em>complete</em> is non-deterministic and cannot drive merge order without breaking
+    /// replay. The caller therefore supplies <paramref name="updatedBags"/> ordered by the
+    /// original tool-call index (the <c>FunctionCallContent</c> order within the turn). This
+    /// method applies them in that fixed index order, so <strong>the later index wins</strong>
+    /// on key conflict — a deterministic, replay-stable rule (X-1 / X-2 merge policy).
+    /// </para>
+    /// <para>
+    /// The merge is key-level over the flat JSON object produced by
+    /// <see cref="AgentSessionStateBag.Serialize"/>: each write-back's top-level keys overlay
+    /// the accumulator. Pure workflow-thread computation — no I/O, no awaits, no wall-clock.
+    /// </para>
+    /// </remarks>
+    private void MergeStateBagWriteBacks(IReadOnlyList<JsonElement?> updatedBags)
+    {
+        // Accumulate into a plain key->raw-json map, seeded from _currentStateBag, then overlay
+        // each write-back in index order. Using the raw JSON object keeps the merge agnostic of
+        // value types and avoids deserializing/reserializing each typed entry.
+        var merged = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+
+        void Overlay(JsonElement? bagElement)
+        {
+            if (bagElement is { ValueKind: JsonValueKind.Object } obj)
+            {
+                foreach (var prop in obj.EnumerateObject())
+                {
+                    merged[prop.Name] = prop.Value.Clone();
+                }
+            }
+        }
+
+        Overlay(_currentStateBag);
+
+        var changed = false;
+        foreach (var updated in updatedBags)
+        {
+            if (updated is { ValueKind: JsonValueKind.Object })
+            {
+                Overlay(updated);
+                changed = true;
+            }
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        // Emit keys in a fixed (ordinal-sorted) order so the serialized JsonElement carried
+        // in workflow state is byte-stable across replay regardless of dictionary insertion order.
+        using var stream = new System.IO.MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var key in merged.Keys.OrderBy(k => k, StringComparer.Ordinal))
+            {
+                writer.WritePropertyName(key);
+                merged[key].WriteTo(writer);
+            }
+            writer.WriteEndObject();
+        }
+
+        _currentStateBag = JsonSerializer.Deserialize<JsonElement>(stream.ToArray());
     }
 
     private List<ChatMessage> FlattenHistoryMessages()

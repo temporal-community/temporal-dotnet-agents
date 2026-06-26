@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace Temporalio.Extensions.AI.Tools;
 
 /// <summary>
@@ -86,4 +89,34 @@ internal sealed class DurableToolInterceptorResult
     /// </list>
     /// </summary>
     public string? Message { get; init; }
+
+    /// <summary>
+    /// Serialized StateBag snapshot reflecting any mutations the interceptor made to the
+    /// session state during <c>BeforeToolCallAsync</c>. <see langword="null"/> when the
+    /// interceptor did not change the bag (the common case). The workflow merges this back
+    /// into its carried StateBag after the interceptor activity returns and before tool
+    /// dispatch, so interceptor-driven state changes are durable.
+    /// </summary>
+    /// <remarks>
+    /// Optional and <c>[JsonIgnore(WhenWritingNull)]</c> so in-flight histories serialized
+    /// before this field existed continue to replay (wire-compatible).
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? UpdatedStateBag { get; init; }
+
+    /// <summary>
+    /// Returns a copy of this result with <see cref="UpdatedStateBag"/> set to
+    /// <paramref name="updatedStateBag"/>. Used by the interceptor activity to attach a
+    /// StateBag write-back without mutating the original instance.
+    /// </summary>
+    internal DurableToolInterceptorResult WithUpdatedStateBag(JsonElement updatedStateBag) =>
+        new()
+        {
+            Outcome = this.Outcome,
+            EnrichedDescription = this.EnrichedDescription,
+            ModifiedArguments = this.ModifiedArguments,
+            Metadata = this.Metadata,
+            Message = this.Message,
+            UpdatedStateBag = updatedStateBag,
+        };
 }

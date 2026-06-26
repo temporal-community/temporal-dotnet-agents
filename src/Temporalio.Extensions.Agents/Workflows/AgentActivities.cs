@@ -996,6 +996,10 @@ internal sealed class AgentActivities(
             RequiresApproval = input.RequiresApproval,
         };
 
+        // Snapshot the bag's serialized form before the interceptor runs so we can detect
+        // (and propagate) in-place mutations afterwards (X-2 StateBag write-back).
+        var stateBagBefore = stateBag is { Count: > 0 } ? stateBag.Serialize().GetRawText() : null;
+
         DurableToolDecision decision;
         try
         {
@@ -1016,7 +1020,22 @@ internal sealed class AgentActivities(
             };
         }
 
-        return DurableToolInterceptorResult.FromDecision(decision);
+        var result = DurableToolInterceptorResult.FromDecision(decision);
+
+        // X-2: propagate StateBag mutations the interceptor made in place. Only emit
+        // UpdatedStateBag when the serialized bag actually changed, so the no-mutation
+        // case stays null (wire-compatible with old histories). The workflow merges this
+        // back into _currentStateBag before tool dispatch (AgentWorkflow).
+        if (toolContext.StateBag is { Count: > 0 } mutatedBag)
+        {
+            var stateBagAfter = mutatedBag.Serialize();
+            if (!string.Equals(stateBagBefore, stateBagAfter.GetRawText(), StringComparison.Ordinal))
+            {
+                result = result.WithUpdatedStateBag(stateBagAfter);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>

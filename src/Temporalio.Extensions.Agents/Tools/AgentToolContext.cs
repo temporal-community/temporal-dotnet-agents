@@ -19,13 +19,20 @@ public sealed class AgentToolContext : DurableToolContext
     public required string AgentName { get; init; }
 
     /// <summary>
-    /// Gets a read-only snapshot of the agent's session state at turn start.
-    /// Deserialized from <c>_currentStateBag</c> inside the interceptor activity using the
-    /// same pattern as <c>TemporalAgentSession.FromStateBag</c>.
-    /// Mutations made to this object are NOT persisted back — only the LLM-step activity's
-    /// <c>UpdatedStateBag</c> flows back to the workflow.
+    /// Gets the agent's session state snapshot at turn start. Deserialized from
+    /// <c>_currentStateBag</c> inside the interceptor activity using the same pattern as
+    /// <c>TemporalAgentSession.FromStateBag</c>.
     /// May be <see langword="null"/> when no state has been accumulated yet.
     /// </summary>
+    /// <remarks>
+    /// Mutations the interceptor makes to this bag during <c>BeforeToolCallAsync</c> ARE
+    /// persisted back (X-2): the activity serializes the changed bag into
+    /// <c>DurableToolInterceptorResult.UpdatedStateBag</c>, and the workflow merges it into the
+    /// carried StateBag before tool dispatch. When the bag is <see langword="null"/> (no state
+    /// yet) there is nothing to mutate; an interceptor that needs to seed fresh state should do
+    /// so via the LLM-step path. Concurrent interceptors in one turn are merged deterministically
+    /// in tool-call index order (later index wins on key conflict).
+    /// </remarks>
     public AgentSessionStateBag? StateBag { get; init; }
 
     /// <summary>
