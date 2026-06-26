@@ -186,6 +186,69 @@ public class BuiltInStrategiesTests
     }
 
     [Fact]
+    public async Task Summarization_Marker_PinsSummaryStrategyIdsAndModel()
+    {
+        // S-T2-1: direct unit test for the SHIPPING compaction path
+        // (SummarizationCompactionStrategy.CompactAsync — the dead RunCompactionSummary
+        // activity tests were removed). Pins the full marker contract: summary text from the
+        // chat client, strategy key, the supplied marker correlation id, the model id echoed
+        // from the chat response, and the compacted/originating id lists set to the targets.
+        var chat = new StubChat(
+            reply: "Summary: user requested invoice export; agent confirmed.",
+            modelId: "summarizer-model-v1");
+        var strategy = new SummarizationCompactionStrategy();
+
+        var targetIds = new[] { "entry-0", "entry-1" };
+        var ctx = MakeContext(
+            rawEntries: MakeHistory(3),
+            targetIds: targetIds,
+            markerCorrelationId: "marker-pinned-id",
+            chatClient: chat);
+
+        var result = await strategy.CompactAsync(ctx);
+        var marker = result.Marker;
+
+        // Summary text — carried in the marker's Messages.
+        Assert.Single(marker.Messages);
+        Assert.Contains("invoice export", marker.Messages[0].Text);
+
+        // Strategy key.
+        Assert.Equal(SummarizationCompactionStrategy.Key, marker.Strategy);
+
+        // The pre-minted marker correlation id must be used verbatim (retry-idempotent id).
+        Assert.Equal("marker-pinned-id", marker.CorrelationId);
+
+        // Model id is echoed from the chat response so audit logs can distinguish the
+        // summarizer model from the agent model.
+        Assert.Equal("summarizer-model-v1", marker.ModelId);
+
+        // Compacted + originating id lists are the trigger-selected targets.
+        Assert.Equal(targetIds, marker.CompactedMessageIds);
+        Assert.Equal(targetIds, marker.OriginatingTurnCorrelationIds);
+    }
+
+    [Fact]
+    public async Task Summarization_EmptyChatResponse_FallsBackToPlaceholderSummary()
+    {
+        // When the chat client returns no messages, the strategy must still produce a
+        // non-empty marker (placeholder rollup) rather than an empty Messages list — so the
+        // post-compact projection always has something to show in place of collapsed entries.
+        var chat = new StubChat(reply: null);
+        var strategy = new SummarizationCompactionStrategy();
+
+        var ctx = MakeContext(
+            rawEntries: MakeHistory(2),
+            targetIds: new[] { "entry-0" },
+            markerCorrelationId: "marker-empty",
+            chatClient: chat);
+
+        var result = await strategy.CompactAsync(ctx);
+
+        Assert.Single(result.Marker.Messages);
+        Assert.False(string.IsNullOrWhiteSpace(result.Marker.Messages[0].Text));
+    }
+
+    [Fact]
     public void Summarization_InvalidCtorArgs_Throws()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
@@ -287,8 +350,9 @@ public class BuiltInStrategiesTests
 
     private sealed class StubChat : IChatClient
     {
-        private readonly string _reply;
-        public StubChat(string reply) { _reply = reply; }
+        private readonly string? _reply;
+        private readonly string? _modelId;
+        public StubChat(string? reply, string? modelId = null) { _reply = reply; _modelId = modelId; }
         public int CallCount { get; private set; }
         public List<ChatMessage>? LastPrompt { get; private set; }
 
@@ -301,7 +365,13 @@ public class BuiltInStrategiesTests
         {
             CallCount++;
             LastPrompt = messages.ToList();
-            return Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, _reply)]));
+            // A null reply models an empty chat response (no messages) so the strategy's
+            // placeholder-summary fallback can be exercised.
+            var response = _reply is null
+                ? new ChatResponse(Array.Empty<ChatMessage>())
+                : new ChatResponse([new ChatMessage(ChatRole.Assistant, _reply)]);
+            response.ModelId = _modelId;
+            return Task.FromResult(response);
         }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
