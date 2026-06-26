@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
@@ -20,4 +23,18 @@ internal sealed class InvokeAgentToolResult
     /// tool dispatches.
     /// </summary>
     public string? CallId { get; init; }
+
+    /// <summary>
+    /// Serialized <c>AgentSessionStateBag</c> reflecting any mutations the tool made to the
+    /// session state during invocation (X-1). <see langword="null"/> when the tool did not
+    /// change the bag (the common case). The workflow merges this back into its carried
+    /// StateBag after the tool fan-out completes, in tool-call index order (later index wins
+    /// on key conflict) for replay determinism.
+    /// </summary>
+    /// <remarks>
+    /// Optional and <c>[JsonIgnore(WhenWritingNull)]</c> so in-flight histories serialized
+    /// before this field existed continue to replay (wire-compatible).
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? UpdatedStateBag { get; init; }
 }

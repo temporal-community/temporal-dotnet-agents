@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace Temporalio.Extensions.Agents.Workflows;
 
 /// <summary>
@@ -36,4 +39,19 @@ internal sealed class InvokeAgentToolInput
     /// workflow can correlate parallel tool invocations to the right pending tool-call slot.
     /// </summary>
     public string? CallId { get; init; }
+
+    /// <summary>
+    /// Serialized <c>AgentSessionStateBag</c> snapshot carried into the tool activity (X-1).
+    /// The activity builds its <c>TemporalAgentSession</c> from this bag so tools (and any
+    /// <c>AIContextProvider</c> they consult) see accumulated session state rather than an
+    /// empty bag. Mutations the tool makes are returned via
+    /// <see cref="InvokeAgentToolResult.UpdatedStateBag"/> and merged back by the workflow.
+    /// </summary>
+    /// <remarks>
+    /// Optional and <c>[JsonIgnore(WhenWritingNull)]</c> so in-flight histories serialized
+    /// before this field existed continue to replay (wire-compatible). <see langword="null"/>
+    /// means no accumulated state.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? SerializedStateBag { get; init; }
 }

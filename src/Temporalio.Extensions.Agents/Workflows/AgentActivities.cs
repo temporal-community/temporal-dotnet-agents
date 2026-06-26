@@ -1152,6 +1152,9 @@ internal sealed class AgentActivities(
         // context will throw the same "No TemporalAgentContext is available" error
         // as before this fix, but tools that don't need it continue to work.
         var contextSetUp = false;
+        // X-1: hold the session so we can both (a) seed the tool with the carried StateBag and
+        // (b) capture the tool's StateBag mutations for write-back after invocation.
+        TemporalAgentSession? session = null;
         try
         {
             ArgumentNullException.ThrowIfNull(ctx.Info.WorkflowId, nameof(ctx.Info.WorkflowId));
@@ -1169,7 +1172,9 @@ internal sealed class AgentActivities(
             }
             else
             {
-                var session = TemporalAgentSession.FromStateBag(sessionId, null);
+                // X-1: build the session from the carried StateBag (was literal null before),
+                // so tools and any AIContextProvider they consult see accumulated state.
+                session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
                 var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
                 TemporalAgentContext.SetCurrent(temporalContext);
                 contextSetUp = true;
@@ -1180,6 +1185,10 @@ internal sealed class AgentActivities(
             // Workflow ID isn't a valid agent session ID — likely a test environment.
             // Tools that need TemporalAgentContext.Current will throw on access.
         }
+
+        // Snapshot the bag's serialized form before invocation so we can detect (and write back)
+        // tool-driven mutations afterwards (X-1). Only computed on the real agent-session path.
+        var stateBagBefore = session?.SerializeStateBag()?.GetRawText();
 
         try
         {
@@ -1193,10 +1202,24 @@ internal sealed class AgentActivities(
 
             _logger.LogAgentToolInvocationCompleted(input.AgentName, input.ToolName);
 
+            // X-1: capture StateBag write-back. Only emit UpdatedStateBag when the serialized
+            // bag actually changed, so the no-mutation case stays null (wire-compatible). The
+            // workflow merges this back into _currentStateBag in tool-call index order.
+            System.Text.Json.JsonElement? updatedStateBag = null;
+            if (session is not null)
+            {
+                var after = session.SerializeStateBag();
+                if (!string.Equals(stateBagBefore, after?.GetRawText(), StringComparison.Ordinal))
+                {
+                    updatedStateBag = after;
+                }
+            }
+
             return new InvokeAgentToolResult
             {
                 Result = result,
                 CallId = input.CallId,
+                UpdatedStateBag = updatedStateBag,
             };
         }
         catch (Exception ex)

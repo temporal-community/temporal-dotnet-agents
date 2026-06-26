@@ -635,6 +635,8 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             ToolName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
+                            // X-1: seed the tool with accumulated session state (was null before).
+                            SerializedStateBag = _currentStateBag,
                         }, ResolveDurableToolActivityOptions(tc.Name)));
                         break;
 
@@ -726,6 +728,9 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                                 ToolName = tc.Name,
                                 Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                                 CallId = tc.CallId,
+                                // X-1: seed with state including any session-scope record just
+                                // written by WriteSessionScopeToStateBag above.
+                                SerializedStateBag = _currentStateBag,
                             }, ResolveDurableToolActivityOptions(tc.Name)));
                         }
                         else
@@ -768,7 +773,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 : null;
 
             // Assemble final results in original order.
+            // X-1: also collect each tool's StateBag write-back, slotted by tool-call index so
+            // the post-fan-out merge is deterministic (later index wins) regardless of which
+            // activity completed first. toolResults is in ascending tool-call-index order
+            // (pendingTasks was built by iterating toolTasks[] in index order).
             var functionResultContents = new List<AIContent>(toolCalls.Count);
+            var toolStateBagWriteBacks = new JsonElement?[toolCalls.Count];
             var pendingIdx = 0;
             for (var i = 0; i < toolCalls.Count; i++)
             {
@@ -780,11 +790,18 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 }
                 else if (toolResults is not null && pendingIdx < toolResults.Length)
                 {
+                    var toolResult = toolResults[pendingIdx++];
+                    toolStateBagWriteBacks[i] = toolResult.UpdatedStateBag;
                     functionResultContents.Add(new FunctionResultContent(
                         callId: toolCalls[i].CallId,
-                        result: toolResults[pendingIdx++].Result));
+                        result: toolResult.Result));
                 }
             }
+
+            // X-1: merge tool StateBag mutations back in tool-call index order. The merge is
+            // post-result and does NOT re-run any tool, so .NoRetry() write tools are not
+            // double-executed by this step.
+            MergeStateBagWriteBacks(toolStateBagWriteBacks);
 
             var toolResultMessage = new ChatMessage(ChatRole.Tool, functionResultContents);
             accumulated.Add(toolResultMessage);
@@ -1078,76 +1095,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     }
 
     /// <summary>
-    /// Deterministically merges a sequence of StateBag write-backs (each a serialized
-    /// <see cref="AgentSessionStateBag"/> object, or <see langword="null"/> for "no change")
-    /// into <c>_currentStateBag</c>.
+    /// Deterministically merges a sequence of StateBag write-backs into <c>_currentStateBag</c>
+    /// in tool-call index order (later index wins). Delegates to <see cref="StateBagMerge.Merge"/>.
+    /// See that type for the full merge policy (X-1 / X-2).
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Tool and interceptor activities fan out concurrently, so the order in which they
-    /// <em>complete</em> is non-deterministic and cannot drive merge order without breaking
-    /// replay. The caller therefore supplies <paramref name="updatedBags"/> ordered by the
-    /// original tool-call index (the <c>FunctionCallContent</c> order within the turn). This
-    /// method applies them in that fixed index order, so <strong>the later index wins</strong>
-    /// on key conflict — a deterministic, replay-stable rule (X-1 / X-2 merge policy).
-    /// </para>
-    /// <para>
-    /// The merge is key-level over the flat JSON object produced by
-    /// <see cref="AgentSessionStateBag.Serialize"/>: each write-back's top-level keys overlay
-    /// the accumulator. Pure workflow-thread computation — no I/O, no awaits, no wall-clock.
-    /// </para>
-    /// </remarks>
-    private void MergeStateBagWriteBacks(IReadOnlyList<JsonElement?> updatedBags)
-    {
-        // Accumulate into a plain key->raw-json map, seeded from _currentStateBag, then overlay
-        // each write-back in index order. Using the raw JSON object keeps the merge agnostic of
-        // value types and avoids deserializing/reserializing each typed entry.
-        var merged = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
-
-        void Overlay(JsonElement? bagElement)
-        {
-            if (bagElement is { ValueKind: JsonValueKind.Object } obj)
-            {
-                foreach (var prop in obj.EnumerateObject())
-                {
-                    merged[prop.Name] = prop.Value.Clone();
-                }
-            }
-        }
-
-        Overlay(_currentStateBag);
-
-        var changed = false;
-        foreach (var updated in updatedBags)
-        {
-            if (updated is { ValueKind: JsonValueKind.Object })
-            {
-                Overlay(updated);
-                changed = true;
-            }
-        }
-
-        if (!changed)
-        {
-            return;
-        }
-
-        // Emit keys in a fixed (ordinal-sorted) order so the serialized JsonElement carried
-        // in workflow state is byte-stable across replay regardless of dictionary insertion order.
-        using var stream = new System.IO.MemoryStream();
-        using (var writer = new System.Text.Json.Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            foreach (var key in merged.Keys.OrderBy(k => k, StringComparer.Ordinal))
-            {
-                writer.WritePropertyName(key);
-                merged[key].WriteTo(writer);
-            }
-            writer.WriteEndObject();
-        }
-
-        _currentStateBag = JsonSerializer.Deserialize<JsonElement>(stream.ToArray());
-    }
+    private void MergeStateBagWriteBacks(IReadOnlyList<JsonElement?> updatedBags) =>
+        _currentStateBag = StateBagMerge.Merge(_currentStateBag, updatedBags);
 
     private List<ChatMessage> FlattenHistoryMessages()
     {

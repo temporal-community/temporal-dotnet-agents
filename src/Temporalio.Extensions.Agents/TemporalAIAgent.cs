@@ -357,6 +357,9 @@ public sealed class TemporalAIAgent : AIAgent
                             ToolName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
+                            // X-1: seed the tool with accumulated session state so context
+                            // providers / scope-aware tools see it (was implicitly null before).
+                            SerializedStateBag = _currentStateBag,
                         };
                         // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)
                         // falling back to the shared _activityOptions (P1-2 fix).
@@ -400,6 +403,10 @@ public sealed class TemporalAIAgent : AIAgent
                 : null;
 
             var functionResultContents = new List<AIContent>(toolCalls.Count);
+            // X-1: collect tool StateBag write-backs by tool-call index for a deterministic
+            // index-order merge (later index wins). toolResults is in ascending tool-call-index
+            // order (pendingTasks was built by iterating toolTasks in index order).
+            var toolStateBagWriteBacks = new JsonElement?[toolCalls.Count];
             var pendingIdx = 0;
             for (var i = 0; i < toolCalls.Count; i++)
             {
@@ -411,11 +418,17 @@ public sealed class TemporalAIAgent : AIAgent
                 }
                 else if (toolResults is not null && pendingIdx < toolResults.Length)
                 {
+                    var toolResult = toolResults[pendingIdx++];
+                    toolStateBagWriteBacks[i] = toolResult.UpdatedStateBag;
                     functionResultContents.Add(new FunctionResultContent(
                         callId: toolCalls[i].CallId,
-                        result: toolResults[pendingIdx++].Result));
+                        result: toolResult.Result));
                 }
             }
+
+            // X-1: merge tool StateBag mutations back so the next RunDurableAgentStep sees them.
+            // Post-result; does not re-run tools (.NoRetry() semantics unaffected).
+            _currentStateBag = StateBagMerge.Merge(_currentStateBag, toolStateBagWriteBacks);
 
             var toolResultMessage = new ChatMessage(ChatRole.Tool, functionResultContents);
             accumulated.Add(toolResultMessage);
