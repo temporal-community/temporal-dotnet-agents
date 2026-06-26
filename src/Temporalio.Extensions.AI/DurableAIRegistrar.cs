@@ -46,7 +46,11 @@ internal static class DurableAIRegistrar
         // Every tool registered via AddDurableTools has an entry here, even if the caller
         // didn't supply an explicit configure callback — this guarantees the session client
         // sees a complete picture when it builds the workflow's ToolActivityOptions dict.
-        services.TryAddSingleton<DurableChatToolOptionsRegistry>();
+        // Explicit factory: the only ctor is internal and takes the configurators, so the
+        // default DI activator (which needs a public ctor) cannot construct it. A factory
+        // lambda in this assembly can invoke the internal ctor with the resolved configurators.
+        services.TryAddSingleton<DurableChatToolOptionsRegistry>(sp =>
+            new DurableChatToolOptionsRegistry(sp.GetServices<Action<DurableChatToolOptionsRegistry>>()));
 
         // Register the function registry as IReadOnlyDictionary for activity resolution.
         services.TryAddSingleton<IReadOnlyDictionary<string, AIFunction>>(
