@@ -1,3 +1,4 @@
+#pragma warning disable MAAI001 // experimental MAF file-skills surface (AgentSkill/AgentFileSkill/AgentSkillsSource/etc.); inventoried in Internal/ExperimentalApiSuppressions.cs
 using System.Reflection;
 using System.Text;
 using Microsoft.Agents.AI;

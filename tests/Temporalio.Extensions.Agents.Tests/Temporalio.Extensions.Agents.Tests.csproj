@@ -3,6 +3,14 @@
   <PropertyGroup>
     <IsTestProject>true</IsTestProject>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!--
+      MAAI001 ([Experimental] on the MAF file-skills surface) is error-by-default from the
+      compiler, independent of TreatWarningsAsErrors. The skills test files (Skills/*.cs)
+      deliberately exercise that experimental surface, so suppress the category for this
+      test project. Production suppression is inventoried inline; see
+      src/Temporalio.Extensions.Agents/Internal/ExperimentalApiSuppressions.cs · plan §2.2 (S-F-1).
+    -->
+    <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

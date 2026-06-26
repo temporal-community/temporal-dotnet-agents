@@ -1,3 +1,4 @@
+#pragma warning disable MAAI001 // experimental MAF skills surface (AgentSkillsSource/AgentFileSkill); inventoried in Internal/ExperimentalApiSuppressions.cs
 using Microsoft.Agents.AI;
 
 namespace Temporalio.Extensions.Agents.Skills;

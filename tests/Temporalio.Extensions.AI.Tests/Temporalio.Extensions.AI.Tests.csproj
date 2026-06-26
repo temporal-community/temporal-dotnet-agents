@@ -3,6 +3,15 @@
   <PropertyGroup>
     <IsTestProject>true</IsTestProject>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!--
+      MEAI001 ([Experimental] on newer Microsoft.Extensions.AI content types) is
+      error-by-default from the compiler, independent of TreatWarningsAsErrors.
+      DurableAIDataConverterTests deliberately round-trips those experimental AIContent
+      subtypes, so suppress the category for this test project. Production suppression is
+      inventoried; see src/Temporalio.Extensions.Agents/Internal/ExperimentalApiSuppressions.cs
+      · plan §2.2 (S-F-1).
+    -->
+    <NoWarn>$(NoWarn);MEAI001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

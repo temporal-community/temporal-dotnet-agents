@@ -1,3 +1,4 @@
+#pragma warning disable MAAI001 // experimental MAF AIContextProvider.InvokingContext/InvokedContext ctors; inventoried in Internal/ExperimentalApiSuppressions.cs
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Agents.AI;
