@@ -38,6 +38,11 @@ public sealed class TemporalAIAgent : AIAgent
     private readonly List<DurableSessionEntry> _history = [];
     private readonly ActivityOptions _activityOptions;
     private int _requestCount;
+    // Carried StateBag for context-provider state (e.g. WorkingSetContextProvider) across
+    // steps and turns. Threaded into each RunDurableAgentStep activity and refreshed from
+    // stepResult.UpdatedStateBag, mirroring AgentWorkflow's _currentStateBag (AgentWorkflow.cs
+    // :345 in / :381 out). Without this, sub-agent context providers lose state every step.
+    private JsonElement? _currentStateBag;
     // Resolved from the worker registration on the first RunDurableAgentStep call.
     // When true, cross-turn conversation history is owned by the external IAgentHistoryStore
     // rather than being carried in-workflow. Each turn's request messages are still passed
@@ -187,7 +192,7 @@ public sealed class TemporalAIAgent : AIAgent
                 AgentName = _agentName,
                 Request = request,
                 AccumulatedMessages = accumulated,
-                SerializedStateBag = null,
+                SerializedStateBag = _currentStateBag,
                 SessionId = sessionId,
                 IsFirstStep = iteration == 0,
                 NeedsWorkerSettingsResolution = !_settingsResolved && iteration == 0,
@@ -196,6 +201,11 @@ public sealed class TemporalAIAgent : AIAgent
             var stepResult = await Workflow.ExecuteActivityAsync(
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 _activityOptions);
+
+            // Persist the step's StateBag mutations so context-provider state (e.g.
+            // WorkingSetContextProvider) survives across steps and turns. Mirrors
+            // AgentWorkflow.cs:381.
+            _currentStateBag = stepResult.UpdatedStateBag;
 
             if (stepResult.ResolvedWorkerConfig is not null)
             {
