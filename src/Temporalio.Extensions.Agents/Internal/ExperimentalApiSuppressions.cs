@@ -34,11 +34,11 @@
 //      AgentResponse.ContinuationToken). Generated files cannot carry a `#pragma`, so
 //      MEAI001 is suppressed via a documented, project-scoped <NoWarn> in
 //      Temporalio.Extensions.Agents.csproj. No direct (hand-written) consumption of an
-//      MEAI experimental API exists in this assembly; if one is added it will surface as
-//      a normal MEAI001 error in source despite the generated-code NoWarn? No — <NoWarn>
-//      is project-wide, so hand-written MEAI usage would also be silenced. This is the
-//      one residual blanket; it is scoped to a single project and documented here so a
-//      reviewer knows to grep for new MEAI usage when bumping the MEAI version.
+//      MEAI experimental API exists in this assembly today. Because the <NoWarn> is
+//      project-wide, any hand-written MEAI usage added later would also be silenced (not
+//      surfaced as an MEAI001 error). This is the one residual blanket; it is scoped to a
+//      single project and documented here so a reviewer knows to grep for new MEAI usage
+//      when bumping the MEAI version.
 //
 // When a listed API graduates (loses [Experimental]) or is removed/renamed by Microsoft,
 // the per-file pragma / NoWarn entry should be revisited. The base-contract guard tests
