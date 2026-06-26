@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using Temporalio.Extensions.Agents.Session;
 
 namespace Temporalio.Extensions.Agents.Skills;
@@ -108,10 +109,18 @@ public sealed class SkillsContextProvider : AIContextProvider
                     session.StateBag.SetValue(
                         StateBagKey, indexXml, System.Text.Json.JsonSerializerOptions.Default);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Session not a TemporalAgentSession (e.g. in tests) — continue without
-                    // persisting. The injected note still provides value for the current call.
+                    // StateBag.SetValue failed — continue without persisting. The injected
+                    // note still provides value for the current call. Log at Debug for
+                    // diagnosability without noise.
+                    if (Temporalio.Activities.ActivityExecutionContext.HasCurrent)
+                    {
+                        Temporalio.Activities.ActivityExecutionContext.Current.Logger.LogDebug(
+                            ex,
+                            "SkillsContextProvider could not persist '{StateBagKey}' to the StateBag; continuing without carry-forward.",
+                            StateBagKey);
+                    }
                 }
             }
         }

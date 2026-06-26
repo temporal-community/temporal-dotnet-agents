@@ -914,6 +914,18 @@ internal sealed class AgentActivities(
     /// calls <see cref="IAgentToolInterceptor.BeforeToolCallAsync"/>, and returns a serializable
     /// <see cref="DurableToolInterceptorResult"/> DTO for the workflow to act on.
     /// </summary>
+    /// <remarks>
+    /// <b>Missing-interceptor security posture (fail-CLOSED — intentional asymmetry with MEAI).</b>
+    /// When no interceptor is resolved at activity time (e.g. worker restart without
+    /// re-registration), a <c>ScopeAware + RequiresApproval</c> tool returns
+    /// <see cref="DurableToolOutcome.PauseForApproval"/> rather than proceeding: those tools were
+    /// excluded from the unconditional approval list and rely on the interceptor to enforce the
+    /// missing-scope approval gate, so silently proceeding would bypass a security control. All
+    /// other tools degrade to <see cref="DurableToolOutcome.Proceed"/> to keep the session live.
+    /// This differs deliberately from the MEAI <c>DurableChatActivities.RunToolInterceptorAsync</c>
+    /// path, which always fails OPEN (Proceed) because MEAI has no built-in approval floor to fall
+    /// back to.
+    /// </remarks>
     [Activity("Temporalio.Extensions.Agents.RunToolInterceptor")]
     public async Task<DurableToolInterceptorResult> RunToolInterceptorAsync(DurableToolInterceptorInput input)
     {
