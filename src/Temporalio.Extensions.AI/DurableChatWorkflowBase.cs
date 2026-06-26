@@ -262,12 +262,22 @@ public abstract class DurableChatWorkflowBase<TOutput>
 
         if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount) && !_shutdownRequested)
         {
-            // No-reducer path: pass _history directly — the workflow exits after this throw,
-            // so there is no aliasing risk. Reducer path: pass _history as IList<T> (no copy
-            // needed), then materialize the reducer's result once into a List<T>.
+            // Reducer path: pass _history as IList<T> (no copy needed), then materialize the
+            // reducer's result once into a List<T>.
+            //
+            // No-reducer path (C-2): previously passed _history through unchanged. When CAN was
+            // triggered by the count threshold (_history.Count >= MaxEntryCount), carrying the
+            // full history forward meant the very next turn re-tripped the same threshold,
+            // producing a back-to-back continue-as-new loop. Apply a deterministic default
+            // bounded trim that keeps only the most-recent entries and guarantees the carried
+            // count is strictly below MaxEntryCount, so the fresh run has headroom for new turns
+            // before the next CAN. The trim is pure (TakeLast over an ordered list — no
+            // wall-clock, no Guid) and therefore replay-safe. External-store mode (MAF only)
+            // nulls CarriedHistory in its CreateContinueAsNewException override, so this trim is
+            // a harmless no-op there.
             var carriedHistory = input.HistoryReducer is not null
                 ? input.HistoryReducer(_history).ToList()
-                : _history;
+                : DefaultBoundedTrim(_history, input.MaxEntryCount);
             var carriedInput = new DurableChatWorkflowInput
             {
                 TimeToLive = input.TimeToLive,
@@ -282,6 +292,45 @@ public abstract class DurableChatWorkflowBase<TOutput>
             };
             throw CreateContinueAsNewException(carriedInput);
         }
+    }
+
+    /// <summary>
+    /// Deterministic default history trim applied at continue-as-new when no
+    /// <see cref="DurableChatWorkflowInput.HistoryReducer"/> is configured (C-2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The CAN trigger is <c>history.Count &gt;= maxEntryCount</c>. Without a trim, the no-reducer
+    /// path carried the full history into the fresh run, which immediately re-tripped the same
+    /// threshold — a back-to-back CAN loop. This keeps only the most-recent entries and guarantees
+    /// the carried count is <strong>strictly below</strong> <paramref name="maxEntryCount"/>, so the
+    /// new run has headroom before the next CAN.
+    /// </para>
+    /// <para>
+    /// Target = half of <paramref name="maxEntryCount"/> (floored, minimum 1) — a conservative
+    /// default that leaves room for several turns and avoids trimming on every turn near the cap.
+    /// When the history is already at or below the target it is returned unchanged (so an
+    /// SDK-suggested CAN with a small history is not perturbed). Pure and order-preserving
+    /// (<see cref="System.Linq.Enumerable.TakeLast{TSource}"/> over the existing entry order) — no
+    /// wall-clock, no <see cref="Workflow.NewGuid"/> — hence replay-safe.
+    /// </para>
+    /// </remarks>
+    private static List<DurableSessionEntry> DefaultBoundedTrim(
+        List<DurableSessionEntry> history,
+        int maxEntryCount)
+    {
+        // Guard against non-positive MaxEntryCount (validated elsewhere, but stay total here):
+        // a target of at least 1 keeps the most-recent entry rather than emptying history.
+        var target = Math.Max(1, maxEntryCount / 2);
+
+        if (history.Count <= target)
+        {
+            // Already below the trim target (e.g. SDK-suggested CAN, not count-driven) — pass
+            // through unchanged. The workflow exits after the throw, so no aliasing risk.
+            return history;
+        }
+
+        return history.TakeLast(target).ToList();
     }
 
     /// <summary>
