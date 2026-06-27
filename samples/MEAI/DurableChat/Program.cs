@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
+using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Extensions.AI;
 
@@ -87,15 +88,31 @@ IChatClient openAiChatClient = new OpenAIClient(
 
 builder.Services.AddChatClient(openAiChatClient);
 
+// ── Setup: Connect Temporal client with DurableAIDataConverter ───────────────
+// DurableAIDataConverter.Instance wraps the payload converter with
+// AIJsonUtilities.DefaultOptions so MEAI's polymorphic AIContent subclasses
+// ($type discriminators: TextContent, FunctionCallContent, etc.) survive
+// round-trips through Temporal history.
+//
+// We connect the client manually and register it as ITemporalClient because
+// DurableChatSessionClient is resolved from the root service provider after the
+// host starts (see host.Services.GetRequiredService<DurableChatSessionClient>()
+// below) and its factory depends on a root-resolvable ITemporalClient. The
+// 3-arg AddHostedTemporalWorker(address, namespace, taskQueue) overload does NOT
+// register a root-resolvable ITemporalClient, so resolving the session client
+// from root would throw. Connecting explicitly here (and setting the data
+// converter ourselves) is the pattern every MEAI sample that resolves
+// DurableChatSessionClient from root uses.
+var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions(temporalAddress)
+{
+    DataConverter = DurableAIDataConverter.Instance,
+    Namespace = "default",
+});
+builder.Services.AddSingleton<ITemporalClient>(temporalClient);
+
 // ── Setup: Register worker + durable AI ──────────────────────────────────────
-// The 3-arg AddHostedTemporalWorker(address, namespace, taskQueue) overload
-// creates its own ITemporalClient — that's the path the AI library's plugin
-// hooks into to auto-wire DurableAIDataConverter. The data converter is what
-// preserves MEAI's $type discriminators for polymorphic AIContent subclasses
-// (TextContent, FunctionCallContent, etc.) across the wire. Going through a
-// manual `TemporalClient.ConnectAsync(...)` + AddSingleton<ITemporalClient>
-// bypasses that auto-wire path — you'd have to set
-// `DataConverter = DurableAIDataConverter.Instance` yourself.
+// The 1-arg AddHostedTemporalWorker(taskQueue) overload binds the worker to the
+// ITemporalClient registered above.
 //
 // AddDurableAI registers DurableChatWorkflow, DurableChatActivities, and
 // DurableChatSessionClient on the worker. The session client is resolved from
@@ -106,7 +123,7 @@ builder.Services.AddChatClient(openAiChatClient);
 // each tool invocation as a separate InvokeFunction activity, and per-tool
 // retry/timeout can be configured via the DurableChatToolOptions callback.
 builder.Services
-    .AddHostedTemporalWorker(temporalAddress, "default", TaskQueue)
+    .AddHostedTemporalWorker(TaskQueue)
     .AddDurableAI(opts =>
     {
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
