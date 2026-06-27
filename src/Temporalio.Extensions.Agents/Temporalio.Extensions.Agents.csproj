@@ -7,6 +7,19 @@
     <IsPackable>true</IsPackable>
     <PackageId>Temporalio.Extensions.Agents</PackageId>
     <PackageTags>temporal;ai;agents;workflow;dotnet;microsoft-agent-framework</PackageTags>
+
+    <!--
+      MEAI001 is suppressed project-wide ONLY because every occurrence is in
+      System.Text.Json source-generated code (AgentSessionJsonContext over AgentResponse,
+      which transitively pulls in the experimental ResponseContinuationToken). Generated
+      files cannot carry a `#pragma warning disable`, so this is the only lever. There is
+      no hand-written consumption of an experimental MEAI API in this assembly today.
+      When bumping the Microsoft.Extensions.AI version, grep this project for new direct
+      MEAI usage — this NoWarn would silence it. MAAI001 is deliberately NOT here: it is
+      suppressed per-file via `#pragma` so the category stays live elsewhere. Full
+      inventory: Internal/ExperimentalApiSuppressions.cs · plan §2.2 (S-F-1).
+    -->
+    <NoWarn>$(NoWarn);MEAI001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

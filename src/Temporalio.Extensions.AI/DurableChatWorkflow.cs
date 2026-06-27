@@ -426,6 +426,9 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
 
                 if (task.IsCompletedSuccessfully)
                 {
+                    // S-X-6: task.Result.Result crosses the activity boundary as a JsonElement
+                    // (declared object?), so FunctionResultContent.Result holds a JsonElement here,
+                    // not the tool's domain type. Accepted limitation — see DurableFunctionOutput.Result.
                     functionResultContents.Add(new FunctionResultContent(tc.CallId, task.Result.Result));
                 }
                 else if (task.IsCanceled || Workflow.CancellationToken.IsCancellationRequested)
@@ -510,6 +513,10 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         {
             StartToCloseTimeout = RequiredInput.ActivityTimeout,
             HeartbeatTimeout = RequiredInput.HeartbeatTimeout,
+            // Apply the configured retry policy so an unmapped tool does not fall back to
+            // Temporal's default (unlimited retries) — a non-idempotent unregistered tool
+            // would otherwise retry forever. The MAF path already does this.
+            RetryPolicy = RequiredInput.RetryPolicy,
             Summary = toolName,
         };
     }
@@ -527,6 +534,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             CarriedHistory = input.CarriedHistory,
             ActivityTimeout = input.ActivityTimeout,
             HeartbeatTimeout = input.HeartbeatTimeout,
+            RetryPolicy = input.RetryPolicy,
             ApprovalTimeout = input.ApprovalTimeout,
             EnableSearchAttributes = input.EnableSearchAttributes,
             MaxEntryCount = input.MaxEntryCount,

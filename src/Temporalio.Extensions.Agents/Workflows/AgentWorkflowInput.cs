@@ -38,12 +38,10 @@ internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? CarriedStateBag { get; init; }
 
-    /// <summary>
-    /// Gets the retry policy applied to the agent's <c>RunAgentStep</c> activity (the LLM call).
-    /// When <see langword="null"/>, Temporal SDK defaults apply (unbounded retries). Per-tool
-    /// retry policies are configured separately via <see cref="DurableAgentToolActivityOptions"/>.
-    /// </summary>
-    public RetryPolicy? RetryPolicy { get; init; }
+    // RetryPolicy is inherited from DurableChatWorkflowInput (added in S-X-5). It applies to
+    // the agent's RunAgentStep activity (the LLM call); per-tool retry policies are configured
+    // separately via DurableAgentToolActivityOptions. The MAF construction sites assign it as
+    // before — behavior is unchanged, the declaration just moved to the shared base.
 
     /// <summary>
     /// Gets the bundle of worker-side settings resolved either eagerly at workflow start

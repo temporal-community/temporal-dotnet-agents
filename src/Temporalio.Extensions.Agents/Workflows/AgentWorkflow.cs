@@ -378,6 +378,10 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 };
             }
 
+            // Context providers run inside the LLM-step activity and are trusted-tier by design
+            // (developer-registered, same trust as the workflow), so their StateBag output is
+            // applied unfiltered here — unlike tool/interceptor write-backs, which are deny-list
+            // filtered via StateBagMerge.
             _currentStateBag = stepResult.UpdatedStateBag;
 
             // Feature B — Sub-section B: load always-scopes at proxy-start session start.
@@ -590,6 +594,13 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 }
 
                 interceptorResults = await Workflow.WhenAllAsync(interceptorTasks).ConfigureAwait(true);
+
+                // X-2: merge any StateBag mutations the interceptors made back into the carried
+                // bag, BEFORE tool dispatch, so a tool sees interceptor-driven state changes.
+                // Interceptors fan out concurrently; merge in tool-call index order (later index
+                // wins) for replay determinism — never by completion order.
+                MergeStateBagWriteBacks(
+                    [.. interceptorResults.Select(r => r?.UpdatedStateBag)]);
             }
 
             // ── Feature L — Phase 2 & Feature A: Process decisions, park for approvals ────
@@ -628,6 +639,8 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             ToolName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
+                            // X-1: seed the tool with accumulated session state (was null before).
+                            SerializedStateBag = _currentStateBag,
                         }, ResolveDurableToolActivityOptions(tc.Name)));
                         break;
 
@@ -719,6 +732,9 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                                 ToolName = tc.Name,
                                 Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                                 CallId = tc.CallId,
+                                // X-1: seed with state including any session-scope record just
+                                // written by WriteSessionScopeToStateBag above.
+                                SerializedStateBag = _currentStateBag,
                             }, ResolveDurableToolActivityOptions(tc.Name)));
                         }
                         else
@@ -761,7 +777,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 : null;
 
             // Assemble final results in original order.
+            // X-1: also collect each tool's StateBag write-back, slotted by tool-call index so
+            // the post-fan-out merge is deterministic (later index wins) regardless of which
+            // activity completed first. toolResults is in ascending tool-call-index order
+            // (pendingTasks was built by iterating toolTasks[] in index order).
             var functionResultContents = new List<AIContent>(toolCalls.Count);
+            var toolStateBagWriteBacks = new JsonElement?[toolCalls.Count];
             var pendingIdx = 0;
             for (var i = 0; i < toolCalls.Count; i++)
             {
@@ -773,11 +794,21 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 }
                 else if (toolResults is not null && pendingIdx < toolResults.Length)
                 {
+                    var toolResult = toolResults[pendingIdx++];
+                    toolStateBagWriteBacks[i] = toolResult.UpdatedStateBag;
+                    // S-X-6: toolResult.Result crosses the activity boundary as a JsonElement
+                    // (declared object?), so FunctionResultContent.Result holds a JsonElement here,
+                    // not the tool's domain type. Accepted limitation — see InvokeAgentToolResult.Result.
                     functionResultContents.Add(new FunctionResultContent(
                         callId: toolCalls[i].CallId,
-                        result: toolResults[pendingIdx++].Result));
+                        result: toolResult.Result));
                 }
             }
+
+            // X-1: merge tool StateBag mutations back in tool-call index order. The merge is
+            // post-result and does NOT re-run any tool, so .NoRetry() write tools are not
+            // double-executed by this step.
+            MergeStateBagWriteBacks(toolStateBagWriteBacks);
 
             var toolResultMessage = new ChatMessage(ChatRole.Tool, functionResultContents);
             accumulated.Add(toolResultMessage);
@@ -910,32 +941,85 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     /// <c>temporal.approval_scopes.session</c> key in the workflow's <c>_currentStateBag</c>.
     /// Pure workflow-thread computation — no I/O, no awaits.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Session scope previously grew unbounded (S-1): no dedup and no cap, so a long-lived
+    /// session that repeatedly re-granted the same tool/pattern would bloat the replay-carried
+    /// StateBag past the 64 KB warn-only guard. This method now:
+    /// </para>
+    /// <list type="number">
+    /// <item>Deduplicates by <c>(ToolName, Pattern)</c> — the latest <see cref="ApprovalScopeRecord.GrantedAt"/>
+    /// wins, so re-granting an existing scope replaces it rather than appending.</item>
+    /// <item>Bounds the record count and serialized byte size by reusing the existing always-scope
+    /// budget (<c>MaxAlwaysScopeCacheRecords</c> / <c>MaxAlwaysScopeCacheBytes</c> via
+    /// <see cref="IsWithinAlwaysScopeCacheBudget"/>) — no new config knobs (per plan §2.5).</item>
+    /// </list>
+    /// <para>
+    /// <strong>Overflow behavior:</strong> when the deduplicated set would exceed the budget the
+    /// new session grant is <em>rejected</em> (not written) and the approval degrades to
+    /// this-call-only — the tool still executes once (the caller dispatches it regardless), but no
+    /// reusable session record is persisted. Deterministic for consistent audit and replay.
+    /// </para>
+    /// </remarks>
     private void WriteSessionScopeToStateBag(
         string toolName,
         ApprovalScopePattern? pattern,
         string originatingRequestId)
     {
+        const string sessionScopeKey = "temporal.approval_scopes.session";
+
         var bag = _currentStateBag is { ValueKind: not System.Text.Json.JsonValueKind.Undefined and not System.Text.Json.JsonValueKind.Null } bagEl
             ? AgentSessionStateBag.Deserialize(bagEl)
             : new AgentSessionStateBag();
 
         bag.TryGetValue<List<ApprovalScopeRecord>>(
-            "temporal.approval_scopes.session",
+            sessionScopeKey,
             out var existing,
             TemporalAgentJsonUtilities.DefaultOptions);
 
         var records = existing ?? new List<ApprovalScopeRecord>();
-        records.Add(new ApprovalScopeRecord
+
+        var newRecord = new ApprovalScopeRecord
         {
             ToolName = toolName,
             Pattern = pattern,
             GrantedAt = Workflow.UtcNow,
             OriginatingRequestId = originatingRequestId,
-        });
+        };
+
+        // Dedup by (ToolName, Pattern): drop any prior record with the same identity so the
+        // latest grant (this one, with the newest GrantedAt) wins. Preserves relative order of
+        // surviving records, appending the new grant last.
+        var newKey = SessionScopeDedupKey(toolName, pattern);
+        var deduped = new List<ApprovalScopeRecord>(records.Count + 1);
+        foreach (var r in records)
+        {
+            if (!string.Equals(SessionScopeDedupKey(r.ToolName, r.Pattern), newKey, StringComparison.Ordinal))
+            {
+                deduped.Add(r);
+            }
+        }
+        deduped.Add(newRecord);
+
+        // Bound the session cache by reusing the always-scope budget. On overflow, reject the
+        // new grant (degrade to this-call-only) and keep the pre-existing records untouched.
+        if (!IsWithinAlwaysScopeCacheBudget(
+                deduped,
+                _input!.MaxAlwaysScopeCacheRecords,
+                _input!.MaxAlwaysScopeCacheBytes))
+        {
+            Workflow.Logger.LogWarning(
+                "[{SessionId}] Session-scope grant for tool '{ToolName}' (RequestId: {RequestId}) " +
+                "rejected: it would exceed the session-scope budget (reusing MaxAlwaysScopeCacheRecords/" +
+                "MaxAlwaysScopeCacheBytes). Degrading this approval to this-call-only; the tool still runs " +
+                "but no reusable session record is persisted.",
+                Workflow.Info.WorkflowId, toolName, originatingRequestId);
+            return;
+        }
 
         bag.SetValue<List<ApprovalScopeRecord>>(
-            "temporal.approval_scopes.session",
-            records,
+            sessionScopeKey,
+            deduped,
             TemporalAgentJsonUtilities.DefaultOptions);
 
         _currentStateBag = bag.Serialize();
@@ -944,6 +1028,25 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             "[{SessionId}] Session-scope record written for tool '{ToolName}' " +
             "(RequestId: {RequestId}).",
             Workflow.Info.WorkflowId, toolName, originatingRequestId);
+    }
+
+    /// <summary>
+    /// Builds a stable, deterministic dedup key for a session-scope record from its tool name
+    /// and optional argument pattern. A <see langword="null"/> pattern (match-any) collapses to
+    /// a distinct sentinel so it does not collide with concrete patterns.
+    /// </summary>
+    private static string SessionScopeDedupKey(string toolName, ApprovalScopePattern? pattern)
+    {
+        if (pattern is null)
+        {
+            return toolName + " *";
+        }
+
+        return string.Concat(
+            toolName, " ",
+            ((int)pattern.Type).ToString(System.Globalization.CultureInfo.InvariantCulture), " ",
+            pattern.Parameter ?? "*", " ",
+            pattern.Pattern);
     }
 
     /// <summary>
@@ -1069,6 +1172,21 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
 
         _currentStateBag = bag.Serialize();
     }
+
+    /// <summary>
+    /// Deterministically merges a sequence of untrusted tool/interceptor StateBag write-backs into
+    /// <c>_currentStateBag</c> in tool-call index order (later index wins). Delegates to
+    /// <see cref="StateBagMerge.Merge"/>, which applies the reserved approval-scope deny-list
+    /// (<see cref="StateBagMerge.ApprovalScopesReservedPrefix"/> + the agent's configured
+    /// always-scopes store key) so a write-back can never forge or clobber an approval grant.
+    /// See that type for the full merge policy (X-1 / X-2) and security rationale.
+    /// </summary>
+    private void MergeStateBagWriteBacks(IReadOnlyList<JsonElement?> updatedBags) =>
+        _currentStateBag = StateBagMerge.Merge(
+            _currentStateBag,
+            updatedBags,
+            _input!.AlwaysScopesStoreKey,
+            Workflow.Logger);
 
     private List<ChatMessage> FlattenHistoryMessages()
     {

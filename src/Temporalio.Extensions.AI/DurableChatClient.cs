@@ -191,7 +191,18 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         }
 
         // Clone the options to avoid mutating the caller's instance.
-        // RawRepresentationFactory is a delegate and cannot be serialized.
+        //
+        // ALLOW (copied — serializable and materially steer the model):
+        //   Temperature, MaxOutputTokens, TopP, TopK, StopSequences, FrequencyPenalty,
+        //   PresencePenalty, Seed, ModelId, ResponseFormat, Tools, ToolMode,
+        //   AdditionalProperties (Temporal keys stripped), ConversationId,
+        //   Instructions, Reasoning, AllowMultipleToolCalls, AllowBackgroundResponses.
+        //
+        // DENY (intentionally dropped — delegate-backed / not durably serializable):
+        //   - RawRepresentationFactory: a delegate; cannot be serialized.
+        //   - ContinuationToken: a provider-specific opaque token (experimental,
+        //     ResponseContinuationToken) that is not meaningful to replay across the
+        //     durable boundary; dropping it keeps the durable request self-contained.
         return new ChatOptions
         {
             Temperature = options.Temperature,
@@ -208,6 +219,18 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
             ToolMode = options.ToolMode,
             AdditionalProperties = StripTemporalKeys(options.AdditionalProperties),
             ConversationId = options.ConversationId,
+            Instructions = options.Instructions,
+            Reasoning = options.Reasoning,
+            AllowMultipleToolCalls = options.AllowMultipleToolCalls,
+            // AllowBackgroundResponses is [Experimental] (MEAI001) on this pinned MEAI
+            // version. It is a plain bool? that steers the model, so we copy it across the
+            // durable boundary. Suppressed narrowly here (not project-wide) so the MEAI001
+            // category stays live elsewhere in this assembly per S-F-1; revisit if the
+            // property graduates or is removed. Inventory note: this is the only
+            // hand-written experimental MEAI consumption in Temporalio.Extensions.AI.
+#pragma warning disable MEAI001
+            AllowBackgroundResponses = options.AllowBackgroundResponses,
+#pragma warning restore MEAI001
         };
     }
 

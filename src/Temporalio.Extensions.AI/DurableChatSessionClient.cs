@@ -146,6 +146,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
                 TimeToLive = _options.SessionTimeToLive,
                 ActivityTimeout = _options.ActivityTimeout,
                 HeartbeatTimeout = _options.HeartbeatTimeout,
+                RetryPolicy = _options.RetryPolicy,
                 ApprovalTimeout = _options.ApprovalTimeout,
                 EnableSearchAttributes = _options.EnableSearchAttributes,
                 MaxEntryCount = _options.MaxEntryCount,

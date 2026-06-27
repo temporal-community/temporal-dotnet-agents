@@ -196,4 +196,41 @@ public class DurableExecutionOptionsTests
         var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
         Assert.Contains("MaxEntryCount", ex.Message);
     }
+
+    // ── MaxToolCallsPerTurn (S-T1-1) ───────────────────────────────────
+
+    [Fact]
+    public void MaxToolCallsPerTurn_DefaultsTo20()
+    {
+        var options = new DurableExecutionOptions();
+        Assert.Equal(20, options.MaxToolCallsPerTurn);
+    }
+
+    [Fact]
+    public void Validate_ThrowsWhenMaxToolCallsPerTurnIsZero()
+    {
+        // A non-positive loop bound makes the durable dispatch loop body never run, so the
+        // chat call would never fire. Validate() must reject it up front.
+        var options = new DurableExecutionOptions { TaskQueue = "q", MaxToolCallsPerTurn = 0 };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
+        Assert.Contains("MaxToolCallsPerTurn", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_ThrowsWhenMaxToolCallsPerTurnIsNegative()
+    {
+        var options = new DurableExecutionOptions { TaskQueue = "q", MaxToolCallsPerTurn = -1 };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
+        Assert.Contains("MaxToolCallsPerTurn", ex.Message);
+    }
+
+    [Fact]
+    public void Validate_SucceedsWhenMaxToolCallsPerTurnIsPositive()
+    {
+        var options = new DurableExecutionOptions { TaskQueue = "q", MaxToolCallsPerTurn = 1 };
+
+        options.Validate(); // Should not throw
+    }
 }

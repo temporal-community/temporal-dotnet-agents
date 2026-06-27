@@ -315,9 +315,14 @@ internal sealed class DurableChatActivities(
                 }
                 else
                 {
-                    _logger.LogWarning(
-                        "Tool '{ToolName}' not found in DurableFunctionRegistry; dropping from options.",
-                        placeholder.Name);
+                    // Configuration error, not transient: the placeholder name has no
+                    // registration, so the LLM would be told to use a tool it never
+                    // receives. Fail fast and non-retryably rather than silently dropping
+                    // it. ErrorType carries the typed name so workflow callers can match.
+                    throw new ApplicationFailureException(
+                        DurablePlaceholderToolNotRegisteredException.BuildMessage(placeholder.Name),
+                        errorType: nameof(DurablePlaceholderToolNotRegisteredException),
+                        nonRetryable: true);
                 }
             }
             else
@@ -377,6 +382,18 @@ internal sealed class DurableChatActivities(
     /// dispatched. Resolves the interceptor from DI; if none is registered, logs a warning
     /// and returns <see cref="DurableToolOutcome.Proceed"/> so the tool still runs.
     /// </summary>
+    /// <remarks>
+    /// <b>Missing-interceptor security posture (fail-OPEN — intentional asymmetry with MAF).</b>
+    /// When no interceptor is resolved at activity time (e.g. worker restart without
+    /// re-registration), this MEAI path always returns <see cref="DurableToolOutcome.Proceed"/>.
+    /// MEAI has no built-in always-require-approval floor, so there is nothing to fail closed
+    /// to — proceeding keeps the session live. This differs deliberately from the MAF
+    /// <c>AgentActivities.RunToolInterceptorAsync</c> path, which fails CLOSED
+    /// (<c>PauseForApproval</c>) for <c>ScopeAware + RequiresApproval</c> tools because those
+    /// tools were excluded from the unconditional approval list and rely on the interceptor to
+    /// enforce the gate. Callers that need a hard approval floor in MEAI should enforce it in
+    /// their own interceptor rather than relying on the missing-interceptor default.
+    /// </remarks>
     [Activity("Temporalio.Extensions.AI.RunToolInterceptor")]
     public async Task<DurableToolInterceptorResult> RunToolInterceptorAsync(
         DurableToolInterceptorInput input)

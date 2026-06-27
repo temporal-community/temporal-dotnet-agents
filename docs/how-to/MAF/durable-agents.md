@@ -19,8 +19,7 @@ The first two activities always run; the remainder are mode-gated by configurati
 |---|---|---|
 | `Temporalio.Extensions.Agents.AppendAgentTurn` | After the turn loop exits (external-store mode only) | Writes `[requestEntry, responseEntry]` to `IAgentHistoryStore` |
 | `Temporalio.Extensions.Agents.ReduceHistoryInStore` | At continue-as-new (external-store mode only) | Loads projected view, runs `HistoryReducer`, `ReplaceAsync`-es the store |
-| `Temporalio.Extensions.Agents.CompactHistory` | When `stepResult.CompactionNeeded == true` (after `AppendAgentTurn`) | Invokes the configured `ICompactionStrategy`, appends one `CompactionMarkerEntry`. See [`compaction.md`](./compaction.md) |
-| `Temporalio.Extensions.Agents.RunCompactionSummary` | Reserved — registered but not currently workflow-dispatched | LLM call that produces a rollup summary. Held for custom strategies that prefer a separately-tracked summarization activity |
+| `Temporalio.Extensions.Agents.CompactHistory` | When `stepResult.CompactionNeeded == true` (after `AppendAgentTurn`) | Invokes the configured `ICompactionStrategy`, appends one `CompactionMarkerEntry`. Summarization runs the LLM call inline within this activity. See [`compaction.md`](./compaction.md) |
 
 ## When to use what
 

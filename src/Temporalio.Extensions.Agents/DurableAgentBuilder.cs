@@ -686,6 +686,22 @@ public sealed class DurableAgentBuilder
             }
         }
 
+        // Validate loop / history bounds. A non-positive MaxToolCallsPerTurn makes the
+        // dispatch loop body never run, so the agent returns "iterations exceeded" without
+        // ever calling the LLM. MaxEntryCount is nullable (null = inherit the worker-level
+        // default), so only a non-null, non-positive value is invalid.
+        if (MaxToolCallsPerTurn <= 0)
+        {
+            throw new InvalidOperationException(
+                $"DurableAgentBuilder.MaxToolCallsPerTurn for agent '{Name}' must be a positive integer.");
+        }
+
+        if (MaxEntryCount is <= 0)
+        {
+            throw new InvalidOperationException(
+                $"DurableAgentBuilder.MaxEntryCount for agent '{Name}' must be a positive integer when set (null inherits the worker-level default).");
+        }
+
         return new DurableAgentRegistration(
             Name: Name,
             Description: Description,

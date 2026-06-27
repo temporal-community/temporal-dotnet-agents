@@ -38,6 +38,11 @@ public sealed class TemporalAIAgent : AIAgent
     private readonly List<DurableSessionEntry> _history = [];
     private readonly ActivityOptions _activityOptions;
     private int _requestCount;
+    // Carried StateBag for context-provider state (e.g. WorkingSetContextProvider) across
+    // steps and turns. Threaded into each RunDurableAgentStep activity and refreshed from
+    // stepResult.UpdatedStateBag, mirroring AgentWorkflow's _currentStateBag (AgentWorkflow.cs
+    // :345 in / :381 out). Without this, sub-agent context providers lose state every step.
+    private JsonElement? _currentStateBag;
     // Resolved from the worker registration on the first RunDurableAgentStep call.
     // When true, cross-turn conversation history is owned by the external IAgentHistoryStore
     // rather than being carried in-workflow. Each turn's request messages are still passed
@@ -187,7 +192,7 @@ public sealed class TemporalAIAgent : AIAgent
                 AgentName = _agentName,
                 Request = request,
                 AccumulatedMessages = accumulated,
-                SerializedStateBag = null,
+                SerializedStateBag = _currentStateBag,
                 SessionId = sessionId,
                 IsFirstStep = iteration == 0,
                 NeedsWorkerSettingsResolution = !_settingsResolved && iteration == 0,
@@ -196,6 +201,14 @@ public sealed class TemporalAIAgent : AIAgent
             var stepResult = await Workflow.ExecuteActivityAsync(
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 _activityOptions);
+
+            // Persist the step's StateBag mutations so context-provider state (e.g.
+            // WorkingSetContextProvider) survives across steps and turns. Mirrors
+            // AgentWorkflow.cs:381. Context providers run inside the LLM-step activity and are
+            // trusted-tier by design, so their StateBag output is applied unfiltered here —
+            // unlike tool/interceptor write-backs below, which are deny-list filtered via
+            // StateBagMerge.
+            _currentStateBag = stepResult.UpdatedStateBag;
 
             if (stepResult.ResolvedWorkerConfig is not null)
             {
@@ -347,6 +360,9 @@ public sealed class TemporalAIAgent : AIAgent
                             ToolName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
+                            // X-1: seed the tool with accumulated session state so context
+                            // providers / scope-aware tools see it (was implicitly null before).
+                            SerializedStateBag = _currentStateBag,
                         };
                         // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)
                         // falling back to the shared _activityOptions (P1-2 fix).
@@ -390,6 +406,10 @@ public sealed class TemporalAIAgent : AIAgent
                 : null;
 
             var functionResultContents = new List<AIContent>(toolCalls.Count);
+            // X-1: collect tool StateBag write-backs by tool-call index for a deterministic
+            // index-order merge (later index wins). toolResults is in ascending tool-call-index
+            // order (pendingTasks was built by iterating toolTasks in index order).
+            var toolStateBagWriteBacks = new JsonElement?[toolCalls.Count];
             var pendingIdx = 0;
             for (var i = 0; i < toolCalls.Count; i++)
             {
@@ -401,11 +421,25 @@ public sealed class TemporalAIAgent : AIAgent
                 }
                 else if (toolResults is not null && pendingIdx < toolResults.Length)
                 {
+                    var toolResult = toolResults[pendingIdx++];
+                    toolStateBagWriteBacks[i] = toolResult.UpdatedStateBag;
                     functionResultContents.Add(new FunctionResultContent(
                         callId: toolCalls[i].CallId,
-                        result: toolResults[pendingIdx++].Result));
+                        result: toolResult.Result));
                 }
             }
+
+            // X-1: merge tool StateBag mutations back so the next RunDurableAgentStep sees them.
+            // Post-result; does not re-run tools (.NoRetry() semantics unaffected).
+            // SECURITY: the merge applies the reserved approval-scope deny-list
+            // (StateBagMerge.ApprovalScopesReservedPrefix). TemporalAIAgent has no approval-scope
+            // store plumbing, so there is no custom always-scopes store key to pass — the prefix
+            // deny-list (covering the session key and default always key) is sufficient here.
+            _currentStateBag = StateBagMerge.Merge(
+                _currentStateBag,
+                toolStateBagWriteBacks,
+                alwaysScopesStoreKey: null,
+                Workflow.Logger);
 
             var toolResultMessage = new ChatMessage(ChatRole.Tool, functionResultContents);
             accumulated.Add(toolResultMessage);

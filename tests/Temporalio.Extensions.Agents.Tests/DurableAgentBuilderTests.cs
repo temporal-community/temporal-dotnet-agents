@@ -297,6 +297,82 @@ public class DurableAgentBuilderTests
         Assert.Empty(reg.ContextProviderFactories);
     }
 
+    // ── ToRegistration loop / history bound validation (S-T1-1) ──────────
+
+    [Fact]
+    public void ToRegistration_ThrowsWhenMaxToolCallsPerTurnIsZero()
+    {
+        // A non-positive MaxToolCallsPerTurn makes the dispatch loop body never run, so the
+        // agent returns "iterations exceeded" without ever calling the LLM. Reject it at build.
+        var builder = NewBuilder("ZeroLoop");
+        builder.ChatClient = _ => new TestChatClient();
+        builder.MaxToolCallsPerTurn = 0;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => builder.ToRegistration());
+        Assert.Contains("MaxToolCallsPerTurn", ex.Message);
+        Assert.Contains("ZeroLoop", ex.Message);
+    }
+
+    [Fact]
+    public void ToRegistration_ThrowsWhenMaxToolCallsPerTurnIsNegative()
+    {
+        var builder = NewBuilder("NegLoop");
+        builder.ChatClient = _ => new TestChatClient();
+        builder.MaxToolCallsPerTurn = -3;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => builder.ToRegistration());
+        Assert.Contains("MaxToolCallsPerTurn", ex.Message);
+    }
+
+    [Fact]
+    public void ToRegistration_ThrowsWhenMaxEntryCountIsZero()
+    {
+        // MaxEntryCount is nullable: null = inherit the worker-level default. A non-null,
+        // non-positive value is invalid.
+        var builder = NewBuilder("ZeroEntries");
+        builder.ChatClient = _ => new TestChatClient();
+        builder.MaxEntryCount = 0;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => builder.ToRegistration());
+        Assert.Contains("MaxEntryCount", ex.Message);
+        Assert.Contains("ZeroEntries", ex.Message);
+    }
+
+    [Fact]
+    public void ToRegistration_ThrowsWhenMaxEntryCountIsNegative()
+    {
+        var builder = NewBuilder("NegEntries");
+        builder.ChatClient = _ => new TestChatClient();
+        builder.MaxEntryCount = -10;
+
+        var ex = Assert.Throws<InvalidOperationException>(() => builder.ToRegistration());
+        Assert.Contains("MaxEntryCount", ex.Message);
+    }
+
+    [Fact]
+    public void ToRegistration_AcceptsNullMaxEntryCount_AsInheritSentinel()
+    {
+        // null MaxEntryCount means "inherit the worker-level DefaultMaxEntryCount" and must NOT
+        // be rejected — only a non-null, non-positive value is invalid.
+        var builder = NewBuilder("InheritEntries");
+        builder.ChatClient = _ => new TestChatClient();
+        builder.MaxEntryCount = null;
+
+        var reg = builder.ToRegistration(); // Should not throw.
+        Assert.Null(reg.MaxEntryCount);
+    }
+
+    [Fact]
+    public void ToRegistration_AcceptsPositiveMaxEntryCount()
+    {
+        var builder = NewBuilder("PosEntries");
+        builder.ChatClient = _ => new TestChatClient();
+        builder.MaxEntryCount = 1;
+
+        var reg = builder.ToRegistration(); // Should not throw.
+        Assert.Equal(1, reg.MaxEntryCount);
+    }
+
     // ── Test helpers ────────────────────────────────────────────────────
 
     private sealed class TestContextProvider : AIContextProvider

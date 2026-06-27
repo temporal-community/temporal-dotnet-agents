@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using Temporalio.Extensions.Agents.Session;
 
 namespace Temporalio.Extensions.Agents;
@@ -95,10 +96,18 @@ public sealed class WorkingSetContextProvider : AIContextProvider
                         StateBagKey, csv, System.Text.Json.JsonSerializerOptions.Default);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Session not a TemporalAgentSession (e.g. in tests) — continue without
-                // persisting the working-set. The injected note still provides value.
+                // Session not a TemporalAgentSession (e.g. in tests) or StateBag.SetValue
+                // failed — continue without persisting the working-set. The injected note
+                // still provides value. Log at Debug for diagnosability without noise.
+                if (Temporalio.Activities.ActivityExecutionContext.HasCurrent)
+                {
+                    Temporalio.Activities.ActivityExecutionContext.Current.Logger.LogDebug(
+                        ex,
+                        "WorkingSetContextProvider could not persist '{StateBagKey}' to the StateBag; continuing without carry-forward.",
+                        StateBagKey);
+                }
             }
         }
 

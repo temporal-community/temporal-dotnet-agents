@@ -1,3 +1,4 @@
+#pragma warning disable MAAI001 // experimental MAF AIContextProvider.InvokingContext/InvokedContext ctors; inventoried in Internal/ExperimentalApiSuppressions.cs
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Agents.AI;
@@ -836,99 +837,6 @@ internal sealed class AgentActivities(
         Internal.AgentInternalConstants.FunctionInvocationDelegatingAgentFullName;
 
     /// <summary>
-    /// Per-tool activity used by durable agents. Looks up the named agent's local tool registry,
-    /// invokes the tool with the supplied arguments, and returns the result.
-    /// </summary>
-    /// <summary>
-    /// Runs an LLM-backed compaction summarization. Dormant at Step 5d — registered on
-    /// the worker via <c>AddSingletonActivities</c> but no workflow dispatches it yet.
-    /// Step 6 wires the <c>"summarization"</c> strategy to this activity when
-    /// <c>UseCompaction("summarization")</c> is configured.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Why a separate activity (not folded into <see cref="RunDurableAgentStepAsync"/>):
-    /// per Q6, every LLM call gets its own Temporal activity. Compaction summarization is
-    /// an LLM call, so it deserves its own dispatch — preserving the "one LLM call = one
-    /// activity" invariant and yielding a distinct <c>agent.compaction.summarize</c> span
-    /// for cost/latency attribution.
-    /// </para>
-    /// <para>
-    /// <b>Activity-side mixed-pattern check is intentionally skipped:</b> summarization
-    /// dispatches a single chat call with a curated prompt — no tools, no function-invocation
-    /// loop. The chat client's <c>.UseFunctionInvocation()</c> middleware (if present) is
-    /// harmless here because no tool calls are produced.
-    /// </para>
-    /// </remarks>
-    [Activity("Temporalio.Extensions.Agents.RunCompactionSummary")]
-    public async Task<RunCompactionSummaryResult> RunCompactionSummaryAsync(
-        RunCompactionSummaryInput input)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-
-        var ctx = ActivityExecutionContext.Current;
-        var ct = ctx.CancellationToken;
-
-        ctx.Heartbeat($"compacting {input.SummarizationPrompt.Count} message(s) for agent '{input.AgentName}'");
-
-        using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
-            TemporalAgentTelemetry.AgentCompactionSummarizeSpanName,
-            ActivityKind.Client);
-        span?.SetTag(TemporalAgentTelemetry.AgentNameAttribute, input.AgentName);
-        if (!string.IsNullOrEmpty(input.ChatClientKey))
-        {
-            span?.SetTag("temporal.agent.compaction.chat_client_key", input.ChatClientKey);
-        }
-        if (!string.IsNullOrEmpty(input.ModelIdOverride))
-        {
-            span?.SetTag("gen_ai.request.model", input.ModelIdOverride);
-        }
-
-        var chatClient = string.IsNullOrEmpty(input.ChatClientKey)
-            ? services.GetRequiredService<IChatClient>()
-            : services.GetRequiredKeyedService<IChatClient>(input.ChatClientKey);
-
-        var chatOptions = new ChatOptions();
-        if (!string.IsNullOrEmpty(input.ModelIdOverride))
-        {
-            chatOptions.ModelId = input.ModelIdOverride;
-        }
-
-        try
-        {
-            var collected = new List<ChatResponseUpdate>();
-            await foreach (var update in chatClient
-                .GetStreamingResponseAsync(input.SummarizationPrompt, chatOptions, ct)
-                .WithCancellation(ct)
-                .ConfigureAwait(false))
-            {
-                collected.Add(update);
-                ctx.Heartbeat(update.Text);
-            }
-            var response = collected.ToChatResponse();
-
-            span?.SetTag(TemporalAgentTelemetry.InputTokensAttribute,
-                response.Usage?.InputTokenCount);
-            span?.SetTag(TemporalAgentTelemetry.OutputTokensAttribute,
-                response.Usage?.OutputTokenCount);
-            span?.SetTag("gen_ai.response.model", response.ModelId);
-
-            return new RunCompactionSummaryResult
-            {
-                SummaryMessages = response.Messages,
-                ModelIdUsed = response.ModelId ?? input.ModelIdOverride ?? string.Empty,
-                InputTokenCount = response.Usage?.InputTokenCount,
-                OutputTokenCount = response.Usage?.OutputTokenCount,
-            };
-        }
-        catch (Exception ex)
-        {
-            span?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            throw;
-        }
-    }
-
-    /// <summary>
     /// Performs an in-session history compaction. Dispatched by the workflow when the
     /// activity-side trigger evaluator (Q2 = B) flags <c>CompactionNeeded</c> on a step
     /// result. Loads the audit canonical view, invokes the configured strategy, appends the
@@ -1006,6 +914,18 @@ internal sealed class AgentActivities(
     /// calls <see cref="IAgentToolInterceptor.BeforeToolCallAsync"/>, and returns a serializable
     /// <see cref="DurableToolInterceptorResult"/> DTO for the workflow to act on.
     /// </summary>
+    /// <remarks>
+    /// <b>Missing-interceptor security posture (fail-CLOSED — intentional asymmetry with MEAI).</b>
+    /// When no interceptor is resolved at activity time (e.g. worker restart without
+    /// re-registration), a <c>ScopeAware + RequiresApproval</c> tool returns
+    /// <see cref="DurableToolOutcome.PauseForApproval"/> rather than proceeding: those tools were
+    /// excluded from the unconditional approval list and rely on the interceptor to enforce the
+    /// missing-scope approval gate, so silently proceeding would bypass a security control. All
+    /// other tools degrade to <see cref="DurableToolOutcome.Proceed"/> to keep the session live.
+    /// This differs deliberately from the MEAI <c>DurableChatActivities.RunToolInterceptorAsync</c>
+    /// path, which always fails OPEN (Proceed) because MEAI has no built-in approval floor to fall
+    /// back to.
+    /// </remarks>
     [Activity("Temporalio.Extensions.Agents.RunToolInterceptor")]
     public async Task<DurableToolInterceptorResult> RunToolInterceptorAsync(DurableToolInterceptorInput input)
     {
@@ -1076,6 +996,10 @@ internal sealed class AgentActivities(
             RequiresApproval = input.RequiresApproval,
         };
 
+        // Snapshot the bag's serialized form before the interceptor runs so we can detect
+        // (and propagate) in-place mutations afterwards (X-2 StateBag write-back).
+        var stateBagBefore = stateBag is { Count: > 0 } ? stateBag.Serialize().GetRawText() : null;
+
         DurableToolDecision decision;
         try
         {
@@ -1096,7 +1020,22 @@ internal sealed class AgentActivities(
             };
         }
 
-        return DurableToolInterceptorResult.FromDecision(decision);
+        var result = DurableToolInterceptorResult.FromDecision(decision);
+
+        // X-2: propagate StateBag mutations the interceptor made in place. Only emit
+        // UpdatedStateBag when the serialized bag actually changed, so the no-mutation
+        // case stays null (wire-compatible with old histories). The workflow merges this
+        // back into _currentStateBag before tool dispatch (AgentWorkflow).
+        if (toolContext.StateBag is { Count: > 0 } mutatedBag)
+        {
+            var stateBagAfter = mutatedBag.Serialize();
+            if (!string.Equals(stateBagBefore, stateBagAfter.GetRawText(), StringComparison.Ordinal))
+            {
+                result = result.WithUpdatedStateBag(stateBagAfter);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -1213,6 +1152,9 @@ internal sealed class AgentActivities(
         // context will throw the same "No TemporalAgentContext is available" error
         // as before this fix, but tools that don't need it continue to work.
         var contextSetUp = false;
+        // X-1: hold the session so we can both (a) seed the tool with the carried StateBag and
+        // (b) capture the tool's StateBag mutations for write-back after invocation.
+        TemporalAgentSession? session = null;
         try
         {
             ArgumentNullException.ThrowIfNull(ctx.Info.WorkflowId, nameof(ctx.Info.WorkflowId));
@@ -1230,7 +1172,9 @@ internal sealed class AgentActivities(
             }
             else
             {
-                var session = TemporalAgentSession.FromStateBag(sessionId, null);
+                // X-1: build the session from the carried StateBag (was literal null before),
+                // so tools and any AIContextProvider they consult see accumulated state.
+                session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
                 var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
                 TemporalAgentContext.SetCurrent(temporalContext);
                 contextSetUp = true;
@@ -1241,6 +1185,10 @@ internal sealed class AgentActivities(
             // Workflow ID isn't a valid agent session ID — likely a test environment.
             // Tools that need TemporalAgentContext.Current will throw on access.
         }
+
+        // Snapshot the bag's serialized form before invocation so we can detect (and write back)
+        // tool-driven mutations afterwards (X-1). Only computed on the real agent-session path.
+        var stateBagBefore = session?.SerializeStateBag()?.GetRawText();
 
         try
         {
@@ -1254,10 +1202,24 @@ internal sealed class AgentActivities(
 
             _logger.LogAgentToolInvocationCompleted(input.AgentName, input.ToolName);
 
+            // X-1: capture StateBag write-back. Only emit UpdatedStateBag when the serialized
+            // bag actually changed, so the no-mutation case stays null (wire-compatible). The
+            // workflow merges this back into _currentStateBag in tool-call index order.
+            System.Text.Json.JsonElement? updatedStateBag = null;
+            if (session is not null)
+            {
+                var after = session.SerializeStateBag();
+                if (!string.Equals(stateBagBefore, after?.GetRawText(), StringComparison.Ordinal))
+                {
+                    updatedStateBag = after;
+                }
+            }
+
             return new InvokeAgentToolResult
             {
                 Result = result,
                 CallId = input.CallId,
+                UpdatedStateBag = updatedStateBag,
             };
         }
         catch (Exception ex)
@@ -1318,66 +1280,4 @@ internal sealed class CompactHistoryInput
     /// implementor contract).
     /// </summary>
     public required string MarkerCorrelationId { get; init; }
-}
-
-/// <summary>
-/// Input for <see cref="AgentActivities.RunCompactionSummaryAsync"/>.
-/// </summary>
-/// <remarks>
-/// The summarization-strategy producer assembles <see cref="SummarizationPrompt"/> from the
-/// entries it wants to roll up (typically: a system message with summarization instructions
-/// + the messages from the entries being summarized). This activity stays narrow: it executes
-/// the prompt against the resolved <see cref="IChatClient"/> and returns the response. Step
-/// 6's <c>"summarization"</c> strategy is the workflow-side consumer.
-/// </remarks>
-internal sealed class RunCompactionSummaryInput
-{
-    /// <summary>Agent name — telemetry only. Carried for span tags + log correlation.</summary>
-    public required string AgentName { get; init; }
-
-    /// <summary>
-    /// The full prompt to send to the summarization model — typically a system message
-    /// (instructing the model to produce a concise rollup) followed by the user/assistant
-    /// turns that the strategy wants to compress.
-    /// </summary>
-    public required IReadOnlyList<ChatMessage> SummarizationPrompt { get; init; }
-
-    /// <summary>
-    /// Optional keyed-DI key naming the <see cref="IChatClient"/> the summarization should
-    /// use. When <see langword="null"/> or empty, the unkeyed default client is resolved.
-    /// Strategies can route summarization to a cheaper model than the agent's primary chat
-    /// client by registering a separate keyed client.
-    /// </summary>
-    public string? ChatClientKey { get; init; }
-
-    /// <summary>
-    /// Optional model ID override applied via <see cref="ChatOptions.ModelId"/>. When
-    /// <see langword="null"/>, the resolved chat client's default model is used.
-    /// </summary>
-    public string? ModelIdOverride { get; init; }
-}
-
-/// <summary>
-/// Result of <see cref="AgentActivities.RunCompactionSummaryAsync"/>.
-/// </summary>
-internal sealed class RunCompactionSummaryResult
-{
-    /// <summary>
-    /// The model's response messages. Typically a single assistant <see cref="ChatMessage"/>
-    /// containing the rollup summary text — stored on the
-    /// <see cref="CompactionMarkerEntry.Messages"/> of the marker entry the strategy emits.
-    /// </summary>
-    public required IList<ChatMessage> SummaryMessages { get; init; }
-
-    /// <summary>
-    /// Model ID actually used to produce the summary — surfaced into the
-    /// <see cref="CompactionMarkerEntry.ModelId"/> field of the resulting marker entry.
-    /// </summary>
-    public required string ModelIdUsed { get; init; }
-
-    /// <summary>Input token count reported by the model, when available.</summary>
-    public long? InputTokenCount { get; init; }
-
-    /// <summary>Output token count reported by the model, when available.</summary>
-    public long? OutputTokenCount { get; init; }
 }
