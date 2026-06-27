@@ -111,17 +111,18 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         var toolOptions = RequiredInput.ToolActivityOptions;
         if (toolOptions is null || toolOptions.Count == 0)
         {
-            return ExecutePattern1TurnAsync(activityOptions, requestEntry, chatOptions);
+            return ExecuteInlineToolTurnAsync(activityOptions, requestEntry, chatOptions);
         }
 
-        return ExecutePattern3TurnAsync(activityOptions, requestEntry, chatOptions);
+        return ExecuteDurableToolLoopTurnAsync(activityOptions, requestEntry, chatOptions);
     }
 
     /// <summary>
-    /// Pattern 1 single-activity dispatch. Preserved verbatim from the original
-    /// implementation so existing workflows keep their event history shape.
+    /// Inline-tool dispatch (a.k.a. "Pattern 1"): a single <c>GetResponseAsync</c> activity
+    /// handles the LLM call and any inline tool invocation. Preserved verbatim from the
+    /// original implementation so existing workflows keep their event history shape.
     /// </summary>
-    private Task<ChatResponse> ExecutePattern1TurnAsync(
+    private Task<ChatResponse> ExecuteInlineToolTurnAsync(
         ActivityOptions activityOptions,
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
@@ -151,16 +152,16 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     }
 
     /// <summary>
-    /// Pattern 3 dispatch loop. Alternates between <c>GetChatStepAsync</c> (one LLM call,
-    /// returns raw <see cref="FunctionCallContent"/>) and one <c>InvokeFunctionAsync</c>
-    /// activity per tool call (fanned out in parallel via
+    /// Durable tool-dispatch loop (a.k.a. "Pattern 3"). Alternates between
+    /// <c>GetChatStepAsync</c> (one LLM call, returns raw <see cref="FunctionCallContent"/>)
+    /// and one <c>InvokeFunctionAsync</c> activity per tool call (fanned out in parallel via
     /// <see cref="Workflow.WhenAllAsync{TResult}(IEnumerable{Task{TResult}})"/>). Loop exits
     /// when the LLM returns a final assistant message or
     /// <see cref="DurableChatWorkflowInput.MaxToolCallsPerTurn"/> is exceeded — the latter
     /// synthesizes a sentinel <see cref="ChatResponse"/> rather than throwing, matching the
     /// behavior of MAF's <c>AgentWorkflow</c>.
     /// </summary>
-    private async Task<ChatResponse> ExecutePattern3TurnAsync(
+    private async Task<ChatResponse> ExecuteDurableToolLoopTurnAsync(
         ActivityOptions stepActivityOptions,
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
@@ -480,7 +481,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         // Iteration cap hit. Per OD-9 we synthesize an explicit sentinel message rather than
         // throwing — workflow continues, history stays consistent, caller gets a clear signal.
         Workflow.Logger.LogWarning(
-            "Pattern 3 turn aborted after {Max} tool-call iterations; LLM did not converge.",
+            "Durable tool-loop turn aborted after {Max} tool-call iterations; LLM did not converge.",
             maxIterations);
 
         var sentinel = new ChatMessage(

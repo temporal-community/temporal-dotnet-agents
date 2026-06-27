@@ -26,7 +26,7 @@ The sample registers an `OrderInterceptor` that fires before every `apply_refund
 
 > **Library split:** `DurableToolDecision`, `DurableToolContext`, and `IDurableToolInterceptor<TContext>` are defined in `Temporalio.Extensions.AI.Tools`. `IAgentToolInterceptor` and `AgentToolContext` are in `Temporalio.Extensions.Agents.Tools`. Add `using Temporalio.Extensions.AI.Tools;` to any file that references `DurableToolDecision` directly; add `using Temporalio.Extensions.Agents.Tools;` for `IAgentToolInterceptor` / `AgentToolContext`.
 
-> **`IDurableToolInterceptor<DurableToolContext>` sample** — a dedicated MEAI sample demonstrating the base-library interface will be added in Phase 2 when `DurableChatWorkflow.ExecutePattern3TurnAsync` gains interceptor support.
+> **`IDurableToolInterceptor<DurableToolContext>` sample** — see `samples/MEAI/ToolInterceptor` for the base-library interface in action. Interceptors run inside `DurableChatWorkflow.ExecuteDurableToolLoopTurnAsync` (the durable tool-dispatch loop).
 
 ## Prerequisites
 
