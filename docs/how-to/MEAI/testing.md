@@ -1,4 +1,4 @@
-# Testing — Temporalio.Extensions.AI
+# Testing — TemporalCommunity.Extensions.AI
 
 ## Two Testing Layers
 

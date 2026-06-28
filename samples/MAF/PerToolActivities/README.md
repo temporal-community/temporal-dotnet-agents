@@ -1,9 +1,9 @@
 # PerToolActivities — Per-Tool Temporal Activity Granularity
 
 This sample demonstrates **per-tool Temporal activities** in v0.3 of
-`Temporalio.Extensions.Agents`. Every LLM call is its own
-`Temporalio.Extensions.Agents.RunDurableAgentStep` activity, and every tool call
-is its own `Temporalio.Extensions.Agents.InvokeAgentTool` activity. Per-tool
+`TemporalCommunity.Extensions.Agents`. Every LLM call is its own
+`TemporalCommunity.Extensions.Agents.RunDurableAgentStep` activity, and every tool call
+is its own `TemporalCommunity.Extensions.Agents.InvokeAgentTool` activity. Per-tool
 retry policies make write-style tools safe to use without risking double-fire on
 transient failure.
 

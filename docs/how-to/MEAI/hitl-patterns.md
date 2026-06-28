@@ -1,8 +1,8 @@
-# Human-in-the-Loop Patterns — Temporalio.Extensions.AI
+# Human-in-the-Loop Patterns — TemporalCommunity.Extensions.AI
 
 ## Overview
 
-Human-in-the-Loop (HITL) in `Temporalio.Extensions.AI` lets a tool call pause the entire conversation workflow and wait for a human decision before proceeding. The workflow blocks at a `WaitConditionAsync` — Temporal persists all state durably — and only resumes once a decision arrives via `SubmitApprovalAsync`. There is no polling loop, no database, and no lost state if the worker crashes while waiting.
+Human-in-the-Loop (HITL) in `TemporalCommunity.Extensions.AI` lets a tool call pause the entire conversation workflow and wait for a human decision before proceeding. The workflow blocks at a `WaitConditionAsync` — Temporal persists all state durably — and only resumes once a decision arrives via `SubmitApprovalAsync`. There is no polling loop, no database, and no lost state if the worker crashes while waiting.
 
 ---
 

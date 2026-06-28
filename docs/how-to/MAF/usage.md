@@ -1,6 +1,6 @@
 # Usage Guide
 
-Detailed usage patterns and configuration for Temporalio.Extensions.Agents. For a quick overview, see the [README](../../../README.md).
+Detailed usage patterns and configuration for TemporalCommunity.Extensions.Agents. For a quick overview, see the [README](../../../README.md).
 
 ---
 
@@ -70,7 +70,7 @@ builder.Services
 | `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
 | `HistoryStore` | Per-agent `IAgentHistoryStore` factory. `null` inherits `opts.HistoryStore`; if both are `null`, history is carried in workflow state. |
 | `CompactionStrategyKey` | Keyed-DI name of the `ICompactionStrategy` to use for in-session compaction. `null` inherits `opts.DefaultCompactionStrategy`; both `null` disables compaction. Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"`. Requires an external history store. `[Experimental("TA002")]`. See [`compaction.md`](./compaction.md). |
-| `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `Temporalio.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
+| `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
 
 ### `DurableToolOptions` reference
 
@@ -124,9 +124,9 @@ For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new
 
 ## Library Dependencies
 
-`Temporalio.Extensions.Agents` depends on `Temporalio.Extensions.AI`. Installing the Agents NuGet package pulls in the AI package automatically — no separate `<PackageReference>` for `Temporalio.Extensions.AI` is needed.
+`TemporalCommunity.Extensions.Agents` depends on `TemporalCommunity.Extensions.AI`. Installing the Agents NuGet package pulls in the AI package automatically — no separate `<PackageReference>` for `TemporalCommunity.Extensions.AI` is needed.
 
-The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `Temporalio.Extensions.AI` and used by both libraries as the shared wire protocol for approval flows. They are available in your project as soon as you reference `Temporalio.Extensions.Agents`.
+The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI` and used by both libraries as the shared wire protocol for approval flows. They are available in your project as soon as you reference `TemporalCommunity.Extensions.Agents`.
 
 ---
 
@@ -208,8 +208,8 @@ Console.WriteLine(r2.Messages[0].Text);  // ~2.1 million (context preserved)
 
 For long-running agent sessions the conversation history accumulated in the
 `AgentWorkflow` can grow large enough to make each LLM call expensive.
-`Temporalio.Extensions.Agents` works with the same MEAI `IChatReducer` family
-as `Temporalio.Extensions.AI`: register a stateless reducer such as
+`TemporalCommunity.Extensions.Agents` works with the same MEAI `IChatReducer` family
+as `TemporalCommunity.Extensions.AI`: register a stateless reducer such as
 `MessageCountingChatReducer` on the underlying `IChatClient` that backs your
 `AIAgent`. The reducer applies a sliding window at the LLM-call boundary —
 inside `AgentActivities.RunDurableAgentStepAsync` — so it does not need to be replay-safe.
@@ -253,7 +253,7 @@ With this configuration:
 > token-counting reducers, summarization reducers, etc. — as long as it is
 > stateless or scoped per call.
 
-See the equivalent guidance for `Temporalio.Extensions.AI` in
+See the equivalent guidance for `TemporalCommunity.Extensions.AI` in
 [the MEAI usage guide](../MEAI/usage.md#reducing-the-llm-context-window).
 
 ---
@@ -353,7 +353,7 @@ agent's conversation history is stored in the workflow's event history and repla
 
 ```csharp
 using Temporalio.Workflows;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 
 [Workflow]
 public class ResearchWorkflow
@@ -656,7 +656,7 @@ using `Workflow.WhenAllAsync` — the workflow-safe equivalent of `Task.WhenAll`
 
 ```csharp
 using Temporalio.Workflows;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 
 [Workflow]
 public class ResearchAndSummarizeWorkflow
@@ -1048,7 +1048,7 @@ When opted in, conversation messages no longer appear in `ActivityScheduled` eve
 
 ## Per-Tool Activity Configuration
 
-Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity (`Temporalio.Extensions.Agents.InvokeAgentTool`). The default policy is the worker-level `opts.DefaultRetryPolicy` (or Temporal SDK defaults when null). Override per tool via the `configure` callback on `AddTool`.
+Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity (`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). The default policy is the worker-level `opts.DefaultRetryPolicy` (or Temporal SDK defaults when null). Override per tool via the `configure` callback on `AddTool`.
 
 | Property / Method on `DurableToolOptions` | Purpose |
 |---|---|
@@ -1100,7 +1100,7 @@ tracing interceptor and the agent activity source:
 ```csharp
 using OpenTelemetry.Trace;
 using Temporalio.Extensions.OpenTelemetry;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 
 // 1. Configure the OTel tracer provider with all relevant sources
 using var tracerProvider = Sdk.CreateTracerProviderBuilder()
@@ -1108,7 +1108,7 @@ using var tracerProvider = Sdk.CreateTracerProviderBuilder()
         TracingInterceptor.ClientSource.Name,      // Temporal client spans (StartWorkflow, etc.)
         TracingInterceptor.WorkflowsSource.Name,   // Temporal workflow spans
         TracingInterceptor.ActivitiesSource.Name,  // Temporal activity spans (RunActivity)
-        TemporalAgentTelemetry.ActivitySourceName) // "Temporalio.Extensions.Agents"
+        TemporalAgentTelemetry.ActivitySourceName) // "TemporalCommunity.Extensions.Agents"
     .AddOtlpExporter()
     .Build();
 
@@ -1149,7 +1149,7 @@ agent.client.send          (DefaultTemporalAgentClient — before the Update rea
 The span name constants are available on `TemporalAgentTelemetry`:
 
 ```csharp
-TemporalAgentTelemetry.ActivitySourceName    // "Temporalio.Extensions.Agents"
+TemporalAgentTelemetry.ActivitySourceName    // "TemporalCommunity.Extensions.Agents"
 TemporalAgentTelemetry.AgentTurnSpanName     // "agent.turn"
 TemporalAgentTelemetry.AgentClientSendSpanName // "agent.client.send"
 ```

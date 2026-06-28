@@ -1,14 +1,14 @@
 # Cross-Library Integration: Extensions.AI and Extensions.Agents
 
-This document describes the structural relationship between `Temporalio.Extensions.AI` and `Temporalio.Extensions.Agents` — specifically what is shared, what is not, and why the boundary is drawn where it is.
+This document describes the structural relationship between `TemporalCommunity.Extensions.AI` and `TemporalCommunity.Extensions.Agents` — specifically what is shared, what is not, and why the boundary is drawn where it is.
 
 ---
 
 ## The Two-Library Structure
 
-`Temporalio.Extensions.AI` is the lower-level primitive. It makes any `IChatClient` (Microsoft.Extensions.AI / MEAI) durable using Temporal workflows. It has no dependency on the Microsoft Agent Framework and carries minimal abstractions: a workflow, a set of activities, a session client, and the HITL types.
+`TemporalCommunity.Extensions.AI` is the lower-level primitive. It makes any `IChatClient` (Microsoft.Extensions.AI / MEAI) durable using Temporal workflows. It has no dependency on the Microsoft Agent Framework and carries minimal abstractions: a workflow, a set of activities, a session client, and the HITL types.
 
-`Temporalio.Extensions.Agents` builds on top of `Extensions.AI`. It adds the full Microsoft Agent Framework model — `AIAgent`, `ChatClientAgent`, `AgentSessionStateBag`, multi-agent orchestration, workflow-based routing, and scheduled runs — all backed by its own workflow (`AgentWorkflow`) and activity (`AgentActivities`). It takes a NuGet dependency on `Temporalio.Extensions.AI`, pulling in the shared types described below.
+`TemporalCommunity.Extensions.Agents` builds on top of `Extensions.AI`. It adds the full Microsoft Agent Framework model — `AIAgent`, `ChatClientAgent`, `AgentSessionStateBag`, multi-agent orchestration, workflow-based routing, and scheduled runs — all backed by its own workflow (`AgentWorkflow`) and activity (`AgentActivities`). It takes a NuGet dependency on `TemporalCommunity.Extensions.AI`, pulling in the shared types described below.
 
 ---
 
@@ -17,23 +17,23 @@ This document describes the structural relationship between `Temporalio.Extensio
 The dependency is strictly one-way:
 
 ```
-Temporalio.Extensions.Agents
+TemporalCommunity.Extensions.Agents
         │
         │  depends on
         ▼
-Temporalio.Extensions.AI
+TemporalCommunity.Extensions.AI
 ```
 
-`Extensions.AI` has no knowledge of `Extensions.Agents`. This keeps the lower-level library lightweight and usable independently. Adding `Temporalio.Extensions.Agents` to a project automatically pulls in `Temporalio.Extensions.AI` — no separate `<PackageReference>` is needed.
+`Extensions.AI` has no knowledge of `Extensions.Agents`. This keeps the lower-level library lightweight and usable independently. Adding `TemporalCommunity.Extensions.Agents` to a project automatically pulls in `TemporalCommunity.Extensions.AI` — no separate `<PackageReference>` is needed.
 
 ---
 
 ## What Crosses the Boundary
 
-Two types cross the boundary between the libraries: `DurableApprovalRequest` and `DurableApprovalDecision`. Both are defined in `Temporalio.Extensions.AI.Approvals` and used by `Temporalio.Extensions.Agents`.
+Two types cross the boundary between the libraries: `DurableApprovalRequest` and `DurableApprovalDecision`. Both are defined in `TemporalCommunity.Extensions.AI.Approvals` and used by `TemporalCommunity.Extensions.Agents`.
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI.Approvals
+// Namespace: TemporalCommunity.Extensions.AI.Approvals
 // Used by both DurableChatWorkflow (Extensions.AI) and AgentWorkflow (Extensions.Agents)
 public sealed record DurableApprovalRequest
 {

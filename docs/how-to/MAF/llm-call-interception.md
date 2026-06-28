@@ -194,7 +194,7 @@ Both work together. The decorator sees every LLM round — including the rounds 
 - [`docs/design-decisions.md`](../../design-decisions.md) — the underlying design rationale for the v0.3 durable-agent dispatch model.
 - [`docs/how-to/MAF/durable-agents.md`](./durable-agents.md) — per-tool retry/timeout configuration via `DurableToolOptions`.
 - [`docs/how-to/MAF/observability.md`](./observability.md) — the full OTel span hierarchy. Spans emitted by your decorator nest inside `agent.turn`.
-- `src/Temporalio.Extensions.Agents/Workflows/AgentActivities.cs` — `ComposeDurableAgent` and `RunDurableAgentStepAsync`, where the per-step `ChatOptions` is built and the decorated `IChatClient` is invoked.
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentActivities.cs` — `ComposeDurableAgent` and `RunDurableAgentStepAsync`, where the per-step `ChatOptions` is built and the decorated `IChatClient` is invoked.
 - `samples/MAF/BasicAgent/Program.cs` — canonical `agent.ChatClient = sp => ...` registration shape.
 - [`Microsoft.Extensions.AI.DelegatingChatClient`](https://learn.microsoft.com/dotnet/api/microsoft.extensions.ai.delegatingchatclient) — the base class for chat client decorators.
 

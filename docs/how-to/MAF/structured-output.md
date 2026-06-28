@@ -287,7 +287,7 @@ await proxy.RunAsync("Tell me more", session);
 
 ## ResponseFormat in Workflow State
 
-When `ChatResponseFormat` is used, it's serialized into the conversation history as part of `AgentSessionRequest` (the MAF-specific subclass of `DurableSessionRequest` from `Temporalio.Extensions.AI`):
+When `ChatResponseFormat` is used, it's serialized into the conversation history as part of `AgentSessionRequest` (the MAF-specific subclass of `DurableSessionRequest` from `TemporalCommunity.Extensions.AI`):
 
 - `ResponseType`: `"json"` or `"text"`
 - `ResponseSchema`: the JSON schema as a `JsonElement` (for `ChatResponseFormatJson`)
@@ -312,11 +312,11 @@ When omitted, the workflow auto-generates one via `Workflow.NewGuid()` (or `Guid
 
 ## References
 
-- `src/Temporalio.Extensions.Agents/StructuredOutputExtensions.cs` — `RunAsync<T>` implementation
-- `src/Temporalio.Extensions.Agents/StructuredOutputOptions.cs` — configuration options
-- `src/Temporalio.Extensions.Agents/MarkdownCodeFenceHelper.cs` — fence stripping logic
-- `tests/Temporalio.Extensions.Agents.Tests/MarkdownCodeFenceHelperTests.cs` — 11 edge-case tests
-- `tests/Temporalio.Extensions.Agents.Tests/StructuredOutputOptionsTests.cs` — option validation tests
+- `src/TemporalCommunity.Extensions.Agents/StructuredOutputExtensions.cs` — `RunAsync<T>` implementation
+- `src/TemporalCommunity.Extensions.Agents/StructuredOutputOptions.cs` — configuration options
+- `src/TemporalCommunity.Extensions.Agents/MarkdownCodeFenceHelper.cs` — fence stripping logic
+- `tests/TemporalCommunity.Extensions.Agents.Tests/MarkdownCodeFenceHelperTests.cs` — 11 edge-case tests
+- `tests/TemporalCommunity.Extensions.Agents.Tests/StructuredOutputOptionsTests.cs` — option validation tests
 - [Usage Guide — Structured Output](./usage.md#structured-output) — quick-start examples
 
 ---

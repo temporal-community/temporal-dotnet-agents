@@ -34,12 +34,12 @@ not replay-compatible. The historical rationale for the API consolidation is in
   `.WithMaxAttempts(n)`, `.WithTimeout(t)`. Write-style tools (send email, write record,
   charge card) should call `.NoRetry()` to prevent double-execution on retry.
 
-- **`Temporalio.Extensions.Agents.RunDurableAgentStep` activity**
+- **`TemporalCommunity.Extensions.Agents.RunDurableAgentStep` activity**
   (`AgentActivities.RunDurableAgentStepAsync`) — performs one LLM call per dispatch and returns
   either a final assistant message or a list of pending `FunctionCallContent` items. Used by
   the durable-agent workflow loop in `AgentWorkflow.ExecuteDurableAgentTurnAsync`.
 
-- **`Temporalio.Extensions.Agents.InvokeAgentTool` activity**
+- **`TemporalCommunity.Extensions.Agents.InvokeAgentTool` activity**
   (`AgentActivities.InvokeAgentToolAsync`) — performs one tool dispatch per pending
   `FunctionCallContent`. Per-agent local tool registry, distinct from MEAI's flat
   `InvokeFunction` activity. Tool resolution scopes per-agent, so two agents on the same worker
@@ -93,7 +93,7 @@ not replay-compatible. The historical rationale for the API consolidation is in
   `HistoryStore` factory keeps the unprefixed name because its presence is itself the opt-in.
   Inheritance: `effective = registration.X ?? options.DefaultX`.
 
-  **Note:** `Temporalio.Extensions.AI`'s `DurableExecutionOptions` is unchanged — the
+  **Note:** `TemporalCommunity.Extensions.AI`'s `DurableExecutionOptions` is unchanged — the
   unprefixed names (`ActivityTimeout`, `HeartbeatTimeout`, `RetryPolicy`, `ApprovalTimeout`,
   `HistoryReducer`) remain on the MEAI side. The `Default*` rename is MAF-only.
 
@@ -184,7 +184,7 @@ runs before deploying.
 
 ### Added
 
-- **`Temporalio.Extensions.AI` per-turn observability.**
+- **`TemporalCommunity.Extensions.AI` per-turn observability.**
   `DurableChatSessionClient.GetHistoryAsync()` now returns
   `IReadOnlyList<DurableSessionEntry>` instead of `IReadOnlyList<ChatMessage>`.
   Entries carry per-turn `CorrelationId`, `CreatedAt`, and (on responses)
@@ -202,10 +202,10 @@ runs before deploying.
   `ChatResponse.Text` for the common `response.Text` pattern at user call
   sites; `[JsonIgnore]` so it does not appear on the wire.
 
-- **`Temporalio.Extensions.Agents` shares session-entry types with the AI
+- **`TemporalCommunity.Extensions.Agents` shares session-entry types with the AI
   library.** `AgentSessionRequest` and `AgentSessionResponse` are now
   subclasses of `DurableSessionRequest` and `DurableSessionResponse` (in
-  `Temporalio.Extensions.AI`). MAF-specific fields (`OrchestrationId`,
+  `TemporalCommunity.Extensions.AI`). MAF-specific fields (`OrchestrationId`,
   `ResponseType`, `ResponseSchema`) live on the subclasses; messages,
   `CorrelationId`, `CreatedAt`, and `Usage` live on the shared base types.
   Polymorphism is wired across the assembly boundary via a runtime
@@ -228,7 +228,7 @@ runs before deploying.
 
 ### Changed (BREAKING)
 
-- **`Temporalio.Extensions.Agents` workflow history wire format.** Conversation
+- **`TemporalCommunity.Extensions.Agents` workflow history wire format.** Conversation
   history entries serialized by prior versions are not deserializable by this
   version. `TemporalAgentStateEntry.Messages` changed from a TA-custom
   `TemporalAgentStateMessage[]` shape to MEAI's `ChatMessage[]`. The
@@ -246,7 +246,7 @@ runs before deploying.
   version. No dual-reader compatibility shim is provided; the library is
   in preview.
 
-- **`Temporalio.Extensions.AI` workflow history wire format.**
+- **`TemporalCommunity.Extensions.AI` workflow history wire format.**
   `DurableChatWorkflow` history entries now serialize as `DurableSessionEntry`
   (with `ai_request` / `ai_response` polymorphic discriminators on the
   `$type` property) instead of flat `ChatMessage`. In-flight workflows from
@@ -295,7 +295,7 @@ runs before deploying.
   entry-shaped delegate; in-pipeline reducers passed to
   `ChatClientBuilder.UseChatReducer(...)` are unaffected.
 
-- **`Temporalio.Extensions.Agents` state types removed.**
+- **`TemporalCommunity.Extensions.Agents` state types removed.**
   `TemporalAgentStateEntry`, `TemporalAgentStateRequest`,
   `TemporalAgentStateResponse`, and `TemporalAgentStateUsage` are deleted.
   Replaced by `AgentSessionRequest` and `AgentSessionResponse` (extending

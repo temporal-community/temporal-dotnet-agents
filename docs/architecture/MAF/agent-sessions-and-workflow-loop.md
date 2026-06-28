@@ -96,7 +96,7 @@ The session effectively *is* the workflow. Creating a session doesn't start the 
 ### Inheritance: shared session loop, MAF-specific overrides
 
 `AgentWorkflow` inherits from `DurableChatWorkflowBase<AgentResponse>` (declared in
-`Temporalio.Extensions.AI`). The base class owns the session-loop body — the turn
+`TemporalCommunity.Extensions.AI`). The base class owns the session-loop body — the turn
 mutex, continue-as-new triggering, history reduction, the `[WorkflowQuery("GetHistory")]`
 handler, the `[WorkflowSignal("RequestShutdown")]` handler, and all four HITL
 approval methods (`RequestApproval`, `SubmitApproval`, `GetPendingApproval`, plus
@@ -106,7 +106,7 @@ the MAF library no longer carries its own copies.
 The shared shape:
 
 ```
-DurableChatWorkflowBase<TOutput>           ← in Temporalio.Extensions.AI
+DurableChatWorkflowBase<TOutput>           ← in TemporalCommunity.Extensions.AI
     ├─ _history: List<DurableSessionEntry> (private)
     ├─ session-loop body (turn mutex, CAN trigger, history reducer)
     ├─ [WorkflowQuery("GetHistory")]
@@ -118,7 +118,7 @@ DurableChatWorkflowBase<TOutput>           ← in Temporalio.Extensions.AI
     ├─ protected abstract CreateContinueAsNewException(...) ← MAF override below
     └─ protected virtual UpsertCustomSearchAttributes()   ← MAF override below
 
-AgentWorkflow : DurableChatWorkflowBase<AgentResponse>     ← in Temporalio.Extensions.Agents
+AgentWorkflow : DurableChatWorkflowBase<AgentResponse>     ← in TemporalCommunity.Extensions.Agents
     ├─ _currentStateBag: JsonElement?  (MAF-specific)
     ├─ _input: AgentWorkflowInput?     (MAF-specific)
     ├─ [WorkflowUpdate("RunAgent")] + [WorkflowUpdateValidator]
@@ -581,7 +581,7 @@ The fix has to live at the workflow boundary, before step 2: the workflow must o
 | Workflow coordination | `IAgentHistoryStore` | `AgentWorkflow` | Decides whether prior-turn messages are in the activity payload at all — controls what hits the Temporal event log |
 | LLM context injection | `AIContextProvider` (registered via `agent.AddContextProvider`) | `AgentActivities.RunDurableAgentStepAsync` | Surfaces extra context into the prompt for a single LLM call — controls what the model sees |
 
-Inside `RunDurableAgentStepAsync`, when the resolved `CachedDurableAgent.HistoryStore` is non-null and `AgentStepInput.IsFirstStep == true`, the library calls `IAgentHistoryStore.LoadAsync(sessionId)` and prepends the loaded entries' messages to `messagesForLlm` before invoking the chat client. This keeps the workflow-level event log free of prior-turn PII while still giving the model full conversational context for the LLM call. After the turn loop exits — whether the model produced a final response or the iteration cap was reached — the workflow dispatches a separate `AppendAgentTurn` activity (`Temporalio.Extensions.Agents.AppendAgentTurn`) that records the new request/response entries via `IAgentHistoryStore.AppendAsync`. The step activity itself is responsible only for the LLM call and the store load on `IsFirstStep`.
+Inside `RunDurableAgentStepAsync`, when the resolved `CachedDurableAgent.HistoryStore` is non-null and `AgentStepInput.IsFirstStep == true`, the library calls `IAgentHistoryStore.LoadAsync(sessionId)` and prepends the loaded entries' messages to `messagesForLlm` before invoking the chat client. This keeps the workflow-level event log free of prior-turn PII while still giving the model full conversational context for the LLM call. After the turn loop exits — whether the model produced a final response or the iteration cap was reached — the workflow dispatches a separate `AppendAgentTurn` activity (`TemporalCommunity.Extensions.Agents.AppendAgentTurn`) that records the new request/response entries via `IAgentHistoryStore.AppendAsync`. The step activity itself is responsible only for the LLM call and the store load on `IsFirstStep`.
 
 The two layers are complementary, not alternatives. `IAgentHistoryStore` controls Temporal-event content; `AIContextProvider` controls LLM-call content. You need the first to address PII and event growth; you can register additional `AIContextProvider` instances on the same agent for memory, retrieval-augmented context, or similar use cases.
 
@@ -655,7 +655,7 @@ The two changes from the default flow are:
 
 - **Step 8'**: prior-turn entries in the workflow's `_history` are stripped of their `Messages` payload (`ShouldStripMessagesFromHistoryEntry` returns `true`). `accumulated` therefore carries only this turn's request on the wire — the `ActivityScheduled` event written next contains no prior-turn PII.
 - **Step 11b**: on the **first** step of a turn, the activity loads prior history from `IAgentHistoryStore.LoadAsync` and prepends those messages to the LLM call. The step activity's responsibility in the external-store path ends there — it does not write to the store.
-- **Step 9b**: after the turn loop exits (whether the model produced a final response or the iteration cap was reached), the workflow dispatches a separate `AppendAgentTurn` activity (`Temporalio.Extensions.Agents.AppendAgentTurn`). That activity calls `IAgentHistoryStore.AppendAsync` with the completed turn's `[requestEntry, responseEntry]` pair. Operators monitoring the Temporal Web UI will see `AppendAgentTurn` appear as a distinct activity row after the last `RunDurableAgentStep` of each turn.
+- **Step 9b**: after the turn loop exits (whether the model produced a final response or the iteration cap was reached), the workflow dispatches a separate `AppendAgentTurn` activity (`TemporalCommunity.Extensions.Agents.AppendAgentTurn`). That activity calls `IAgentHistoryStore.AppendAsync` with the completed turn's `[requestEntry, responseEntry]` pair. Operators monitoring the Temporal Web UI will see `AppendAgentTurn` appear as a distinct activity row after the last `RunDurableAgentStep` of each turn.
 
 The flag that travels with the workflow is `AgentWorkflowInput.UseExternalStoreMode` — it is set when the workflow is created and survives continue-as-new boundaries (see [Continue-as-new behavior change](#continue-as-new-behavior-change) below).
 
@@ -699,7 +699,7 @@ In v0.3 every agent registered via `TemporalAgentsOptions.AddDurableAgent(...)` 
 
 ### Why the loop must live in the workflow
 
-Temporal has a hard constraint: **activities cannot schedule child activities**. Only a workflow can call `Workflow.ExecuteActivityAsync`. There is no in-activity API for "run this thing as another activity and wait." The `Temporalio.Extensions.AI` durable-tools pattern works exactly because the workflow (`DurableChatWorkflow`) owns the dispatch — the activity that drives the LLM call cannot fan out to per-tool activities of its own.
+Temporal has a hard constraint: **activities cannot schedule child activities**. Only a workflow can call `Workflow.ExecuteActivityAsync`. There is no in-activity API for "run this thing as another activity and wait." The `TemporalCommunity.Extensions.AI` durable-tools pattern works exactly because the workflow (`DurableChatWorkflow`) owns the dispatch — the activity that drives the LLM call cannot fan out to per-tool activities of its own.
 
 This eliminates several otherwise-tempting designs:
 
@@ -758,8 +758,8 @@ The durable path dispatches two activity types per turn:
 
 | Activity name | Role |
 |---|---|
-| `Temporalio.Extensions.Agents.RunDurableAgentStep` | One LLM call. Returns either a final assistant message or `FunctionCallContent[]`. Pipeline includes `UseAIContextProvider`. |
-| `Temporalio.Extensions.Agents.InvokeAgentTool` | One tool dispatch. Resolves the tool from the agent's local registry (per-agent — names do not collide across agents). |
+| `TemporalCommunity.Extensions.Agents.RunDurableAgentStep` | One LLM call. Returns either a final assistant message or `FunctionCallContent[]`. Pipeline includes `UseAIContextProvider`. |
+| `TemporalCommunity.Extensions.Agents.InvokeAgentTool` | One tool dispatch. Resolves the tool from the agent's local registry (per-agent — names do not collide across agents). |
 
 The split is intentional: `InvokeAgentTool` carries the `AgentName` so the cached agent state can resolve the tool against its local registry. Two agents on the same worker can register tools with the same `AIFunction.Name` without collision, and the Temporal Web UI shows `RunDurableAgentStep` and `InvokeAgentTool` as distinct rows so operators can read the dispatch shape at a glance.
 
@@ -771,7 +771,7 @@ The fan-out step uses `Workflow.WhenAllAsync` — the Temporal SDK's workflow-sa
 var toolOutputs = await Workflow.WhenAllAsync(toolTasks).ConfigureAwait(true);
 ```
 
-Inside a Temporal `[Workflow]`, `await`s must run on the workflow scheduler so that task continuations are deterministic on replay. `Task.WhenAll` is technically safe in many cases (when all the awaited tasks come from `Workflow.ExecuteActivityAsync`, which schedules continuations on `TaskScheduler.Current`), but `Workflow.WhenAllAsync` is the project convention and is documented as "the workflow-safe equivalent of `Task.WhenAll`" by the SDK itself. `TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync` (`src/Temporalio.Extensions.Agents/TemporalWorkflowExtensions.cs:112`) already uses it for the parallel-agent pattern; the durable loop follows the same convention.
+Inside a Temporal `[Workflow]`, `await`s must run on the workflow scheduler so that task continuations are deterministic on replay. `Task.WhenAll` is technically safe in many cases (when all the awaited tasks come from `Workflow.ExecuteActivityAsync`, which schedules continuations on `TaskScheduler.Current`), but `Workflow.WhenAllAsync` is the project convention and is documented as "the workflow-safe equivalent of `Task.WhenAll`" by the SDK itself. `TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync` (`src/TemporalCommunity.Extensions.Agents/TemporalWorkflowExtensions.cs:112`) already uses it for the parallel-agent pattern; the durable loop follows the same convention.
 
 `Workflow.WhenAllAsync` preserves input order. The result list is index-aligned with the input task list, so the workflow can pair `toolOutputs[i]` with `toolCalls[i]` to build `FunctionResultContent(callId: toolCalls[i].CallId, result: toolOutputs[i].Result)` without needing a correlation lookup.
 

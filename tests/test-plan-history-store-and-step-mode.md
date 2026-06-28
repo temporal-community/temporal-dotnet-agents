@@ -13,8 +13,8 @@ Tests are split between the existing test projects:
 
 | Project | Type | When |
 |---|---|---|
-| `Temporalio.Extensions.Agents.Tests` | xUnit unit tests, no embedded server | Default; use for type-level, validation, and capture assertions |
-| `Temporalio.Extensions.Agents.IntegrationTests` | xUnit integration tests, `WorkflowEnvironment.StartLocalAsync()` | When the assertion needs real workflow scheduling, replay, or worker restarts |
+| `TemporalCommunity.Extensions.Agents.Tests` | xUnit unit tests, no embedded server | Default; use for type-level, validation, and capture assertions |
+| `TemporalCommunity.Extensions.Agents.IntegrationTests` | xUnit integration tests, `WorkflowEnvironment.StartLocalAsync()` | When the assertion needs real workflow scheduling, replay, or worker restarts |
 
 ---
 
@@ -33,10 +33,10 @@ These four helpers live under the `Tests` project and have no dependency on Tank
 
 | File | Purpose |
 |---|---|
-| `tests/Temporalio.Extensions.Agents.Tests/HistoryStore/FakeAgentHistoryStore.cs` | Concurrent-safe in-memory test double for `IAgentHistoryStore`. Records every call (`Load` / `Append` / `Replace`), supports failure injection and pre-op hooks for ordering tests. |
-| `tests/Temporalio.Extensions.Agents.Tests/HistoryStore/CapturingPayloadConverter.cs` | Wraps the production `DefaultPayloadConverter(AIJsonUtilities.DefaultOptions)` and records every `ToPayload` / `ToValue` call. Lets tests assert "the activity-scheduled event would not contain `ConversationHistory`" by inspecting the captured `ExecuteAgentInput` instance directly — no live server round-trip required. |
-| `tests/Temporalio.Extensions.Agents.Tests/StepMode/RecordingTool.cs` | Records every tool call (count, arguments, timestamp). Behavior is configurable: `AlwaysSucceed`, `AlwaysFail`, `FailOnceThenSucceed`. Drives retry-policy tests and crash-safety counters. |
-| `tests/Temporalio.Extensions.Agents.Tests/StepMode/ScriptedChatClient.cs` | `IChatClient` that returns a pre-defined sequence of `ChatResponse` values, including responses that carry `FunctionCallContent`. Drives the step-mode loop deterministically. Has a `WithToolCallsThenFinal` factory for the canonical two-turn pattern. |
+| `tests/TemporalCommunity.Extensions.Agents.Tests/HistoryStore/FakeAgentHistoryStore.cs` | Concurrent-safe in-memory test double for `IAgentHistoryStore`. Records every call (`Load` / `Append` / `Replace`), supports failure injection and pre-op hooks for ordering tests. |
+| `tests/TemporalCommunity.Extensions.Agents.Tests/HistoryStore/CapturingPayloadConverter.cs` | Wraps the production `DefaultPayloadConverter(AIJsonUtilities.DefaultOptions)` and records every `ToPayload` / `ToValue` call. Lets tests assert "the activity-scheduled event would not contain `ConversationHistory`" by inspecting the captured `ExecuteAgentInput` instance directly — no live server round-trip required. |
+| `tests/TemporalCommunity.Extensions.Agents.Tests/StepMode/RecordingTool.cs` | Records every tool call (count, arguments, timestamp). Behavior is configurable: `AlwaysSucceed`, `AlwaysFail`, `FailOnceThenSucceed`. Drives retry-policy tests and crash-safety counters. |
+| `tests/TemporalCommunity.Extensions.Agents.Tests/StepMode/ScriptedChatClient.cs` | `IChatClient` that returns a pre-defined sequence of `ChatResponse` values, including responses that carry `FunctionCallContent`. Drives the step-mode loop deterministically. Has a `WithToolCallsThenFinal` factory for the canonical two-turn pattern. |
 
 When Tank's `IAgentHistoryStore` interface lands, the `FakeAgentHistoryStore` only needs `: IAgentHistoryStore` added on the class declaration — its public surface already matches the planned interface (`LoadAsync` / `AppendAsync` / `ReplaceAsync`).
 
@@ -62,9 +62,9 @@ When Tank's `IAgentHistoryStore` interface lands, the `FakeAgentHistoryStore` on
 
 ### Test class locations
 
-- New file: `tests/Temporalio.Extensions.Agents.Tests/ExternalHistoryStoreTests.cs` — for unit tests 1.1, 1.4, 1.7 (validation lives elsewhere — see below), 1.11.
-- New file: `tests/Temporalio.Extensions.Agents.Tests/TemporalAgentsRegistrarValidationTests.cs` (or extend the existing `TemporalAgentsOptionsTests.cs`) — for 1.7. The existing `AgentWorkflowValidatorTests.cs` is a good model.
-- New file: `tests/Temporalio.Extensions.Agents.IntegrationTests/ExternalHistoryStoreIntegrationTests.cs` — for 1.2, 1.3, 1.5, 1.6, 1.8, 1.9, 1.10.
+- New file: `tests/TemporalCommunity.Extensions.Agents.Tests/ExternalHistoryStoreTests.cs` — for unit tests 1.1, 1.4, 1.7 (validation lives elsewhere — see below), 1.11.
+- New file: `tests/TemporalCommunity.Extensions.Agents.Tests/TemporalAgentsRegistrarValidationTests.cs` (or extend the existing `TemporalAgentsOptionsTests.cs`) — for 1.7. The existing `AgentWorkflowValidatorTests.cs` is a good model.
+- New file: `tests/TemporalCommunity.Extensions.Agents.IntegrationTests/ExternalHistoryStoreIntegrationTests.cs` — for 1.2, 1.3, 1.5, 1.6, 1.8, 1.9, 1.10.
 
 ### How to assert "ConversationHistory is null in the activity-scheduled event"
 
@@ -79,7 +79,7 @@ The plan's verification section calls for inspecting the activity-scheduled even
 
 ### Notes for Tank
 
-- The `ShouldStripMessagesFromHistoryEntry()` virtual hook on `DurableChatWorkflowBase` referenced in the plan needs `StripMessagesFromEntry(...)` and `StripMessagesFromResponse(...)` helpers. The current WIP at `src/Temporalio.Extensions.AI/DurableChatWorkflowBase.cs:256,275` references these names but they aren't defined yet — they need to land before the test project will compile.
+- The `ShouldStripMessagesFromHistoryEntry()` virtual hook on `DurableChatWorkflowBase` referenced in the plan needs `StripMessagesFromEntry(...)` and `StripMessagesFromResponse(...)` helpers. The current WIP at `src/TemporalCommunity.Extensions.AI/DurableChatWorkflowBase.cs:256,275` references these names but they aren't defined yet — they need to land before the test project will compile.
 - Tests 1.5 and 1.6 require a way to observe the new run input from the prior run. The standard Temporal pattern is to read it back via `WorkflowHandle.GetResultAsync()` after the workflow signals completion, or via a workflow query that reflects the current input.
 
 ---
@@ -105,21 +105,21 @@ The plan's verification section calls for inspecting the activity-scheduled even
 
 ### Test class locations
 
-- New file: `tests/Temporalio.Extensions.Agents.Tests/RunAgentStepActivityTests.cs` — for 2.11, 2.12.
+- New file: `tests/TemporalCommunity.Extensions.Agents.Tests/RunAgentStepActivityTests.cs` — for 2.11, 2.12.
 - Validation test 2.10 lives in the same `TemporalAgentsRegistrarValidationTests.cs` file from Feature 1.
-- New file: `tests/Temporalio.Extensions.Agents.IntegrationTests/StepModeIntegrationTests.cs` — for 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9.
+- New file: `tests/TemporalCommunity.Extensions.Agents.IntegrationTests/StepModeIntegrationTests.cs` — for 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9.
 
 ### How to assert parallel fan-out (test 2.4)
 
 Three approaches, in order of preference:
 
-1. **History inspection** — use `WorkflowHandle.FetchHistoryAsync()` and walk events. For the "all scheduled before any completes" claim, find the indices of `ActivityTaskScheduled` events for `Temporalio.Extensions.AI.InvokeFunction` and the first `ActivityTaskCompleted` event of the same type — assert all three schedule events have indices < the first complete event.
+1. **History inspection** — use `WorkflowHandle.FetchHistoryAsync()` and walk events. For the "all scheduled before any completes" claim, find the indices of `ActivityTaskScheduled` events for `TemporalCommunity.Extensions.AI.InvokeFunction` and the first `ActivityTaskCompleted` event of the same type — assert all three schedule events have indices < the first complete event.
 2. **Tool-side timing** — `RecordingTool.RecordedInvocation` carries `StartedAt`. With three `RecordingTool` instances (each with a small `await Task.Yield()` inside the body), assert all three `StartedAt` values are within a tight window. Less rigorous than (1) but useful as a sanity check.
 3. **Replay** — combine with test 2.9.
 
 ### How to crash-test the worker (test 2.7)
 
-Existing pattern: `tests/Temporalio.Extensions.Agents.IntegrationTests/ResilienceTests.cs` already starts and kills workers. The recipe:
+Existing pattern: `tests/TemporalCommunity.Extensions.Agents.IntegrationTests/ResilienceTests.cs` already starts and kills workers. The recipe:
 
 1. Configure the `RecordingTool` with a delay (e.g., `Task.Delay(TimeSpan.FromSeconds(2))` inside the body) so we have time to crash.
 2. Start the workflow and wait until `RecordingTool.CallCount == 1`.
@@ -151,8 +151,8 @@ Per plan §"ConfigureAwait(false) — current state and action required", a grep
 
 ```bash
 grep -rn "ConfigureAwait(false)" \
-  src/Temporalio.Extensions.Agents/Workflows/AgentWorkflow.cs \
-  src/Temporalio.Extensions.AI/DurableChatWorkflowBase.cs
+  src/TemporalCommunity.Extensions.Agents/Workflows/AgentWorkflow.cs \
+  src/TemporalCommunity.Extensions.AI/DurableChatWorkflowBase.cs
 ```
 
 Must return zero results. This is a `just` recipe candidate (`just verify-workflow-configureawait`) but at minimum should be in the PR review checklist for both features.
@@ -164,7 +164,7 @@ Must return zero results. This is a `just` recipe candidate (`just verify-workfl
 What I've shipped now:
 
 - This document.
-- Four scaffolding files in `tests/Temporalio.Extensions.Agents.Tests/HistoryStore/` and `tests/Temporalio.Extensions.Agents.Tests/StepMode/` (compile-clean against unmodified `main`; verified via stash + build).
+- Four scaffolding files in `tests/TemporalCommunity.Extensions.Agents.Tests/HistoryStore/` and `tests/TemporalCommunity.Extensions.Agents.Tests/StepMode/` (compile-clean against unmodified `main`; verified via stash + build).
 
 What I'm waiting on:
 

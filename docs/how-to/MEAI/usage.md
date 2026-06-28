@@ -1,6 +1,6 @@
-# Getting Started with Temporalio.Extensions.AI
+# Getting Started with TemporalCommunity.Extensions.AI
 
-`Temporalio.Extensions.AI` makes any `IChatClient` (Microsoft.Extensions.AI / MEAI) durable using Temporal workflows — no Microsoft Agent Framework required. You keep your existing MEAI pipeline and conversation code; the library wraps each LLM call as a Temporal activity and stores conversation history inside a long-running workflow.
+`TemporalCommunity.Extensions.AI` makes any `IChatClient` (Microsoft.Extensions.AI / MEAI) durable using Temporal workflows — no Microsoft Agent Framework required. You keep your existing MEAI pipeline and conversation code; the library wraps each LLM call as a Temporal activity and stores conversation history inside a long-running workflow.
 
 The key insight is the mapping between MEAI concepts and Temporal primitives. Each **conversation** becomes a **Temporal workflow** identified by a `conversationId` string you control. Each **LLM call** (a single `GetResponseAsync` invocation) becomes a **Temporal activity** with configurable timeouts, retry policy, and crash recovery. If the worker process crashes mid-call, Temporal retries the activity automatically from where it left off — the conversation history is safe in workflow state.
 
@@ -16,7 +16,7 @@ This is meaningfully different from a plain MEAI pipeline. A raw `IChatClient` c
 - The NuGet package:
 
 ```bash
-dotnet add package Temporalio.Extensions.AI
+dotnet add package TemporalCommunity.Extensions.AI
 ```
 
 ---
@@ -359,22 +359,22 @@ The resolved dict is captured into workflow history at session start, so per-too
 
 `MaxToolCallsPerTurn` and `MaximumConsecutiveErrorsPerRequest` are **independent counters** with different jobs. Confusing them leads to surprising turn-abort behavior, so it is worth pinning down exactly what each one counts.
 
-`MaxToolCallsPerTurn` bounds the outer `for` loop in the workflow ([`DurableChatWorkflow.cs:167`](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L167)). Every iteration consumes exactly one slot — it does not matter whether the tool calls in that iteration succeeded or faulted. Errors **do** count against this iteration budget.
+`MaxToolCallsPerTurn` bounds the outer `for` loop in the workflow ([`DurableChatWorkflow.cs:167`](../../../src/TemporalCommunity.Extensions.AI/DurableChatWorkflow.cs#L167)). Every iteration consumes exactly one slot — it does not matter whether the tool calls in that iteration succeeded or faulted. Errors **do** count against this iteration budget.
 
-`MaximumConsecutiveErrorsPerRequest` is a separate counter that only moves when *at least one* tool call in an iteration faulted (`hadError = true` at [line 245](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L245), incremented at [lines 260–270](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L260)). A fully successful iteration resets it back to zero ([line 273](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L273)).
+`MaximumConsecutiveErrorsPerRequest` is a separate counter that only moves when *at least one* tool call in an iteration faulted (`hadError = true` at [line 245](../../../src/TemporalCommunity.Extensions.AI/DurableChatWorkflow.cs#L245), incremented at [lines 260–270](../../../src/TemporalCommunity.Extensions.AI/DurableChatWorkflow.cs#L260)). A fully successful iteration resets it back to zero ([line 273](../../../src/TemporalCommunity.Extensions.AI/DurableChatWorkflow.cs#L273)).
 
 ### What happens on each iteration
 
-1. **LLM step.** The workflow dispatches `GetChatStepAsync` ([line 179](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L179)). The LLM call itself is **not gated** by either counter — an LLM failure surfaces directly as an activity exception, and it does **not** increment the error counter.
-2. **Tool fan-out.** If the response contains tool calls, they dispatch in parallel via `Workflow.WhenAllAsync` ([line 226](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L226)).
-3. **Per-task inspection.** The workflow walks every task individually and synthesizes one `FunctionResultContent` per `CallId` in original order ([lines 235–258](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L235-L258)) — successful results carry the activity output; failures carry an error message that gets fed back to the LLM. Every `CallId` always gets a result; partial-failure turns never leave orphan IDs (OpenAI/Anthropic reject those).
-4. **Consecutive-error check.** *After* synthesizing tool-result messages, the workflow checks the threshold ([line 263](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L263)). Exceeding it throws a non-retryable `ApplicationFailureException` that terminates the turn.
+1. **LLM step.** The workflow dispatches `GetChatStepAsync` ([line 179](../../../src/TemporalCommunity.Extensions.AI/DurableChatWorkflow.cs#L179)). The LLM call itself is **not gated** by either counter — an LLM failure surfaces directly as an activity exception, and it does **not** increment the error counter.
+2. **Tool fan-out.** If the response contains tool calls, they dispatch in parallel via `Workflow.WhenAllAsync` ([line 226](../../../src/TemporalCommunity.Extensions.AI/DurableChatWorkflow.cs#L226)).
+3. **Per-task inspection.** The workflow walks every task individually and synthesizes one `FunctionResultContent` per `CallId` in original order ([lines 235–258](../../../src/TemporalCommunity.Extensions.AI/DurableChatWorkflow.cs#L235-L258)) — successful results carry the activity output; failures carry an error message that gets fed back to the LLM. Every `CallId` always gets a result; partial-failure turns never leave orphan IDs (OpenAI/Anthropic reject those).
+4. **Consecutive-error check.** *After* synthesizing tool-result messages, the workflow checks the threshold ([line 263](../../../src/TemporalCommunity.Extensions.AI/DurableChatWorkflow.cs#L263)). Exceeding it throws a non-retryable `ApplicationFailureException` that terminates the turn.
 
 ### The three behavioral modes
 
 - **`MaximumConsecutiveErrorsPerRequest = 0`** — immediate-failure agent. The first faulted iteration aborts the turn.
 - **Default of `3`** — up to three consecutive partially-faulting iterations are tolerated before the turn aborts. Any all-success iteration mixed in resets the counter.
-- **Errors effectively disabled (very large value)** — `MaxToolCallsPerTurn` still caps total dispatches. When the cap is hit the workflow synthesizes the sentinel assistant message ([lines 281–293](../../../src/Temporalio.Extensions.AI/DurableChatWorkflow.cs#L281-L293)) and returns cleanly — it does **not** throw.
+- **Errors effectively disabled (very large value)** — `MaxToolCallsPerTurn` still caps total dispatches. When the cap is hit the workflow synthesizes the sentinel assistant message ([lines 281–293](../../../src/TemporalCommunity.Extensions.AI/DurableChatWorkflow.cs#L281-L293)) and returns cleanly — it does **not** throw.
 
 In other words: iteration-cap exhaustion is a **soft** outcome (sentinel message, healthy workflow), while exceeding the consecutive-error budget is a **hard** outcome (non-retryable failure propagated to the caller). Choose `MaximumConsecutiveErrorsPerRequest` based on how loudly you want a stuck tool to fail.
 
@@ -583,9 +583,9 @@ Non-sensitive settings (`OPENAI_API_BASE_URL`, `OPENAI_MODEL`) remain in `sample
 
 ## When to Use Extensions.Agents Instead
 
-`Temporalio.Extensions.AI` is the right choice when you need durable `IChatClient` execution without taking a dependency on the Microsoft Agent Framework. It works with any MEAI-compatible provider and adds Temporal durability to a standard chat pipeline with minimal overhead.
+`TemporalCommunity.Extensions.AI` is the right choice when you need durable `IChatClient` execution without taking a dependency on the Microsoft Agent Framework. It works with any MEAI-compatible provider and adds Temporal durability to a standard chat pipeline with minimal overhead.
 
-Reach for `Temporalio.Extensions.Agents` when your use case calls for any of the following:
+Reach for `TemporalCommunity.Extensions.Agents` when your use case calls for any of the following:
 
 - **LLM-powered routing** — automatically dispatching user messages to a specialist agent based on intent
 - **Multi-agent orchestration** — running sub-agents from inside a workflow with `GetAgent` and parallel fan-out with `ExecuteAgentsInParallelAsync`
@@ -594,4 +594,4 @@ Reach for `Temporalio.Extensions.Agents` when your use case calls for any of the
 
 Both libraries share the same HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) and use the same approval protocol, so an external approval system works against either workflow type.
 
-See [Temporalio.Extensions.Agents Usage Guide](../MAF/usage.md) for the full feature set.
+See [TemporalCommunity.Extensions.Agents Usage Guide](../MAF/usage.md) for the full feature set.

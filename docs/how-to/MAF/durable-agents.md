@@ -10,16 +10,16 @@ The first two activities always run; the remainder are mode-gated by configurati
 
 | Activity name | When | What it does |
 |---|---|---|
-| `Temporalio.Extensions.Agents.RunDurableAgentStep` | Every step of every turn (loop iterations) | One LLM call. Activity-side trigger evaluation also runs here (sets `CompactionNeeded` / target IDs on the result) |
-| `Temporalio.Extensions.Agents.InvokeAgentTool` | One per tool call the LLM emits | Dispatches a single tool. Honors per-tool `DurableToolOptions` |
+| `TemporalCommunity.Extensions.Agents.RunDurableAgentStep` | Every step of every turn (loop iterations) | One LLM call. Activity-side trigger evaluation also runs here (sets `CompactionNeeded` / target IDs on the result) |
+| `TemporalCommunity.Extensions.Agents.InvokeAgentTool` | One per tool call the LLM emits | Dispatches a single tool. Honors per-tool `DurableToolOptions` |
 
 **Opt-in (gated by configuration):**
 
 | Activity name | When | What it does |
 |---|---|---|
-| `Temporalio.Extensions.Agents.AppendAgentTurn` | After the turn loop exits (external-store mode only) | Writes `[requestEntry, responseEntry]` to `IAgentHistoryStore` |
-| `Temporalio.Extensions.Agents.ReduceHistoryInStore` | At continue-as-new (external-store mode only) | Loads projected view, runs `HistoryReducer`, `ReplaceAsync`-es the store |
-| `Temporalio.Extensions.Agents.CompactHistory` | When `stepResult.CompactionNeeded == true` (after `AppendAgentTurn`) | Invokes the configured `ICompactionStrategy`, appends one `CompactionMarkerEntry`. Summarization runs the LLM call inline within this activity. See [`compaction.md`](./compaction.md) |
+| `TemporalCommunity.Extensions.Agents.AppendAgentTurn` | After the turn loop exits (external-store mode only) | Writes `[requestEntry, responseEntry]` to `IAgentHistoryStore` |
+| `TemporalCommunity.Extensions.Agents.ReduceHistoryInStore` | At continue-as-new (external-store mode only) | Loads projected view, runs `HistoryReducer`, `ReplaceAsync`-es the store |
+| `TemporalCommunity.Extensions.Agents.CompactHistory` | When `stepResult.CompactionNeeded == true` (after `AppendAgentTurn`) | Invokes the configured `ICompactionStrategy`, appends one `CompactionMarkerEntry`. Summarization runs the LLM call inline within this activity. See [`compaction.md`](./compaction.md) |
 
 ## When to use what
 

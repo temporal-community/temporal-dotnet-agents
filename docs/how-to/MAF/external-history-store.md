@@ -96,8 +96,8 @@ If you only register a custom `ChatHistoryProvider` without `IAgentHistoryStore`
 Register a store implementation in DI and assign the worker-level `HistoryStore` factory:
 
 ```csharp
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.HistoryStore;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.HistoryStore;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -171,7 +171,7 @@ The factory runs once at first activity dispatch (the same lifecycle as `agent.C
 The interface is small:
 
 ```csharp
-namespace Temporalio.Extensions.Agents.HistoryStore;
+namespace TemporalCommunity.Extensions.Agents.HistoryStore;
 
 public interface IAgentHistoryStore
 {
@@ -229,7 +229,7 @@ Store `DurableSessionEntry` (or its concrete subclasses `AgentSessionRequest` / 
 Use `TemporalAgentJsonUtilities.DefaultOptions` for serialization. It is configured with the runtime polymorphism modifier that emits the discriminators correctly:
 
 ```csharp
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using System.Text.Json;
 
 var json = JsonSerializer.Serialize(entry, TemporalAgentJsonUtilities.DefaultOptions);
@@ -245,8 +245,8 @@ This is suitable for tests and as a starting template — not production:
 
 ```csharp
 using System.Collections.Concurrent;
-using Temporalio.Extensions.Agents.HistoryStore;
-using Temporalio.Extensions.AI;
+using TemporalCommunity.Extensions.Agents.HistoryStore;
+using TemporalCommunity.Extensions.AI;
 
 public sealed class InMemoryAgentHistoryStore : IAgentHistoryStore
 {
@@ -424,9 +424,9 @@ For sessions of fewer than ~50 turns with no PII concerns, the default path is t
 - [Agent Sessions and the Workflow Loop — External History Store](../../architecture/MAF/agent-sessions-and-workflow-loop.md#external-history-store) — architectural diagram and rationale
 - [Usage Guide](./usage.md) — full `TemporalAgentsOptions` and `DurableAgentBuilder` reference
 - [Session StateBag and Context Providers](../../architecture/MAF/session-statebag-and-context-providers.md) — how `AIContextProvider` integrates with the session loop
-- `src/Temporalio.Extensions.Agents/HistoryStore/IAgentHistoryStore.cs` — interface definition
-- `src/Temporalio.Extensions.Agents/TemporalAgentsOptions.cs` — `HistoryStore` worker-level factory
-- `src/Temporalio.Extensions.Agents/DurableAgentBuilder.cs` — `HistoryStore` per-agent factory
+- `src/TemporalCommunity.Extensions.Agents/HistoryStore/IAgentHistoryStore.cs` — interface definition
+- `src/TemporalCommunity.Extensions.Agents/TemporalAgentsOptions.cs` — `HistoryStore` worker-level factory
+- `src/TemporalCommunity.Extensions.Agents/DurableAgentBuilder.cs` — `HistoryStore` per-agent factory
 
 ---
 

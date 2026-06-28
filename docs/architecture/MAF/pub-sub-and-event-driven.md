@@ -36,7 +36,7 @@ The helper `ExecuteAgentsInParallelAsync` (from `TemporalWorkflowExtensions`) di
 multiple agents in parallel and returns all responses in input order.
 
 ```csharp
-using static Temporalio.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
 
 [Workflow("EventDrivenFanOut")]
 public class EventDrivenFanOutWorkflow
