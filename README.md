@@ -5,7 +5,7 @@ Temporal .NET SDK integrations for building durable AI applications. Two package
 | Package | Description |
 |---------|-------------|
 | [`Temporalio.Extensions.AI`](src/Temporalio.Extensions.AI/README.md) | Make any `IChatClient` durable — no Agent Framework required |
-| [`Temporalio.Extensions.Agents`](src/Temporalio.Extensions.Agents/README.md) | Durable agent sessions built on Microsoft Agent Framework (`Microsoft.Agents.AI`) |
+| [`Temporalio.Extensions.Agents`](src/Temporalio.Extensions.Agents/README.md) | Durable agent sessions built on Microsoft Agent Framework |
 
 Both packages give AI workloads **durability by default** — conversation history, LLM calls, and tool invocations are persisted in Temporal's event history and replayed deterministically after crashes or restarts.
 
