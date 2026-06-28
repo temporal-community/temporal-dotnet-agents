@@ -1,6 +1,6 @@
 # Durable Chat Pipeline Architecture
 
-`Temporalio.Extensions.AI` is a thin middleware layer that wraps MEAI's `IChatClient` abstraction with Temporal's durable execution engine. Each conversation maps to a long-lived Temporal workflow. LLM calls and tool invocations run as Temporal activities — independently retried, checkpointed to durable history, and never re-executed after completion.
+`TemporalCommunity.Extensions.AI` is a thin middleware layer that wraps MEAI's `IChatClient` abstraction with Temporal's durable execution engine. Each conversation maps to a long-lived Temporal workflow. LLM calls and tool invocations run as Temporal activities — independently retried, checkpointed to durable history, and never re-executed after completion.
 
 This document covers the internal architecture of the pipeline: how the components relate, why the design choices were made, and what guarantees the system provides.
 
@@ -765,7 +765,7 @@ if (registry?.Count > 0 && responseHasToolCalls && !hasFIC)
 }
 ```
 
-`DurableToolsNotWrappedException` extends `DurableConfigurationException` and lives in `Temporalio.Extensions.AI.Exceptions`. It fires only when the LLM actually returned tool calls and no dispatch path exists — not at startup, not on healthy paths.
+`DurableToolsNotWrappedException` extends `DurableConfigurationException` and lives in `TemporalCommunity.Extensions.AI.Exceptions`. It fires only when the LLM actually returned tool calls and no dispatch path exists — not at startup, not on healthy paths.
 
 ### Pattern 3 + ContinueAsNew
 
@@ -827,7 +827,7 @@ This limitation is fundamental to Temporal's activity execution model, which is 
 
 ## 10. Observability
 
-The library emits OpenTelemetry spans via `DurableChatTelemetry.ActivitySource` (`"Temporalio.Extensions.AI"`). Temporal's SDK `TracingInterceptor` emits separate spans for the Temporal protocol layer. These compose into a single trace:
+The library emits OpenTelemetry spans via `DurableChatTelemetry.ActivitySource` (`"TemporalCommunity.Extensions.AI"`). Temporal's SDK `TracingInterceptor` emits separate spans for the Temporal protocol layer. These compose into a single trace:
 
 ```
 durable_chat.send                    ← DurableChatTelemetry (conversation.id, model)
@@ -846,7 +846,7 @@ Sdk.CreateTracerProviderBuilder()
         TracingInterceptor.ClientSource.Name,
         TracingInterceptor.WorkflowsSource.Name,
         TracingInterceptor.ActivitiesSource.Name,
-        DurableChatTelemetry.ActivitySourceName)   // "Temporalio.Extensions.AI"
+        DurableChatTelemetry.ActivitySourceName)   // "TemporalCommunity.Extensions.AI"
     .AddOtlpExporter()
     .Build();
 ```

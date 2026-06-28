@@ -14,7 +14,7 @@ using OpenAI;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 using Temporalio.Client;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Extensions.OpenTelemetry;
 

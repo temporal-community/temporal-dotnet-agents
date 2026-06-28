@@ -10,13 +10,13 @@
       MAAI001 ([Experimental] on the MAF file-skills surface) is error-by-default from the
       compiler. This sample demonstrates UseSkills, which consumes that experimental
       surface, so suppress the category here. Production inventory:
-      src/Temporalio.Extensions.Agents/Internal/ExperimentalApiSuppressions.cs · plan §2.2 (S-F-1).
+      src/TemporalCommunity.Extensions.Agents/Internal/ExperimentalApiSuppressions.cs · plan §2.2 (S-F-1).
     -->
     <NoWarn>$(NoWarn);MAAI001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../../src/Temporalio.Extensions.Agents/Temporalio.Extensions.Agents.csproj" />
+    <ProjectReference Include="../../../src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions.Agents.csproj" />
   </ItemGroup>
 
   <ItemGroup>

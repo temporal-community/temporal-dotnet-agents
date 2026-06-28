@@ -135,7 +135,7 @@ Worker started.
  Agent: In Paris it's sunny and 22 °C, while in Berlin ...
 
  Tool calls visible in Temporal Web UI as separate
- `Temporalio.Extensions.AI.InvokeFunction` activities.
+ `TemporalCommunity.Extensions.AI.InvokeFunction` activities.
 ════════════════════════════════════════════════════════
 
 Done.
@@ -199,8 +199,8 @@ Two sub-scenarios:
 2. Find the workflow IDs printed by Demo 4 (e.g. `durable-tools-explicit-<guid>`,
    `durable-tools-auto-<guid>`).
 3. Open the workflow history. You should see:
-   - `Temporalio.Extensions.AI.GetChatStep` activities (one per LLM iteration)
-   - `Temporalio.Extensions.AI.InvokeFunction` activities (one per tool call) — each with its
+   - `TemporalCommunity.Extensions.AI.GetChatStep` activities (one per LLM iteration)
+   - `TemporalCommunity.Extensions.AI.InvokeFunction` activities (one per tool call) — each with its
      Summary set to the tool name
 4. Demos 2 and 4 both follow this structure since both use Pattern 3 (durable tool dispatch). The
    difference is *how* `ChatOptions.Tools` is populated, not whether the tool runs inside its own

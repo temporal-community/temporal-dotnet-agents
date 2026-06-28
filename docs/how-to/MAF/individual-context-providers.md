@@ -53,7 +53,7 @@ opts.AddDurableAgent("TaskAgent", agent =>
 
 ### `WorkingSetContextProvider`
 
-`WorkingSetContextProvider` is a library-provided `AIContextProvider` that ships with `Temporalio.Extensions.Agents` — no additional package reference required.
+`WorkingSetContextProvider` is a library-provided `AIContextProvider` that ships with `TemporalCommunity.Extensions.Agents` — no additional package reference required.
 
 On every LLM step it scans the accumulated `ChatMessage` history (assistant and tool messages only), extracts recently-referenced file paths using two heuristics — the first line inside a code fence and path-shaped tokens that contain a `/` or `\` and carry a recognized extension — deduplicates them, and injects a compact `## Working set` system note listing the most-recently-seen files (up to `MaxPaths`, default 20). The extracted paths are also written to `AgentSessionStateBag["temporal.working_set"]` as a CSV string, so the working set survives worker restarts and continue-as-new transitions.
 

@@ -15,7 +15,7 @@ Architectural findings and rationale for the two-library design. This document r
 
 ## MEAI Features in the MAF Context
 
-The question: do the durable embedding and history reduction features from `Temporalio.Extensions.AI` transfer usefully to `Temporalio.Extensions.Agents`?
+The question: do the durable embedding and history reduction features from `TemporalCommunity.Extensions.AI` transfer usefully to `TemporalCommunity.Extensions.Agents`?
 
 ### History Reduction
 
@@ -41,7 +41,7 @@ Practical upshot: inject `IEmbeddingGenerator<string, Embedding<float>>` into to
 
 ### What is already shared
 
-These types are defined in `Temporalio.Extensions.AI` and used by both libraries:
+These types are defined in `TemporalCommunity.Extensions.AI` and used by both libraries:
 
 | Type | Purpose |
 |---|---|
@@ -84,7 +84,7 @@ These are deliberately scoped to the subclass and are not candidates for further
 
 ### Compatibility with non-`ChatClientAgent` `AIAgent` subtypes
 
-`Temporalio.Extensions.Agents` registers durable agents via `opts.AddDurableAgent(name, configure)`. The agent type produced by the library is `ChatClientAgent` (composed internally with `UseProvidedChatClientAsIs = true` and the user-supplied `IChatClient`). Direct registration of an arbitrary `AIAgent` subtype — `A2AAgent` from `Microsoft.Agents.AI.A2A`, graph-workflow agents from `Microsoft.Agents.AI.Workflows`, or a user-built custom `AIAgent` subclass — is not supported through `AddDurableAgent`. The v0.2 surface that allowed it was removed as part of the v0.3 API consolidation (see *Why the v0.3 consolidation removed the v0.2 surface* below).
+`TemporalCommunity.Extensions.Agents` registers durable agents via `opts.AddDurableAgent(name, configure)`. The agent type produced by the library is `ChatClientAgent` (composed internally with `UseProvidedChatClientAsIs = true` and the user-supplied `IChatClient`). Direct registration of an arbitrary `AIAgent` subtype — `A2AAgent` from `Microsoft.Agents.AI.A2A`, graph-workflow agents from `Microsoft.Agents.AI.Workflows`, or a user-built custom `AIAgent` subclass — is not supported through `AddDurableAgent`. The v0.2 surface that allowed it was removed as part of the v0.3 API consolidation (see *Why the v0.3 consolidation removed the v0.2 surface* below).
 
 v0.3 narrows registration to `ChatClientAgent` shape — `agent.ChatClient` is a required `Func<IServiceProvider, IChatClient>` slot, and the library composes the agent internally with `UseProvidedChatClientAsIs = true`. Users who need to plug in non-`ChatClientAgent` MAF agents (`A2AAgent`, graph-workflow agents from `Microsoft.Agents.AI.Workflows`, custom `AIAgent` subclasses) cannot do so through `AddDurableAgent` today. The legacy AIAgent-instance-shaped registration was the previous escape hatch; restoring direct support is tracked as a possible follow-on once the new surface stabilises.
 
@@ -219,9 +219,9 @@ directly.
 - **A2A protocol** — Agent-to-Agent communication protocol, not tied to any particular chat client abstraction
 - **AG-UI** — agent UI streaming protocol
 
-These directions indicate that `AIAgent` and `IChatClient` will continue to be parallel abstractions rather than converging into one. Designing `Temporalio.Extensions.Agents` toward a future where `AIAgent` becomes an `IChatClient` subtype would be planning against the upstream trajectory.
+These directions indicate that `AIAgent` and `IChatClient` will continue to be parallel abstractions rather than converging into one. Designing `TemporalCommunity.Extensions.Agents` toward a future where `AIAgent` becomes an `IChatClient` subtype would be planning against the upstream trajectory.
 
-**No pluggable durability backend.** `Microsoft.Agents.AI.DurableTask` (the existing durable counterpart) is tightly coupled to Azure Storage via the DurableTask framework. There is no durability interface that Temporal can implement as a drop-in replacement. The relationship between `Temporalio.Extensions.Agents` and MAF is a Temporal-native integration, not a backend swap.
+**No pluggable durability backend.** `Microsoft.Agents.AI.DurableTask` (the existing durable counterpart) is tightly coupled to Azure Storage via the DurableTask framework. There is no durability interface that Temporal can implement as a drop-in replacement. The relationship between `TemporalCommunity.Extensions.Agents` and MAF is a Temporal-native integration, not a backend swap.
 
 **`[Workflow]` attribute is not inheritable.** `[Workflow(Inherited = false)]` means workflow attributes cannot be declared on a base class and inherited by a subclass. This is a hard constraint against building a shared workflow base class that the Temporal SDK discovers automatically.
 
@@ -233,8 +233,8 @@ These directions indicate that `AIAgent` and `IChatClient` will continue to be p
 
 **Keep the two-library design.**
 
-- `Temporalio.Extensions.AI` serves `IChatClient` users who do not need named agents, routing, StateBag, or `AIContextProvider`. It is the right choice for most MEAI-native projects.
-- `Temporalio.Extensions.Agents` serves `AIAgent` users who need the full MAF session model, search attributes, routing, parallel fan-out, and `TemporalAgentContext`. It is the right choice for MAF-native projects.
+- `TemporalCommunity.Extensions.AI` serves `IChatClient` users who do not need named agents, routing, StateBag, or `AIContextProvider`. It is the right choice for most MEAI-native projects.
+- `TemporalCommunity.Extensions.Agents` serves `AIAgent` users who need the full MAF session model, search attributes, routing, parallel fan-out, and `TemporalAgentContext`. It is the right choice for MAF-native projects.
 
 **Share at the type level and the workflow-loop level — but not at the activity level.**
 

@@ -1,7 +1,7 @@
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
-using Temporalio.Extensions.AI;
-using Temporalio.Extensions.AI.Session;
+using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Session;
 using Temporalio.Workflows;
 
 namespace CustomWorkflow;

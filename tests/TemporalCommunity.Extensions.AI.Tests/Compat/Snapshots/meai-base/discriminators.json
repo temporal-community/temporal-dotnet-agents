@@ -1,0 +1,12 @@
+{
+  "snapshotName": "meai-base",
+  "_comment": "Base-library canary (plan §2.2 S-F-3). Enumerates ONLY the upstream Microsoft.Extensions.AI AIContent [JsonDerivedType] $type discriminators that TemporalCommunity.Extensions.AI durable history actually serializes. Derived from base Contents/AIContent.cs and confirmed against our serialization (DurableAIDataConverterTests + ChatMessage/ChatResponse round-trips): TextContent('text') from ChatMessage text, FunctionCallContent('functionCall') + FunctionResultContent('functionResult') from tool turns, UsageContent('usage') from ChatResponse.Usage. The guard asserts the LIVE AIContent.PolymorphismOptions.DerivedTypes is a SUPERSET of this set, so our own additions never false-positive; only a base removal/rename of one of these discriminators fails the test. This is NOT the v0_3 snapshot (that tracks OUR DurableSessionEntry discriminators); this one tracks MICROSOFT's AIContent table.",
+  "baseTypes": {
+    "Microsoft.Extensions.AI.AIContent": [
+      "text",
+      "functionCall",
+      "functionResult",
+      "usage"
+    ]
+  }
+}

@@ -14,7 +14,7 @@ namespace ExternalHistoryStore;
 /// <see cref="TenantDirectory"/>, and returns an <see cref="AIContext"/> containing
 /// one tenant-scoped system message.</para>
 ///
-/// <para>This provider does not know about the workflow-level <see cref="Temporalio.Extensions.Agents.HistoryStore.IAgentHistoryStore"/>;
+/// <para>This provider does not know about the workflow-level <see cref="TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore"/>;
 /// the two abstractions are independent — see this sample's README for the layered
 /// architecture diagram.</para>
 /// </summary>

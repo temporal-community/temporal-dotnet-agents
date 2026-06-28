@@ -1,4 +1,4 @@
-# Tool Functions in Temporalio.Extensions.AI
+# Tool Functions in TemporalCommunity.Extensions.AI
 
 There are three distinct models for invoking tools (AI functions) in this library. The
 right one depends on your **intent**, not on a static list of features:

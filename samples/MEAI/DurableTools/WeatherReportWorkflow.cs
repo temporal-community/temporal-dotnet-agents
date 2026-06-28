@@ -2,7 +2,7 @@
 // a separate Temporal activity rather than executing the lambda inline.
 
 using Microsoft.Extensions.AI;
-using Temporalio.Extensions.AI;
+using TemporalCommunity.Extensions.AI;
 using Temporalio.Workflows;
 
 // ── Input ─────────────────────────────────────────────────────────────────────

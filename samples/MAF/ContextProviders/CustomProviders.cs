@@ -10,8 +10,8 @@
 
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
 
 namespace ContextProviders;
 

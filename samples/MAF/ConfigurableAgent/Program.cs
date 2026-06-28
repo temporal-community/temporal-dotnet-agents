@@ -23,16 +23,16 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using Temporalio.Client;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
-using static Temporalio.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddFilter("SupportWorkflow", LogLevel.Information);          // workflow routing decisions
-builder.Logging.AddFilter("Temporalio.Extensions.Agents", LogLevel.Information); // agent activity dispatch
+builder.Logging.AddFilter("TemporalCommunity.Extensions.Agents", LogLevel.Information); // agent activity dispatch
 
 // ── Step 2: Load configuration ───────────────────────────────────────────────
 var apiKey = builder.Configuration.GetValue<string>("OPENAI_API_KEY");

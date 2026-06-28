@@ -1,5 +1,5 @@
 // OpenTelemetry sample — demonstrates how to configure distributed tracing for
-// Temporalio.Extensions.AI, showing the full span hierarchy produced by a
+// TemporalCommunity.Extensions.AI, showing the full span hierarchy produced by a
 // durable chat session.
 // Run:  dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
 
@@ -15,7 +15,7 @@ using OpenAI;
 using OpenTelemetry.Trace;
 using Temporalio.Client;
 using Temporalio.Common;
-using Temporalio.Extensions.AI;
+using TemporalCommunity.Extensions.AI;
 using Temporalio.Extensions.OpenTelemetry;
 
 // Enable the OpenAI .NET SDK's experimental OpenTelemetry instrumentation.

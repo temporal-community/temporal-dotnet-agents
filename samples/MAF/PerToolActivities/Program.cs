@@ -20,13 +20,13 @@ using Microsoft.Extensions.Logging;
 using OpenAI;
 using PerToolActivities;
 using Temporalio.Client;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
-builder.Logging.AddFilter("Temporalio.Extensions.Agents", LogLevel.Information);
+builder.Logging.AddFilter("TemporalCommunity.Extensions.Agents", LogLevel.Information);
 
 // ── Step 2: Load configuration ───────────────────────────────────────────────
 var apiKey = builder.Configuration.GetValue<string>("OPENAI_API_KEY");

@@ -21,7 +21,7 @@ How conversation history grows in TemporalAgents, how the framework manages it a
 
 Every agent session in TemporalAgents maintains a conversation history — the full sequence of user messages, assistant responses, tool calls, and tool results. This history is:
 
-1. **Stored in workflow state** (`AgentWorkflow._history`) as a `List<DurableSessionEntry>` populated with `AgentSessionRequest` / `AgentSessionResponse` instances (MAF subclasses of the shared `DurableSessionRequest` / `DurableSessionResponse` types in `Temporalio.Extensions.AI`). Each entry's `Messages` is `IReadOnlyList<ChatMessage>` (MEAI type, stored directly).
+1. **Stored in workflow state** (`AgentWorkflow._history`) as a `List<DurableSessionEntry>` populated with `AgentSessionRequest` / `AgentSessionResponse` instances (MAF subclasses of the shared `DurableSessionRequest` / `DurableSessionResponse` types in `TemporalCommunity.Extensions.AI`). Each entry's `Messages` is `IReadOnlyList<ChatMessage>` (MEAI type, stored directly).
 2. **Flattened into `AgentStepInput.AccumulatedMessages`** at the start of every turn by `AgentWorkflow.ExecuteDurableAgentTurnAsync`, then re-sent on each step of the per-LLM-call durable loop
 3. **Sent to the LLM** by `AgentActivities.RunDurableAgentStepAsync` via `IChatClient.GetStreamingResponseAsync`
 4. **Carried across continue-as-new boundaries** via `AgentWorkflowInput.CarriedHistory`
@@ -365,9 +365,9 @@ Continue-as-New:
 
 ## References
 
-- `src/Temporalio.Extensions.Agents/Workflows/AgentWorkflow.cs` — history storage and continue-as-new
-- `src/Temporalio.Extensions.Agents/Workflows/AgentActivities.cs` — history rebuild and token logging
-- `src/Temporalio.Extensions.Agents/State/` — serialization types for conversation history
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentWorkflow.cs` — history storage and continue-as-new
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentActivities.cs` — history rebuild and token logging
+- `src/TemporalCommunity.Extensions.Agents/State/` — serialization types for conversation history
 - [Session StateBag & Context Providers](../architecture/MAF/session-statebag-and-context-providers.md) — AIContextProvider deep dive
 - [Observability](./observability.md) — token usage monitoring via OTel spans
 - [Usage Guide](./usage.md) — structured output and tool filtering

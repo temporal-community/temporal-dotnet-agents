@@ -7,10 +7,10 @@
 //   • Amount > 500             → Block (policy violation; tool never dispatches)
 //   • Everything else          → PauseForApproval (enriched description for the reviewer)
 
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Tools;
-using Temporalio.Extensions.AI;
-using Temporalio.Extensions.AI.Tools;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Tools;
+using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Tools;
 
 namespace ToolInterceptor;
 

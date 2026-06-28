@@ -323,7 +323,7 @@ public class AlertActivities(ITemporalClient client)
 **AlertWorkflow** — receives signals, uses an LLM agent to compose notifications:
 
 ```csharp
-using static Temporalio.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
 
 [Workflow("AmbientAgent.AlertWorkflow")]
 public class AlertWorkflow
@@ -418,9 +418,9 @@ public async Task<string> RunAsync(string question)
 
 ## References
 
-- `src/Temporalio.Extensions.Agents/TemporalWorkflowExtensions.cs` — `GetAgent`, `ExecuteAgentsInParallelAsync`
-- `src/Temporalio.Extensions.Agents/TemporalAIAgent.cs` — workflow-safe agent with activity-based execution
-- `src/Temporalio.Extensions.Agents/Session/TemporalAgentContext.cs` — async-local Temporal capabilities for tools
+- `src/TemporalCommunity.Extensions.Agents/TemporalWorkflowExtensions.cs` — `GetAgent`, `ExecuteAgentsInParallelAsync`
+- `src/TemporalCommunity.Extensions.Agents/TemporalAIAgent.cs` — workflow-safe agent with activity-based execution
+- `src/TemporalCommunity.Extensions.Agents/Session/TemporalAgentContext.cs` — async-local Temporal capabilities for tools
 - `samples/MAF/WorkflowOrchestration/` — Pattern 1 example
 - `samples/MAF/MultiAgentRouting/RoutingWorkflow.cs` — Pattern 2 example
 - `samples/MAF/EvaluatorOptimizer/EvaluatorOptimizerWorkflow.cs` — iterative agent communication

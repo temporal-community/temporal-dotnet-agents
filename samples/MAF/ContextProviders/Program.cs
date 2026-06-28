@@ -1,4 +1,4 @@
-// ContextProviders — custom AIContextProvider subclasses with Temporalio.Extensions.Agents (v0.3).
+// ContextProviders — custom AIContextProvider subclasses with TemporalCommunity.Extensions.Agents (v0.3).
 //
 // Demonstrates registering custom AIContextProvider subclasses via
 // DurableAgentBuilder.AddContextProvider. Providers fire once per LLM step, not once
@@ -20,7 +20,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

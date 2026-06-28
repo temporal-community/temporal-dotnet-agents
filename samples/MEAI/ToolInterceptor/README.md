@@ -3,7 +3,7 @@
 ## Overview
 
 This sample demonstrates `IDurableToolInterceptor<DurableToolContext>` — the pre-tool lifecycle
-hook in `Temporalio.Extensions.AI`. The interceptor fires as a Temporal activity before each
+hook in `TemporalCommunity.Extensions.AI`. The interceptor fires as a Temporal activity before each
 durable tool dispatch, allowing you to apply policy, enrich approval context, or short-circuit
 execution before the tool activity runs.
 
@@ -15,7 +15,7 @@ The scenario is a "file assistant" with two tools:
 An `AuditInterceptor` enforces file-deletion policy before any delete tool activity executes.
 
 > **Note:** This sample uses `IDurableToolInterceptor<DurableToolContext>` — the base-library
-> interface from `Temporalio.Extensions.AI`. For MAF sessions where you need `AgentName` or
+> interface from `TemporalCommunity.Extensions.AI`. For MAF sessions where you need `AgentName` or
 > `StateBag` in your interceptor, implement `IAgentToolInterceptor` instead
 > (see `samples/MAF/ToolInterceptor/`).
 

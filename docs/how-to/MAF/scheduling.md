@@ -56,7 +56,7 @@ A minimal workflow that drives the same durable-agent dispatch loop as `AgentWor
 ```csharp
 // Internal — you don't instantiate this directly.
 // Summarized for documentation; see AgentJobWorkflow.cs for the full source.
-[Workflow("Temporalio.Extensions.Agents.AgentJobWorkflow")]
+[Workflow("TemporalCommunity.Extensions.Agents.AgentJobWorkflow")]
 internal sealed class AgentJobWorkflow
 {
     [WorkflowRun]
@@ -118,7 +118,7 @@ The following example sets up a `DigestAgent` that summarizes new customer feedb
 ```csharp
 using Microsoft.Extensions.AI;
 using Temporalio.Client.Schedules;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient()).Build();
 
@@ -158,7 +158,7 @@ Call `ScheduleAgentAsync` at any time to create a Temporal Schedule. Resolve `IT
 
 ```csharp
 using Temporalio.Client.Schedules;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using Microsoft.Extensions.DependencyInjection;
 
 // ITemporalAgentClient is registered automatically when using AddTemporalAgents.
@@ -215,10 +215,10 @@ The example below runs an analysis immediately, then schedules a follow-up compa
 
 ```csharp
 using Temporalio.Activities;
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Scheduling;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Scheduling;
 using Temporalio.Workflows;
-using static Temporalio.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
 
 [Workflow]
 public class ResearchWorkflow
@@ -261,8 +261,8 @@ Internally, this uses signal-with-start: the workflow is created and the initial
 The example below creates a trial-welcome session that fires 24 hours after signup:
 
 ```csharp
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
 using Microsoft.Extensions.DependencyInjection;
 
 var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
@@ -295,7 +295,7 @@ The `ScheduleHandle` returned by `ScheduleAgentAsync` (or retrieved via `GetAgen
 
 ```csharp
 using Temporalio.Client.Schedules;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using Microsoft.Extensions.DependencyInjection;
 
 var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
@@ -376,8 +376,8 @@ temporal schedule delete --schedule-id daily-digest
 The primary use case for scheduled work is a delayed full session: call `ShutdownAsync` after the agent has finished its work and you have no further messages to send.
 
 ```csharp
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
 using Microsoft.Extensions.DependencyInjection;
 
 var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
@@ -510,12 +510,12 @@ There is no per-schedule timeout override — the effective per-agent timeout (o
 
 ## References
 
-- `src/Temporalio.Extensions.Agents/Workflows/AgentJobWorkflow.cs` — fire-and-forget workflow for scheduled runs
-- `src/Temporalio.Extensions.Agents/Workflows/ScheduleActivities.cs` — one-time scheduling from inside workflows
-- `src/Temporalio.Extensions.Agents/Workflows/ScheduleRegistrationService.cs` — config-time schedule creation
-- `src/Temporalio.Extensions.Agents/Workflows/DefaultTemporalAgentClient.cs` — `ScheduleAgentAsync` and `RunAgentDelayedAsync`
-- `src/Temporalio.Extensions.Agents/ITemporalAgentClient.cs` — `ShutdownAsync` and full interface surface
-- `src/Temporalio.Extensions.Agents/Workflows/ScheduleAgentRegistration.cs` — internal registration record
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentJobWorkflow.cs` — fire-and-forget workflow for scheduled runs
+- `src/TemporalCommunity.Extensions.Agents/Workflows/ScheduleActivities.cs` — one-time scheduling from inside workflows
+- `src/TemporalCommunity.Extensions.Agents/Workflows/ScheduleRegistrationService.cs` — config-time schedule creation
+- `src/TemporalCommunity.Extensions.Agents/Workflows/DefaultTemporalAgentClient.cs` — `ScheduleAgentAsync` and `RunAgentDelayedAsync`
+- `src/TemporalCommunity.Extensions.Agents/ITemporalAgentClient.cs` — `ShutdownAsync` and full interface surface
+- `src/TemporalCommunity.Extensions.Agents/Workflows/ScheduleAgentRegistration.cs` — internal registration record
 - [Usage Guide](./usage.md) — `AddDurableAgent` registration patterns
 - [Observability](./observability.md) — scheduling OTel spans
 - [Temporal Schedules Documentation](https://docs.temporal.io/workflows#schedule)

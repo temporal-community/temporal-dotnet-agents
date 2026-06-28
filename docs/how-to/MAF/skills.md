@@ -113,7 +113,7 @@ Use this skill to help employees submit, track, and correct expense reports.
 **Malformed files are silently skipped** (logged as warnings) unless you construct a `FileSkillsSource` directly and pass a logger:
 
 ```csharp
-using Temporalio.Extensions.Agents.Skills;
+using TemporalCommunity.Extensions.Agents.Skills;
 
 agent.UseSkills(s =>
 {

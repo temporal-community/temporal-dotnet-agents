@@ -19,7 +19,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using Temporalio.Client;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
@@ -183,7 +183,7 @@ string? lastStepPayload = null;
 await foreach (var ev in handle.FetchHistoryEventsAsync())
 {
     if (ev.ActivityTaskScheduledEventAttributes is { } attrs &&
-        attrs.ActivityType.Name == "Temporalio.Extensions.Agents.RunDurableAgentStep" &&
+        attrs.ActivityType.Name == "TemporalCommunity.Extensions.Agents.RunDurableAgentStep" &&
         attrs.Input?.Payloads_.Count >= 1)
     {
         lastStepPayload = Encoding.UTF8.GetString(
@@ -225,10 +225,10 @@ Console.WriteLine("Done.");
 namespace ExternalHistoryStore
 {
     using Microsoft.Extensions.AI;
-    using Temporalio.Extensions.Agents;
-    using Temporalio.Extensions.Agents.Session;
+    using TemporalCommunity.Extensions.Agents;
+    using TemporalCommunity.Extensions.Agents.Session;
     using Temporalio.Workflows;
-    using static Temporalio.Extensions.Agents.TemporalWorkflowExtensions;
+    using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
 
     /// <summary>
     /// Input for the <see cref="SupportSessionWorkflow.AskAsync"/> update.

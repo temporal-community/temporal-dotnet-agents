@@ -4,36 +4,36 @@ Temporal .NET SDK integrations for building durable AI applications. Two package
 
 | Package | Description |
 |---------|-------------|
-| [`Temporalio.Extensions.AI`](src/Temporalio.Extensions.AI/README.md) | Make any `IChatClient` durable — no Agent Framework required |
-| [`Temporalio.Extensions.Agents`](src/Temporalio.Extensions.Agents/README.md) | Durable agent sessions built on Microsoft Agent Framework (`Microsoft.Agents.AI`) |
+| [`TemporalCommunity.Extensions.AI`](src/TemporalCommunity.Extensions.AI/README.md) | Make any `IChatClient` durable — no Agent Framework required |
+| [`TemporalCommunity.Extensions.Agents`](src/TemporalCommunity.Extensions.Agents/README.md) | Durable agent sessions built on Microsoft Agent Framework |
 
 Both packages give AI workloads **durability by default** — conversation history, LLM calls, and tool invocations are persisted in Temporal's event history and replayed deterministically after crashes or restarts.
 
 ## Overview
 
-### `Temporalio.Extensions.AI`
+### `TemporalCommunity.Extensions.AI`
 
 A lightweight middleware layer for [Microsoft.Extensions.AI (MEAI)](https://learn.microsoft.com/en-us/dotnet/ai/ai-extensions). Wraps any `IChatClient` with Temporal durability via a `DelegatingChatClient` middleware. No agent framework, no heavy abstractions — just MEAI pipelines made crash-resilient.
 
 **Start here if:** you are already using MEAI's `IChatClient` directly and want Temporal durability without adopting the full Agent Framework.
 
 ```bash
-dotnet add package Temporalio.Extensions.AI
+dotnet add package TemporalCommunity.Extensions.AI
 ```
 
-[Full documentation →](src/Temporalio.Extensions.AI/README.md)
+[Full documentation →](src/TemporalCommunity.Extensions.AI/README.md)
 
-### `Temporalio.Extensions.Agents`
+### `TemporalCommunity.Extensions.Agents`
 
 A Temporal integration for [Microsoft Agent Framework](https://github.com/microsoft/agents) (`Microsoft.Agents.AI`). Each `AIAgent` session maps to a long-lived Temporal workflow with full session management: history, `StateBag` persistence, HITL approval gates, LLM-powered routing, and parallel agent fan-out.
 
 **Start here if:** you are building with the Microsoft Agent Framework and want durable, stateful, multi-agent sessions.
 
 ```bash
-dotnet add package Temporalio.Extensions.Agents
+dotnet add package TemporalCommunity.Extensions.Agents
 ```
 
-[Full documentation →](src/Temporalio.Extensions.Agents/README.md)
+[Full documentation →](src/TemporalCommunity.Extensions.Agents/README.md)
 
 ## How It Works
 

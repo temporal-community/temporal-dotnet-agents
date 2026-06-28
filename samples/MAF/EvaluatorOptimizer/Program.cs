@@ -12,7 +12,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using Temporalio.Client;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 
 // ── Step 1: Build the application host ───────────────────────────────────────

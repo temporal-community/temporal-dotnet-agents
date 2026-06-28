@@ -1,8 +1,8 @@
 # TemporalAgents Project Guide
 
 **Two Temporal .NET SDK integrations for durable AI applications:**
-- `Temporalio.Extensions.Agents` — durable agent sessions built on Microsoft Agent Framework (`Microsoft.Agents.AI`)
-- `Temporalio.Extensions.AI` — makes any plain `IChatClient` (MEAI) durable, no Agent Framework required
+- `TemporalCommunity.Extensions.Agents` — durable agent sessions built on Microsoft Agent Framework (`Microsoft.Agents.AI`)
+- `TemporalCommunity.Extensions.AI` — makes any plain `IChatClient` (MEAI) durable, no Agent Framework required
 
 This document gives load-bearing project context: structure, gotchas, behavioral guarantees. For API how-tos, see `docs/how-to/`.
 
@@ -24,8 +24,8 @@ TemporalAgents/
 │   ├── architecture/          # Internal design docs (durability, sessions, statebag, a2a, pub/sub, etc.)
 │   └── how-to/MAF + MEAI/     # Practical guides per library
 ├── src/
-│   ├── Temporalio.Extensions.Agents/   # Agent Framework integration (depends on Extensions.AI)
-│   └── Temporalio.Extensions.AI/       # MEAI IChatClient middleware (no Agent Framework)
+│   ├── TemporalCommunity.Extensions.Agents/   # Agent Framework integration (depends on Extensions.AI)
+│   └── TemporalCommunity.Extensions.AI/       # MEAI IChatClient middleware (no Agent Framework)
 ├── tests/                     # Four projects: {Agents,AI} × {Tests, IntegrationTests}
 └── samples/
     ├── MAF/                   # 14 samples — run: ls samples/MAF
@@ -36,7 +36,7 @@ Use `Glob` / `ls` to discover specific files. Notable types and their locations 
 
 ---
 
-## Temporalio.Extensions.AI — Key Concepts
+## TemporalCommunity.Extensions.AI — Key Concepts
 
 **Entry points** (any of these is sufficient — they produce identical DI state):
 - `services.AddHostedTemporalWorker(...).AddDurableAI(opts => ...)` — DI extension (primary)
@@ -66,7 +66,7 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 
 ---
 
-## Temporalio.Extensions.Agents — Key Concepts
+## TemporalCommunity.Extensions.Agents — Key Concepts
 
 **Entry points**:
 - `services.AddHostedTemporalWorker(...).AddTemporalAgents(opts => opts.AddDurableAgent("Name", a => { a.ChatClient = sp => ...; a.AddTool(...); }))`
@@ -106,8 +106,8 @@ When a worker crashes:
 ## Important Dependencies and Notes
 
 ### Microsoft Agent Framework
-- `Temporalio.Extensions.Agents` depends on `Temporalio.Extensions.AI` (which transitively brings in MEAI).
-- HITL types are MEAI-side: `DurableApprovalRequest` / `DurableApprovalDecision` (from `Temporalio.Extensions.AI.Approvals`).
+- `TemporalCommunity.Extensions.Agents` depends on `TemporalCommunity.Extensions.AI` (which transitively brings in MEAI).
+- HITL types are MEAI-side: `DurableApprovalRequest` / `DurableApprovalDecision` (from `TemporalCommunity.Extensions.AI.Approvals`).
 - `AgentResponse`, `AIAgent`, `DelegatingAIAgent`, `AgentRunOptions` → `Microsoft.Agents.AI`.
 - `ChatClientAgentRunOptions` → `Microsoft.Agents.AI` (not the Hosting package).
 - `AgentSessionStateBag.Count` available; `AgentSessionStateBag.Serialize()` uses its own `AgentAbstractionsJsonUtilities.DefaultOptions`.
@@ -116,19 +116,19 @@ When a worker crashes:
 - `RpcException` — `Temporalio.Exceptions` (NOT `Grpc.Core`)
 - `Workflow.CreateContinueAsNewException` — takes `Expression<Func<TWorkflow, Task>>` (no collection expressions inside)
 - `WorkflowIdConflictPolicy.UseExisting` — `Temporalio.Api.Enums.V1`
-- `IAgentHistoryStore` — `Temporalio.Extensions.Agents.HistoryStore` (opt-in via `opts.HistoryStore` or `agent.HistoryStore`); see `docs/how-to/MAF/external-history-store.md`. **`LoadAsync` takes `bool applyCompaction` (no default value)** — `false` = audit canonical, `true` = projected post-compact view. Erasure path uses `false`; inference + reducer paths use `true`.
-- `ICompactionStrategy`, `CompactionContext`, `CompactionResult` — `Temporalio.Extensions.Agents.Compaction` (`[Experimental("TA002")]`). Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"` pre-registered via `TryAddKeyedSingleton`. See `docs/how-to/MAF/compaction.md`.
-- `CompactionMarkerEntry` — `Temporalio.Extensions.AI.Session` (lives in the AI library so both source-gen contexts see the `"compaction-marker"` discriminator). Polymorphic subtype of `DurableSessionEntry`. `CompactedAt` is a `[JsonIgnore]` alias of `CreatedAt` (no wire duplication).
-- `CompactionAwareErasureHelper` — `Temporalio.Extensions.Agents.HistoryStore`. Static `EraseSessionDataAsync(store, sessionId, erasedIds)` — only correct GDPR-erasure path when compaction markers may exist.
-- `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException`, `DurableToolsNotWrappedException` — `Temporalio.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the others are stable.
-- `DurableChatStepResult` — `Temporalio.Extensions.AI` (internal sealed) — Pattern 3 activity return type from `GetChatStepAsync`; carries `IsFinal`, `AssistantMessage`, optional `ToolCalls` and `Usage`.
-- `DurableChatToolOptions` — `Temporalio.Extensions.AI` (public sealed) — per-tool options builder for Pattern 3; mirrors MAF's `DurableToolOptions` verbatim.
-- `IDurableToolInterceptor<in TContext>` — `Temporalio.Extensions.AI.Tools` — cross-library interceptor interface. `BeforeToolCallAsync(TContext, CancellationToken) → Task<DurableToolDecision>`. `in` variance: `IDurableToolInterceptor<DurableToolContext>` is assignable to `IDurableToolInterceptor<AgentToolContext>`.
-- `DurableToolDecision` — `Temporalio.Extensions.AI.Tools` — return type of `BeforeToolCallAsync`. Static factories: `Proceed(...)`, `PauseForApproval(description)`, `Skip(syntheticResult)`, `Block(reason)`. Not wire-serialized (internal DTO is the serialized form).
-- `DurableToolContext` — `Temporalio.Extensions.AI.Tools` — cross-library base context. Properties: `ToolName`, `Arguments`, `CallId`, `SessionId?`. Non-sealed — `AgentToolContext` extends it.
-- `IAgentToolInterceptor` — `Temporalio.Extensions.Agents.Tools` — convenience alias for `IDurableToolInterceptor<AgentToolContext>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`. Returns `DurableToolDecision` from the AI library.
-- `AgentToolContext` — `Temporalio.Extensions.Agents.Tools` — extends `DurableToolContext`. Adds `AgentName` (required) and `StateBag?` (read-only snapshot). The inherited `SessionId` is populated from `ActivityExecutionContext.Current.Info.WorkflowId` in the interceptor activity.
-- `WorkingSetContextProvider` — `Temporalio.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Stores result in `AgentSessionStateBag["temporal.working_set"]`; effectively a no-op for external-store sessions (sparse current-turn messages only).
+- `IAgentHistoryStore` — `TemporalCommunity.Extensions.Agents.HistoryStore` (opt-in via `opts.HistoryStore` or `agent.HistoryStore`); see `docs/how-to/MAF/external-history-store.md`. **`LoadAsync` takes `bool applyCompaction` (no default value)** — `false` = audit canonical, `true` = projected post-compact view. Erasure path uses `false`; inference + reducer paths use `true`.
+- `ICompactionStrategy`, `CompactionContext`, `CompactionResult` — `TemporalCommunity.Extensions.Agents.Compaction` (`[Experimental("TA002")]`). Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"` pre-registered via `TryAddKeyedSingleton`. See `docs/how-to/MAF/compaction.md`.
+- `CompactionMarkerEntry` — `TemporalCommunity.Extensions.AI.Session` (lives in the AI library so both source-gen contexts see the `"compaction-marker"` discriminator). Polymorphic subtype of `DurableSessionEntry`. `CompactedAt` is a `[JsonIgnore]` alias of `CreatedAt` (no wire duplication).
+- `CompactionAwareErasureHelper` — `TemporalCommunity.Extensions.Agents.HistoryStore`. Static `EraseSessionDataAsync(store, sessionId, erasedIds)` — only correct GDPR-erasure path when compaction markers may exist.
+- `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException`, `DurableToolsNotWrappedException` — `TemporalCommunity.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the others are stable.
+- `DurableChatStepResult` — `TemporalCommunity.Extensions.AI` (internal sealed) — Pattern 3 activity return type from `GetChatStepAsync`; carries `IsFinal`, `AssistantMessage`, optional `ToolCalls` and `Usage`.
+- `DurableChatToolOptions` — `TemporalCommunity.Extensions.AI` (public sealed) — per-tool options builder for Pattern 3; mirrors MAF's `DurableToolOptions` verbatim.
+- `IDurableToolInterceptor<in TContext>` — `TemporalCommunity.Extensions.AI.Tools` — cross-library interceptor interface. `BeforeToolCallAsync(TContext, CancellationToken) → Task<DurableToolDecision>`. `in` variance: `IDurableToolInterceptor<DurableToolContext>` is assignable to `IDurableToolInterceptor<AgentToolContext>`.
+- `DurableToolDecision` — `TemporalCommunity.Extensions.AI.Tools` — return type of `BeforeToolCallAsync`. Static factories: `Proceed(...)`, `PauseForApproval(description)`, `Skip(syntheticResult)`, `Block(reason)`. Not wire-serialized (internal DTO is the serialized form).
+- `DurableToolContext` — `TemporalCommunity.Extensions.AI.Tools` — cross-library base context. Properties: `ToolName`, `Arguments`, `CallId`, `SessionId?`. Non-sealed — `AgentToolContext` extends it.
+- `IAgentToolInterceptor` — `TemporalCommunity.Extensions.Agents.Tools` — convenience alias for `IDurableToolInterceptor<AgentToolContext>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`. Returns `DurableToolDecision` from the AI library.
+- `AgentToolContext` — `TemporalCommunity.Extensions.Agents.Tools` — extends `DurableToolContext`. Adds `AgentName` (required) and `StateBag?` (read-only snapshot). The inherited `SessionId` is populated from `ActivityExecutionContext.Current.Info.WorkflowId` in the interceptor activity.
+- `WorkingSetContextProvider` — `TemporalCommunity.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Stores result in `AgentSessionStateBag["temporal.working_set"]`; effectively a no-op for external-store sessions (sparse current-turn messages only).
 
 ### DI Patterns
 - `TemporalAgentsOptions` has an **internal constructor** — always access via the `AddTemporalAgents(opts => ...)` delegate.
@@ -191,11 +191,11 @@ just pack               # clean → build → pack → artifacts/packages/*.nupk
 
 ```bash
 # When an integration suite hangs and you can't tell which test:
-just test-individual tests/Temporalio.Extensions.AI.IntegrationTests       # per-test loop, 180s default cap, reports PASS/FAIL/HANG
-just test-individual tests/Temporalio.Extensions.AI.IntegrationTests Pattern3 300  # filter + custom cap
+just test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests       # per-test loop, 180s default cap, reports PASS/FAIL/HANG
+just test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests Pattern3 300  # filter + custom cap
 
 # When a single test command hangs (pipe-buffering hides output):
-just test-logged tests/Temporalio.Extensions.Agents.IntegrationTests       # writes to /tmp log, 600s default cap
+just test-logged tests/TemporalCommunity.Extensions.Agents.IntegrationTests       # writes to /tmp log, 600s default cap
 
 # Orphaned embedded Temporal servers (.NET SDK extracts a CLI to /var/folders/.../T/):
 just list-orphans                                                          # read-only — show, don't kill
@@ -227,15 +227,15 @@ just clean-test-artifacts  # remove artifacts/{test-individual,sample-runs}/
 
 **Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release with `git tag -a X.Y.Z -m "..."` then `just pack`. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention (`0.1.0`, `0.1.1`, ..., `0.3.0`).
 
-**Publish**: `just publish-nuget` (needs `NUGET_API_KEY`) or `just publish-github` (needs `NUGET_GITHUB_TOKEN`).
+**Publish**: `just publish-github` (needs `NUGET_GITHUB_PAT`) — publishes to GitHub Packages under the `temporal-community` organization.
 
 ---
 
 ## CI/CD — GitHub Actions
 
-`.github/workflows/build.yml`. Three jobs: `build` (ubuntu+macOS matrix on push to `main`, runs `just build` + `just test-unit`), `package` (after `build`, `just pack`, uploads artifact), `publish` (`workflow_dispatch` only — pushes pre-built artifact to GitHub or NuGet). Integration tests are excluded from CI.
+`.github/workflows/build.yml`. Three jobs: `build` (ubuntu+macOS matrix on push to `main`, runs `just build` + `just test-unit`), `package` (after `build`, `just pack`, uploads artifact), `publish` (`workflow_dispatch` only — pushes pre-built artifact to GitHub Packages). Integration tests are excluded from CI.
 
-**Required secrets**: `NUGET_PAT` (GitHub Packages), `NUGET_API_KEY` (NuGet.org).
+**Required secrets**: `NUGET_GITHUB_PAT` (GitHub Packages).
 
 ---
 
@@ -292,7 +292,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **Temporal .NET SDK**: https://github.com/temporalio/sdk-dotnet
 - **Microsoft Agent Framework**: https://github.com/microsoft/agent-framework
 
-### Temporalio.Extensions.Agents (MAF)
+### TemporalCommunity.Extensions.Agents (MAF)
 
 - **Usage Guide**: `docs/how-to/MAF/usage.md`
 - **Routing Patterns**: `docs/how-to/MAF/routing.md`
@@ -313,7 +313,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **StateBag and AIContextProvider**: `docs/architecture/MAF/session-statebag-and-context-providers.md`
 - **Agent-to-Agent Communication**: `docs/architecture/MAF/agent-to-agent-communication.md`
 
-### Temporalio.Extensions.AI (MEAI)
+### TemporalCommunity.Extensions.AI (MEAI)
 
 - **Usage Guide**: `docs/how-to/MEAI/usage.md`
 - **Tool Functions**: `docs/how-to/MEAI/tool-functions.md` (Model 1 inline / Model 2 custom workflow / Model 3 durable dispatch loop)

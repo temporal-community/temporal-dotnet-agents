@@ -1,6 +1,6 @@
 # Library Combinations Guide
 
-This project ships two libraries — `Temporalio.Extensions.AI` and `Temporalio.Extensions.Agents` — and the choices you make at registration time determine which Temporal primitives back your AI calls, what operational features are available, and what constraints you inherit. There are two supported combinations. One pairing — MAF + `Extensions.AI` — is an anti-pattern to avoid.
+This project ships two libraries — `TemporalCommunity.Extensions.AI` and `TemporalCommunity.Extensions.Agents` — and the choices you make at registration time determine which Temporal primitives back your AI calls, what operational features are available, and what constraints you inherit. There are two supported combinations. One pairing — MAF + `Extensions.AI` — is an anti-pattern to avoid.
 
 ---
 
@@ -11,7 +11,7 @@ This project ships two libraries — `Temporalio.Extensions.AI` and `Temporalio.
 | **Stack** | MEAI + `Extensions.AI` | MAF + `Extensions.Agents` |
 | **Entry point** | `DurableChatSessionClient` | `ITemporalAgentClient` / `TemporalAIAgentProxy` |
 | **Registration** | `AddDurableAI()` | `AddTemporalAgents()` |
-| **NuGet package** | `Temporalio.Extensions.AI` | `Temporalio.Extensions.Agents` |
+| **NuGet package** | `TemporalCommunity.Extensions.AI` | `TemporalCommunity.Extensions.Agents` |
 | **Named agents** | No | Yes |
 | **Temporal UI search attributes** | No | Yes — `AgentName`, `SessionCreatedAt`, `TurnCount` (opt-in via `EnableSearchAttributes`) |
 | **StateBag / AIContextProvider** | No | Yes |
@@ -21,9 +21,9 @@ This project ships two libraries — `Temporalio.Extensions.AI` and `Temporalio.
 
 ---
 
-## Combination 1 — MEAI + `Temporalio.Extensions.AI`
+## Combination 1 — MEAI + `TemporalCommunity.Extensions.AI`
 
-**The designed happy path for `Temporalio.Extensions.AI`.**
+**The designed happy path for `TemporalCommunity.Extensions.AI`.**
 
 `DurableChatWorkflow` wraps an `IChatClient` directly. Every turn becomes a Temporal activity; every conversation becomes a workflow identified by a `conversationId` string you control. No Microsoft Agent Framework is required.
 
@@ -71,13 +71,13 @@ Conversations are identified by an opaque string ID. There are no named agents, 
 
 ---
 
-## Combination 2 — MAF + `Temporalio.Extensions.Agents`
+## Combination 2 — MAF + `TemporalCommunity.Extensions.Agents`
 
-**The designed happy path for `Temporalio.Extensions.Agents`.**
+**The designed happy path for `TemporalCommunity.Extensions.Agents`.**
 
 `AgentActivities` wraps an `AIAgent` (from `Microsoft.Agents.AI`) with a full session — structured history, `AgentSessionStateBag`, `AIContextProvider` runs, and agent-semantic OTel spans. Each agent gets its own `AgentWorkflow` instance, identified by name and a session key. Enabling `EnableSearchAttributes = true` adds `AgentName`, `SessionCreatedAt`, and `TurnCount` search attributes that make the Temporal Web UI genuinely useful.
 
-`Temporalio.Extensions.Agents` depends on `Temporalio.Extensions.AI` — installing the Agents NuGet package pulls in the AI package automatically.
+`TemporalCommunity.Extensions.Agents` depends on `TemporalCommunity.Extensions.AI` — installing the Agents NuGet package pulls in the AI package automatically.
 
 ### Registration
 
@@ -145,7 +145,7 @@ On top of everything in Combination 1:
 
 ---
 
-## Anti-pattern: MAF + `Temporalio.Extensions.AI`
+## Anti-pattern: MAF + `TemporalCommunity.Extensions.AI`
 
 Do not register an `AIAgent` or `ChatClientAgent` with `AddDurableAI()`. `DurableChatWorkflow` does not know about `AIAgent`, `AgentSession`, `AgentSessionStateBag`, or `TemporalAgentContext` — the agent runs as a plain `IChatClient`. You pay the `Microsoft.Agents.AI` dependency cost and receive exactly Combination 1's capabilities, with none of the Agents-specific features.
 
@@ -155,7 +155,7 @@ If you use `Microsoft.Agents.AI`, use Combination 2 (`AddTemporalAgents()`).
 
 ## Adopting Extensions.AI Incrementally
 
-Some projects build the correct Combination 1 pattern independently — a `[WorkflowUpdate]`-based request/response loop, `WaitConditionAsync` for turn gating, `IChatClient` + `UseFunctionInvocation()` for tools — before encountering these libraries. These projects fit Combination 1 and can adopt `Temporalio.Extensions.AI` selectively rather than wholesale.
+Some projects build the correct Combination 1 pattern independently — a `[WorkflowUpdate]`-based request/response loop, `WaitConditionAsync` for turn gating, `IChatClient` + `UseFunctionInvocation()` for tools — before encountering these libraries. These projects fit Combination 1 and can adopt `TemporalCommunity.Extensions.AI` selectively rather than wholesale.
 
 Incremental adoption paths:
 
@@ -183,8 +183,8 @@ In short:
 
 ## Further Reading
 
-- [Getting Started — `Temporalio.Extensions.AI`](how-to/MEAI/usage.md)
-- [Usage Guide — `Temporalio.Extensions.Agents`](how-to/MAF/usage.md)
+- [Getting Started — `TemporalCommunity.Extensions.AI`](how-to/MEAI/usage.md)
+- [Usage Guide — `TemporalCommunity.Extensions.Agents`](how-to/MAF/usage.md)
 - [Tool Functions](how-to/MEAI/tool-functions.md) — Model 1 vs Model 2 tool execution
 - [Human-in-the-Loop Patterns (MEAI)](how-to/MEAI/hitl-patterns.md)
 - [Human-in-the-Loop Patterns (MAF)](how-to/MAF/hitl-patterns.md)

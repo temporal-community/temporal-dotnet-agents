@@ -2,7 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
-using Temporalio.Extensions.AI;
+using TemporalCommunity.Extensions.AI;
 
 namespace CustomWorkflow;
 

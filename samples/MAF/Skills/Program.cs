@@ -1,4 +1,4 @@
-// Skills — progressive-disclosure skills with Temporalio.Extensions.Agents (v0.3).
+// Skills — progressive-disclosure skills with TemporalCommunity.Extensions.Agents (v0.3).
 //
 // Demonstrates UseSkills(Action<SkillsBuilder>) to wire up a compact skill index
 // and on-demand load_skill dispatch as separate InvokeAgentTool Temporal activities.
@@ -22,9 +22,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using Temporalio.Client;
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Session;
-using Temporalio.Extensions.Agents.Skills;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents.Skills;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

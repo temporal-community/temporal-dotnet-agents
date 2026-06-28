@@ -19,11 +19,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
-using Temporalio.Extensions.AI;
-using Temporalio.Extensions.AI.Session;
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Compaction;
-using Temporalio.Extensions.Agents.HistoryStore;
+using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Session;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Compaction;
+using TemporalCommunity.Extensions.Agents.HistoryStore;
 
 // ── Step 1: Build the host ───────────────────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -100,7 +100,7 @@ Console.WriteLine("Worker started. Demonstrating in-session compaction.\n");
 
 var store = host.Services.GetRequiredService<InMemoryCompactionAwareStore>();
 var proxy = host.Services.GetTemporalAgentProxy("SupportAgent");
-var session = (Temporalio.Extensions.Agents.Session.TemporalAgentSession)await proxy.CreateSessionAsync();
+var session = (TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession)await proxy.CreateSessionAsync();
 var sessionId = session.SessionId.WorkflowId;
 
 Console.WriteLine($"Session: {sessionId}");

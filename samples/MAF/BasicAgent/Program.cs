@@ -1,4 +1,4 @@
-// BasicAgent — single durable agent session via Temporalio.Extensions.Agents (v0.3).
+// BasicAgent — single durable agent session via TemporalCommunity.Extensions.Agents (v0.3).
 //
 // Demonstrates the canonical AddDurableAgent registration: an IChatClient registered
 // in DI, an agent registered via opts.AddDurableAgent("name", agent => { ... }), and
@@ -14,8 +14,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

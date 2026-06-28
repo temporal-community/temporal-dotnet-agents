@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>TemporalCommunity.Extensions.Agents</AssemblyName>
+    <RootNamespace>TemporalCommunity.Extensions.Agents</RootNamespace>
+    <Description>Temporal integration for Microsoft Agent Framework</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>TemporalCommunity.Extensions.Agents</PackageId>
+    <PackageTags>temporal;ai;agents;workflow;dotnet;microsoft-agent-framework</PackageTags>
+
+    <!--
+      MEAI001 is suppressed project-wide ONLY because every occurrence is in
+      System.Text.Json source-generated code (AgentSessionJsonContext over AgentResponse,
+      which transitively pulls in the experimental ResponseContinuationToken). Generated
+      files cannot carry a `#pragma warning disable`, so this is the only lever. There is
+      no hand-written consumption of an experimental MEAI API in this assembly today.
+      When bumping the Microsoft.Extensions.AI version, grep this project for new direct
+      MEAI usage — this NoWarn would silence it. MAAI001 is deliberately NOT here: it is
+      suppressed per-file via `#pragma` so the category stays live elsewhere. Full
+      inventory: Internal/ExperimentalApiSuppressions.cs · plan §2.2 (S-F-1).
+    -->
+    <NoWarn>$(NoWarn);MEAI001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.3.0" />
+    <PackageReference Include="Temporalio" Version="1.14.1" />
+    <PackageReference Include="Temporalio.Extensions.Hosting" Version="1.14.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../TemporalCommunity.Extensions.AI/TemporalCommunity.Extensions.AI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TemporalCommunity.Extensions.Agents.Tests" />
+    <InternalsVisibleTo Include="TemporalCommunity.Extensions.Agents.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

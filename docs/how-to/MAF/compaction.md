@@ -235,7 +235,7 @@ Per the Q5α design rule, the reducer runs against the **post-compact projection
 Erasure cascades correctly only if you route through `CompactionAwareErasureHelper`. Raw `ReplaceAsync` calls that delete source entries without rewriting markers will corrupt projection.
 
 ```csharp
-using Temporalio.Extensions.Agents.HistoryStore;
+using TemporalCommunity.Extensions.Agents.HistoryStore;
 
 var result = await CompactionAwareErasureHelper.EraseSessionDataAsync(
     store,
@@ -272,13 +272,13 @@ The `"compaction-marker"` polymorphic discriminator is registered in both `Durab
 
 A worker on an older build that pulls a workflow task whose history contains a marker raises `DurableReplayCompatibilityException` with `Discriminator == "compaction-marker"` rather than a vague `JsonException`. Upgrade the lagging worker.
 
-The `tests/Temporalio.Extensions.AI.Tests/Compat/Snapshots/v0_3/discriminators.json` snapshot harness pins this contract — adding any new `[JsonDerivedType]` to `DurableSessionEntry` requires updating that snapshot.
+The `tests/TemporalCommunity.Extensions.AI.Tests/Compat/Snapshots/v0_3/discriminators.json` snapshot harness pins this contract — adding any new `[JsonDerivedType]` to `DurableSessionEntry` requires updating that snapshot.
 
 ---
 
 ## Limitations
 
-- **Compaction is Agents-only at v0.4.0-preview.2.** The MEAI library (`Temporalio.Extensions.AI`'s `DurableChatWorkflow`) does not consume the trigger hook yet — the plan's Q13 commits MEAI compaction to a follow-up release.
+- **Compaction is Agents-only at v0.4.0-preview.2.** The MEAI library (`TemporalCommunity.Extensions.AI`'s `DurableChatWorkflow`) does not consume the trigger hook yet — the plan's Q13 commits MEAI compaction to a follow-up release.
 - **No per-tool-call compaction.** Triggers fire only at end-of-turn (the `isFinal` step); mid-turn tool-call iterations are never compaction boundaries.
 - **Strategies receive the entire raw history.** For sessions with hundreds of thousands of entries, the `EvaluateTrigger` call could become expensive. Custom strategies that want to bound this should subscribe to a separate signal (e.g. a count cached in their own state).
 - **Marker re-compaction is not supported.** The built-in strategies skip pre-existing `CompactionMarkerEntry` entries when selecting compaction targets. Compacting a marker-of-markers would require strategy-specific merge logic not yet built.
@@ -291,12 +291,12 @@ The `tests/Temporalio.Extensions.AI.Tests/Compat/Snapshots/v0_3/discriminators.j
 - **Sample**: `samples/MAF/Compaction/` — end-to-end driver with summarization + a compaction-aware in-memory store + GDPR erasure demo.
 - **Design log**: `artifacts/maf-feature-gap-analysis.md` — Q2, Q5α, Q6, Q12, Q13 decisions.
 - **API surface**:
-  - `Temporalio.Extensions.Agents.Compaction.ICompactionStrategy`
-  - `Temporalio.Extensions.Agents.Compaction.CompactionContext`
-  - `Temporalio.Extensions.Agents.Compaction.CompactionResult`
-  - `Temporalio.Extensions.Agents.Compaction.{Truncation,SlidingWindow,Summarization}CompactionStrategy`
-  - `Temporalio.Extensions.AI.Session.CompactionMarkerEntry`
-  - `Temporalio.Extensions.AI.Exceptions.DurableCompactionMarkerException`
-  - `Temporalio.Extensions.Agents.HistoryStore.CompactionAwareErasureHelper`
+  - `TemporalCommunity.Extensions.Agents.Compaction.ICompactionStrategy`
+  - `TemporalCommunity.Extensions.Agents.Compaction.CompactionContext`
+  - `TemporalCommunity.Extensions.Agents.Compaction.CompactionResult`
+  - `TemporalCommunity.Extensions.Agents.Compaction.{Truncation,SlidingWindow,Summarization}CompactionStrategy`
+  - `TemporalCommunity.Extensions.AI.Session.CompactionMarkerEntry`
+  - `TemporalCommunity.Extensions.AI.Exceptions.DurableCompactionMarkerException`
+  - `TemporalCommunity.Extensions.Agents.HistoryStore.CompactionAwareErasureHelper`
 - **External history store**: [`docs/how-to/MAF/external-history-store.md`](./external-history-store.md)
 - **History reducer + token optimization**: [`docs/how-to/MAF/prompt-caching.md`](./prompt-caching.md)

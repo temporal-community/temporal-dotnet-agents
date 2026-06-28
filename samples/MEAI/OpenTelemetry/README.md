@@ -21,7 +21,7 @@ down to the LLM inference span emitted by `DurableChatActivities`. It also shows
 
 Two `ActivitySource`s emit spans during a chat turn:
 
-- `Temporalio.Extensions.AI` — library spans for the client send and the LLM inference call
+- `TemporalCommunity.Extensions.AI` — library spans for the client send and the LLM inference call
 - `Temporalio-Client`, `Temporalio-Workflow`, `Temporalio-Activity` — Temporal SDK protocol spans
   (emitted by `TracingInterceptor`)
 
@@ -30,9 +30,9 @@ The parent/child relationship for a single `ChatAsync` call:
 ```
 durable_chat.send                                                ← DurableChatTelemetry (client)
   └─ UpdateWorkflow:Chat                                         ← TracingInterceptor (client)
-       └─ RunWorkflow:Temporalio.Extensions.AI.DurableChatWorkflow
+       └─ RunWorkflow:TemporalCommunity.Extensions.AI.DurableChatWorkflow
                                                                  ← TracingInterceptor (worker)
-            └─ RunActivity:Temporalio.Extensions.AI.GetResponse  ← TracingInterceptor (activity)
+            └─ RunActivity:TemporalCommunity.Extensions.AI.GetResponse  ← TracingInterceptor (activity)
                  └─ chat gpt-4o-mini                             ← DurableChatTelemetry
                                                                    (ActivityKind.Client)
                                                                    carries gen_ai.* tags
@@ -43,8 +43,8 @@ Notes on the names:
 - `durable_chat.send` is a constant. Defined as `DurableChatTelemetry.ChatSendSpanName`.
 - `UpdateWorkflow:{updateName}`, `RunWorkflow:{workflowType}`, and `RunActivity:{activityName}` are
   formatted by the Temporal SDK's `TracingInterceptor` from the workflow/update/activity names
-  registered in code. The workflow type is `Temporalio.Extensions.AI.DurableChatWorkflow`; the
-  update is `Chat`; the activity (Pattern 1) is `Temporalio.Extensions.AI.GetResponse`.
+  registered in code. The workflow type is `TemporalCommunity.Extensions.AI.DurableChatWorkflow`; the
+  update is `Chat`; the activity (Pattern 1) is `TemporalCommunity.Extensions.AI.GetResponse`.
 - `chat {modelId}` is constructed dynamically at the call site. The prefix
   (`DurableChatTelemetry.ChatOperationName`) follows the OTel GenAI semantic convention
   `"{operation.name} {model}"`. With `OPENAI_MODEL=gpt-4o-mini` this prints as `chat gpt-4o-mini`.
@@ -147,10 +147,10 @@ Activity.DisplayName: UpdateWorkflow:Chat
         temporalWorkflowID: chat-otel-demo-<guid>
         ...
 
-Activity.DisplayName: RunWorkflow:Temporalio.Extensions.AI.DurableChatWorkflow
+Activity.DisplayName: RunWorkflow:TemporalCommunity.Extensions.AI.DurableChatWorkflow
     Tags: ...
 
-Activity.DisplayName: RunActivity:Temporalio.Extensions.AI.GetResponse
+Activity.DisplayName: RunActivity:TemporalCommunity.Extensions.AI.GetResponse
     Tags: ...
 
 Activity.DisplayName: chat gpt-4o-mini
@@ -179,13 +179,13 @@ against a single workflow.
 ## Pattern 3 callout (durable per-tool dispatch loop)
 
 This sample does not register durable tools, so every chat turn dispatches a single
-`Temporalio.Extensions.AI.GetResponse` activity per turn. If you adapt the sample to register
+`TemporalCommunity.Extensions.AI.GetResponse` activity per turn. If you adapt the sample to register
 durable tools via `AddDurableTools(...)`:
 
-- The workflow switches to Pattern 3, calling `Temporalio.Extensions.AI.GetChatStep` per LLM step
+- The workflow switches to Pattern 3, calling `TemporalCommunity.Extensions.AI.GetChatStep` per LLM step
   (still wrapped in `RunActivity:...`, with the inner `chat {modelId}` span carrying `gen_ai.*`
   tags).
-- Each tool invocation produces a separate `RunActivity:Temporalio.Extensions.AI.InvokeFunction`
+- Each tool invocation produces a separate `RunActivity:TemporalCommunity.Extensions.AI.InvokeFunction`
   span — one span per tool call.
 
 See `docs/how-to/MEAI/tool-functions.md` for the full Pattern 1 / 2 / 3 comparison.
