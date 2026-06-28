@@ -14,7 +14,7 @@
 //      available.
 
 using Microsoft.Extensions.AI;
-using Temporalio.Extensions.AI;
+using TemporalCommunity.Extensions.AI;
 
 internal static class DurableToolDemo
 {
@@ -60,7 +60,7 @@ internal static class DurableToolDemo
         var autoId = await RunAutoPopulatedToolsScenarioAsync(sessionClient);
 
         Console.WriteLine(" Tool calls visible in Temporal Web UI as separate");
-        Console.WriteLine(" `Temporalio.Extensions.AI.InvokeFunction` activities.");
+        Console.WriteLine(" `TemporalCommunity.Extensions.AI.InvokeFunction` activities.");
         Console.WriteLine("════════════════════════════════════════════════════════\n");
 
         return [explicitId, autoId];

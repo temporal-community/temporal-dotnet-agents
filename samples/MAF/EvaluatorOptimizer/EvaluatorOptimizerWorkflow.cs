@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 using Temporalio.Workflows;
-using static Temporalio.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
 
 namespace EvaluatorOptimizer;
 

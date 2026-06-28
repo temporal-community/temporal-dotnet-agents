@@ -12,10 +12,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Session;
-using Temporalio.Extensions.AI;
-using Temporalio.Extensions.AI.Approvals;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Approvals;
 
 // OpenAI.Chat also defines ChatMessage and ChatRole; pin to the MEAI versions
 // throughout this file so the conversation loop types remain unambiguous.

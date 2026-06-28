@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 using OpenAI;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
-using Temporalio.Extensions.AI;
+using TemporalCommunity.Extensions.AI;
 using Temporalio.Extensions.Hosting;
 
 // ── Setup: Build the application host ────────────────────────────────────────

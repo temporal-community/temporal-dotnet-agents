@@ -1,5 +1,5 @@
 using Temporalio.Activities;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 
 namespace WorkflowRouting;
 

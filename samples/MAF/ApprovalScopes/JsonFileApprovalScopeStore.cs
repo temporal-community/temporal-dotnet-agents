@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Approvals;
-using Temporalio.Extensions.AI;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Approvals;
+using TemporalCommunity.Extensions.AI;
 
 namespace ApprovalScopes;
 

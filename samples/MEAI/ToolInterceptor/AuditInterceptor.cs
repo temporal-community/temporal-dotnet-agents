@@ -1,7 +1,7 @@
 // AuditInterceptor — demonstrates IDurableToolInterceptor<DurableToolContext>.
 //
-// This interceptor uses the base-library interface (Temporalio.Extensions.AI) rather
-// than IAgentToolInterceptor (Temporalio.Extensions.Agents) because it only needs
+// This interceptor uses the base-library interface (TemporalCommunity.Extensions.AI) rather
+// than IAgentToolInterceptor (TemporalCommunity.Extensions.Agents) because it only needs
 // the core context fields (ToolName, Arguments) and is not MAF-specific. Any
 // IDurableToolInterceptor<DurableToolContext> implementation also works transparently
 // inside MAF agent sessions due to the interface's 'in' variance annotation.
@@ -12,8 +12,8 @@
 //   Proceed        — everything else (read_file and unknown tools)
 //                    Proceed carries an "audit" metadata tag to show the metadata parameter.
 
-using Temporalio.Extensions.AI;
-using Temporalio.Extensions.AI.Tools;
+using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Tools;
 
 /// <summary>
 /// Pre-tool interceptor that enforces a policy on file operations:

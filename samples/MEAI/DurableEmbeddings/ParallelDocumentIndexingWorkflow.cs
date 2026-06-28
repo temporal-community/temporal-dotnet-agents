@@ -3,7 +3,7 @@
 
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
-using Temporalio.Extensions.AI;
+using TemporalCommunity.Extensions.AI;
 using Temporalio.Workflows;
 
 namespace DurableEmbeddings;

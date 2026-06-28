@@ -18,10 +18,10 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using ToolInterceptor;
-using Temporalio.Extensions.Agents;
-using Temporalio.Extensions.Agents.Session;
-using Temporalio.Extensions.AI;
-using Temporalio.Extensions.AI.Approvals;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Approvals;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

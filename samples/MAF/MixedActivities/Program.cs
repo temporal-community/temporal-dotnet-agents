@@ -18,7 +18,7 @@ using Microsoft.Extensions.Logging;
 using MixedActivities;
 using OpenAI;
 using Temporalio.Client;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
 
