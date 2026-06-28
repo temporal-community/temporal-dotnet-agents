@@ -192,7 +192,7 @@ services.AddHostedTemporalWorker("localhost:7233", "default", "agents")
     .AddSingletonActivities<RoutingActivities>();
 ```
 
-> The `Description` you set on the builder is stored in the agent registry. `AddAgentProxy` accepts an optional `description` parameter for proxy-only declarations. Agents registered without a description (e.g. a classifier) are excluded from `GetAgentDescriptors()` automatically. The `AgentDescriptor` record in `Temporalio.Extensions.Agents.State` is the `(Name, Description)` shape the method returns.
+> The `Description` you set on the builder is stored in the agent registry. `AddAgentProxy` accepts an optional `description` parameter for proxy-only declarations. Agents registered without a description (e.g. a classifier) are excluded from `GetAgentDescriptors()` automatically. The `AgentDescriptor` record in `TemporalCommunity.Extensions.Agents.State` is the `(Name, Description)` shape the method returns.
 
 #### Step 2: Define routing activities
 
@@ -360,7 +360,7 @@ The rule is simple: **if the code runs inside a workflow execution context, do n
 - [`durability-and-determinism.md`](../architecture/MAF/durability-and-determinism.md) — why workflow code must be deterministic
 - [`agent-sessions-and-workflow-loop.md`](../architecture/MAF/agent-sessions-and-workflow-loop.md) — how agent calls become durable activities
 - [`session-statebag-and-context-providers.md`](../architecture/MAF/session-statebag-and-context-providers.md) — StateBag and AIContextProvider integration
-- `src/Temporalio.Extensions.Agents/TemporalAgentsOptions.cs` — agent registry API (`GetRegisteredAgentNames`, `IsAgentRegistered`)
+- `src/TemporalCommunity.Extensions.Agents/TemporalAgentsOptions.cs` — agent registry API (`GetRegisteredAgentNames`, `IsAgentRegistered`)
 
 ---
 

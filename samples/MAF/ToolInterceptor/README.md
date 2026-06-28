@@ -24,7 +24,7 @@ The sample registers an `OrderInterceptor` that fires before every `apply_refund
 - `DurableToolOptions.SkipInterceptor()` — opt read-only `lookup_order` out of the interceptor
 - `ITemporalAgentClient.GetPendingApprovalAsync` / `SubmitApprovalAsync` — approval poll/submit loop
 
-> **Library split:** `DurableToolDecision`, `DurableToolContext`, and `IDurableToolInterceptor<TContext>` are defined in `Temporalio.Extensions.AI.Tools`. `IAgentToolInterceptor` and `AgentToolContext` are in `Temporalio.Extensions.Agents.Tools`. Add `using Temporalio.Extensions.AI.Tools;` to any file that references `DurableToolDecision` directly; add `using Temporalio.Extensions.Agents.Tools;` for `IAgentToolInterceptor` / `AgentToolContext`.
+> **Library split:** `DurableToolDecision`, `DurableToolContext`, and `IDurableToolInterceptor<TContext>` are defined in `TemporalCommunity.Extensions.AI.Tools`. `IAgentToolInterceptor` and `AgentToolContext` are in `TemporalCommunity.Extensions.Agents.Tools`. Add `using TemporalCommunity.Extensions.AI.Tools;` to any file that references `DurableToolDecision` directly; add `using TemporalCommunity.Extensions.Agents.Tools;` for `IAgentToolInterceptor` / `AgentToolContext`.
 
 > **`IDurableToolInterceptor<DurableToolContext>` sample** — see `samples/MEAI/ToolInterceptor` for the base-library interface in action. Interceptors run inside `DurableChatWorkflow.ExecuteDurableToolLoopTurnAsync` (the durable tool-dispatch loop).
 

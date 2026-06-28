@@ -1,10 +1,10 @@
-# Observability — Temporalio.Extensions.AI
+# Observability — TemporalCommunity.Extensions.AI
 
 ## Overview
 
-Two instrumentation layers compose when you use `Temporalio.Extensions.AI`:
+Two instrumentation layers compose when you use `TemporalCommunity.Extensions.AI`:
 
-- **`DurableChatTelemetry`** — AI-semantic spans for conversation turns, token counts, and tool invocations. Uses the `ActivitySource` named `"Temporalio.Extensions.AI"`.
+- **`DurableChatTelemetry`** — AI-semantic spans for conversation turns, token counts, and tool invocations. Uses the `ActivitySource` named `"TemporalCommunity.Extensions.AI"`.
 - **`TracingInterceptor`** — Temporal protocol spans for workflow starts, updates, and activity scheduling. Uses three `ActivitySource` instances owned by `Temporalio.Extensions.OpenTelemetry`.
 
 These are independent `ActivitySource` instances. They propagate W3C trace context through Temporal's gRPC calls, so they compose into a single distributed trace automatically — no extra configuration is needed beyond registering all four sources with your `TracerProvider`.
@@ -17,12 +17,12 @@ All four sources must be registered with `TracerProvider.AddSource(...)` to capt
 
 | Constant | Source name | Spans emitted |
 |---|---|---|
-| `DurableChatTelemetry.ActivitySourceName` | `"Temporalio.Extensions.AI"` | `durable_chat.send`, `durable_chat.turn`, `durable_function.invoke` |
+| `DurableChatTelemetry.ActivitySourceName` | `"TemporalCommunity.Extensions.AI"` | `durable_chat.send`, `durable_chat.turn`, `durable_function.invoke` |
 | `TracingInterceptor.ClientSource.Name` | `"Temporalio.Client"` | `UpdateWorkflow:*`, `QueryWorkflow:*`, `StartWorkflow:*` |
 | `TracingInterceptor.WorkflowsSource.Name` | `"Temporalio.Workflows"` | Workflow execution spans (suppressed on replay) |
 | `TracingInterceptor.ActivitiesSource.Name` | `"Temporalio.Activities"` | `RunActivity:*` |
 
-Registering only `"Temporalio.Extensions.AI"` gives you the AI-semantic spans but the trace will appear disconnected — the `durable_chat.send` and `durable_chat.turn` spans will have no common parent. Registering all four gives the full picture: a single root span that spans from client call to LLM response, with the Temporal scheduling envelope visible in between.
+Registering only `"TemporalCommunity.Extensions.AI"` gives you the AI-semantic spans but the trace will appear disconnected — the `durable_chat.send` and `durable_chat.turn` spans will have no common parent. Registering all four gives the full picture: a single root span that spans from client call to LLM response, with the Temporal scheduling envelope visible in between.
 
 ---
 
@@ -40,7 +40,7 @@ durable_chat.send                         ← DurableChatSessionClient (client p
 │
 └─ UpdateWorkflow:Chat                    ← TracingInterceptor (client side)
      │
-     └─ RunActivity:Temporalio.Extensions.AI.GetResponse   ← TracingInterceptor (worker side)
+     └─ RunActivity:TemporalCommunity.Extensions.AI.GetResponse   ← TracingInterceptor (worker side)
           │
           └─ durable_chat.turn            ← DurableChatActivities (worker process)
                  conversation.id
@@ -56,15 +56,15 @@ When a tool registered via `AddDurableTools()` is invoked, an additional span ap
 ```
 durable_chat.send
 └─ UpdateWorkflow:Chat
-     └─ RunActivity:Temporalio.Extensions.AI.GetResponse
+     └─ RunActivity:TemporalCommunity.Extensions.AI.GetResponse
           └─ durable_chat.turn
-               └─ RunActivity:Temporalio.Extensions.AI.InvokeFunction   ← TracingInterceptor
+               └─ RunActivity:TemporalCommunity.Extensions.AI.InvokeFunction   ← TracingInterceptor
                     └─ durable_function.invoke                           ← DurableFunctionActivities
                            gen_ai.tool.name
                            gen_ai.tool.call_id
 ```
 
-> **Note:** `durable_function.invoke` is emitted inside the `InvokeFunction` activity, so it is always a child of the `RunActivity:Temporalio.Extensions.AI.InvokeFunction` span. Multi-tool responses produce one `durable_function.invoke` span per tool call, each as a separate activity execution.
+> **Note:** `durable_function.invoke` is emitted inside the `InvokeFunction` activity, so it is always a child of the `RunActivity:TemporalCommunity.Extensions.AI.InvokeFunction` span. Multi-tool responses produce one `durable_function.invoke` span per tool call, each as a separate activity execution.
 
 ---
 
@@ -100,7 +100,7 @@ Token count attributes on `durable_chat.send` are set after the update returns, 
 <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.0" />  <!-- prod -->
 ```
 
-`TracingInterceptor` lives in `Temporalio.Extensions.OpenTelemetry`. `DurableChatTelemetry` lives in `Temporalio.Extensions.AI` (this library).
+`TracingInterceptor` lives in `Temporalio.Extensions.OpenTelemetry`. `DurableChatTelemetry` lives in `TemporalCommunity.Extensions.AI` (this library).
 
 ### Register the TracerProvider
 
@@ -109,7 +109,7 @@ Token count attributes on `durable_chat.send` are set after the update returns, 
 builder.Services
     .AddOpenTelemetry()
     .WithTracing(tracing => tracing
-        .AddSource(DurableChatTelemetry.ActivitySourceName)      // "Temporalio.Extensions.AI"
+        .AddSource(DurableChatTelemetry.ActivitySourceName)      // "TemporalCommunity.Extensions.AI"
         .AddSource(TracingInterceptor.ClientSource.Name)         // "Temporalio.Client"
         .AddSource(TracingInterceptor.WorkflowsSource.Name)      // "Temporalio.Workflows"
         .AddSource(TracingInterceptor.ActivitiesSource.Name)     // "Temporalio.Activities"
@@ -296,4 +296,4 @@ Activity summaries are independent of OpenTelemetry — they are written into Te
 dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
 ```
 
-The console exporter output will show each span with its attributes as the multi-turn demo conversation executes. Search for `durable_chat.send` in the output to find the root span, then trace downward through `UpdateWorkflow:Chat` → `RunActivity:Temporalio.Extensions.AI.GetResponse` → `durable_chat.turn` to see the full hierarchy.
+The console exporter output will show each span with its attributes as the multi-turn demo conversation executes. Search for `durable_chat.send` in the output to find the root span, then trace downward through `UpdateWorkflow:Chat` → `RunActivity:TemporalCommunity.Extensions.AI.GetResponse` → `durable_chat.turn` to see the full hierarchy.

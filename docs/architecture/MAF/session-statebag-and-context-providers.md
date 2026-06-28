@@ -477,11 +477,11 @@ Each provider reads only its own key — they are fully independent.
 
 ## References
 
-- `src/Temporalio.Extensions.Agents/Session/TemporalAgentSession.cs` — `FromStateBag`, `SerializeStateBag`
-- `src/Temporalio.Extensions.Agents/Workflows/AgentActivities.cs` — activity entry point; restore/serialize lifecycle
-- `src/Temporalio.Extensions.Agents/Workflows/AgentWorkflow.cs` — `_currentStateBag`, continue-as-new transfer
-- `src/Temporalio.Extensions.Agents/Workflows/AgentStepInput.cs` — `SerializedStateBag` field
-- `src/Temporalio.Extensions.Agents/Workflows/AgentWorkflowInput.cs` — `CarriedStateBag` field
+- `src/TemporalCommunity.Extensions.Agents/Session/TemporalAgentSession.cs` — `FromStateBag`, `SerializeStateBag`
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentActivities.cs` — activity entry point; restore/serialize lifecycle
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentWorkflow.cs` — `_currentStateBag`, continue-as-new transfer
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentStepInput.cs` — `SerializedStateBag` field
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentWorkflowInput.cs` — `CarriedStateBag` field
 - `agent-framework/dotnet/src/Microsoft.Agents.AI.Abstractions/AgentSessionStateBag.cs`
 - `agent-framework/dotnet/src/Microsoft.Agents.AI.Abstractions/AIContextProvider.cs`
 - `agent-framework/dotnet/src/Microsoft.Agents.AI.Abstractions/ProviderSessionState{TState}.cs`

@@ -34,8 +34,8 @@ For a comparison of the two approval flavors, see [HITL Patterns](./hitl-pattern
 ## The interface
 
 ```csharp
-using Temporalio.Extensions.AI.Tools;    // DurableToolDecision, IDurableToolInterceptor
-using Temporalio.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
+using TemporalCommunity.Extensions.AI.Tools;    // DurableToolDecision, IDurableToolInterceptor
+using TemporalCommunity.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
 
 public interface IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContext>
 {
@@ -48,8 +48,8 @@ public interface IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContex
 `BeforeToolCallAsync` is called once per tool call per turn. Return a `DurableToolDecision` to control what happens next.
 
 > **Library split:** `DurableToolDecision`, `DurableToolContext`, and `IDurableToolInterceptor<TContext>` are
-> defined in `Temporalio.Extensions.AI.Tools`. `IAgentToolInterceptor` and `AgentToolContext` live in
-> `Temporalio.Extensions.Agents.Tools`. Implementors need `using Temporalio.Extensions.AI.Tools;` for the decision type.
+> defined in `TemporalCommunity.Extensions.AI.Tools`. `IAgentToolInterceptor` and `AgentToolContext` live in
+> `TemporalCommunity.Extensions.Agents.Tools`. Implementors need `using TemporalCommunity.Extensions.AI.Tools;` for the decision type.
 
 `AfterToolCallAsync` is named and reserved for a follow-on release. When it ships, the interface will add a default implementation so existing interceptors are not broken.
 
@@ -58,7 +58,7 @@ public interface IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContex
 ## AgentToolContext
 
 ```csharp
-// DurableToolContext (Temporalio.Extensions.AI.Tools) — cross-library base
+// DurableToolContext (TemporalCommunity.Extensions.AI.Tools) — cross-library base
 public class DurableToolContext
 {
     public required string ToolName { get; init; }
@@ -68,7 +68,7 @@ public class DurableToolContext
     // + ConversationId, CorrelationId, TurnNumber, Metadata (Phase 2)
 }
 
-// AgentToolContext (Temporalio.Extensions.Agents.Tools) — MAF-specific extension
+// AgentToolContext (TemporalCommunity.Extensions.Agents.Tools) — MAF-specific extension
 public sealed class AgentToolContext : DurableToolContext
 {
     public required string AgentName { get; init; }
@@ -88,14 +88,14 @@ public sealed class AgentToolContext : DurableToolContext
 
 ## The four decision outcomes
 
-Use the static factory methods on `DurableToolDecision` (from `Temporalio.Extensions.AI.Tools`) to construct instances.
+Use the static factory methods on `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`) to construct instances.
 
 ### `Proceed`
 
 Dispatch the tool normally.
 
 ```csharp
-using Temporalio.Extensions.AI.Tools;
+using TemporalCommunity.Extensions.AI.Tools;
 
 return DurableToolDecision.Proceed(
     enrichedDescription: $"Looked up order #{orderId} — value $240.00",
@@ -179,7 +179,7 @@ When an agent is configured with `UseApprovalScopes()` and a reviewer submits a 
 ### ApprovalScopeRecord
 
 ```csharp
-// Namespace: Temporalio.Extensions.Agents.Approvals
+// Namespace: TemporalCommunity.Extensions.Agents.Approvals
 public sealed class ApprovalScopeRecord
 {
     public required string ToolName { get; init; }
@@ -196,9 +196,9 @@ public sealed class ApprovalScopeRecord
 `ApprovalScopeHelpers.TryMatchScope` is the safe, public API for consulting scope records from inside an interceptor. It deserializes the list from StateBag, evaluates tool name (case-insensitive) and optional argument patterns, and returns the first matching record:
 
 ```csharp
-using Temporalio.Extensions.AI.Tools;     // DurableToolDecision
-using Temporalio.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
-using Temporalio.Extensions.Agents.Approvals; // ApprovalScopeHelpers
+using TemporalCommunity.Extensions.AI.Tools;     // DurableToolDecision
+using TemporalCommunity.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
+using TemporalCommunity.Extensions.Agents.Approvals; // ApprovalScopeHelpers
 
 public class PolicyInterceptor : IAgentToolInterceptor
 {
@@ -362,8 +362,8 @@ If an interceptor may return `PauseForApproval`, use it only with session-backed
 Load order details from the database so the reviewer sees meaningful context rather than raw LLM arguments.
 
 ```csharp
-using Temporalio.Extensions.AI.Tools;     // DurableToolDecision
-using Temporalio.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
+using TemporalCommunity.Extensions.AI.Tools;     // DurableToolDecision
+using TemporalCommunity.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
 
 public class OrderApprovalInterceptor(OrderRepository repo) : IAgentToolInterceptor
 {
@@ -393,8 +393,8 @@ public class OrderApprovalInterceptor(OrderRepository repo) : IAgentToolIntercep
 Call an external risk API and block if the score exceeds a threshold.
 
 ```csharp
-using Temporalio.Extensions.AI.Tools;     // DurableToolDecision
-using Temporalio.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
+using TemporalCommunity.Extensions.AI.Tools;     // DurableToolDecision
+using TemporalCommunity.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
 
 public class RiskScoringInterceptor(IRiskService riskService) : IAgentToolInterceptor
 {
@@ -421,8 +421,8 @@ public class RiskScoringInterceptor(IRiskService riskService) : IAgentToolInterc
 Tokenize a sensitive field before it reaches the tool, keeping PII out of the `InvokeAgentTool` activity event.
 
 ```csharp
-using Temporalio.Extensions.AI.Tools;     // DurableToolDecision
-using Temporalio.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
+using TemporalCommunity.Extensions.AI.Tools;     // DurableToolDecision
+using TemporalCommunity.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
 
 public class PiiScrubbingInterceptor(IPiiVault vault) : IAgentToolInterceptor
 {

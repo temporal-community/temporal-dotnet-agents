@@ -86,7 +86,7 @@ var results = await Task.WhenAll(toolTasks);
 var results = await Workflow.WhenAllAsync(toolTasks);
 ```
 
-**Why:** `Workflow.WhenAllAsync` is the SDK-provided workflow-safe combinator and the project convention. The XML doc on `TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync` (`src/Temporalio.Extensions.Agents/TemporalWorkflowExtensions.cs:112`) describes it as "the workflow-safe equivalent of `Task.WhenAll`." `Task.WhenAll` is technically safe when every task comes from `Workflow.ExecuteActivityAsync` (those schedule on `TaskScheduler.Current`), but using the SDK method makes intent clear and stays consistent with the rest of the codebase.
+**Why:** `Workflow.WhenAllAsync` is the SDK-provided workflow-safe combinator and the project convention. The XML doc on `TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync` (`src/TemporalCommunity.Extensions.Agents/TemporalWorkflowExtensions.cs:112`) describes it as "the workflow-safe equivalent of `Task.WhenAll`." `Task.WhenAll` is technically safe when every task comes from `Workflow.ExecuteActivityAsync` (those schedule on `TaskScheduler.Current`), but using the SDK method makes intent clear and stays consistent with the rest of the codebase.
 
 ### Don't use `ConfigureAwait(false)` in workflow code
 
@@ -320,16 +320,16 @@ Assert.Throws<ArgumentException>(() => Foo(""));
 ### Do use TestEnvironmentHelper.StartLocalAsync() for Agents integration tests
 
 ```csharp
-// Temporalio.Extensions.Agents integration tests
+// TemporalCommunity.Extensions.Agents integration tests
 var env = await TestEnvironmentHelper.StartLocalAsync();
 ```
 
 `AgentWorkflow` calls `UpsertTypedSearchAttributes` only when `EnableSearchAttributes = true`. If search attributes are enabled in your test fixture, the three custom attributes (`AgentName`, `SessionCreatedAt`, `TurnCount`) must be pre-registered when the embedded server starts — otherwise the workflow fails with an opaque "unexpected workflow task failure". `TestEnvironmentHelper.StartLocalAsync()` passes the required `--search-attribute` CLI args to `WorkflowEnvironment.StartLocalAsync()` automatically.
 
-If `EnableSearchAttributes` is left at its default (`false`), bare `WorkflowEnvironment.StartLocalAsync()` works fine for Agents integration tests too. It is always appropriate for `Temporalio.Extensions.AI` integration tests, which use `DurableChatWorkflow` and never require custom search attributes:
+If `EnableSearchAttributes` is left at its default (`false`), bare `WorkflowEnvironment.StartLocalAsync()` works fine for Agents integration tests too. It is always appropriate for `TemporalCommunity.Extensions.AI` integration tests, which use `DurableChatWorkflow` and never require custom search attributes:
 
 ```csharp
-// Temporalio.Extensions.AI integration tests only — no custom search attributes needed
+// TemporalCommunity.Extensions.AI integration tests only — no custom search attributes needed
 var env = await WorkflowEnvironment.StartLocalAsync();
 ```
 

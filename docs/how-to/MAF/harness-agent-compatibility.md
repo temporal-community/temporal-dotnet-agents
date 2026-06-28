@@ -1,6 +1,6 @@
 # MAF `HarnessAgent` Compatibility
 
-MAF's `HarnessAgent` is a batteries-included pre-wired agent that bundles a chat client, function invocation loop, todo management, file memory, agent-mode switching, background agent delegation, and approval gating into a single object. **It is structurally incompatible with `Temporalio.Extensions.Agents`** and cannot be used as a drop-in replacement for a plain `IChatClient`.
+MAF's `HarnessAgent` is a batteries-included pre-wired agent that bundles a chat client, function invocation loop, todo management, file memory, agent-mode switching, background agent delegation, and approval gating into a single object. **It is structurally incompatible with `TemporalCommunity.Extensions.Agents`** and cannot be used as a drop-in replacement for a plain `IChatClient`.
 
 This document explains the three independent blockers and what to use instead.
 

@@ -369,8 +369,8 @@ opts.AddDurableAgent("DataAgent", agent =>
 Register an interceptor that evaluates each tool call and decides dynamically whether to pause:
 
 ```csharp
-using Temporalio.Extensions.AI.Tools;     // DurableToolDecision
-using Temporalio.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
+using TemporalCommunity.Extensions.AI.Tools;     // DurableToolDecision
+using TemporalCommunity.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
 
 public class RiskyToolInterceptor : IAgentToolInterceptor
 {
@@ -403,7 +403,7 @@ opts.DefaultToolInterceptor = sp => new RiskyToolInterceptor();
 > of the former `AgentToolDecision.PauseForApproval` — the approval flow is identical. The `description` still
 > becomes `DurableApprovalRequest.Description` on the reviewer's side. `SubmitApprovalAsync`,
 > `GetPendingApprovalAsync`, `DurableApprovalRequest`, and `DurableApprovalDecision` are all unchanged;
-> only the interceptor outcome type name changed (it now lives in `Temporalio.Extensions.AI.Tools`).
+> only the interceptor outcome type name changed (it now lives in `TemporalCommunity.Extensions.AI.Tools`).
 
 > **Note:** `PauseForApproval` is only supported on `AgentWorkflow`-backed agents (sessions and sub-agents inside workflows). On `AgentJobWorkflow` (`AddScheduledAgentRun`, `ScheduleAgentAsync`) the decision degrades to `Block` with a warning logged, because scheduled jobs have no persistent session to resume.
 
@@ -534,7 +534,7 @@ agent.UseApprovalScopes(scopes =>
 });
 ```
 
-`IApprovalScopeStore` (namespace `Temporalio.Extensions.Agents.Approvals`) has two methods:
+`IApprovalScopeStore` (namespace `TemporalCommunity.Extensions.Agents.Approvals`) has two methods:
 
 ```csharp
 Task<IReadOnlyList<ApprovalScopeRecord>> LoadAsync(
@@ -655,7 +655,7 @@ See [Testing Agents](./testing-agents.md) for the full integration test fixture 
 ### DurableApprovalRequest
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI.Approvals
+// Namespace: TemporalCommunity.Extensions.AI.Approvals
 public sealed record DurableApprovalRequest
 {
     public required string RequestId { get; init; }            // must be set explicitly, e.g. Guid.NewGuid().ToString("N")
@@ -665,12 +665,12 @@ public sealed record DurableApprovalRequest
 }
 ```
 
-> **Note:** In MAF HITL flows, `FunctionName` and `CallId` are always `null`. These fields are populated by `DurableAIFunction` in MEAI tool-call flows (`Temporalio.Extensions.AI`), which are not part of the MAF pipeline. When building a shared approval UI that handles requests from both libraries, check these fields for null before displaying them. Tool authors should always populate `RequestId` and `Description` — these are the fields a human reviewer will see.
+> **Note:** In MAF HITL flows, `FunctionName` and `CallId` are always `null`. These fields are populated by `DurableAIFunction` in MEAI tool-call flows (`TemporalCommunity.Extensions.AI`), which are not part of the MAF pipeline. When building a shared approval UI that handles requests from both libraries, check these fields for null before displaying them. Tool authors should always populate `RequestId` and `Description` — these are the fields a human reviewer will see.
 
 ### DurableApprovalDecision
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI.Approvals
+// Namespace: TemporalCommunity.Extensions.AI.Approvals
 // Used for both the submitted decision and the returned outcome
 public sealed record DurableApprovalDecision
 {
@@ -687,7 +687,7 @@ public sealed record DurableApprovalDecision
 ### ApprovalScopePattern
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI.Approvals
+// Namespace: TemporalCommunity.Extensions.AI.Approvals
 public sealed class ApprovalScopePattern
 {
     public PatternMatchType Type { get; init; }    // Exact | Glob | Regex
@@ -699,7 +699,7 @@ public sealed class ApprovalScopePattern
 ### ApprovalScope
 
 ```csharp
-// Namespace: Temporalio.Extensions.AI.Approvals
+// Namespace: TemporalCommunity.Extensions.AI.Approvals
 public enum ApprovalScope
 {
     ThisCallOnly,   // default — no scope record written
@@ -791,16 +791,16 @@ dotnet run --project samples/MAF/HumanInTheLoop
 
 ## References
 
-- `src/Temporalio.Extensions.AI/Approvals/DurableApprovalRequest.cs` — request type
-- `src/Temporalio.Extensions.AI/Approvals/DurableApprovalDecision.cs` — decision and outcome type (includes `Scope`, `ScopePattern`)
-- `src/Temporalio.Extensions.AI/Approvals/ApprovalScope.cs` — `ApprovalScope` enum
-- `src/Temporalio.Extensions.AI/Approvals/ApprovalScopePattern.cs` — `ApprovalScopePattern` and `PatternMatchType`
-- `src/Temporalio.Extensions.Agents/Approvals/ApprovalScopeRecord.cs` — persisted scope record
-- `src/Temporalio.Extensions.Agents/Approvals/ApprovalScopeHelpers.cs` — `TryMatchScope` public helper
-- `src/Temporalio.Extensions.Agents/Approvals/ApprovalScopesOptions.cs` — per-agent scope configuration
-- `src/Temporalio.Extensions.Agents/Approvals/IApprovalScopeStore.cs` — always-scope store interface
-- `src/Temporalio.Extensions.Agents/Workflows/AgentWorkflow.cs` — HITL update/query handlers, scope record write path
-- `src/Temporalio.Extensions.Agents/Session/TemporalAgentContext.cs` — `RequestApprovalAsync` for tools
+- `src/TemporalCommunity.Extensions.AI/Approvals/DurableApprovalRequest.cs` — request type
+- `src/TemporalCommunity.Extensions.AI/Approvals/DurableApprovalDecision.cs` — decision and outcome type (includes `Scope`, `ScopePattern`)
+- `src/TemporalCommunity.Extensions.AI/Approvals/ApprovalScope.cs` — `ApprovalScope` enum
+- `src/TemporalCommunity.Extensions.AI/Approvals/ApprovalScopePattern.cs` — `ApprovalScopePattern` and `PatternMatchType`
+- `src/TemporalCommunity.Extensions.Agents/Approvals/ApprovalScopeRecord.cs` — persisted scope record
+- `src/TemporalCommunity.Extensions.Agents/Approvals/ApprovalScopeHelpers.cs` — `TryMatchScope` public helper
+- `src/TemporalCommunity.Extensions.Agents/Approvals/ApprovalScopesOptions.cs` — per-agent scope configuration
+- `src/TemporalCommunity.Extensions.Agents/Approvals/IApprovalScopeStore.cs` — always-scope store interface
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentWorkflow.cs` — HITL update/query handlers, scope record write path
+- `src/TemporalCommunity.Extensions.Agents/Session/TemporalAgentContext.cs` — `RequestApprovalAsync` for tools
 - `samples/MAF/HumanInTheLoop/` — complete working example
 - [Tool Interceptor — Approval scope records](./tool-interceptor.md#approval-scope-records) — interceptor integration, one-turn lag
 - [Usage Guide — HITL](./usage.md#human-in-the-loop-hitl-approval-gates) — quick-start examples

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The simplest way to get started with `Temporalio.Extensions.Agents`. A single process registers a Temporal worker and an AI agent, then runs a multi-turn conversation where every exchange is durably recorded in workflow state.
+The simplest way to get started with `TemporalCommunity.Extensions.Agents`. A single process registers a Temporal worker and an AI agent, then runs a multi-turn conversation where every exchange is durably recorded in workflow state.
 
 This sample demonstrates:
 - Registering an agent with `AddTemporalAgents()` + `opts.AddDurableAgent("name", agent => { ... })`

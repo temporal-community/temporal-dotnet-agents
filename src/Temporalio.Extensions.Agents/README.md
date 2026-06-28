@@ -1,4 +1,4 @@
-# Temporalio.Extensions.Agents
+# TemporalCommunity.Extensions.Agents
 
 A [Temporal](https://temporal.io/) integration for
 the [Microsoft Agent Framework](https://github.com/microsoft/agents) (`Microsoft.Agents.AI`). This library provides
@@ -28,10 +28,10 @@ Key benefits over in-memory agent frameworks:
 - MCP tool integration via async agent factory
 - External memory with `AIContextProvider` and `AgentSessionStateBag` persistence
 - Streaming responses via `IAgentResponseHandler`
-- Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `Temporalio.Extensions.AI.Tools`)
+- Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`)
 - `WorkingSetContextProvider` — `AIContextProvider` subclass that extracts recently-referenced file paths and injects a working-set note before each LLM call
 - OpenTelemetry distributed tracing (two-layer span hierarchy; search attributes opt-in via `EnableSearchAttributes`)
-- Plugin composition — `.AddWorkerPlugin()` / `.AddClientPlugin()` available via the `Temporalio.Extensions.AI` dependency (same worker builder, chains after `.AddTemporalAgents()`)
+- Plugin composition — `.AddWorkerPlugin()` / `.AddClientPlugin()` available via the `TemporalCommunity.Extensions.AI` dependency (same worker builder, chains after `.AddTemporalAgents()`)
 
 ## How It Works
 
@@ -63,7 +63,7 @@ determinism.
 Install the NuGet package:
 
 ```bash
-dotnet add package Temporalio.Extensions.Agents
+dotnet add package TemporalCommunity.Extensions.Agents
 ```
 
 ## Getting Started
@@ -74,7 +74,7 @@ Two equivalent entry points register the agent workflow, activities, proxies, an
 
 ```csharp
 using Microsoft.Agents.AI;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -180,14 +180,14 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 - **`ITemporalAgentClient`** — Update-based client with routing, scheduling, and HITL support
 - **`TemporalAgentContext`** — Async-local context for agent tools running inside activities
 - **`StructuredOutputExtensions`** — `RunAsync<T>` with markdown fence stripping and retry
-- **`IAgentToolInterceptor`** (`Temporalio.Extensions.Agents.Tools`) — pre-tool lifecycle hook; extends `IDurableToolInterceptor<AgentToolContext>` from `Temporalio.Extensions.AI.Tools`; return `DurableToolDecision.Proceed/PauseForApproval/Skip/Block`
+- **`IAgentToolInterceptor`** (`TemporalCommunity.Extensions.Agents.Tools`) — pre-tool lifecycle hook; extends `IDurableToolInterceptor<AgentToolContext>` from `TemporalCommunity.Extensions.AI.Tools`; return `DurableToolDecision.Proceed/PauseForApproval/Skip/Block`
 - **`WorkingSetContextProvider`** — `AIContextProvider` that injects a compact file-reference note before each LLM call
 
-### Dependency on Temporalio.Extensions.AI
+### Dependency on TemporalCommunity.Extensions.AI
 
-This library depends on `Temporalio.Extensions.AI`. Installing `Temporalio.Extensions.Agents` pulls in `Temporalio.Extensions.AI` automatically — no separate package reference is needed.
+This library depends on `TemporalCommunity.Extensions.AI`. Installing `TemporalCommunity.Extensions.Agents` pulls in `TemporalCommunity.Extensions.AI` automatically — no separate package reference is needed.
 
-The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `Temporalio.Extensions.AI.Approvals` and used here as the shared wire protocol for approval flows. An external approval system built against these types works against both `AgentWorkflow` and `DurableChatWorkflow` without modification.
+The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI.Approvals` and used here as the shared wire protocol for approval flows. An external approval system built against these types works against both `AgentWorkflow` and `DurableChatWorkflow` without modification.
 
 `DurableAIDataConverter` is auto-wired by `AddTemporalAgents()` for the standard registration patterns (3-arg `AddHostedTemporalWorker` and `AddTemporalClient`). Manual setup is only required when creating the client via `TemporalClient.ConnectAsync` and registering it with `AddSingleton<ITemporalClient>`.
 

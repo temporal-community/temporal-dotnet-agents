@@ -21,7 +21,7 @@ How to instrument, trace, and query TemporalAgents workloads — from OpenTeleme
 
 TemporalAgents emits two layers of distributed tracing spans:
 
-1. **Agent spans** — emitted by `TemporalAgentTelemetry.ActivitySource` (`"Temporalio.Extensions.Agents"`) to capture agent-semantic events like "agent turn" and "client send"
+1. **Agent spans** — emitted by `TemporalAgentTelemetry.ActivitySource` (`"TemporalCommunity.Extensions.Agents"`) to capture agent-semantic events like "agent turn" and "client send"
 2. **Temporal SDK spans** — emitted by the `TracingInterceptor` from `Temporalio.Extensions.OpenTelemetry` to capture protocol-level events like `StartWorkflow` and `RunActivity`
 
 These two layers compose naturally: agent spans nest inside (or wrap) Temporal SDK spans, giving you a single trace that spans the full lifecycle of a request — from the external caller through the workflow down to the LLM inference.
@@ -44,7 +44,7 @@ Register **all four** `ActivitySource` names plus the `TracingInterceptor`:
 ```csharp
 using OpenTelemetry.Trace;
 using Temporalio.Extensions.OpenTelemetry;
-using Temporalio.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents;
 
 // 1. Configure the OTel tracer provider with all relevant sources
 using var tracerProvider = Sdk.CreateTracerProviderBuilder()
@@ -52,7 +52,7 @@ using var tracerProvider = Sdk.CreateTracerProviderBuilder()
         TracingInterceptor.ClientSource.Name,      // Temporal client spans
         TracingInterceptor.WorkflowsSource.Name,   // Temporal workflow spans
         TracingInterceptor.ActivitiesSource.Name,  // Temporal activity spans
-        TemporalAgentTelemetry.ActivitySourceName) // "Temporalio.Extensions.Agents"
+        TemporalAgentTelemetry.ActivitySourceName) // "TemporalCommunity.Extensions.Agents"
     .AddOtlpExporter()
     .Build();
 
@@ -303,10 +303,10 @@ This is a doc-only pattern with no library opt-in flag. See [Per-LLM-Call Interc
 
 ## References
 
-- `src/Temporalio.Extensions.Agents/TemporalAgentTelemetry.cs` — all span and attribute constants
-- `src/Temporalio.Extensions.Agents/Workflows/DefaultTemporalAgentClient.cs` — `agent.client.send` and scheduling spans
-- `src/Temporalio.Extensions.Agents/Workflows/AgentActivities.cs` — `agent.turn` span with token metrics
-- `src/Temporalio.Extensions.Agents/Workflows/AgentWorkflow.cs` — search attribute upserts
+- `src/TemporalCommunity.Extensions.Agents/TemporalAgentTelemetry.cs` — all span and attribute constants
+- `src/TemporalCommunity.Extensions.Agents/Workflows/DefaultTemporalAgentClient.cs` — `agent.client.send` and scheduling spans
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentActivities.cs` — `agent.turn` span with token metrics
+- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentWorkflow.cs` — search attribute upserts
 - `samples/MAF/MultiAgentRouting/Program.cs` — complete OTel setup example
 - [Temporal Visibility](https://docs.temporal.io/visibility) — search attribute documentation
 - [Temporalio.Extensions.OpenTelemetry](https://github.com/temporalio/sdk-dotnet) — SDK tracing interceptor
