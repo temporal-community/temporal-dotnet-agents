@@ -8,6 +8,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+This release rebrands the libraries from the `Temporalio.Extensions.*` prefix to
+`TemporalCommunity.Extensions.*`. The rename touches package IDs, namespaces, assembly names,
+**and Temporal wire identifiers** — workflow type names, activity names, plugin-name constants,
+and `ActivitySource` names all change. Like the v0.3 upgrade, this is replay-breaking: in-flight
+workflows started by old-named workers will NOT replay against renamed workers. Drain in-flight
+workflows before deploying.
+
+### Changed (BREAKING)
+
+- **Package rename.** `Temporalio.Extensions.AI` → `TemporalCommunity.Extensions.AI` and
+  `Temporalio.Extensions.Agents` → `TemporalCommunity.Extensions.Agents`. Install with
+  `dotnet add package TemporalCommunity.Extensions.AI` and
+  `dotnet add package TemporalCommunity.Extensions.Agents`.
+
+- **Namespaces and assembly names changed to match the new package IDs.** All public types move
+  from the `Temporalio.Extensions.*` namespaces to the corresponding `TemporalCommunity.Extensions.*`
+  namespaces.
+
+  **Migration:** update `using` directives from `Temporalio.Extensions.AI` /
+  `Temporalio.Extensions.Agents` (and their sub-namespaces) to
+  `TemporalCommunity.Extensions.AI` / `TemporalCommunity.Extensions.Agents`.
+
+- **Temporal wire identifiers changed.** Workflow type names, activity names, plugin-name
+  constants, and `ActivitySource` names all changed as a consequence of the namespace/type rename.
+  Workflows started by old-named workers cannot replay against renamed workers — the registered
+  workflow and activity type names no longer match the names recorded in event history.
+
+  **Migration:** drain in-flight workflows before deploying renamed workers. Stop new workflow
+  starts on the old-named version, wait for in-flight workflows to complete (or roll history via
+  continue-as-new), then deploy. This is the same drain requirement as the v0.3 upgrade; no
+  dual-name compatibility shim is provided.
+
+### Changed
+
+- **Publishing moved to GitHub Packages under the `temporal-community` organization.** Packages
+  are no longer published to NuGet.org.
+
+---
+
 ## [0.3.0] - 2026-05-07
 
 This release consolidates the MAF-side public API around a single fluent registration path and
