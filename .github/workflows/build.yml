@@ -11,13 +11,12 @@ on:
         required: true
         options:
           - GitHub
-          - NuGet
           - None
 
 # Least-privilege default for all jobs. Equivalent to the read-only default, but
 # explicit so it stays restricted if repo/org defaults change or this workflow is
-# copied elsewhere. Package publishing authenticates via PAT secrets
-# (NUGET_GITHUB_PAT / NUGET_API_KEY), not GITHUB_TOKEN, so no packages: write is needed.
+# copied elsewhere. Package publishing authenticates via the NUGET_GITHUB_PAT
+# secret, not GITHUB_TOKEN, so no packages: write is needed.
 permissions:
   contents: read
 
@@ -123,12 +122,4 @@ jobs:
           dotnet nuget push "artifacts/packages/*.nupkg" \
             --api-key "${{ secrets.NUGET_GITHUB_PAT }}" \
             --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
-            --skip-duplicate
-
-      - name: Publish to NuGet.org
-        if: github.event.inputs.packregistry == 'NuGet'
-        run: |
-          dotnet nuget push "artifacts/packages/*.nupkg" \
-            --api-key "${{ secrets.NUGET_API_KEY }}" \
-            --source "https://api.nuget.org/v3/index.json" \
             --skip-duplicate
