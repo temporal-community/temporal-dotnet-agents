@@ -150,7 +150,13 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
                 ApprovalTimeout = _options.ApprovalTimeout,
                 EnableSearchAttributes = _options.EnableSearchAttributes,
                 MaxEntryCount = _options.MaxEntryCount,
+                // Both reducer forms are set:
+                // - HistoryReducer: [JsonIgnore] delegate for in-process / embedded-test use.
+                // - HistoryReducerKey: serialized key for production durable workflows.
+                // The durable CAN path uses HistoryReducerKey when present; falls back to
+                // HistoryReducer (inline) only when HistoryReducerKey is null.
                 HistoryReducer = _options.HistoryReducer,
+                HistoryReducerKey = _options.DefaultHistoryReducerKey,
                 ToolActivityOptions = toolActivityOptions,
                 MaxToolCallsPerTurn = _options.MaxToolCallsPerTurn,
                 MaximumConsecutiveErrorsPerRequest = _options.MaximumConsecutiveErrorsPerRequest,

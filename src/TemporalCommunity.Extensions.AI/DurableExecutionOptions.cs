@@ -106,19 +106,55 @@ public sealed class DurableExecutionOptions
 
     /// <summary>
     /// Gets or sets a reducer applied to conversation history before a continue-as-new transition.
-    /// When null (default), the full history is carried forward.
+    /// When <see langword="null"/> (default) and <see cref="DefaultHistoryReducerKey"/> is also
+    /// <see langword="null"/>, <c>DefaultBoundedTrim</c> is applied: it keeps the most-recent
+    /// <c>Max(1, MaxEntryCount/2)</c> entries when history reaches <c>MaxEntryCount</c>; when
+    /// <c>MaxEntryCount</c> is not the trigger (SDK-suggested CAN), history is carried forward
+    /// unchanged.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Use this to trim or summarize history when the workflow is about to continue-as-new,
-    /// preventing the carried history from growing unbounded across runs.
+    /// This property is provided for in-process and unit-test scenarios where a delegate can be
+    /// supplied directly. For production durable workflows, prefer
+    /// <see cref="DefaultHistoryReducerKey"/> — the key is serialized and survives the wire,
+    /// so the reducer reliably fires at every continue-as-new boundary including after worker
+    /// restarts and replay. If both are set, <see cref="DefaultHistoryReducerKey"/> takes
+    /// precedence for the durable path.
     /// </para>
     /// <para>
-    /// <b>Workflow determinism:</b> the reducer runs inside the workflow task scheduler and
-    /// must be synchronous — do not perform async I/O, call LLM APIs, or use <c>Task.Delay</c>.
+    /// <b>Workflow determinism:</b> the reducer runs inside a Temporal activity (not on the
+    /// workflow thread) and may be async-capable, but the delegate itself must be pure and
+    /// deterministic — same inputs must always produce the same output.
     /// </para>
     /// </remarks>
     public Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer { get; set; }
+
+    /// <summary>
+    /// Gets or sets the keyed-service key used to resolve the history-reducer delegate from DI.
+    /// When non-null, the session client sets this key on the workflow input and the worker
+    /// dispatches a <c>ReduceHistoryByKey</c> activity at continue-as-new time to apply the reducer.
+    /// The key is serialized and survives continue-as-new transitions.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Register the reducer in DI before calling <c>AddDurableAI</c>:
+    /// <code>
+    /// services.AddKeyedSingleton&lt;Func&lt;IList&lt;DurableSessionEntry&gt;, IList&lt;DurableSessionEntry&gt;&gt;&gt;(
+    ///     "my-reducer", (sp, key) => history => history.TakeLast(50).ToList());
+    /// opts.DefaultHistoryReducerKey = "my-reducer";
+    /// </code>
+    /// Alternatively, <c>AddDurableAI</c> auto-registers <see cref="HistoryReducer"/> under
+    /// <see cref="DefaultHistoryReducerKey"/> when both are supplied, as a convenience for
+    /// migration from the non-durable delegate form.
+    /// </para>
+    /// <para>
+    /// <b>Determinism requirement:</b> the registered delegate must be pure and deterministic.
+    /// An implementation that changes behaviour between deployments without a key change is a
+    /// nondeterminism hazard for in-flight sessions (treat reducer changes like workflow-code
+    /// changes: new key or <c>Workflow.Patched</c>).
+    /// </para>
+    /// </remarks>
+    public string? DefaultHistoryReducerKey { get; set; }
 
     /// <summary>
     /// Gets or sets whether to register the default <see cref="DurableChatWorkflow"/> and

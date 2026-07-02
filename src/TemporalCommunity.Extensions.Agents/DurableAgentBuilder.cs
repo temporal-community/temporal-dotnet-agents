@@ -181,9 +181,18 @@ public sealed class DurableAgentBuilder
 
     /// <summary>
     /// Gets or sets a deterministic, pure reducer applied to the agent's accumulated history before
-    /// continue-as-new. When <see langword="null"/>, the full history is carried forward verbatim.
+    /// continue-as-new. Kept for in-process and unit-test use. For production durable workflows,
+    /// prefer <see cref="HistoryReducerKey"/> which is serialized and survives the wire.
     /// </summary>
     public Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer { get; set; }
+
+    /// <summary>
+    /// Gets or sets the keyed-service key used to resolve the history-reducer delegate from DI.
+    /// When non-null, the session client sets this key on the workflow input and the worker
+    /// dispatches a <c>ReduceHistoryByKey</c> activity at continue-as-new time. Inherits
+    /// <see cref="TemporalAgentsOptions.DefaultHistoryReducerKey"/> when <see langword="null"/>.
+    /// </summary>
+    public string? HistoryReducerKey { get; set; }
 
     /// <summary>
     /// Gets or sets a callback that configures an <see cref="AIAgentBuilder"/> middleware pipeline
@@ -719,6 +728,7 @@ public sealed class DurableAgentBuilder
             MaxEntryCount: MaxEntryCount,
             MaxToolCallsPerTurn: MaxToolCallsPerTurn,
             HistoryReducer: HistoryReducer,
+            HistoryReducerKey: HistoryReducerKey,
             ConfigureAgentPipeline: ConfigureAgentPipeline,
             CompactionStrategyKey: CompactionStrategyKey,
             ToolInterceptorFactory: _toolInterceptorFactory,

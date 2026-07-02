@@ -203,6 +203,39 @@ internal sealed class DurableChatActivities(
     }
 
     /// <summary>
+    /// Applies a keyed history reducer to the supplied history list and returns the result.
+    /// Dispatched by <see cref="DurableChatWorkflow"/> at continue-as-new time when
+    /// <see cref="DurableChatWorkflowInput.HistoryReducerKey"/> is set. The reducer delegate is
+    /// resolved from DI via <see cref="IServiceProvider.GetKeyedService{T}"/>, applied to the
+    /// history, and the trimmed list is returned to the workflow as the new carried history.
+    /// </summary>
+    /// <remarks>
+    /// Running the reducer inside an activity (not on the workflow thread) ensures that:
+    /// <list type="bullet">
+    ///   <item>the delegate is resolved from DI (workflows have no service provider);</item>
+    ///   <item>the activity result is stored in Temporal history, so replay is deterministic.</item>
+    /// </list>
+    /// </remarks>
+    [Activity("TemporalCommunity.Extensions.AI.ReduceHistoryByKey")]
+    public Task<List<Session.DurableSessionEntry>> ReduceHistoryByKeyAsync(
+        ReduceHistoryByKeyInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var reducer = services.GetKeyedService<
+            Func<IList<Session.DurableSessionEntry>, IList<Session.DurableSessionEntry>>>(
+            input.ReducerKey)
+            ?? throw new InvalidOperationException(
+                $"No history reducer registered under key '{input.ReducerKey}'. " +
+                $"Register a Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> " +
+                $"via services.AddKeyedSingleton(\"{input.ReducerKey}\", ...).");
+
+        var result = reducer(input.History);
+        return Task.FromResult(result as List<Session.DurableSessionEntry>
+            ?? result.ToList());
+    }
+
+    /// <summary>
     /// Shared streaming accumulator: streams the LLM response, heartbeats each chunk,
     /// materializes the response via <c>ToChatResponse()</c>, populates span success tags,
     /// and rethrows any exception with span error status and a log entry. The span is passed

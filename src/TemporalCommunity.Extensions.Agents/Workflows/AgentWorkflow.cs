@@ -152,6 +152,20 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         AgentSessionResponse.FromAgentResponse(correlationId, output, createdAt);
 
     /// <inheritdoc/>
+    protected override Task<List<DurableSessionEntry>> ApplyKeyedHistoryReducerAsync(
+        string reducerKey,
+        List<DurableSessionEntry> history,
+        ActivityOptions activityOptions) =>
+        Workflow.ExecuteActivityAsync(
+            (AgentActivities a) => a.ReduceHistoryByKeyAsync(
+                new TemporalCommunity.Extensions.AI.ReduceHistoryByKeyInput
+                {
+                    ReducerKey = reducerKey,
+                    History = history,
+                }),
+            activityOptions);
+
+    /// <inheritdoc/>
     protected override Task<AgentResponse> ExecuteTurnAsync(
         ActivityOptions activityOptions,
         DurableSessionRequest requestEntry,
@@ -195,6 +209,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             EnableSearchAttributes = input.EnableSearchAttributes,
             MaxEntryCount = input.MaxEntryCount,
             HistoryReducer = input.HistoryReducer,
+            HistoryReducerKey = input.HistoryReducerKey,
             OriginalCreatedAt = input.OriginalCreatedAt,
             ActivityTimeout = input.ActivityTimeout,
             HeartbeatTimeout = input.HeartbeatTimeout,

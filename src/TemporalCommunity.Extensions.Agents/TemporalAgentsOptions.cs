@@ -104,17 +104,43 @@ public sealed class TemporalAgentsOptions
     /// <summary>
     /// Gets or sets the worker-level default deterministic, pure history reducer applied before
     /// continue-as-new. Agents inherit this value when <see cref="DurableAgentBuilder.HistoryReducer"/>
-    /// is unset. When <see langword="null"/>, full history is carried forward verbatim.
+    /// is unset.
     /// </summary>
     /// <remarks>
-    /// The reducer receives the full history list and returns the list to carry forward. Prefer
-    /// LINQ projections over mutating the input list.
     /// <para>
-    /// WARNING: This delegate is not serialized. Re-supply it on every StartWorkflowAsync call
-    /// (on the same worker, in-memory carry-forward across continue-as-new is fine).
+    /// This delegate is kept for in-process and unit-test use. For production durable workflows,
+    /// prefer <see cref="DefaultHistoryReducerKey"/> which is serialized and survives the wire.
+    /// If both are set, <see cref="DefaultHistoryReducerKey"/> takes precedence for the durable path.
+    /// </para>
+    /// <para>
+    /// WARNING: This delegate is not serialized. It does not survive workflow start serialization
+    /// and will be silently ignored at continue-as-new time in production durable workflows unless
+    /// <see cref="DefaultHistoryReducerKey"/> is also configured.
     /// </para>
     /// </remarks>
     public Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? DefaultHistoryReducer { get; set; }
+
+    /// <summary>
+    /// Gets or sets the worker-level default keyed-service key used to resolve the history-reducer
+    /// delegate from DI. Agents inherit this value when
+    /// <see cref="DurableAgentBuilder.HistoryReducerKey"/> is unset.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Register the reducer in DI before calling <c>AddTemporalAgents</c>:
+    /// <code>
+    /// services.AddKeyedSingleton&lt;Func&lt;IList&lt;DurableSessionEntry&gt;, IList&lt;DurableSessionEntry&gt;&gt;&gt;(
+    ///     "my-reducer", (sp, key) => history => history.TakeLast(50).ToList());
+    /// opts.DefaultHistoryReducerKey = "my-reducer";
+    /// </code>
+    /// </para>
+    /// <para>
+    /// <b>Determinism requirement:</b> the registered delegate must be pure and deterministic.
+    /// An implementation that changes behaviour between deployments without a key change is a
+    /// nondeterminism hazard for in-flight sessions.
+    /// </para>
+    /// </remarks>
+    public string? DefaultHistoryReducerKey { get; set; }
 
     /// <summary>
     /// Gets or sets the worker-level default compaction-strategy key. When an agent does
