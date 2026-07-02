@@ -207,7 +207,7 @@ ci: clean build test-unit-all pack
 # Show orphaned Temporal embedded servers + dotnet test hosts scoped to this repo
 list-orphans:
     @echo "== temporal-sdk-dotnet processes =="
-    @pgrep -af "temporal-sdk-dotnet" 2>/dev/null || echo "(none)"
+    @pgrep -af "[t]emporal-sdk-dotnet" 2>/dev/null || echo "(none)"
     @echo ""
     @echo "== TemporalAgents testhost.dll processes =="
     @pgrep -af "testhost.dll" 2>/dev/null | grep -i "TemporalAgents" || echo "(none)"
@@ -221,13 +221,13 @@ list-orphans:
 # Does NOT touch testhost.dll or `dotnet test` — see `kill-test-hosts` for that.
 kill-orphans:
     @echo "Sending SIGTERM to orphaned temporal-sdk-dotnet processes..."
-    -@pkill -TERM -f "temporal-sdk-dotnet" 2>/dev/null; true
+    -@pkill -TERM -f "[t]emporal-sdk-dotnet" 2>/dev/null; true
     @sleep 2
     @echo "Sending SIGKILL to any stragglers..."
-    -@pkill -9 -f "temporal-sdk-dotnet" 2>/dev/null; true
+    -@pkill -9 -f "[t]emporal-sdk-dotnet" 2>/dev/null; true
     @echo ""
     @echo "Remaining temporal-sdk-dotnet processes:"
-    @pgrep -af "temporal-sdk-dotnet" 2>/dev/null || echo "(none)"
+    @pgrep -af "[t]emporal-sdk-dotnet" 2>/dev/null || echo "(none)"
 
 # Kill TemporalAgents-scoped test hosts (opt-in; risk of cross-project blast
 # without the path filter). Use this when `dotnet test` for THIS repo is hung
