@@ -24,6 +24,12 @@
     <None Update="Compat/Snapshots/**/*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Checked-in workflow history JSON files for replay regression tests.
+         Captured by HistoryCaptureTests in the integration project.
+         Update by re-running those capture tests when workflow command sequences change. -->
+    <None Update="Compat/Histories/**/*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <ItemGroup>
