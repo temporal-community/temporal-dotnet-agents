@@ -1,7 +1,3 @@
-#pragma warning disable MEAI001 // ToolApprovalRequestContent / ToolApprovalResponseContent are stable in MEAI 10.7+;
-                               // this file is marked [Experimental("TAI001")] because the adapter class
-                               // itself is an opt-in utility, not because the MEAI types are experimental.
-                               // If a future MEAI release adds [Experimental] to these types, revisit.
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.AI;
 
