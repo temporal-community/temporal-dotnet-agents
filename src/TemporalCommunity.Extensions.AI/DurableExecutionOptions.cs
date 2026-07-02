@@ -143,9 +143,6 @@ public sealed class DurableExecutionOptions
     ///     "my-reducer", (sp, key) => history => history.TakeLast(50).ToList());
     /// opts.DefaultHistoryReducerKey = "my-reducer";
     /// </code>
-    /// Alternatively, <c>AddDurableAI</c> auto-registers <see cref="HistoryReducer"/> under
-    /// <see cref="DefaultHistoryReducerKey"/> when both are supplied, as a convenience for
-    /// migration from the non-durable delegate form.
     /// </para>
     /// <para>
     /// <b>Determinism requirement:</b> the registered delegate must be pure and deterministic.
