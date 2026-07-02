@@ -3,6 +3,7 @@ using Temporalio.Client.Schedules;
 using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
 
 namespace TemporalCommunity.Extensions.Agents;
@@ -10,7 +11,7 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <summary>
 /// Client for running agents via Temporal workflow updates.
 /// </summary>
-public interface ITemporalAgentClient
+public interface ITemporalAgentClient : IDurableSessionControl
 {
     /// <summary>
     /// Runs an agent by sending a Temporal workflow update and waiting for the response.

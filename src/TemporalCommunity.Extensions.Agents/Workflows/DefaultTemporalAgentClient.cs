@@ -233,6 +233,42 @@ internal sealed class DefaultTemporalAgentClient(
             .ConfigureAwait(false);
     }
 
+    // ── IDurableSessionControl — explicit implementations ───────────────────
+    // ITemporalAgentClient.GetPendingApprovalAsync / SubmitApprovalAsync / ShutdownAsync take
+    // TemporalAgentSessionId. IDurableSessionControl uses string workflowId so approval
+    // dashboards can address any session directly without constructing a session-ID value.
+
+    async Task<DurableApprovalRequest?> IDurableSessionControl.GetPendingApprovalAsync(
+        string workflowId, CancellationToken ct)
+    {
+        var handle = client.GetWorkflowHandle<AgentWorkflow>(workflowId);
+        return await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
+            wf => wf.GetPendingApproval(),
+            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = ct } })
+            .ConfigureAwait(false);
+    }
+
+    async Task IDurableSessionControl.SubmitApprovalAsync(
+        string workflowId, DurableApprovalDecision decision, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        var handle = client.GetWorkflowHandle<AgentWorkflow>(workflowId);
+        await handle.ExecuteUpdateAsync(
+            wf => wf.SubmitApprovalAsync(decision),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = ct } })
+            .ConfigureAwait(false);
+    }
+
+    async Task IDurableSessionControl.ShutdownAsync(string workflowId, CancellationToken ct)
+    {
+        var handle = client.GetWorkflowHandle(workflowId);
+        await handle.SignalAsync(
+            DurableChatWorkflowBase<AgentResponse>.ShutdownSignalName,
+            Array.Empty<object>(),
+            new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = ct } })
+            .ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Constructs the <see cref="AgentWorkflowInput"/> for a session by resolving every per-agent
     /// scalar via the inheritance rule: <c>effective = registration.X ?? options.DefaultX</c>.
