@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/TemporalCommunity.Extensions.AI/TemporalCommunity.Extensions.AI.csproj" />
+    <ProjectReference Include="../TemporalCommunity.Extensions.Tests.Shared/TemporalCommunity.Extensions.Tests.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

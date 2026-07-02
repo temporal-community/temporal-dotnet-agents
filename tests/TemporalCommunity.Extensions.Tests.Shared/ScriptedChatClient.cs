@@ -1,17 +1,17 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 
-namespace TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
+namespace TemporalCommunity.Extensions.Tests.Shared;
 
 /// <summary>
 /// An <see cref="IChatClient"/> that returns a pre-defined sequence of
-/// <see cref="ChatResponse"/> values. Used to drive the Pattern 3 tool loop
+/// <see cref="ChatResponse"/> values. Used to drive the workflow tool loop
 /// deterministically without hitting a real LLM.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Each call to <see cref="GetResponseAsync"/> dequeues the next scripted response.
-/// The typical Pattern 3 test scripts:
+/// The typical test scripts:
 /// <list type="number">
 ///   <item>turn 1 — assistant response containing one or more <see cref="FunctionCallContent"/> items</item>
 ///   <item>turn 2 — assistant response with a final text answer (no tool calls)</item>
@@ -34,28 +34,6 @@ public sealed class ScriptedChatClient : IChatClient
         _scripted = new Queue<ChatResponse>(scriptedResponses);
     }
 
-    /// <summary>Gets the captured calls in arrival order.</summary>
-    public IReadOnlyList<CapturedCall> Calls
-    {
-        get
-        {
-            lock (_gate)
-                return _calls.ToArray();
-        }
-    }
-
-    /// <summary>Total chat-completion calls received.</summary>
-    public int CallCount
-    {
-        get
-        {
-            lock (_gate)
-                return _calls.Count;
-        }
-    }
-
-    public ChatClientMetadata Metadata { get; } = new("scripted-test");
-
     /// <summary>
     /// Append an additional response to the script after construction.
     /// Useful for tests that build the script across multiple steps.
@@ -68,6 +46,28 @@ public sealed class ScriptedChatClient : IChatClient
             _scripted.Enqueue(response);
         }
     }
+
+    /// <summary>Gets the captured calls in arrival order.</summary>
+    public IReadOnlyList<CapturedCall> Calls
+    {
+        get
+        {
+            lock (_gate)
+                return _calls.ToArray();
+        }
+    }
+
+    /// <summary>Total chat-completion calls received (success and failure).</summary>
+    public int CallCount
+    {
+        get
+        {
+            lock (_gate)
+                return _calls.Count;
+        }
+    }
+
+    public ChatClientMetadata Metadata { get; } = new("scripted-test");
 
     public Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
@@ -107,7 +107,7 @@ public sealed class ScriptedChatClient : IChatClient
     public void Dispose() { }
 
     /// <summary>
-    /// Convenience constructor for the canonical Pattern 3 test pattern:
+    /// Convenience constructor for the canonical test pattern:
     /// turn 1 returns N tool calls, turn 2 returns a final text answer.
     /// </summary>
     public static ScriptedChatClient WithToolCallsThenFinal(
