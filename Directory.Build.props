@@ -13,8 +13,9 @@
          CS0419: ambiguous overloaded cref.
          All are pre-existing issues now surfaced by GenerateDocumentationFile.
          TreatWarningsAsErrors is on; suppress globally so the build stays green.
-         Remove individual codes here to incrementally enforce doc quality. -->
-    <NoWarn>$(NoWarn);SYSLIB0051;TA002;CS1591;CS1573;CS1574;CS1580;CS1734;CS0419</NoWarn>
+         Remove individual codes here to incrementally enforce doc quality.
+         TA002: intentional — dogfoods the project's own experimental API. -->
+    <NoWarn>$(NoWarn);TA002;CS1591;CS1573;CS1574;CS1580;CS1734;CS0419</NoWarn>
 
     <Authors>Cecil Phillip</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
