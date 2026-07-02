@@ -181,14 +181,39 @@ public class HistoryCaptureTests
 
         Assert.True(canFired, "Expected MaxEntryCount-driven CAN to fire within 10 turns.");
 
-        // Wait for the new run to become queryable.
-        await Task.Delay(TimeSpan.FromSeconds(2));
+        // Send one more turn so the new run has its own activity history (not just WorkflowStarted).
+        // Retry if the new run is still starting up (WorkflowUpdateFailedException is transient here).
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (true)
+        {
+            try
+            {
+                await sessionClient.ChatAsync(conversationId,
+                    [new ChatMessage(ChatRole.User, "turn after CAN")]);
+                break;
+            }
+            catch (Temporalio.Exceptions.WorkflowUpdateFailedException) when (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200));
+            }
+        }
 
-        // Send one more turn so the new run has its own history events (not just WorkflowStarted).
-        await sessionClient.ChatAsync(conversationId,
-            [new ChatMessage(ChatRole.User, "turn after CAN")]);
+        // Poll until the fetched history contains at least one ACTIVITY_TASK_COMPLETED event —
+        // this confirms the post-CAN run has dispatched and finished an activity, giving the
+        // replay test a meaningful history to exercise.
+        WorkflowHistory history;
+        deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (true)
+        {
+            history = await handle.FetchHistoryAsync();
+            if (history.Events.Any(e => e.ActivityTaskCompletedEventAttributes is not null))
+                break;
+            if (DateTime.UtcNow >= deadline)
+                throw new TimeoutException(
+                    "Timed out waiting for ACTIVITY_TASK_COMPLETED in post-CAN history.");
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
+        }
 
-        var history = await handle.FetchHistoryAsync();
         await SaveHistoryAsync("can-transition.json", history);
 
         await host.StopAsync();
