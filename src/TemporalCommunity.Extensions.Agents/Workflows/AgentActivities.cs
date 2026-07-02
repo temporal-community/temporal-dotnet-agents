@@ -295,52 +295,67 @@ internal sealed class AgentActivities(
         // a chain of wrappers terminating in one. Either way the chain handles the call.
 
         var augmentedMessages = messagesForLlm;
-        var providerAIContexts = cached.ContextProviders.Count == 0
-            ? null
-            : new List<Microsoft.Agents.AI.AIContext>(cached.ContextProviders.Count);
         if (cached.ContextProviders.Count > 0)
         {
-            // Pre-populate with the accumulated conversation history so providers that need
-            // to scan prior messages (e.g. WorkingSetContextProvider) can read them from
-            // context.AIContext.Messages. Each provider's output is still appended to this
-            // aggregated context for subsequent providers in the chain.
+            // Seed the aggregated context with the current chatOptions state so providers see the
+            // agent's registered instructions and tools as the starting point — matching
+            // ChatClientAgent.cs:774-779 (MAF's PrepareSessionAndMessagesAsync).
+            // Each provider receives the PREVIOUS provider's output via InvokingContext, so provider
+            // N+1 sees provider N's contributions to Messages, Instructions, and Tools. This is the
+            // chaining pattern from ChatClientAgent.cs:784 (`aiContext = await provider.InvokingAsync(...)`).
             var aggregated = new Microsoft.Agents.AI.AIContext
             {
                 Messages = messagesForLlm,
+                Instructions = chatOptions.Instructions,
             };
+
+            // Track the first provider that returns tools so we can emit a single targeted warning.
+            string? firstToolProviderType = null;
+            int firstToolCount = 0;
+
             foreach (var provider in cached.ContextProviders)
             {
                 var invokingCtx = new Microsoft.Agents.AI.AIContextProvider.InvokingContext(
                     cached.Agent, session, aggregated);
-                var providerCtx = await provider.InvokingAsync(invokingCtx, ct).ConfigureAwait(false);
-                providerAIContexts!.Add(providerCtx);
-            }
+                aggregated = await provider.InvokingAsync(invokingCtx, ct).ConfigureAwait(false);
 
-            // Materialize each context's Messages list once. AIContext.Messages is typed as
-            // IEnumerable<ChatMessage> — calling Count() and then iterating again would
-            // double-enumerate any lazy or one-shot provider (F3 fix).
-            var materializedMessages = providerAIContexts!
-                .Select(c => c.Messages?.ToList())
-                .ToList();
-            var extraCapacity = materializedMessages.Sum(m => m?.Count ?? 0);
-            var extraMessages = new List<ChatMessage>(extraCapacity);
-            foreach (var extra in materializedMessages)
-            {
-                if (extra is { } msgs)
+                // Capture the first provider that returned tools for the per-turn warning below.
+                if (firstToolProviderType is null && aggregated.Tools is { } tools)
                 {
-                    foreach (var m in msgs)
+                    var count = tools is ICollection<Microsoft.Extensions.AI.AITool> c ? c.Count : tools.Count();
+                    if (count > 0)
                     {
-                        extraMessages.Add(m);
+                        firstToolProviderType = provider.GetType().Name;
+                        firstToolCount = count;
                     }
                 }
             }
 
-            if (extraMessages.Count > 0)
+            // Apply the final aggregated messages. AIContext.Messages is already materialized by
+            // the last provider in the chain; no need to enumerate intermediate contexts.
+            augmentedMessages = aggregated.Messages != null
+                ? (aggregated.Messages as IReadOnlyList<ChatMessage> ?? aggregated.Messages.ToList())
+                : messagesForLlm;
+
+            // Apply the final aggregated instructions to chatOptions so the LLM call sees them.
+            // Provider instructions replace (not append to) the agent's registered instructions,
+            // matching ChatClientAgent.cs:797-801 (MAF pattern). The agent's own instructions are
+            // already in aggregated.Instructions via the seed above — providers may extend them.
+            if (aggregated.Instructions is not null)
             {
-                var combined = new List<ChatMessage>(extraMessages.Count + messagesForLlm.Count);
-                combined.AddRange(extraMessages);
-                combined.AddRange(messagesForLlm);
-                augmentedMessages = combined;
+                chatOptions.Instructions = aggregated.Instructions;
+            }
+
+            // Provider-contributed tools are NOT dispatched as durable activities and are ignored.
+            // Emit one LogWarning per turn (not per provider, not per tool) when any provider
+            // returned tools, so the developer knows to register them via agent.AddTool() instead.
+            if (firstToolProviderType is not null)
+            {
+                _logger.LogWarning(
+                    "Context provider {ProviderType} returned {ToolCount} tool(s) for agent {AgentName}. " +
+                    "Provider-contributed tools are not dispatched as durable activities and are ignored. " +
+                    "Register tools via agent.AddTool() to ensure durable execution.",
+                    firstToolProviderType, firstToolCount, input.AgentName);
             }
         }
 
