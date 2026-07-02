@@ -616,10 +616,56 @@ internal sealed class AgentActivities(
             {
                 // Only evaluate at end-of-turn (isFinal) — tool-call iterations are
                 // mid-turn and not the right boundary for compaction.
-                var auditView = await cached.HistoryStore
-                    .LoadAsync(sessionId.WorkflowId, applyCompaction: false, ct)
+                //
+                // Item 10 / F2: the trigger-evaluation path previously issued a full LoadAsync
+                // here (loading all message payloads) even though EvaluateTrigger only needs
+                // entry counts, correlation IDs, and IsCompactionMarker flags.
+                //
+                // We now call GetMetadataAsync (which avoids loading payloads in overrides that
+                // implement it efficiently) and reconstruct a minimal stub list for EvaluateTrigger.
+                //
+                // TODO (UNVERIFIED): EvaluateTrigger takes IReadOnlyList<DurableSessionEntry>
+                // because built-in strategies call CompactionTargetFilter.CollectAlreadyCompactedIds
+                // (which only needs CorrelationId + IsCompactionMarker). Custom strategies could
+                // access message content via the history parameter — if any such strategy exists it
+                // will see empty Messages lists in the stubs below. If that is a problem, fall back
+                // to the full LoadAsync call and remove the stub reconstruction below.
+                var metadata = await cached.HistoryStore
+                    .GetMetadataAsync(sessionId.WorkflowId, ct)
                     .ConfigureAwait(false);
-                var targets = cached.CompactionStrategy.EvaluateTrigger(auditView);
+
+                // Reconstruct a minimal stub list satisfying EvaluateTrigger:
+                // each stub carries only CorrelationId (required) and its concrete type.
+                // Messages and other payload fields are left empty — built-in strategies only
+                // use entry.CorrelationId and (entry is CompactionMarkerEntry), so stubs are sufficient.
+                var stubEntries = new List<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry>(metadata.Count);
+                foreach (var (id, isMarker) in metadata.CorrelationIds)
+                {
+                    if (isMarker)
+                    {
+#pragma warning disable TA002 // stubs for compaction metadata — internal to the trigger-eval path
+                        stubEntries.Add(new TemporalCommunity.Extensions.AI.Session.CompactionMarkerEntry
+                        {
+                            CorrelationId = id,
+                            CreatedAt = default,
+                            Strategy = string.Empty,
+                            ModelId = string.Empty,
+                            CompactedMessageIds = [],
+                            OriginatingTurnCorrelationIds = [],
+                        });
+#pragma warning restore TA002
+                    }
+                    else
+                    {
+                        stubEntries.Add(new TemporalCommunity.Extensions.AI.Session.DurableSessionRequest
+                        {
+                            CorrelationId = id,
+                            CreatedAt = default,
+                        });
+                    }
+                }
+
+                var targets = cached.CompactionStrategy.EvaluateTrigger(stubEntries);
                 if (targets is { Count: > 0 })
                 {
                     compactionNeeded = true;

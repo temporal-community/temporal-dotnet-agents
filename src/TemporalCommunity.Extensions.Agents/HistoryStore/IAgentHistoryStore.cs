@@ -3,6 +3,22 @@ using TemporalCommunity.Extensions.AI.Session;
 namespace TemporalCommunity.Extensions.Agents.HistoryStore;
 
 /// <summary>
+/// Lightweight metadata projection for a session's history — entry count and correlation IDs only,
+/// without loading message payloads. Used by the compaction-trigger evaluation path (Item 10 / F2)
+/// to avoid a full <see cref="IAgentHistoryStore.LoadAsync"/> call when the trigger evaluator only
+/// needs entry counts and IDs.
+/// </summary>
+/// <param name="Count">Total number of entries in the session (including any <c>CompactionMarkerEntry</c> entries).</param>
+/// <param name="CorrelationIds">
+/// Each entry's correlation ID, in append order, paired with a flag indicating whether the entry
+/// is a <c>CompactionMarkerEntry</c>. Required by built-in compaction strategies whose
+/// <c>EvaluateTrigger</c> implementations skip already-compacted IDs and marker entries.
+/// </param>
+public sealed record HistoryMetadata(
+    int Count,
+    IReadOnlyList<(string CorrelationId, bool IsCompactionMarker)> CorrelationIds);
+
+/// <summary>
 /// Pluggable external store for durable agent conversation history.
 /// </summary>
 /// <remarks>
@@ -100,4 +116,44 @@ public interface IAgentHistoryStore
         string sessionId,
         IReadOnlyList<DurableSessionEntry> reducedEntries,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns lightweight metadata (entry count + correlation IDs) for a session without loading
+    /// message payloads. Used by the compaction-trigger evaluation path to avoid a full
+    /// <see cref="LoadAsync"/> call when the trigger only needs counts and IDs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Default implementation delegates to <c>LoadAsync(applyCompaction: false)</c> and projects
+    /// the metadata from the result. Existing store implementations get this behavior automatically.
+    /// Override in production implementations for a more efficient projection (e.g., a
+    /// <c>COUNT + SELECT id, type FROM ...</c> query) rather than fetching full message payloads.
+    /// </para>
+    /// <para>
+    /// Uses the audit-canonical view (<c>applyCompaction: false</c>) because trigger evaluators
+    /// that call <see cref="Compaction.CompactionTargetFilter.CollectAlreadyCompactedIds"/> need
+    /// to see <c>CompactionMarkerEntry</c> entries in the stream. The projected view collapses
+    /// markers, which would cause the trigger to re-select already-compacted entries.
+    /// </para>
+    /// </remarks>
+    /// <param name="sessionId">The agent workflow ID.</param>
+    /// <param name="cancellationToken">Activity cancellation token.</param>
+    /// <returns>
+    /// Metadata for the session. Returns a zero-count instance when the session has no prior entries.
+    /// </returns>
+    async ValueTask<HistoryMetadata> GetMetadataAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        var entries = await LoadAsync(sessionId, applyCompaction: false, cancellationToken)
+            .ConfigureAwait(false);
+
+        var ids = new List<(string, bool)>(entries.Count);
+        foreach (var entry in entries)
+        {
+            ids.Add((entry.CorrelationId, entry is AI.Session.CompactionMarkerEntry));
+        }
+
+        return new HistoryMetadata(entries.Count, ids);
+    }
 }

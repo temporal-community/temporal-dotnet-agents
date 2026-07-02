@@ -36,6 +36,9 @@ internal sealed class FakeAgentHistoryStore : IAgentHistoryStore
     /// <summary>Number of times <see cref="ReplaceAsync"/> has been called.</summary>
     public int ReplaceCount => _calls.Count(c => c.Operation == HistoryStoreOperation.Replace);
 
+    /// <summary>Number of times <see cref="GetMetadataAsync"/> has been called.</summary>
+    public int GetMetadataCount => _calls.Count(c => c.Operation == HistoryStoreOperation.GetMetadata);
+
     /// <summary>
     /// Optional hook to inject an exception on the next call of any kind. Useful
     /// for testing how the workflow / activity surfaces store failures.
@@ -169,6 +172,43 @@ internal sealed class FakeAgentHistoryStore : IAgentHistoryStore
         }
     }
 
+    /// <summary>
+    /// Override of the default interface method: returns metadata without going through the full
+    /// load path, so tests that assert on <see cref="LoadCount"/> are not surprised by extra
+    /// counts from trigger-evaluation calls (Item 10 / F2).
+    /// </summary>
+    public ValueTask<HistoryMetadata> GetMetadataAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(sessionId);
+
+        _calls.Enqueue(new RecordedCall(
+            HistoryStoreOperation.GetMetadata,
+            sessionId,
+            Entries: null,
+            Timestamp: DateTimeOffset.UtcNow));
+
+        if (!_store.TryGetValue(sessionId, out var list))
+        {
+            return ValueTask.FromResult(new HistoryMetadata(0, []));
+        }
+
+        DurableSessionEntry[] raw;
+        lock (GetLock(sessionId))
+        {
+            raw = list.ToArray();
+        }
+
+        var ids = new List<(string, bool)>(raw.Length);
+        foreach (var entry in raw)
+        {
+            ids.Add((entry.CorrelationId, entry is CompactionMarkerEntry));
+        }
+
+        return ValueTask.FromResult(new HistoryMetadata(raw.Length, ids));
+    }
+
     public async Task ReplaceAsync(
         string sessionId,
         IReadOnlyList<DurableSessionEntry> reducedEntries,
@@ -238,4 +278,5 @@ internal enum HistoryStoreOperation
     Load,
     Append,
     Replace,
+    GetMetadata,
 }
