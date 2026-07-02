@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/TemporalCommunity.Extensions.AI/TemporalCommunity.Extensions.AI.csproj" />
+    <ProjectReference Include="../TemporalCommunity.Extensions.Tests.Shared/TemporalCommunity.Extensions.Tests.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,6 +25,10 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

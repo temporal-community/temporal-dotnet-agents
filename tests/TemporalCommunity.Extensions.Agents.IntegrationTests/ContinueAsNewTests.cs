@@ -100,24 +100,10 @@ public class ContinueAsNewTests : IAsyncLifetime
 
         // After enough turns, the workflow should have continued-as-new.
         // GetWorkflowHandle with no specific runId follows to the latest run.
-        // Give the workflow a moment to process the continue-as-new after the last update.
-        await Task.Delay(TimeSpan.FromSeconds(2));
-        var currentDesc = await handle.DescribeAsync();
-        _output.WriteLine($"Current RunId: {currentDesc.RunId}");
-
-        // The run ID should have changed if continue-as-new occurred.
-        // (This assertion may be flaky if the exact event count doesn't trigger the threshold,
-        // so we only assert it as informational.)
-        if (currentDesc.RunId != initialRunId)
-        {
-            _output.WriteLine("Continue-as-new confirmed: RunId changed.");
-        }
-        else
-        {
-            _output.WriteLine(
-                "RunId unchanged — threshold may not have been reached. " +
-                "This is expected if event count didn't exceed threshold.");
-        }
+        // Poll until the RunId changes (CAN has executed) — throws TimeoutException if it
+        // doesn't happen within 30 s, catching regressions where CAN never fires.
+        var currentDesc = await PollUntilRunIdChangesAsync(handle, initialRunId, TimeSpan.FromSeconds(30));
+        _output.WriteLine($"Current RunId: {currentDesc.RunId} — continue-as-new confirmed.");
 
         // The critical assertion: send one more turn and verify history is preserved.
         // Whether or not continue-as-new actually triggered, the conversation must work.
@@ -147,10 +133,8 @@ public class ContinueAsNewTests : IAsyncLifetime
             await _proxy.RunAsync($"Msg {i}", session);
         }
 
-        // Allow time for the workflow to process continue-as-new after last update completes.
-        await Task.Delay(TimeSpan.FromSeconds(2));
-
-        var currentDesc = await handle.DescribeAsync();
+        // Poll until the RunId changes (CAN has executed) rather than sleeping blindly.
+        var currentDesc = await PollUntilRunIdChangesAsync(handle, initialRunId, TimeSpan.FromSeconds(30));
 
         _output.WriteLine($"Initial RunId: {initialRunId}");
         _output.WriteLine($"Current RunId: {currentDesc.RunId}");
@@ -211,9 +195,9 @@ public class ContinueAsNewTests : IAsyncLifetime
                 await proxy.RunAsync($"Turn {i}", session);
             }
 
-            // Wait for continue-as-new to take effect.
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            var currentRunId = (await handle.DescribeAsync()).RunId;
+            // Poll until continue-as-new has taken effect (RunId changes).
+            var postCanDesc = await PollUntilRunIdChangesAsync(handle, initialRunId, TimeSpan.FromSeconds(30));
+            var currentRunId = postCanDesc.RunId;
 
             _output.WriteLine($"Initial RunId: {initialRunId}");
             _output.WriteLine($"Current RunId: {currentRunId}");
@@ -238,5 +222,30 @@ public class ContinueAsNewTests : IAsyncLifetime
         {
             await extraHost.StopAsync();
         }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Polls <paramref name="handle"/> until its <c>RunId</c> differs from
+    /// <paramref name="originalRunId"/>, confirming that continue-as-new has executed.
+    /// Returns the latest <see cref="WorkflowExecutionDescription"/> once the RunId changes.
+    /// Throws <see cref="TimeoutException"/> if <paramref name="timeout"/> elapses.
+    /// </summary>
+    private static async Task<WorkflowExecutionDescription> PollUntilRunIdChangesAsync(
+        WorkflowHandle handle,
+        string originalRunId,
+        TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var desc = await handle.DescribeAsync().ConfigureAwait(false);
+            if (desc.RunId != originalRunId)
+                return desc;
+            await Task.Delay(TimeSpan.FromMilliseconds(200)).ConfigureAwait(false);
+        }
+        throw new TimeoutException(
+            $"RunId did not change from {originalRunId} within {timeout}.");
     }
 }

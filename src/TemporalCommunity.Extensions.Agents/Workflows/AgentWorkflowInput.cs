@@ -22,7 +22,7 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// flat-field names remain as forwarding computed properties so consumers don't need updating;
 /// only construction sites assign to <see cref="ResolvedWorkerConfig"/> directly.
 /// </remarks>
-internal sealed class AgentWorkflowInput : DurableChatWorkflowInput
+internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 {
     /// <summary>Gets the name of the agent that this workflow manages.</summary>
     public required string AgentName { get; init; }

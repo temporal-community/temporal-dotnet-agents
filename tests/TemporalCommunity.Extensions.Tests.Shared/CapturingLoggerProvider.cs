@@ -1,13 +1,12 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
-namespace TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
+namespace TemporalCommunity.Extensions.Tests.Shared;
 
 /// <summary>
-/// Test-only <see cref="ILoggerProvider"/> that captures every emitted log entry. Registered in the
-/// worker host's DI <see cref="ILoggerFactory"/> so it observes <c>Workflow.Logger</c> output
-/// (which routes through the worker-level logger factory). Thread-safe — workflow and activity
-/// threads write concurrently.
+/// Test-only <see cref="ILoggerProvider"/> that captures every emitted log entry. Register in a
+/// worker host's DI <see cref="ILoggerFactory"/> to observe workflow and activity logger output.
+/// Thread-safe — workflow and activity threads write concurrently.
 /// </summary>
 public sealed class CapturingLoggerProvider : ILoggerProvider
 {

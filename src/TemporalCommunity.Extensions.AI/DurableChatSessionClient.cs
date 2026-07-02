@@ -14,7 +14,7 @@ namespace TemporalCommunity.Extensions.AI;
 /// External entry point for managed durable chat sessions.
 /// Each conversation maps to a Temporal workflow that persists history across turns.
 /// </summary>
-public sealed class DurableChatSessionClient : IDurableChatSessionClient
+public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurableSessionControl
 {
     private readonly ITemporalClient _client;
     private readonly DurableExecutionOptions _options;
@@ -419,5 +419,39 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         }
 
         return result;
+    }
+
+    // ── IDurableSessionControl — explicit implementations ───────────────────
+    // The public API uses conversationId (applies GetWorkflowId prefix). The interface uses the
+    // raw workflowId so approval dashboards can address any session directly without knowing the
+    // prefix. These explicit members bypass the prefix transformation.
+
+    async Task<DurableApprovalRequest?> IDurableSessionControl.GetPendingApprovalAsync(
+        string workflowId, CancellationToken ct)
+    {
+        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        return await handle.QueryAsync<DurableChatWorkflow, DurableApprovalRequest?>(
+            wf => wf.GetPendingApproval(),
+            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = ct } }).ConfigureAwait(false);
+    }
+
+    async Task IDurableSessionControl.SubmitApprovalAsync(
+        string workflowId, DurableApprovalDecision decision, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        await handle.ExecuteUpdateAsync(
+            wf => wf.SubmitApprovalAsync(decision),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = ct } }).ConfigureAwait(false);
+    }
+
+    async Task IDurableSessionControl.ShutdownAsync(string workflowId, CancellationToken ct)
+    {
+        var handle = _client.GetWorkflowHandle(workflowId);
+        await handle.SignalAsync(
+            DurableChatWorkflowBase<ChatResponse>.ShutdownSignalName,
+            Array.Empty<object>(),
+            new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = ct } })
+            .ConfigureAwait(false);
     }
 }

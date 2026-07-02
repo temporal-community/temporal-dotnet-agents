@@ -1,13 +1,13 @@
 using Temporalio.Client;
 
-namespace TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
+namespace TemporalCommunity.Extensions.Tests.Shared;
 
 /// <summary>
 /// Helpers for inspecting a workflow's event history via
 /// <see cref="WorkflowHandle.FetchHistoryEventsAsync"/>.
 /// </summary>
 /// <remarks>
-/// Pattern 3 tests assert behaviour like "this turn dispatched exactly 1
+/// Tests assert behaviour like "this turn dispatched exactly 1
 /// <c>GetChatStep</c> and 2 <c>InvokeFunction</c> activities." That is a
 /// programmatic claim about Temporal's event history, not the chat response.
 /// Centralising the boilerplate keeps tests readable.

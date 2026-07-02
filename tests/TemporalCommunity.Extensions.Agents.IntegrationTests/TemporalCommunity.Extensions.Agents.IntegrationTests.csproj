@@ -24,12 +24,17 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions.Agents.csproj" />
+    <ProjectReference Include="../TemporalCommunity.Extensions.Tests.Shared/TemporalCommunity.Extensions.Tests.Shared.csproj" />
   </ItemGroup>
 
-  <!-- Share step-mode test scaffolding (ScriptedChatClient, RecordingTool) with the unit-test project. -->
+  <!-- RecordingTool remains in Agents.Tests.StepMode and is linked here. ScriptedChatClient
+       has moved to TemporalCommunity.Extensions.Tests.Shared (see ProjectReference above). -->
   <ItemGroup>
-    <Compile Include="../TemporalCommunity.Extensions.Agents.Tests/StepMode/ScriptedChatClient.cs" Link="StepMode/ScriptedChatClient.cs" />
     <Compile Include="../TemporalCommunity.Extensions.Agents.Tests/StepMode/RecordingTool.cs" Link="StepMode/RecordingTool.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

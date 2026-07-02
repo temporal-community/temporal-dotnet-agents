@@ -6,7 +6,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
-/// Task 8.4 — Unit tests for <c>AgentWorkflow.EvaluateScopeNormalization</c>, the pure
+/// Task 8.4 — Unit tests for <c>ApprovalScopeCoordinator.EvaluateScopeNormalization</c>, the pure
 /// static core of <c>NormalizeApprovalScopeForPersistence</c>.
 ///
 /// Load-bearing behavioral guarantee 1: <c>NormalizeApprovalScopeForPersistence</c> must return
@@ -39,7 +39,7 @@ public class NormalizeScopeTests
     public void UndefinedIntegerScope_ReturnsThisCallOnly()
     {
         var decision = Decision((ApprovalScope)99);
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.ThisCallOnly, scope);
         Assert.NotNull(reason); // warning reason should be provided
@@ -52,7 +52,7 @@ public class NormalizeScopeTests
     {
         var pattern = new ApprovalScopePattern { Type = PatternMatchType.Glob, Pattern = "", Parameter = "path" };
         var decision = Decision(ApprovalScope.Session, pattern);
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.ThisCallOnly, scope);
         Assert.NotNull(reason);
@@ -63,7 +63,7 @@ public class NormalizeScopeTests
     {
         var pattern = new ApprovalScopePattern { Type = PatternMatchType.Glob, Pattern = "   ", Parameter = "path" };
         var decision = Decision(ApprovalScope.Always, pattern);
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.ThisCallOnly, scope);
         Assert.NotNull(reason);
@@ -81,7 +81,7 @@ public class NormalizeScopeTests
             Parameter = "   ", // whitespace-only = invalid
         };
         var decision = Decision(ApprovalScope.Session, pattern);
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.ThisCallOnly, scope);
         Assert.NotNull(reason);
@@ -99,7 +99,7 @@ public class NormalizeScopeTests
             Parameter = null, // null = wildcard over all args — valid
         };
         var decision = Decision(ApprovalScope.Session, pattern);
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.Session, scope);
         Assert.Null(reason); // no degradation
@@ -112,7 +112,7 @@ public class NormalizeScopeTests
     {
         var pattern = RegexPattern("[unclosed");
         var decision = Decision(ApprovalScope.Always, pattern);
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.ThisCallOnly, scope);
         Assert.NotNull(reason);
@@ -124,7 +124,7 @@ public class NormalizeScopeTests
     public void Session_NullScopePattern_ReturnsSession()
     {
         var decision = Decision(ApprovalScope.Session, pattern: null);
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.Session, scope);
         Assert.Null(reason);
@@ -134,7 +134,7 @@ public class NormalizeScopeTests
     public void Always_NullScopePattern_ReturnsAlways()
     {
         var decision = Decision(ApprovalScope.Always, pattern: null);
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.Always, scope);
         Assert.Null(reason);
@@ -146,7 +146,7 @@ public class NormalizeScopeTests
     public void Session_ValidGlobPattern_ReturnsSession()
     {
         var decision = Decision(ApprovalScope.Session, GlobPattern("/tmp/*"));
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.Session, scope);
         Assert.Null(reason);
@@ -156,7 +156,7 @@ public class NormalizeScopeTests
     public void Always_ValidGlobPattern_ReturnsAlways()
     {
         var decision = Decision(ApprovalScope.Always, GlobPattern("/tmp/*"));
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.Always, scope);
         Assert.Null(reason);
@@ -169,7 +169,7 @@ public class NormalizeScopeTests
     {
         // Even if a ScopePattern is provided (unusual), ThisCallOnly always returns itself.
         var decision = Decision(ApprovalScope.ThisCallOnly, GlobPattern("/tmp/*"));
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.ThisCallOnly, scope);
         Assert.Null(reason);
@@ -187,7 +187,7 @@ public class NormalizeScopeTests
             Parameter = "path",
         };
         var decision = Decision(ApprovalScope.Session, pattern);
-        var (scope, reason) = AgentWorkflow.EvaluateScopeNormalization(decision);
+        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.ThisCallOnly, scope);
         Assert.NotNull(reason);

@@ -4,6 +4,7 @@
     <Project Path="src/TemporalCommunity.Extensions.AI/TemporalCommunity.Extensions.AI.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/TemporalCommunity.Extensions.Tests.Shared/TemporalCommunity.Extensions.Tests.Shared.csproj" />
     <Project Path="tests/TemporalCommunity.Extensions.Agents.Tests/TemporalCommunity.Extensions.Agents.Tests.csproj" />
     <Project Path="tests/TemporalCommunity.Extensions.Agents.IntegrationTests/TemporalCommunity.Extensions.Agents.IntegrationTests.csproj" />
     <Project Path="tests/TemporalCommunity.Extensions.AI.Tests/TemporalCommunity.Extensions.AI.Tests.csproj" />

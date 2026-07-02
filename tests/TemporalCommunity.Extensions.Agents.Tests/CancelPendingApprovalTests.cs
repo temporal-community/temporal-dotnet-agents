@@ -126,5 +126,18 @@ public class CancelPendingApprovalTests
 
         public Task ShutdownAsync(TemporalAgentSessionId sessionId, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
+
+        // IDurableSessionControl explicit implementations — not exercised by these tests but
+        // required to satisfy the interface contract. Delegate to the typed overloads above.
+        Task<DurableApprovalRequest?> IDurableSessionControl.GetPendingApprovalAsync(
+            string workflowId, CancellationToken ct) =>
+            GetPendingApprovalAsync(TemporalAgentSessionId.Parse(workflowId), ct);
+
+        Task IDurableSessionControl.SubmitApprovalAsync(
+            string workflowId, DurableApprovalDecision decision, CancellationToken ct) =>
+            SubmitApprovalAsync(TemporalAgentSessionId.Parse(workflowId), decision, ct);
+
+        Task IDurableSessionControl.ShutdownAsync(string workflowId, CancellationToken ct) =>
+            ShutdownAsync(TemporalAgentSessionId.Parse(workflowId), ct);
     }
 }
