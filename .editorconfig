@@ -1,0 +1,35 @@
+# Root EditorConfig for TemporalAgents — applies to all .cs files under this directory.
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+charset = utf-8
+
+[*.cs]
+indent_style = space
+indent_size = 4
+
+# ── Analyzer severity settings ──────────────────────────────────────────────
+#
+# CA1062 (null-argument check on public API): warn so we notice public methods
+# that accept nullable reference types without guarding. Active on library code only;
+# test and sample projects have TreatWarningsAsErrors=false.
+dotnet_diagnostic.CA1062.severity = warning
+
+# CA2007 (ConfigureAwait): warn for library code outside workflow files.
+# Workflow files MUST NOT add ConfigureAwait because the Temporal SDK requires
+# synchronization-context-aware awaits (true = stay on workflow thread). Suppress
+# per-file in any [Workflow]-annotated file via `#pragma warning disable CA2007`.
+dotnet_diagnostic.CA2007.severity = warning
+
+# Naming conventions (library-level guidance, informational only — not errors).
+dotnet_naming_rule.async_methods_should_end_with_async.severity = suggestion
+dotnet_naming_rule.async_methods_should_end_with_async.symbols = async_methods
+dotnet_naming_rule.async_methods_should_end_with_async.style = must_end_with_async
+
+dotnet_naming_symbols.async_methods.applicable_kinds = method
+dotnet_naming_symbols.async_methods.required_modifiers = async
+
+dotnet_naming_style.must_end_with_async.required_suffix = Async
+dotnet_naming_style.must_end_with_async.capitalization = pascal_case

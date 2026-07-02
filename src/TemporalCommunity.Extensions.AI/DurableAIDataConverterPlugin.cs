@@ -29,14 +29,11 @@ internal sealed class DurableAIDataConverterPlugin : ITemporalClientPlugin
         if (options.DataConverter == DataConverter.Default)
         {
             options.DataConverter = DurableAIDataConverter.Instance;
-            _logger?.LogDebug(
-                "DurableAIDataConverter applied to TemporalClient (DataConverter was default).");
+            _logger?.LogConverterAppliedToClient();
         }
         else
         {
-            _logger?.LogDebug(
-                "DataConverter already set to {Type}; DurableAIDataConverter not applied.",
-                options.DataConverter.GetType().Name);
+            _logger?.LogConverterSkippedForClient(options.DataConverter.GetType().Name);
         }
     }
 
@@ -55,14 +52,11 @@ internal sealed class DurableAIDataConverterPlugin : ITemporalClientPlugin
         if (options.DataConverter == DataConverter.Default)
         {
             options.DataConverter = DurableAIDataConverter.Instance;
-            _logger?.LogDebug(
-                "DurableAIDataConverter applied to TemporalClientConnectOptions (DataConverter was default).");
+            _logger?.LogConverterAppliedToConnectOptions();
         }
         else
         {
-            _logger?.LogDebug(
-                "DataConverter already set to {Type}; DurableAIDataConverter not applied.",
-                options.DataConverter.GetType().Name);
+            _logger?.LogConverterSkippedForConnectOptions(options.DataConverter.GetType().Name);
         }
     }
 }

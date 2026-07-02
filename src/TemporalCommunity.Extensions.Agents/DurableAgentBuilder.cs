@@ -348,12 +348,23 @@ public sealed class DurableAgentBuilder
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="provider"/> is <see langword="null"/>.</exception>
     /// <remarks>
+    /// <para>
     /// In durable agents, the provider's <c>InvokingAsync</c> and <c>InvokedAsync</c> hooks fire
     /// once per LLM call (per <c>RunAgentStep</c> activity), not once per turn. Make these hooks
     /// idempotent and cheap, or cache results via <c>StateBag</c> to skip redundant work within a
     /// turn. The provider instance is constructed once per agent per worker process and shared
     /// across all sessions on that worker — treat fields as effectively read-only after
     /// construction; per-session state must live in the <c>StateBag</c>.
+    /// </para>
+    /// <para>
+    /// <b>Tool definitions returned in <c>AIContext.Tools</c> by context providers are ignored</b>
+    /// and will not be dispatched as durable activities. Providers that contribute tools
+    /// (e.g., <c>HyperlightCodeActProvider</c>, <c>LocalCodeActProvider</c>,
+    /// <c>TextSearchProvider</c> in on-demand mode, <c>AgentSkillsProvider</c>) are designed for
+    /// MAF's in-process function-invocation harness; their tools are not compatible with
+    /// per-tool durable activity dispatch. To register a tool with durable execution semantics,
+    /// use <see cref="AddTool(AIFunction, Action{DurableToolOptions}?)"/> instead.
+    /// </para>
     /// </remarks>
     public DurableAgentBuilder AddContextProvider(AIContextProvider provider)
     {
@@ -371,12 +382,23 @@ public sealed class DurableAgentBuilder
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
     /// <remarks>
+    /// <para>
     /// In durable agents, the provider's <c>InvokingAsync</c> and <c>InvokedAsync</c> hooks fire
     /// once per LLM call (per <c>RunAgentStep</c> activity), not once per turn. Make these hooks
     /// idempotent and cheap, or cache results via <c>StateBag</c> to skip redundant work within a
     /// turn. The provider instance is constructed once per agent per worker process and shared
     /// across all sessions on that worker — treat fields as effectively read-only after
     /// construction; per-session state must live in the <c>StateBag</c>.
+    /// </para>
+    /// <para>
+    /// <b>Tool definitions returned in <c>AIContext.Tools</c> by context providers are ignored</b>
+    /// and will not be dispatched as durable activities. Providers that contribute tools
+    /// (e.g., <c>HyperlightCodeActProvider</c>, <c>LocalCodeActProvider</c>,
+    /// <c>TextSearchProvider</c> in on-demand mode, <c>AgentSkillsProvider</c>) are designed for
+    /// MAF's in-process function-invocation harness; their tools are not compatible with
+    /// per-tool durable activity dispatch. To register a tool with durable execution semantics,
+    /// use <see cref="AddTool(AIFunction, Action{DurableToolOptions}?)"/> instead.
+    /// </para>
     /// </remarks>
     public DurableAgentBuilder AddContextProvider(Func<IServiceProvider, AIContextProvider> factory)
     {

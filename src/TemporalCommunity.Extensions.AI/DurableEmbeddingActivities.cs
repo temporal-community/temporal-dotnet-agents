@@ -42,7 +42,7 @@ internal sealed class DurableEmbeddingActivities(
                 "unconditionally by AddDurableAI, but the generator itself must be supplied " +
                 "by the caller.");
 
-        _logger.LogDebug("Executing durable embedding activity for {Count} inputs", input.Values.Count);
+        _logger.LogEmbeddingActivityStarted(input.Values.Count);
 
         ctx.Heartbeat();   // reset heartbeat timer before blocking on the embedding call
         var embeddings = await generator.GenerateAsync(
@@ -50,7 +50,7 @@ internal sealed class DurableEmbeddingActivities(
             input.Options,
             ct).ConfigureAwait(false);
 
-        _logger.LogDebug("Durable embedding activity completed");
+        _logger.LogEmbeddingActivityCompleted();
 
         return new DurableEmbeddingOutput { Embeddings = embeddings };
     }
