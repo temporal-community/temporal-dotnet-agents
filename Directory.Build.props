@@ -5,7 +5,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>$(NoWarn);SYSLIB0051;TA002</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591: missing XML doc on public member.
+         CS1573: parameter without matching <param> tag.
+         CS1574/CS1580: unresolvable <cref> targets in existing XML comments.
+         CS1734: <paramref> tag with no matching parameter.
+         CS0419: ambiguous overloaded cref.
+         All are pre-existing issues now surfaced by GenerateDocumentationFile.
+         TreatWarningsAsErrors is on; suppress globally so the build stays green.
+         Remove individual codes here to incrementally enforce doc quality. -->
+    <NoWarn>$(NoWarn);SYSLIB0051;TA002;CS1591;CS1573;CS1574;CS1580;CS1734;CS0419</NoWarn>
 
     <Authors>Cecil Phillip</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>

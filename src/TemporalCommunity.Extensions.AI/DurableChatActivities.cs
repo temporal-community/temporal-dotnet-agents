@@ -101,6 +101,7 @@ internal sealed class DurableChatActivities(
         return response;
     }
 
+    /// <summary>
     /// Once-per-client backstop check for the silent A+B mixed-pattern misconfiguration:
     /// .UseFunctionInvocation() in the IChatClient chain combined with .AsDurable()-wrapped
     /// tools in the DurableFunctionRegistry. The startup
