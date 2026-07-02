@@ -8,7 +8,7 @@ namespace TemporalCommunity.Extensions.AI;
 /// <summary>
 /// Input for the <see cref="DurableChatWorkflow"/>.
 /// </summary>
-public class DurableChatWorkflowInput
+public record class DurableChatWorkflowInput
 {
     /// <summary>
     /// The session time-to-live. The workflow completes when idle for this duration.

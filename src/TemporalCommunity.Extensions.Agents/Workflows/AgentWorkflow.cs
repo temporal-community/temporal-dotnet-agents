@@ -205,18 +205,14 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
 
         var useExternalStore = _input.UseExternalStoreMode;
 
-        var carriedInput = new AgentWorkflowInput
+        // `with` copies all properties from _input and overrides the fields that differ
+        // for the new run: the base class CAN fields (carried from the base input parameter)
+        // plus the StateBag snapshot. RetryPolicy and ResolvedWorkerConfig carry forward
+        // unchanged from _input.
+        var carriedInput = _input with
         {
-            AgentName = _input.AgentName,
-            TaskQueue = _input.TaskQueue,
             CarriedStateBag = _currentStateBag,
-            RetryPolicy = _input.RetryPolicy,
-            // Carry forward the entire resolved-worker-config bundle (or null if proxy-started
-            // and not yet resolved). This replaces the flat MaxToolCallsPerTurn /
-            // UseExternalStoreMode / DurableAgentToolActivityOptions / WorkerSettingsResolved
-            // quartet as of the Step 3c.1 migration.
-            ResolvedWorkerConfig = _input.ResolvedWorkerConfig,
-
+            // Base class CAN fields — sourced from the base DurableChatWorkflowInput arg.
             TimeToLive = input.TimeToLive,
             CarriedHistory = useExternalStore ? null : input.CarriedHistory,
             ApprovalTimeout = input.ApprovalTimeout,
@@ -386,28 +382,15 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 stepActivityOptions).ConfigureAwait(true);
 
             // Apply resolved worker-side settings once and carry forward via CAN. The
-            // entire resolved bundle travels as ProxyResolvedWorkerConfig — 
+            // entire resolved bundle travels as ProxyResolvedWorkerConfig —
             // the flat MaxToolCallsPerTurn / UseExternalStoreMode / DurableAgentToolActivityOptions
             // fields are now forwarding computed properties on AgentWorkflowInput.
             if (needsResolution && stepResult.ResolvedWorkerConfig is not null)
             {
-                _input = new AgentWorkflowInput
+                _input = _input! with
                 {
-                    AgentName = _input!.AgentName,
-                    TaskQueue = _input!.TaskQueue,
                     CarriedStateBag = _currentStateBag,
-                    RetryPolicy = _input!.RetryPolicy,
                     ResolvedWorkerConfig = stepResult.ResolvedWorkerConfig,
-
-                    TimeToLive = _input!.TimeToLive,
-                    CarriedHistory = _input!.CarriedHistory,
-                    ApprovalTimeout = _input!.ApprovalTimeout,
-                    EnableSearchAttributes = _input!.EnableSearchAttributes,
-                    MaxEntryCount = _input!.MaxEntryCount,
-                    HistoryReducer = _input!.HistoryReducer,
-                    OriginalCreatedAt = _input!.OriginalCreatedAt,
-                    ActivityTimeout = _input!.ActivityTimeout,
-                    HeartbeatTimeout = _input!.HeartbeatTimeout,
                 };
             }
 
