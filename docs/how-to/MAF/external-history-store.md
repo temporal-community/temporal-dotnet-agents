@@ -368,7 +368,7 @@ Inspect a workflow's history after opting in (`temporal workflow show -w ta-myag
 - The activity input still carries the new request entry on the wire — the *current* turn's user message is in the activity payload. Only prior turns are absent.
 - On the first step of a turn, the activity loads prior history from the store via `IAgentHistoryStore.LoadAsync` (using `IsFirstStep == true` as the trigger).
 
-If you need *zero* message content in Temporal events, including the current turn, you must additionally redact request content at the caller before sending it to `RunAgentAsync`.
+If you need *zero* message content in Temporal events, including the current turn, you must additionally redact request content at the caller before sending it to `SendAsync`.
 
 ### Continue-as-new
 

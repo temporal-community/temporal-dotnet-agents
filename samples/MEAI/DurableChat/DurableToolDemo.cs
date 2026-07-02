@@ -85,7 +85,7 @@ internal static class DurableToolDemo
 
         // Explicit Tools list. The workflow respects it — no auto-population.
         var options = new ChatOptions { Tools = [weatherTool] };
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, q)],
             options: options);
@@ -113,7 +113,7 @@ internal static class DurableToolDemo
         // FunctionCallContent in one assistant turn, they fan out in parallel
         // via Workflow.WhenAllAsync (verified at DurableChatWorkflow.cs:204-226).
         // Some models may emit them sequentially across turns instead.
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, q)]);
 

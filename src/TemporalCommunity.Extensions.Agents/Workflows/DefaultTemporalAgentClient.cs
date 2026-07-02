@@ -29,7 +29,7 @@ internal sealed class DefaultTemporalAgentClient(
         logger ?? NullLogger<DefaultTemporalAgentClient>.Instance;
 
     /// <inheritdoc/>
-    public async Task<AgentResponse> RunAgentAsync(
+    public async Task<AgentResponse> SendAsync(
         TemporalAgentSessionId sessionId,
         RunRequest request,
         CancellationToken cancellationToken = default)

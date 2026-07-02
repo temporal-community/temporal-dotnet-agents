@@ -201,20 +201,20 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
     Console.WriteLine("════════════════════════════════════════════════════════");
 
     // Each conversation maps to a Temporal workflow. Reusing the same ID across
-    // ChatAsync calls routes all turns to the same workflow instance.
+    // SendAsync calls routes all turns to the same workflow instance.
     var conversationId = $"multi-turn-{Guid.NewGuid():N}";
     Console.WriteLine($" Conversation ID: {conversationId}\n");
 
     var q1 = "What is the capital of France?";
     Console.WriteLine($" User : {q1}");
-    var r1 = await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, q1)]);
+    var r1 = await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, q1)]);
     Console.WriteLine($" Agent: {r1.Text}\n");
 
     // The workflow's history already contains the previous exchange, so the
     // model can answer this pronoun reference without being told explicitly.
     var q2 = "What is the population of that city?";
     Console.WriteLine($" User : {q2}");
-    var r2 = await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, q2)]);
+    var r2 = await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, q2)]);
     Console.WriteLine($" Agent: {r2.Text}");
 
     Console.WriteLine("════════════════════════════════════════════════════════\n");
@@ -265,7 +265,7 @@ static async Task<IEnumerable<string>> RunToolCallDemoAsync(DurableChatSessionCl
     // No ChatOptions passed — the GetChatStepAsync activity auto-populates
     // Options.Tools from the DurableFunctionRegistry (populated above by
     // AddDurableTools). See Demo 4 Scenario 1 for the explicit-pass path.
-    var response = await sessionClient.ChatAsync(
+    var response = await sessionClient.SendAsync(
         conversationId,
         [new ChatMessage(ChatRole.User, q)]);
 
@@ -291,10 +291,10 @@ static async Task<IEnumerable<string>> RunHistoryQueryDemoAsync(DurableChatSessi
     Console.WriteLine($" Conversation ID: {conversationId}\n");
 
     // Build up a short conversation to populate the history.
-    await sessionClient.ChatAsync(conversationId,
+    await sessionClient.SendAsync(conversationId,
         [new ChatMessage(ChatRole.User, "Name three planets in our solar system.")]);
 
-    await sessionClient.ChatAsync(conversationId,
+    await sessionClient.SendAsync(conversationId,
         [new ChatMessage(ChatRole.User, "Which of those is closest to the Sun?")]);
 
     // GetHistoryAsync sends a Temporal Query to the running workflow.

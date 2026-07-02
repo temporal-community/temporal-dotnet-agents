@@ -134,9 +134,9 @@ An external caller (API server, console app, `TemporalAIAgentProxy`) goes throug
 ```
 External Caller (e.g. TemporalAIAgentProxy)
     ↓
-    ITemporalAgentClient.RunAgentAsync(sessionId, request)
+    ITemporalAgentClient.SendAsync(sessionId, request)
     ↓
-    DefaultTemporalAgentClient.RunAgentAsync()
+    DefaultTemporalAgentClient.SendAsync()
     ↓
     client.StartWorkflowAsync(AgentWorkflow, IdConflictPolicy = UseExisting)
         ← Creates or no-ops; establishes the durable session workflow

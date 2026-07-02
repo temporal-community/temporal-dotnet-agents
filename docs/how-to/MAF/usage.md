@@ -185,10 +185,10 @@ ITemporalAgentClient client = // resolved from DI
 
 // Explicit session — recommended pattern
 var session = new TemporalAgentSessionId("MyAgent", Guid.NewGuid().ToString("N"));
-AgentResponse response = await client.RunAgentAsync(session, new RunRequest("What is the capital of France?"));
+AgentResponse response = await client.SendAsync(session, new RunRequest("What is the capital of France?"));
 ```
 
-> **Note:** The `RunAgentAsync(string agentName, string message)` string convenience overload is deprecated (`[Obsolete]`). Prefer constructing a `TemporalAgentSessionId` and calling `RunAgentAsync(sessionId, request)` directly so you retain a handle to the session for follow-up turns.
+> **Note:** The `RunAgentAsync(string agentName, string message)` string convenience overload is deprecated (`[Obsolete]`). Prefer constructing a `TemporalAgentSessionId` and calling `SendAsync(sessionId, request)` directly so you retain a handle to the session for follow-up turns.
 
 ---
 

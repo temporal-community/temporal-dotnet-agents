@@ -21,7 +21,7 @@ public class DurableApprovalIntegrationTests
         var conversationId = $"approval-approve-{Guid.NewGuid():N}";
 
         // First, start a session so the workflow exists.
-        await _fixture.SessionClient.ChatAsync(
+        await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "Hello")]);
 
@@ -65,7 +65,7 @@ public class DurableApprovalIntegrationTests
     {
         var conversationId = $"approval-reject-{Guid.NewGuid():N}";
 
-        await _fixture.SessionClient.ChatAsync(
+        await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "Hello")]);
 
@@ -97,7 +97,7 @@ public class DurableApprovalIntegrationTests
     {
         var conversationId = $"approval-none-{Guid.NewGuid():N}";
 
-        await _fixture.SessionClient.ChatAsync(
+        await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "Hello")]);
 

@@ -55,7 +55,7 @@ public class TemporalAIAgentProxyTests
     public async Task RunAsync_DelegatesToRunAgentAsync()
     {
         var fakeClient = A.Fake<ITemporalAgentClient>();
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))
@@ -70,7 +70,7 @@ public class TemporalAIAgentProxyTests
 
         var response = await proxy.RunAsync("Hello", session);
 
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>.That.Matches(id =>
                     id.AgentName.Equals("TestAgent", StringComparison.OrdinalIgnoreCase)),
                 A<RunRequest>._,
@@ -85,7 +85,7 @@ public class TemporalAIAgentProxyTests
     {
         RunRequest? capturedRequest = null;
         var fakeClient = A.Fake<ITemporalAgentClient>();
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))
@@ -121,7 +121,7 @@ public class TemporalAIAgentProxyTests
         await proxy.RunAsync("Fire!", session, options);
 
         // RunAgentAsync should NOT be called
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))
@@ -166,7 +166,7 @@ public class TemporalAIAgentProxyTests
         // overwrite it with a fresh GUID.
         RunRequest? capturedRequest = null;
         var fakeClient = A.Fake<ITemporalAgentClient>();
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))
@@ -190,7 +190,7 @@ public class TemporalAIAgentProxyTests
         // workflow code downstream relies on a non-empty correlation ID.
         RunRequest? capturedRequest = null;
         var fakeClient = A.Fake<ITemporalAgentClient>();
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))
@@ -212,7 +212,7 @@ public class TemporalAIAgentProxyTests
         // Empty string is treated the same as null — auto-generate a fresh GUID.
         RunRequest? capturedRequest = null;
         var fakeClient = A.Fake<ITemporalAgentClient>();
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))
@@ -234,7 +234,7 @@ public class TemporalAIAgentProxyTests
     private static TemporalAIAgentProxy CreateProxy(string name)
     {
         var fakeClient = A.Fake<ITemporalAgentClient>();
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))

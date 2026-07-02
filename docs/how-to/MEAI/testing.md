@@ -9,7 +9,7 @@ Durable AI code has two distinct testing concerns, and they call for different t
 | **Application logic** | Code that depends on `IDurableChatSessionClient` — controllers, services, background jobs | xUnit unit tests with a stub implementation |
 | **Library integration** | The workflow, activities, and middleware together — that the full pipeline produces correct results | xUnit integration tests using `WorkflowEnvironment.StartLocalAsync()` |
 
-The rule of thumb: if your code just *calls* `ChatAsync` or `GetHistoryAsync`, unit test it with a stub. If you are verifying that conversation history accumulates correctly or that `ContinueAsNew` works, use an integration test.
+The rule of thumb: if your code just *calls* `SendAsync` or `GetHistoryAsync`, unit test it with a stub. If you are verifying that conversation history accumulates correctly or that `ContinueAsNew` works, use an integration test.
 
 ---
 
@@ -17,7 +17,7 @@ The rule of thumb: if your code just *calls* `ChatAsync` or `GetHistoryAsync`, u
 
 ### Stub `IDurableChatSessionClient`
 
-`DurableChatSessionClient` is thin Temporal protocol infrastructure — it adapts `ChatAsync` calls to workflow updates. Testing it directly (by mocking `ITemporalClient` and asserting `ExecuteUpdateAsync` was called) only verifies the SDK's API surface, not your business logic.
+`DurableChatSessionClient` is thin Temporal protocol infrastructure — it adapts `SendAsync` calls to workflow updates. Testing it directly (by mocking `ITemporalClient` and asserting `ExecuteUpdateAsync` was called) only verifies the SDK's API surface, not your business logic.
 
 The right move is to write your application code against `IDurableChatSessionClient` and inject a stub in tests:
 
@@ -28,7 +28,7 @@ public class ConversationService(IDurableChatSessionClient client)
 {
     public async Task<string> AskAsync(string sessionId, string question)
     {
-        var response = await client.ChatAsync(
+        var response = await client.SendAsync(
             sessionId,
             [new ChatMessage(ChatRole.User, question)]);
 
@@ -40,12 +40,12 @@ public class ConversationService(IDurableChatSessionClient client)
 ```csharp
 // Test
 // Stub for unit tests. Signatures match IDurableChatSessionClient post-0.2.0:
-// ChatAsync returns DurableSessionResponse (carries per-turn Usage / CorrelationId);
+// SendAsync returns DurableSessionResponse (carries per-turn Usage / CorrelationId);
 // GetHistoryAsync returns IReadOnlyList<DurableSessionEntry>.
 public class StubChatSessionClient : IDurableChatSessionClient
 {
     public Func<string, IEnumerable<ChatMessage>, ChatOptions?, string?, CancellationToken, Task<DurableSessionResponse>>
-        ChatAsyncHandler { get; set; } = (_, _, _, _, _) =>
+        SendAsyncHandler { get; set; } = (_, _, _, _, _) =>
             Task.FromResult(new DurableSessionResponse
             {
                 CorrelationId = "stub",
@@ -53,10 +53,10 @@ public class StubChatSessionClient : IDurableChatSessionClient
                 Messages = [new ChatMessage(ChatRole.Assistant, "stub reply")],
             });
 
-    public Task<DurableSessionResponse> ChatAsync(string conversationId, IEnumerable<ChatMessage> messages,
+    public Task<DurableSessionResponse> SendAsync(string conversationId, IEnumerable<ChatMessage> messages,
         ChatOptions? options = null, string? correlationId = null,
         CancellationToken cancellationToken = default)
-        => ChatAsyncHandler(conversationId, messages, options, correlationId, cancellationToken);
+        => SendAsyncHandler(conversationId, messages, options, correlationId, cancellationToken);
 
     public Task<IReadOnlyList<DurableSessionEntry>> GetHistoryAsync(string conversationId,
         CancellationToken cancellationToken = default)
@@ -78,7 +78,7 @@ public class StubChatSessionClient : IDurableChatSessionClient
 public async Task AskAsync_Returns_AssistantText()
 {
     var stub = new StubChatSessionClient();
-    stub.ChatAsyncHandler = (_, _, _, _, _) =>
+    stub.SendAsyncHandler = (_, _, _, _, _) =>
         Task.FromResult(new DurableSessionResponse
         {
             CorrelationId = "test-1",
@@ -221,11 +221,11 @@ public class DurableChatSessionTests(IntegrationTestFixture fixture)
     : IClassFixture<IntegrationTestFixture>
 {
     [Fact]
-    public async Task ChatAsync_Returns_AssistantResponse()
+    public async Task SendAsync_Returns_AssistantResponse()
     {
         var conversationId = $"test-{Guid.NewGuid():N}";
 
-        var response = await fixture.SessionClient.ChatAsync(
+        var response = await fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "Hello")]);
 
@@ -237,10 +237,10 @@ public class DurableChatSessionTests(IntegrationTestFixture fixture)
     {
         var conversationId = $"test-{Guid.NewGuid():N}";
 
-        await fixture.SessionClient.ChatAsync(conversationId,
+        await fixture.SessionClient.SendAsync(conversationId,
             [new ChatMessage(ChatRole.User, "First message")]);
 
-        await fixture.SessionClient.ChatAsync(conversationId,
+        await fixture.SessionClient.SendAsync(conversationId,
             [new ChatMessage(ChatRole.User, "Second message")]);
 
         var history = await fixture.SessionClient.GetHistoryAsync(conversationId);
@@ -257,12 +257,12 @@ public class DurableChatSessionTests(IntegrationTestFixture fixture)
         var conversationId = $"test-{Guid.NewGuid():N}";
         int callsBefore = fixture.ChatClient.CallCount;
 
-        await fixture.SessionClient.ChatAsync(conversationId,
+        await fixture.SessionClient.SendAsync(conversationId,
             [new ChatMessage(ChatRole.User, "Turn 1")]);
-        await fixture.SessionClient.ChatAsync(conversationId,
+        await fixture.SessionClient.SendAsync(conversationId,
             [new ChatMessage(ChatRole.User, "Turn 2")]);
 
-        // Two ChatAsync calls → two LLM calls, one workflow
+        // Two SendAsync calls → two LLM calls, one workflow
         Assert.Equal(callsBefore + 2, fixture.ChatClient.CallCount);
     }
 }

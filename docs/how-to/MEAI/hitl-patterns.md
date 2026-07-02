@@ -9,7 +9,7 @@ Human-in-the-Loop (HITL) in `TemporalCommunity.Extensions.AI` lets a tool call p
 ## The Approval Flow
 
 ```
-User message → ChatAsync → DurableChatWorkflow → DurableChatActivities
+User message → SendAsync → DurableChatWorkflow → DurableChatActivities
                                                         │
                                     UseFunctionInvocation runs the tool-call loop
                                                         │
@@ -32,7 +32,7 @@ User message → ChatAsync → DurableChatWorkflow → DurableChatActivities
                                     UseFunctionInvocation sends result to LLM
                                           LLM generates final response
                                                         │
-                                              ChatAsync returns
+                                              SendAsync returns
 ```
 
 ---
@@ -98,11 +98,11 @@ var deleteTool = AIFunctionFactory.Create(
     description: "Deletes records older than the given number of days. Requires human approval.");
 ```
 
-Then pass the tool to `ChatAsync` via `ChatOptions`:
+Then pass the tool to `SendAsync` via `ChatOptions`:
 
 ```csharp
 // Client
-var response = await sessionClient.ChatAsync(
+var response = await sessionClient.SendAsync(
     conversationId,
     [systemMessage, new ChatMessage(ChatRole.User, userRequest)],
     options: new ChatOptions { Tools = [deleteTool] });
@@ -160,7 +160,7 @@ var decision = new DurableApprovalDecision
 await sessionClient.SubmitApprovalAsync(conversationId, decision);
 ```
 
-After `SubmitApprovalAsync` returns, the workflow's `WaitConditionAsync` is satisfied. `RequestApprovalAsync` returns the decision to the tool, the tool completes, `UseFunctionInvocation` sends the result to the LLM, and `ChatAsync` eventually returns the final response.
+After `SubmitApprovalAsync` returns, the workflow's `WaitConditionAsync` is satisfied. `RequestApprovalAsync` returns the decision to the tool, the tool completes, `UseFunctionInvocation` sends the result to the LLM, and `SendAsync` eventually returns the final response.
 
 ---
 

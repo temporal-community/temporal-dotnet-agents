@@ -262,12 +262,12 @@ For tasks that don't need conversational context, use a fresh session per reques
 ```csharp
 // Each call starts fresh — no history accumulation
 var session = new TemporalAgentSessionId("AnalystAgent", Guid.NewGuid().ToString("N"));
-var response = await client.RunAgentAsync(session, new RunRequest("Analyze this data: ..."));
+var response = await client.SendAsync(session, new RunRequest("Analyze this data: ..."));
 ```
 
 Or use `AgentJobWorkflow` via scheduling, which always starts with empty history.
 
-> **Note:** The `RunAgentAsync(string agentName, string message)` convenience overload is deprecated. Use `RunAgentAsync(TemporalAgentSessionId, RunRequest)` directly.
+> **Note:** The `RunAgentAsync(string agentName, string message)` convenience overload is deprecated. Use `SendAsync(TemporalAgentSessionId, RunRequest)` directly.
 
 ### 5b. Cap History at a Fixed Size with MaxEntryCount
 

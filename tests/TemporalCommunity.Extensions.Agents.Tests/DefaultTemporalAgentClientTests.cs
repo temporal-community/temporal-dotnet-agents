@@ -21,16 +21,16 @@ public class DefaultTemporalAgentClientTests
     private DefaultTemporalAgentClient CreateClient() =>
         new(_fakeClient, _options, TaskQueue, logger: null);
 
-    // ─── RunAgentAsync ───────────────────────────────────────────────────────
+    // ─── SendAsync ───────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task RunAgentAsync_NullRequest_ThrowsArgumentNullException()
+    public async Task SendAsync_NullRequest_ThrowsArgumentNullException()
     {
         var client = CreateClient();
         var sessionId = TemporalAgentSessionId.WithRandomKey("Agent");
 
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            client.RunAgentAsync(sessionId, null!));
+            client.SendAsync(sessionId, null!));
     }
 
     // ─── RunAgentFireAndForgetAsync ──────────────────────────────────────────

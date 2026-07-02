@@ -169,7 +169,7 @@ Console.WriteLine("Done.");
 //
 // This demo issues two chat turns in a single conversation. Look at the console
 // exporter output above (or below) this block for the span hierarchy. Each call
-// to ChatAsync produces:
+// to SendAsync produces:
 //
 //   durable_chat.send (conversation.id = <id>)
 //     UpdateWorkflow:Chat
@@ -186,7 +186,7 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
     Console.WriteLine("════════════════════════════════════════════════════════");
 
     // Each conversation maps to a Temporal workflow. Reusing the same ID across
-    // ChatAsync calls routes all turns to the same workflow instance and keeps
+    // SendAsync calls routes all turns to the same workflow instance and keeps
     // the conversation.id attribute consistent across all related spans.
     var conversationId = $"otel-demo-{Guid.NewGuid():N}";
     Console.WriteLine($" Conversation ID: {conversationId}");
@@ -194,14 +194,14 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
 
     var q1 = "What is the capital of France?";
     Console.WriteLine($" User : {q1}");
-    var r1 = await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, q1)]);
+    var r1 = await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, q1)]);
     Console.WriteLine($" Agent: {r1.Text}\n");
 
     // The workflow's history already contains the previous exchange, so the
     // model can answer this pronoun reference without being told explicitly.
     var q2 = "What is the population of that city?";
     Console.WriteLine($" User : {q2}");
-    var r2 = await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, q2)]);
+    var r2 = await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, q2)]);
     Console.WriteLine($" Agent: {r2.Text}");
 
     Console.WriteLine("════════════════════════════════════════════════════════");

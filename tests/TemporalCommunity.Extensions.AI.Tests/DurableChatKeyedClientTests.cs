@@ -66,7 +66,7 @@ public class DurableChatKeyedClientTests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void ChatAsync_UsesPerCallKey_WhenBothPerCallAndDefaultAreSet()
+    public void SendAsync_UsesPerCallKey_WhenBothPerCallAndDefaultAreSet()
     {
         // We verify that the per-call key wins by reading it back through
         // GetChatClientKey after round-tripping through WithChatClientKey.
@@ -83,7 +83,7 @@ public class DurableChatKeyedClientTests
     }
 
     [Fact]
-    public void ChatAsync_UsesDefaultKey_WhenOnlyDefaultIsSet()
+    public void SendAsync_UsesDefaultKey_WhenOnlyDefaultIsSet()
     {
         // No per-call key set — resolution should fall back to DefaultChatClientKey.
         var options = new ChatOptions(); // no WithChatClientKey
@@ -98,7 +98,7 @@ public class DurableChatKeyedClientTests
     }
 
     [Fact]
-    public void ChatAsync_UsesUnkeyed_WhenNeitherKeyIsSet()
+    public void SendAsync_UsesUnkeyed_WhenNeitherKeyIsSet()
     {
         // Neither per-call nor default key is configured.
         var options = new ChatOptions();

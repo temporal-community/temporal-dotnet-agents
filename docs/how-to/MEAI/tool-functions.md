@@ -3,7 +3,7 @@
 There are three distinct models for invoking tools (AI functions) in this library. The
 right one depends on your **intent**, not on a static list of features:
 
-- **"I want a managed durable session"** — you call `DurableChatSessionClient.ChatAsync`
+- **"I want a managed durable session"** — you call `DurableChatSessionClient.SendAsync`
   and let the library own the workflow. Pick **Model 1** (inline tools, single activity
   per turn) or **Model 3** (per-tool activities, dispatch loop owned by the library's
   workflow).
@@ -67,7 +67,7 @@ var getWeather = AIFunctionFactory.Create(
     name: "get_current_weather");
 
 var options = new ChatOptions { Tools = [getWeather] };
-var response = await sessionClient.ChatAsync("conv-123", messages, options);
+var response = await sessionClient.SendAsync("conv-123", messages, options);
 ```
 
 ### When to use
@@ -255,11 +255,11 @@ The client side has two equivalent shapes:
 ```csharp
 // Option A — let the activity auto-populate ChatOptions.Tools from the registry.
 // All tools registered via AddDurableTools are advertised to the LLM.
-var response = await sessionClient.ChatAsync(conversationId, messages);
+var response = await sessionClient.SendAsync(conversationId, messages);
 
 // Option B — explicitly pass a subset. The caller's explicit choice is respected;
 // auto-population only runs when ChatOptions.Tools is null or empty.
-var response = await sessionClient.ChatAsync(
+var response = await sessionClient.SendAsync(
     conversationId,
     messages,
     new ChatOptions { Tools = [weatherTool] });   // only weather, not stock
@@ -305,7 +305,7 @@ Power users (custom backoff, non-retryable error types) assign `RetryPolicy` dir
 
 ### Mid-session drift warning
 
-**Per-tool options are frozen at session start.** When `DurableChatSessionClient.ChatAsync`
+**Per-tool options are frozen at session start.** When `DurableChatSessionClient.SendAsync`
 creates the workflow, it eagerly resolves the full `ToolActivityOptions` dict from the
 registry and captures it in workflow history. Adding a new tool via `AddDurableTools` after
 that point does **not** affect the already-running session — the new tool will only be
@@ -313,7 +313,7 @@ picked up by sessions started *after* the registration. This is required for rep
 determinism: a workflow replaying on a different worker process must see the same options
 that were active when the session began.
 
-Practical implication: `DurableChatSessionClient` caches the per-tool options snapshot on first use — it is computed once for the lifetime of the client instance (thread-safe via `Lazy<T>`). All `AddDurableTools` calls must therefore complete before the host starts, not merely before the first `ChatAsync` for a given conversation. For typical static registrations at worker startup this is automatic. Dynamic late registration is not supported.
+Practical implication: `DurableChatSessionClient` caches the per-tool options snapshot on first use — it is computed once for the lifetime of the client instance (thread-safe via `Lazy<T>`). All `AddDurableTools` calls must therefore complete before the host starts, not merely before the first `SendAsync` for a given conversation. For typical static registrations at worker startup this is automatic. Dynamic late registration is not supported.
 
 ### Long-running turns — RPC timeout vs. update cancellation
 
@@ -338,7 +338,7 @@ var response = await handle.GetResultAsync();
 > out, the workflow is **still running** and the update is **still executing**. The
 > client has only lost its return channel. Treat an RPC timeout as "unknown outcome,
 > reconcile via the handle" — not as "failed, retry the update." A naive retry would
-> issue a second `ChatAsync` for the same logical turn and produce duplicate work.
+> issue a second `SendAsync` for the same logical turn and produce duplicate work.
 
 ### Observability
 
@@ -452,7 +452,7 @@ because it does not use `DurableChatSessionClient`.
 
 | | Model 1 (`UseFunctionInvocation`) | Model 2 (`AsDurable()`) | Model 3 (`AddDurableTools`) |
 |---|---|---|---|
-| Entry point | `DurableChatSessionClient.ChatAsync` | Custom `[Workflow]` | `DurableChatSessionClient.ChatAsync` |
+| Entry point | `DurableChatSessionClient.SendAsync` | Custom `[Workflow]` | `DurableChatSessionClient.SendAsync` |
 | Tool execution | MEAI middleware inside one activity | `DurableFunctionActivities` — own activity per call | `DurableFunctionActivities` — own activity per call (workflow-coordinated loop) |
 | Temporal event history | One entry for the whole chat turn | One entry per tool invocation | One entry per LLM call + one per tool invocation |
 | Per-tool retry / timeout | No | Yes (via `ActivityOptions`) | Yes (via `DurableChatToolOptions`) |

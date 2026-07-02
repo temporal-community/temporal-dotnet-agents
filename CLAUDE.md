@@ -42,7 +42,7 @@ Use `Glob` / `ls` to discover specific files. Notable types and their locations 
 - `services.AddHostedTemporalWorker(...).AddDurableAI(opts => ...)` — DI extension (primary)
 - `services.AddHostedTemporalWorker(...).AddWorkerPlugin(new DurableAIPlugin(opts => ...))` — `[Experimental("TAI001")]`
 
-**External usage**: `host.Services.GetRequiredService<DurableChatSessionClient>().ChatAsync(...)` returns `Task<DurableSessionResponse>` (post-Layer-2). `GetHistoryAsync` returns `Task<IReadOnlyList<DurableSessionEntry>>`.
+**External usage**: `host.Services.GetRequiredService<DurableChatSessionClient>().SendAsync(...)` returns `Task<DurableSessionResponse>` (post-Layer-2). `GetHistoryAsync` returns `Task<IReadOnlyList<DurableSessionEntry>>`.
 
 **Required for MEAI types**: `DurableAIDataConverter.Instance` must be set on the Temporal client. Without it, `FunctionCallContent` / `FunctionResultContent` / other `AIContent` subtypes lose `$type` and deserialize as base `AIContent`. **Auto-wired** when using `AddTemporalClient(...)`, `AddHostedTemporalWorker(addr, ns, queue)`, or any of the plugin paths. **Manual `TemporalClient.ConnectAsync` callers** must set it explicitly.
 

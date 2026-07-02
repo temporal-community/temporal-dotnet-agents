@@ -57,7 +57,7 @@ public class DurableToolInterceptorIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"proceed-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "ping?")]);
 
@@ -115,7 +115,7 @@ public class DurableToolInterceptorIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"skip-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "lookup something")]);
 
@@ -180,7 +180,7 @@ public class DurableToolInterceptorIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"block-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "do the dangerous thing")]);
 
@@ -240,7 +240,7 @@ public class DurableToolInterceptorIntegrationTests
 
         // Start the chat turn in background — it will pause waiting for approval.
         var chatTask = Task.Run(async () =>
-            await sessionClient.ChatAsync(
+            await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "send the email")]));
 
@@ -303,7 +303,7 @@ public class DurableToolInterceptorIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"skip-flag-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "read the file")]);
 

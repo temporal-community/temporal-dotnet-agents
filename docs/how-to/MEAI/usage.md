@@ -81,7 +81,7 @@ builder.Services
 > ```csharp
 > // Client
 > var options = new ChatOptions().WithChatClientKey("routing");
-> var response = await sessionClient.ChatAsync(conversationId, messages, options: options);
+> var response = await sessionClient.SendAsync(conversationId, messages, options: options);
 > ```
 
 ---
@@ -119,7 +119,7 @@ Nothing else needs to be wired up manually. The `TaskQueue` is automatically rea
 
 ## Step 4 — Send a Message
 
-Resolve `DurableChatSessionClient` from DI and call `ChatAsync`:
+Resolve `DurableChatSessionClient` from DI and call `SendAsync`:
 
 ```csharp
 // Client
@@ -127,14 +127,14 @@ var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>()
 
 var conversationId = "user-42-session-1";   // any stable string you control
 
-DurableSessionResponse response = await sessionClient.ChatAsync(
+DurableSessionResponse response = await sessionClient.SendAsync(
     conversationId,
     [new ChatMessage(ChatRole.User, "What is the capital of France?")]);
 
 Console.WriteLine(response.Text);   // "Paris."
 ```
 
-`ChatAsync` returns `DurableSessionResponse` — the workflow's per-turn response entry. It carries:
+`SendAsync` returns `DurableSessionResponse` — the workflow's per-turn response entry. It carries:
 
 - `Messages` — the assistant's reply messages
 - `Usage` — `UsageDetails?` with input/output token counts (when the model returned them)
@@ -142,7 +142,7 @@ Console.WriteLine(response.Text);   // "Paris."
 - `CreatedAt` — when the workflow recorded the response
 - `Text` — convenience accessor returning the last assistant message's text (empty string if none)
 
-`ChatAsync` starts the `DurableChatWorkflow` if it is not already running (using `WorkflowIdConflictPolicy.UseExisting`), then sends the messages via a `[WorkflowUpdate]`. The update blocks until the LLM activity completes and returns the response. If the workflow is already running from a previous turn, the update is routed to the existing instance.
+`SendAsync` starts the `DurableChatWorkflow` if it is not already running (using `WorkflowIdConflictPolicy.UseExisting`), then sends the messages via a `[WorkflowUpdate]`. The update blocks until the LLM activity completes and returns the response. If the workflow is already running from a previous turn, the update is routed to the existing instance.
 
 #### Supplying your own correlation ID
 
@@ -151,7 +151,7 @@ Pass an optional `correlationId` argument to thread an upstream HTTP/gRPC trace 
 ```csharp
 // Client — thread the inbound HTTP request's trace identifier through the agent turn
 var traceId = httpContext.TraceIdentifier;
-var response = await sessionClient.ChatAsync(
+var response = await sessionClient.SendAsync(
     conversationId,
     [new ChatMessage(ChatRole.User, "What is the capital of France?")],
     correlationId: traceId);
@@ -169,17 +169,17 @@ Pass the same `conversationId` on every turn. The workflow accumulates history i
 // Client
 var conversationId = "user-42-session-1";
 
-var r1 = await sessionClient.ChatAsync(conversationId,
+var r1 = await sessionClient.SendAsync(conversationId,
     [new ChatMessage(ChatRole.User, "What is the capital of France?")]);
 Console.WriteLine(r1.Text);   // "Paris."
 
 // The workflow already holds the first exchange in its state.
-var r2 = await sessionClient.ChatAsync(conversationId,
+var r2 = await sessionClient.SendAsync(conversationId,
     [new ChatMessage(ChatRole.User, "What is the population of that city?")]);
 Console.WriteLine(r2.Text);   // "Approximately 2.1 million..."
 ```
 
-Each `ChatAsync` call only needs to send the new message — the workflow maintains the running history and passes the full context to the LLM on every turn.
+Each `SendAsync` call only needs to send the new message — the workflow maintains the running history and passes the full context to the LLM on every turn.
 
 ### Retrieving history
 
@@ -227,7 +227,7 @@ var options = new ChatOptions()
     .WithMaxRetryAttempts(5)
     .WithHeartbeatTimeout(TimeSpan.FromMinutes(3));
 
-var response = await sessionClient.ChatAsync(conversationId, messages, options: options);
+var response = await sessionClient.SendAsync(conversationId, messages, options: options);
 ```
 
 These values are stored in `ChatOptions.AdditionalProperties` under well-known string keys (`temporal.activity.timeout`, `temporal.retry.max_attempts`, `temporal.heartbeat.timeout`). The workflow reads them when scheduling the activity and applies them for that invocation only.
@@ -413,7 +413,7 @@ var handle = await workflowHandle.StartUpdateAsync(
 var response = await handle.GetResultAsync();
 ```
 
-> **Critical gotcha — RPC timeout ≠ update cancellation.** If `GetResultAsync()` times out, the workflow is **still running** and the update is **still executing**. The client has lost only its return channel. Treat an RPC timeout as "unknown outcome, reconcile via the handle" — not as "failed, retry the update." A naive retry would issue a second `ChatAsync` for the same logical turn and produce duplicate work.
+> **Critical gotcha — RPC timeout ≠ update cancellation.** If `GetResultAsync()` times out, the workflow is **still running** and the update is **still executing**. The client has lost only its return channel. Treat an RPC timeout as "unknown outcome, reconcile via the handle" — not as "failed, retry the update." A naive retry would issue a second `SendAsync` for the same logical turn and produce duplicate work.
 
 The same pattern exists in the Agents library; see [docs/how-to/MAF/durable-agents.md](../MAF/durable-agents.md) for cross-library symmetry.
 
@@ -421,7 +421,7 @@ The same pattern exists in the Agents library; see [docs/how-to/MAF/durable-agen
 
 ## Session Lifetime
 
-`SessionTimeToLive` (default: 14 days) controls how long a session workflow remains open while idle. After this period without a new `ChatAsync` call, the workflow exits cleanly. If you then call `ChatAsync` with the same `conversationId`, a new workflow starts — history from the completed workflow is not automatically carried over.
+`SessionTimeToLive` (default: 14 days) controls how long a session workflow remains open while idle. After this period without a new `SendAsync` call, the workflow exits cleanly. If you then call `SendAsync` with the same `conversationId`, a new workflow starts — history from the completed workflow is not automatically carried over.
 
 When the Temporal event history for a session grows large (Temporal's per-workflow limit), the library triggers `ContinueAsNew` automatically. The conversation history is serialized into the new workflow run's input and restored before the next turn. This is transparent to callers — the same `conversationId` continues to work.
 
@@ -541,18 +541,18 @@ builder.Services
 
 | Method | Temporal mechanism | Purpose |
 |--------|--------------------|---------|
-| `ChatAsync` | `[WorkflowUpdate]` | Send messages; starts the session workflow if not already running |
+| `SendAsync` | `[WorkflowUpdate]` | Send messages; starts the session workflow if not already running |
 | `GetHistoryAsync` | `[WorkflowQuery]` | Retrieve the full conversation history accumulated across all turns |
 | `GetPendingApprovalAsync` | `[WorkflowQuery]` | Poll for a blocked HITL approval request; returns `null` if none is pending |
 | `SubmitApprovalAsync` | `[WorkflowUpdate]` | Submit a human decision to unblock a pending approval gate |
 
-### ChatAsync
+### SendAsync
 
 Starts the session workflow on first call using `WorkflowIdConflictPolicy.UseExisting` — subsequent calls with the same `conversationId` reuse the running workflow. Each call delivers messages as a `[WorkflowUpdate]` and blocks until the LLM responds. Returns `Task<DurableSessionResponse>` — the per-turn response entry with `Text`, `Usage`, and `CorrelationId`. The optional `correlationId` parameter lets callers thread a cross-system identifier through the turn.
 
 ```csharp
 // Client
-DurableSessionResponse response = await sessionClient.ChatAsync(
+DurableSessionResponse response = await sessionClient.SendAsync(
     "conv-123",
     [new ChatMessage(ChatRole.User, "Hello")],
     correlationId: "req-42-abc");   // optional; auto-generated when null

@@ -83,7 +83,7 @@ builder.Services
 
 ### `agent.client.send` (Client kind)
 
-**Emitted by:** `DefaultTemporalAgentClient.RunAgentAsync`
+**Emitted by:** `DefaultTemporalAgentClient.SendAsync`
 
 Wraps the full round-trip of sending an update to `AgentWorkflow` — from the external caller through `StartWorkflowAsync` + `ExecuteUpdateAsync` back to the response.
 
