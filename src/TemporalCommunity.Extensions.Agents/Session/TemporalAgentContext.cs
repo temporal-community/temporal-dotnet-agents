@@ -43,7 +43,7 @@ public sealed class TemporalAgentContext
         Expression<Func<TWorkflow, Task>> workflowRunCall,
         WorkflowOptions options)
     {
-        var handle = await _client.StartWorkflowAsync(workflowRunCall, options);
+        var handle = await _client.StartWorkflowAsync(workflowRunCall, options).ConfigureAwait(false);
         return handle.Id;
     }
 
@@ -53,7 +53,7 @@ public sealed class TemporalAgentContext
         try
         {
             var handle = _client.GetWorkflowHandle(workflowId);
-            return await handle.DescribeAsync();
+            return await handle.DescribeAsync().ConfigureAwait(false);
         }
         catch (RpcException)
         {
@@ -128,6 +128,6 @@ public sealed class TemporalAgentContext
         var handle = _client.GetWorkflowHandle<AgentWorkflow>(CurrentSession.SessionId.WorkflowId);
         return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
             wf => wf.RequestApprovalAsync(request),
-            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } });
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
     }
 }

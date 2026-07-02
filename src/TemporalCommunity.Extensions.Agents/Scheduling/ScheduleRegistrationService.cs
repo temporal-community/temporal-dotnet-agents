@@ -49,7 +49,7 @@ internal sealed class ScheduleRegistrationService(
                     registration.Request,
                     registration.Spec,
                     registration.Policy,
-                    stoppingToken);
+                    stoppingToken).ConfigureAwait(false);
 
                 _logger.LogScheduleCreated(registration.ScheduleId, registration.AgentName);
             }

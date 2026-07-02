@@ -82,7 +82,7 @@ public sealed class ScheduleActivities(ITemporalClient client, string taskQueue,
                 {
                     StartDelay = delay,
                     IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
-                });
+                }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
