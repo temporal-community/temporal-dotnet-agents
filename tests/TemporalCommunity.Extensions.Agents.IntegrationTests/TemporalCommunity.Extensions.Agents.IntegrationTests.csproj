@@ -32,4 +32,8 @@
     <Compile Include="../TemporalCommunity.Extensions.Agents.Tests/StepMode/RecordingTool.cs" Link="StepMode/RecordingTool.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
