@@ -89,6 +89,26 @@ For a detailed explanation of why the full `HarnessAgent` bundle (which includes
 
 ---
 
+## How provider output is applied
+
+When a registered `AIContextProvider` returns an `AIContext` from `InvokingAsync`, the library applies the result as follows:
+
+> **`AIContext.Instructions`** — applied to the LLM call. The final aggregated `Instructions` value (after all providers in the chain have run) replaces the agent's registered instructions on `ChatOptions.Instructions` for that step. Providers receive the previous provider's `Instructions` output via `InvokingContext`, so each provider in the chain can extend or replace what the prior provider produced.
+>
+> **`AIContext.Messages`** — merged into the conversation context. The final aggregated `Messages` list becomes the message sequence passed to the LLM for that step. Providers receive the previous provider's `Messages` output via `InvokingContext`, forming a chain.
+>
+> **`AIContext.Tools`** — **not dispatched**. Provider-contributed tools are explicitly ignored. A `LogWarning` is emitted once per turn (not per provider, not per tool) when any provider returns a non-empty tool set:
+>
+> ```
+> Context provider {ProviderType} returned {ToolCount} tool(s) for agent {AgentName}.
+> Provider-contributed tools are not dispatched as durable activities and are ignored.
+> Register tools via agent.AddTool() to ensure durable execution.
+> ```
+>
+> This warning fires at runtime and there is no compile-time check. If you implement a custom `AIContextProvider` that returns tools from `InvokingAsync`, register those tools via `agent.AddTool(...)` instead — that is the only path that gives each tool call its own Temporal activity with configurable retry and timeout.
+
+---
+
 ## Per-step, not per-turn
 
 Providers fire **once per LLM call**, not once per turn. A single agent turn may involve several LLM calls (one per step in the tool-call loop). Keep provider logic idempotent and cheap:

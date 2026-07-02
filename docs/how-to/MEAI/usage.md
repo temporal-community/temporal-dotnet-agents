@@ -439,11 +439,35 @@ When the Temporal event history for a session grows large (Temporal's per-workfl
 | `ApprovalTimeout` | `TimeSpan` | 7 days | Maximum time to wait for a human to respond to a HITL tool approval request. |
 | `WorkflowIdPrefix` | `string` | `"chat-"` | Prefix prepended to `conversationId` when constructing the Temporal workflow ID. |
 | `MaxEntryCount` | `int` | `1000` | Maximum number of `DurableSessionEntry` records the workflow holds before triggering `ContinueAsNew`. Each turn adds two entries (request + response), so the default retains roughly 500 turns. Renamed from `MaxHistorySize` in 0.2.0. |
-| `HistoryReducer` | `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>?` | `null` | Optional synchronous, deterministic delegate that trims the workflow's entry log when rolling over via `ContinueAsNew`. Operates on entries (not flat messages), preserving per-turn `Usage` / `CorrelationId` metadata. |
+| `HistoryReducer` | `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>?` | `null` | Inline delegate that trims the workflow's entry log at `ContinueAsNew` time. Operates on entries (not flat messages), preserving per-turn `Usage` / `CorrelationId` metadata. **For in-process / unit-test use only** — see note below. |
+| `DefaultHistoryReducerKey` | `string?` | `null` | Keyed-DI service key used to resolve the history-reducer delegate on the worker side. The key is serialized into workflow input and survives worker restarts, making this the production-safe alternative to `HistoryReducer`. Register the delegate with `services.AddKeyedSingleton<Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(key, ...)` before calling `AddDurableAI`. When both `HistoryReducer` and `DefaultHistoryReducerKey` are set, `DefaultHistoryReducerKey` takes precedence for the durable path. |
 | `RegisterDefaultWorkflow` | `bool` | `true` | When `true`, the registrar registers the built-in `DurableChatWorkflow` and `DurableChatSessionClient`. Set to `false` when supplying your own `DurableChatWorkflowBase<TOutput>` subclass — see [Custom Workflow Output](./custom-workflow-output.md). All other infrastructure (DI options, `DurableAIDataConverter`, activities, embeddings) is registered regardless. |
 | `MaxToolCallsPerTurn` | `int` | `20` | **Model 3 only.** Maximum LLM↔tool iterations per turn before the workflow synthesizes an "iteration limit exceeded" assistant message. Does not throw — see [Pattern 3 Loop Semantics](#pattern-3-loop-semantics) and [tool-functions.md](tool-functions.md#maxtoolcallsperturn-exhaustion). |
 | `MaximumConsecutiveErrorsPerRequest` | `int` | `3` | **Model 3 only.** Number of consecutive failed tool steps tolerated before a non-retryable `ApplicationFailureException` surfaces. Set to `0` for immediate propagation (MAF-style behavior). See [Pattern 3 Loop Semantics](#pattern-3-loop-semantics). |
 | `IncludeDetailedErrors` | `bool` | `false` | **Model 3 only.** When `true`, synthesized tool-error `FunctionResultContent` includes exception type and message; when `false`, a generic `"Error: Tool invocation failed."` is used. |
+
+> **`HistoryReducer` is silently non-functional in production durable workflows.**
+>
+> The `HistoryReducer` delegate is marked `[JsonIgnore]` on the workflow input. It is never serialized to Temporal and is not present when the activity runs after a worker restart or during replay. This means the delegate is silently dropped and the built-in default trim (`DefaultBoundedTrim`) is used instead, even if you have set a custom `HistoryReducer`.
+>
+> For production durable workflows, use `DefaultHistoryReducerKey` instead:
+>
+> ```csharp
+> // Worker — register the reducer delegate under a stable key in DI
+> services.AddKeyedSingleton<Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
+>     "my-reducer",
+>     (sp, key) => history => history.TakeLast(50).ToList());
+>
+> // Worker — reference the key in DurableExecutionOptions
+> builder.Services
+>     .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+>     .AddDurableAI(opts =>
+>     {
+>         opts.DefaultHistoryReducerKey = "my-reducer";
+>     });
+> ```
+>
+> The key is serialized into the workflow input and survives continue-as-new transitions and worker restarts. `HistoryReducer` (the delegate) is kept for in-process and unit-test scenarios where serialization is not a concern. Treat a reducer-key change the same as a workflow-code change: in-flight sessions that were started with an older key will continue using that key until they complete or trigger a new continue-as-new.
 
 ---
 
@@ -559,6 +583,17 @@ if (pending is not null)
     });
 }
 ```
+
+#### `IDurableSessionControl` — shared approval and lifecycle interface
+
+`DurableChatSessionClient` implements `IDurableSessionControl`, defined in `TemporalCommunity.Extensions.AI`. The same interface is also implemented by `ITemporalAgentClient` / `DefaultTemporalAgentClient` in `TemporalCommunity.Extensions.Agents`. This means approval dashboards and ops tooling can take a single `IDurableSessionControl` dependency and work against either library without coupling to a specific client type.
+
+In addition to `GetPendingApprovalAsync` and `SubmitApprovalAsync`, the interface exposes:
+
+- `CancelPendingApprovalAsync(workflowId)` — cancels the pending approval by submitting a rejection on behalf of the external system. No-op when no approval is currently pending.
+- `ShutdownAsync(workflowId)` — sends a graceful shutdown signal so the session workflow exits its loop rather than sitting parked until its TTL expires.
+
+The `workflowId` parameter is the raw Temporal workflow ID. For `DurableChatSessionClient`, derive it from the `conversationId` by prepending `WorkflowIdPrefix` (default `"chat-"`) or by querying the workflow handle directly.
 
 See [Human-in-the-Loop patterns](hitl-patterns.md) for the full approval flow.
 
