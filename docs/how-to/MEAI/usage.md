@@ -113,6 +113,8 @@ builder.Services
 
 Nothing else needs to be wired up manually. The `TaskQueue` is automatically read from the worker builder and set on `DurableExecutionOptions`.
 
+> **`ITemporalClient` prerequisite:** `AddDurableAI` requires `ITemporalClient` to be registered in DI before it is called. Call `services.AddTemporalClient(address, namespace)` to register it. The 3-arg `AddHostedTemporalWorker(address, namespace, queue)` overload stores connection settings on the worker service but does **not** register `ITemporalClient` as a DI service — `AddTemporalClient` is still required separately.
+
 ---
 
 ## Step 4 — Send a Message

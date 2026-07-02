@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Temporalio.Client;
 using TemporalCommunity.Extensions.AI.Internal;
 using Xunit;
 
@@ -104,6 +106,7 @@ public class TagsChatClientDecoratorTests
         // sp.GetKeyedService<IChatClientDecorator>("tags") and get the built-in.
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         DurableAIRegistrar.Register(
             services,
             builder: null,

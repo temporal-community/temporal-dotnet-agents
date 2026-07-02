@@ -33,6 +33,28 @@ internal static class TemporalAgentsRegistrar
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(agentsOptions);
 
+        // Fail fast if no ITemporalClient is registered. The DefaultTemporalAgentClient
+        // factory (below) calls GetRequiredService<ITemporalClient>() at resolution time;
+        // without this check, a missing registration produces a cryptic generic
+        // InvalidOperationException instead of an actionable message.
+        //
+        // Typical root cause: using the 1-arg AddHostedTemporalWorker(taskQueue) without
+        // also calling services.AddTemporalClient(address, namespace). The 3-arg
+        // AddHostedTemporalWorker(address, namespace, queue) stores connection settings on
+        // TemporalWorkerServiceOptions.ClientOptions so the worker creates its own client at
+        // startup — it intentionally does NOT register ITemporalClient in DI. Call
+        // services.AddTemporalClient(address, namespace) before calling AddTemporalAgents() to
+        // make ITemporalClient available as a DI service.
+        if (!services.Any(d => d.ServiceType == typeof(ITemporalClient)))
+        {
+            throw new InvalidOperationException(
+                "No ITemporalClient registered in DI. " +
+                "Call services.AddTemporalClient(address, namespace) before calling AddTemporalAgents(). " +
+                "Note: AddHostedTemporalWorker(address, namespace, queue) stores connection settings " +
+                "on the worker service but does not register ITemporalClient in DI — " +
+                "AddTemporalClient is required separately.");
+        }
+
         var taskQueue = builder?.TaskQueue ?? string.Empty;
 
         // Options singleton — consumed by DefaultTemporalAgentClient and AgentActivities.

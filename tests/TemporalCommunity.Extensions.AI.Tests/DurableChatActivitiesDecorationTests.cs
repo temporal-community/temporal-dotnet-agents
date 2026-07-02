@@ -1,6 +1,8 @@
+using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Temporalio.Client;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using Xunit;
 
@@ -172,6 +174,7 @@ public class DurableChatActivitiesDecorationTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddSingleton<IChatClient>(inner);
 
         var options = new DurableExecutionOptions { TaskQueue = "test" };
