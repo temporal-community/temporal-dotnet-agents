@@ -22,7 +22,7 @@ public class DurableChatSessionIntegrationTests
         var conversationId = $"single-turn-{Guid.NewGuid():N}";
         var messages = new List<ChatMessage> { new(ChatRole.User, "Hello AI!") };
 
-        var response = await _fixture.SessionClient.ChatAsync(conversationId, messages);
+        var response = await _fixture.SessionClient.SendAsync(conversationId, messages);
 
         Assert.NotNull(response);
         Assert.Single(response.Messages);
@@ -41,14 +41,14 @@ public class DurableChatSessionIntegrationTests
         var conversationId = $"multi-turn-{Guid.NewGuid():N}";
 
         // Turn 1
-        var response1 = await _fixture.SessionClient.ChatAsync(
+        var response1 = await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "First message")]);
 
         Assert.NotNull(response1);
 
         // Turn 2
-        var response2 = await _fixture.SessionClient.ChatAsync(
+        var response2 = await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "Second message")]);
 
@@ -76,11 +76,11 @@ public class DurableChatSessionIntegrationTests
     {
         var conversationId = $"reuse-{Guid.NewGuid():N}";
 
-        await _fixture.SessionClient.ChatAsync(
+        await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "First")]);
 
-        await _fixture.SessionClient.ChatAsync(
+        await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "Second")]);
 
@@ -93,7 +93,7 @@ public class DurableChatSessionIntegrationTests
     public async Task TokenUsage_IsReported()
     {
         var conversationId = $"usage-{Guid.NewGuid():N}";
-        var response = await _fixture.SessionClient.ChatAsync(
+        var response = await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "test")]);
 
@@ -107,11 +107,11 @@ public class DurableChatSessionIntegrationTests
     {
         var conversationId = $"usage-history-{Guid.NewGuid():N}";
 
-        await _fixture.SessionClient.ChatAsync(
+        await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "First")]);
 
-        await _fixture.SessionClient.ChatAsync(
+        await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "Second")]);
 
@@ -134,7 +134,7 @@ public class DurableChatSessionIntegrationTests
         var conversationId = $"correlation-{Guid.NewGuid():N}";
         var customCorrelationId = "trace-abc-123";
 
-        var response = await _fixture.SessionClient.ChatAsync(
+        var response = await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "hello")],
             options: null,
@@ -153,7 +153,7 @@ public class DurableChatSessionIntegrationTests
     {
         var conversationId = $"correlation-auto-{Guid.NewGuid():N}";
 
-        var response = await _fixture.SessionClient.ChatAsync(
+        var response = await _fixture.SessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "hello")]);
 

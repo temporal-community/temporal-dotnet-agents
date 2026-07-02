@@ -35,7 +35,7 @@ public interface IDurableChatSessionClient
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The response entry from the LLM, including per-turn <see cref="UsageDetails"/>.</returns>
-    Task<DurableSessionResponse> ChatAsync(
+    Task<DurableSessionResponse> SendAsync(
         string conversationId,
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,

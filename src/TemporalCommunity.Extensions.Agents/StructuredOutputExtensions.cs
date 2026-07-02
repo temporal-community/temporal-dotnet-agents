@@ -177,7 +177,7 @@ public static class StructuredOutputExtensions
                 };
             }
 
-            var response = await client.RunAgentAsync(sessionId, currentRequest, cancellationToken);
+            var response = await client.SendAsync(sessionId, currentRequest, cancellationToken);
 
             var text = response.Text;
             if (string.IsNullOrWhiteSpace(text))

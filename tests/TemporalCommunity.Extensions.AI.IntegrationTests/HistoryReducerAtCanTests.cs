@@ -71,7 +71,7 @@ public class HistoryReducerAtCanTests
             var handle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
 
             // First turn to start the workflow.
-            await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 1")]);
+            await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 1")]);
             var initialRunId = (await handle.DescribeAsync()).RunId;
 
             // Drive turns until CAN fires (run ID changes). maxEntryCount=6 → CAN after 3 turns
@@ -81,7 +81,7 @@ public class HistoryReducerAtCanTests
             {
                 try
                 {
-                    await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, $"turn {i}")]);
+                    await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, $"turn {i}")]);
                 }
                 catch (Temporalio.Exceptions.WorkflowUpdateFailedException)
                 {

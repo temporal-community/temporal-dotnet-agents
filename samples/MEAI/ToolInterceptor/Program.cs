@@ -169,7 +169,7 @@ conversationIds.Add(convId1);
 var q1 = "What's in config.json?";
 Console.WriteLine($" User : {q1}");
 
-var r1 = await sessionClient.ChatAsync(
+var r1 = await sessionClient.SendAsync(
     convId1,
     [systemMessage, new ChatMessage(ChatRole.User, q1)]);
 
@@ -191,7 +191,7 @@ conversationIds.Add(convId2);
 var q2 = "Delete system.lock";
 Console.WriteLine($" User : {q2}");
 
-var r2 = await sessionClient.ChatAsync(
+var r2 = await sessionClient.SendAsync(
     convId2,
     [systemMessage, new ChatMessage(ChatRole.User, q2)]);
 
@@ -221,7 +221,7 @@ Console.WriteLine(" [Main] Starting chat (will block waiting for approval)...\n"
 
 // Start the chat in the background — it will block inside the workflow once the
 // interceptor returns PauseForApproval, waiting for SubmitApprovalAsync.
-var chatTask3 = sessionClient.ChatAsync(
+var chatTask3 = sessionClient.SendAsync(
     convId3,
     [systemMessage, new ChatMessage(ChatRole.User, q3)]);
 

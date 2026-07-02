@@ -222,15 +222,7 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
             Instructions = options.Instructions,
             Reasoning = options.Reasoning,
             AllowMultipleToolCalls = options.AllowMultipleToolCalls,
-            // AllowBackgroundResponses is [Experimental] (MEAI001) on this pinned MEAI
-            // version. It is a plain bool? that steers the model, so we copy it across the
-            // durable boundary. Suppressed narrowly here (not project-wide) so the MEAI001
-            // category stays live elsewhere in this assembly per S-F-1; revisit if the
-            // property graduates or is removed. Inventory note: this is the only
-            // hand-written experimental MEAI consumption in TemporalCommunity.Extensions.AI.
-#pragma warning disable MEAI001
             AllowBackgroundResponses = options.AllowBackgroundResponses,
-#pragma warning restore MEAI001
         };
     }
 

@@ -231,7 +231,7 @@ By extending `DurableChatWorkflowBase<TOutput>` you get the following at no cost
 | Return type from Update | `ChatResponse` | Any serializable type |
 | Domain data per turn | Via separate query or side channel | Returned atomically with the response |
 | Activity class | `DurableChatActivities` (built-in) | Your own class |
-| Entry point | `DurableChatSessionClient.ChatAsync` | `WorkflowHandle.ExecuteUpdateAsync` |
+| Entry point | `DurableChatSessionClient.SendAsync` | `WorkflowHandle.ExecuteUpdateAsync` |
 | Registration | `AddDurableAI()` only | `AddDurableAI()` + `AddWorkflow<T>()` + `AddSingletonActivities<T>()` |
 | Code to write | None | Three abstract method overrides + Update method |
 | HITL | Inherited | Inherited |

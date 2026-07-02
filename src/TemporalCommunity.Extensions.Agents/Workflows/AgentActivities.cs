@@ -347,14 +347,16 @@ internal sealed class AgentActivities(
             }
 
             // Provider-contributed tools are NOT dispatched as durable activities and are ignored.
-            // Emit one LogWarning per turn (not per provider, not per tool) when any provider
-            // returned tools, so the developer knows to register them via agent.AddTool() instead.
+            // Emit one LogError per turn (not per provider, not per tool) when any provider returned
+            // tools without implementing IDurableToolSource — this is a configuration error, not a
+            // transient warning: a registered feature is completely non-functional until fixed.
             if (firstToolProviderType is not null)
             {
-                _logger.LogWarning(
+                _logger.LogError(
                     "Context provider {ProviderType} returned {ToolCount} tool(s) for agent {AgentName}. " +
                     "Provider-contributed tools are not dispatched as durable activities and are ignored. " +
-                    "Register tools via agent.AddTool() to ensure durable execution.",
+                    "Wrap the provider in DurableContextProviderWrapper or implement IDurableToolSource " +
+                    "to enable durable tool dispatch.",
                     firstToolProviderType, firstToolCount, input.AgentName);
             }
         }

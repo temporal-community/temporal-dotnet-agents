@@ -116,7 +116,7 @@ internal class TemporalAIAgentProxy(
             return new AgentResponse();
         }
 
-        return await _agentClient.RunAgentAsync(sessionId, request, cancellationToken).ConfigureAwait(false);
+        return await _agentClient.SendAsync(sessionId, request, cancellationToken).ConfigureAwait(false);
     }
 
     protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(

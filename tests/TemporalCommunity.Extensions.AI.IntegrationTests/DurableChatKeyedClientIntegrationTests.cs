@@ -50,7 +50,7 @@ public class DurableChatKeyedClientIntegrationTests
 
         // --- No per-call key: should route to DefaultKey client ---
         var conversationId = $"keyed-default-{Guid.NewGuid():N}";
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "hello")]);
 
@@ -62,7 +62,7 @@ public class DurableChatKeyedClientIntegrationTests
         var otherConversationId = $"keyed-other-{Guid.NewGuid():N}";
         var overrideOptions = new ChatOptions().WithChatClientKey(OtherKey);
 
-        var otherResponse = await sessionClient.ChatAsync(
+        var otherResponse = await sessionClient.SendAsync(
             otherConversationId,
             [new ChatMessage(ChatRole.User, "hello")],
             overrideOptions);

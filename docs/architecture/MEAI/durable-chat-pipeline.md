@@ -70,10 +70,10 @@ The diagram below traces the complete path from an external caller through to th
 ```
 External Caller (API server, CLI, test)
   │
-  │  sessionClient.ChatAsync("conv-123", [new ChatMessage(ChatRole.User, "Hello")])
+  │  sessionClient.SendAsync("conv-123", [new ChatMessage(ChatRole.User, "Hello")])
   │
   ▼
-DurableChatSessionClient.ChatAsync
+DurableChatSessionClient.SendAsync
   │  workflowId = "{WorkflowIdPrefix}{conversationId}"   e.g. "chat-conv-123"
   │  span: durable_chat.send  (OTel)
   │
@@ -87,7 +87,7 @@ DurableChatSessionClient.ChatAsync
   │      blocks until the workflow handler completes and returns DurableSessionResponse
   │
   ▼
-DurableChatWorkflow.ChatAsync   [WorkflowUpdate]
+DurableChatWorkflow.SendAsync   [WorkflowUpdate]
   │  ValidateChat() runs first (validator rejects empty messages or shut-down sessions)
   │
   │  // Subclass owns request-entry construction (Decision #9).
@@ -145,10 +145,10 @@ base.RunTurnAsync resumes (after ExecuteTurnAsync returns the TOutput)
   │  _isProcessing = false
   │  returns (TOutput, DurableSessionResponse) tuple to the subclass [WorkflowUpdate]
   │
-DurableChatWorkflow.ChatAsync  (subclass returns the response entry)
+DurableChatWorkflow.SendAsync  (subclass returns the response entry)
   │  return responseEntry          ← DurableSessionResponse
   │
-DurableChatSessionClient.ChatAsync  (ExecuteUpdateAsync returns)
+DurableChatSessionClient.SendAsync  (ExecuteUpdateAsync returns)
   │  span tags: response model, input tokens, output tokens
   │  return DurableSessionResponse to original caller (response.Text exposes the last assistant message)
   │
@@ -240,7 +240,7 @@ A chat turn is inherently a request/response operation: the caller sends message
 **Validation before history entry.** The `[WorkflowUpdateValidator]` runs before the update is written to workflow history. Validation failures are returned to the caller without modifying history — no side effects, no wasted event records.
 
 ```csharp
-[WorkflowUpdateValidator(nameof(ChatAsync))]
+[WorkflowUpdateValidator(nameof(SendAsync))]
 public void ValidateChat(DurableChatInput input)
 {
     if (_shutdownRequested)
@@ -451,13 +451,13 @@ Both `DurableExecutionOptions` and `DurableChatWorkflowInput` expose an `EnableS
 
 ## 6. Turn Serialization
 
-A workflow receives incoming updates asynchronously. If two callers both call `sessionClient.ChatAsync` on the same `conversationId` at the same moment, both updates arrive at the workflow nearly simultaneously. Running them concurrently would corrupt history — the second turn would start building its activity input before the first turn's response had been appended.
+A workflow receives incoming updates asynchronously. If two callers both call `sessionClient.SendAsync` on the same `conversationId` at the same moment, both updates arrive at the workflow nearly simultaneously. Running them concurrently would corrupt history — the second turn would start building its activity input before the first turn's response had been appended.
 
 `DurableChatWorkflowBase<TOutput>` uses an `_isProcessing` flag with `WaitConditionAsync` as a gate inside its shared `RunTurnAsync` helper. Subclasses construct the request entry and call into the base; the base handles the mutex:
 
 ```csharp
 [WorkflowUpdate("Chat")]
-public async Task<DurableSessionResponse> ChatAsync(DurableChatInput input)
+public async Task<DurableSessionResponse> SendAsync(DurableChatInput input)
 {
     // Subclass constructs the entry; the factory auto-generates correlationId + timestamp when null.
     var requestEntry = DurableSessionRequest.FromMessages(input.Messages, input.CorrelationId);
@@ -634,12 +634,12 @@ Pattern 3 is the third tool-execution model (alongside Pattern 1 — `UseFunctio
 
 ### Activation — registry-based, frozen at session start
 
-Pattern 3 is **intent-based**. `DurableChatSessionClient.ChatAsync` checks `DurableFunctionRegistry.Count > 0` at workflow-start time. If at least one tool is registered via `AddDurableTools`, the client eagerly resolves per-tool `ActivityOptions` for **every** registered tool (filling defaults from `DurableExecutionOptions.ActivityTimeout`, `HeartbeatTimeout`, and `RetryPolicy`) and ships the complete dict into `DurableChatWorkflowInput.ToolActivityOptions`.
+Pattern 3 is **intent-based**. `DurableChatSessionClient.SendAsync` checks `DurableFunctionRegistry.Count > 0` at workflow-start time. If at least one tool is registered via `AddDurableTools`, the client eagerly resolves per-tool `ActivityOptions` for **every** registered tool (filling defaults from `DurableExecutionOptions.ActivityTimeout`, `HeartbeatTimeout`, and `RetryPolicy`) and ships the complete dict into `DurableChatWorkflowInput.ToolActivityOptions`.
 
-The workflow then detects Pattern 3 by checking `Input.ToolActivityOptions is { Count: > 0 }`. This **freezes** the activation decision and the resolved options in workflow history, making replay deterministic regardless of which worker process picks up the activation. A worker that joins after a session has begun cannot accidentally see a different tool list or different options. The client-side `BuildToolActivityOptions()` result is cached via `Lazy<T>` for the lifetime of `DurableChatSessionClient` — tool registration must be complete before the first `ChatAsync` call on the client, not merely before each session.
+The workflow then detects Pattern 3 by checking `Input.ToolActivityOptions is { Count: > 0 }`. This **freezes** the activation decision and the resolved options in workflow history, making replay deterministic regardless of which worker process picks up the activation. A worker that joins after a session has begun cannot accidentally see a different tool list or different options. The client-side `BuildToolActivityOptions()` result is cached via `Lazy<T>` for the lifetime of `DurableChatSessionClient` — tool registration must be complete before the first `SendAsync` call on the client, not merely before each session.
 
 ```
-DurableChatSessionClient.ChatAsync
+DurableChatSessionClient.SendAsync
   │
   │  if functionRegistry.Count > 0:
   │      toolActivityOptions = BuildToolActivityOptions()   ← eager resolution from registry
@@ -794,7 +794,7 @@ When a tool activity fails inside the dispatch loop, the workflow's default beha
 
 This is asymmetric with the Agents library, which currently propagates tool failures immediately. The Agents library is expected to adopt this catch-and-feed-back behavior as a follow-up for cross-library consistency.
 
-**Cancellation during fan-out.** If the workflow is cancelled while tool tasks are in flight (`Workflow.CancelAsync()` or an external cancellation signal), the fan-out propagates `OperationCanceledException` directly. Workflow cancellation is not fed into the consecutive-error counter and is not misclassified as `ApplicationFailureException`. Callers that cancel a session workflow mid-turn should expect `OperationCanceledException` (or a wrapping `WorkflowFailedException` / `WorkflowUpdateFailedException`) from `ChatAsync`.
+**Cancellation during fan-out.** If the workflow is cancelled while tool tasks are in flight (`Workflow.CancelAsync()` or an external cancellation signal), the fan-out propagates `OperationCanceledException` directly. Workflow cancellation is not fed into the consecutive-error counter and is not misclassified as `ApplicationFailureException`. Callers that cancel a session workflow mid-turn should expect `OperationCanceledException` (or a wrapping `WorkflowFailedException` / `WorkflowUpdateFailedException`) from `SendAsync`.
 
 ---
 
@@ -893,7 +893,7 @@ var opts = new ChatOptions()
     .WithMaxRetryAttempts(3)                           // overrides opts.RetryPolicy
     .WithHeartbeatTimeout(TimeSpan.FromMinutes(5));    // overrides opts.HeartbeatTimeout
 
-var response = await sessionClient.ChatAsync("conv-123", messages, opts);
+var response = await sessionClient.SendAsync("conv-123", messages, opts);
 ```
 
 The keys are `public const string` on `TemporalChatOptionsExtensions`:
@@ -905,12 +905,12 @@ The keys are `public const string` on `TemporalChatOptionsExtensions`:
 
 ### Session Lifecycle
 
-A session workflow starts on the first `ChatAsync` call and runs until one of:
+A session workflow starts on the first `SendAsync` call and runs until one of:
 
 - `SessionTimeToLive` elapses with no active turns (`WaitConditionAsync` timeout fires)
 - A `[WorkflowSignal("Shutdown")]` is received — sets `_shutdownRequested = true`, which the `RunAsync` loop observes and exits cleanly
 
-Subsequent `ChatAsync` calls with the same `conversationId` reuse the existing workflow via `WorkflowIdConflictPolicy.UseExisting`.
+Subsequent `SendAsync` calls with the same `conversationId` reuse the existing workflow via `WorkflowIdConflictPolicy.UseExisting`.
 
 ---
 

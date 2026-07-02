@@ -109,7 +109,7 @@ Console.WriteLine("\nDone.");
 // Shows the complete approval gate: the LLM calls delete_records, which sends
 // a RequestApproval update to the workflow and blocks. The main loop polls
 // GetPendingApprovalAsync, discovers the request, and auto-approves it.
-// ChatAsync then returns with the LLM's final response.
+// SendAsync then returns with the LLM's final response.
 // ═════════════════════════════════════════════════════════════════════════════
 static async Task RunHitlDemoAsync(
     DurableChatSessionClient sessionClient,
@@ -237,7 +237,7 @@ static async Task RunHitlDemoAsync(
     Console.WriteLine($" User : {userQuestion}\n");
 
     // ── Start the chat turn ───────────────────────────────────────────────
-    // ChatAsync sends a Chat [WorkflowUpdate] to DurableChatWorkflow.
+    // SendAsync sends a Chat [WorkflowUpdate] to DurableChatWorkflow.
     // Inside the workflow, DurableChatActivities.GetResponseAsync is scheduled.
     // UseFunctionInvocation() runs the tool-call loop within that activity.
     // When delete_records calls RequestApprovalAsync on the handle, the activity
@@ -250,7 +250,7 @@ static async Task RunHitlDemoAsync(
     // Start chat in the background — it will block inside the tool waiting for approval.
     // Note: the chat task is NOT awaited here. It runs concurrently so the main thread
     // can poll for the pending approval request and submit a decision.
-    var chatTask = sessionClient.ChatAsync(
+    var chatTask = sessionClient.SendAsync(
         conversationId,
         [systemMessage, new ChatMessage(ChatRole.User, userQuestion)],
         options: chatOptions);
@@ -330,7 +330,7 @@ static async Task RunHitlDemoAsync(
     // ── Await the final response ──────────────────────────────────────────
     // Now that the approval has been submitted, the workflow unblocks,
     // the tool returns its result, UseFunctionInvocation() sends it back to
-    // the LLM for a final response, and ChatAsync returns.
+    // the LLM for a final response, and SendAsync returns.
     var response = await chatTask;
     Console.WriteLine($" Assistant: {response.Text}");
     Console.WriteLine();

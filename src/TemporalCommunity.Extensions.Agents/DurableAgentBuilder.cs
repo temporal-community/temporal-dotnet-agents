@@ -466,7 +466,7 @@ public sealed class DurableAgentBuilder
                         return $"Skill '{name}' not found.";
                     }
 
-                    var content = skill.Content;
+                    var content = await skill.GetContentAsync(ct).ConfigureAwait(false);
                     if (!scriptsEnabled && content.Contains("<scripts>", StringComparison.Ordinal))
                     {
                         content = SkillsContextProvider.StripScriptsSection(content);
@@ -494,8 +494,7 @@ public sealed class DurableAgentBuilder
                         return $"Skill '{skillName}' not found.";
                     }
 
-                    var resource = skill.Resources?.FirstOrDefault(
-                        r => r.Name.Equals(resourceName, StringComparison.OrdinalIgnoreCase));
+                    var resource = await skill.GetResourceAsync(resourceName, ct).ConfigureAwait(false);
                     if (resource is null)
                     {
                         return $"Resource '{resourceName}' not found in '{skillName}'.";
@@ -524,17 +523,16 @@ public sealed class DurableAgentBuilder
                             return $"Skill '{skillName}' not found.";
                         }
 
-                        var script = skill.Scripts?.FirstOrDefault(
-                            s => s.Name.Equals(scriptName, StringComparison.OrdinalIgnoreCase));
+                        var script = await skill.GetScriptAsync(scriptName, ct).ConfigureAwait(false);
                         if (script is null)
                         {
                             return $"Script '{scriptName}' not found in '{skillName}'.";
                         }
 
-                        Dictionary<string, object?>? rawArgs = null;
+                        JsonElement? argsElement = null;
                         try
                         {
-                            rawArgs = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                            argsElement = JsonSerializer.Deserialize<JsonElement>(
                                 argumentsJson, AIJsonUtilities.DefaultOptions);
                         }
                         catch (JsonException ex)
@@ -542,9 +540,7 @@ public sealed class DurableAgentBuilder
                             return $"Invalid arguments JSON: {ex.Message}";
                         }
 
-                        var args = new AIFunctionArguments(
-                            rawArgs ?? new Dictionary<string, object?>());
-                        return await script.RunAsync(skill, args, ct).ConfigureAwait(false);
+                        return await script.RunAsync(skill, argsElement, sp, ct).ConfigureAwait(false);
                     },
                     name: "run_skill_script",
                     description: "Execute a script from a skill."),

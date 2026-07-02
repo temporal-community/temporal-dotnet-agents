@@ -9,7 +9,7 @@ namespace TemporalCommunity.Extensions.Agents.Skills;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Supported skill types (MAF 1.3.0):</b>
+/// <b>Supported skill types:</b>
 /// <list type="table">
 /// <item>
 ///   <term>File-based</term>

@@ -19,14 +19,15 @@
 //      file that touches the experimental MAF surface. Scattered but auditable, and the
 //      category stays LIVE in every other file (a new untouched experimental MAF API
 //      still fails the build). Files:
-//        - Skills/FileSkillsSource.cs   — AgentSkill, AgentSkillsSource, AgentSkillScript,
-//                                          AgentSkillResource, AgentSkillFrontmatter,
-//                                          AgentFileSkill, AgentFileSkillScriptRunner,
-//                                          AgentFileSkillsSourceOptions
-//        - Skills/SkillResolver.cs      — AgentSkill, AgentFileSkill (+ skills surface)
-//        - Skills/SkillsBuilder.cs      — AgentSkillsSource, AgentFileSkill (+ skills surface)
-//        - Workflows/AgentActivities.cs — AIContextProvider.InvokingContext /
-//                                          AIContextProvider.InvokedContext ctors
+//        - Skills/FileSkillsSource.cs        — AgentSkill, AgentSkillsSource, AgentSkillScript,
+//                                              AgentSkillResource, AgentSkillFrontmatter,
+//                                              AgentFileSkill, AgentFileSkillScriptRunner,
+//                                              AgentFileSkillsSourceOptions, AgentSkillsSourceContext
+//        - Skills/SkillResolver.cs           — AgentSkill, AgentSkillsSourceContext (+ skills surface)
+//        - Skills/SkillsBuilder.cs           — AgentSkillsSource, AgentFileSkill (+ skills surface)
+//        - Skills/SkillsContextProvider.cs   — AgentSkillsSourceContext (passed to EnsureLoadedAsync)
+//        - Workflows/AgentActivities.cs      — AIContextProvider.InvokingContext /
+//                                              AIContextProvider.InvokedContext ctors
 //
 //   2. MEAI001 (all occurrences are in GENERATED code only — the System.Text.Json
 //      source generator over AgentSessionJsonContext/AgentResponse pulls in the
@@ -39,6 +40,10 @@
 //      surfaced as an MEAI001 error). This is the one residual blanket; it is scoped to a
 //      single project and documented here so a reviewer knows to grep for new MEAI usage
 //      when bumping the MEAI version.
+//
+//      NOTE (MEAI 10.7.0): AllowBackgroundResponses on ChatOptions graduated out of
+//      [Experimental] in MEAI 10.7.0. The narrowly-scoped MEAI001 pragma pair in
+//      TemporalCommunity.Extensions.AI/DurableChatClient.cs was dropped at that bump.
 //
 // When a listed API graduates (loses [Experimental]) or is removed/renamed by Microsoft,
 // the per-file pragma / NoWarn entry should be revisited. The base-contract guard tests

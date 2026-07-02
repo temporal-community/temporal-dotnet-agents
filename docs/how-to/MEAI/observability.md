@@ -72,7 +72,7 @@ durable_chat.send
 
 | Constant | Attribute key | Appears on | Description |
 |---|---|---|---|
-| `DurableChatTelemetry.ConversationIdAttribute` | `conversation.id` | `durable_chat.send`, `durable_chat.turn` | The conversation/session identifier passed to `ChatAsync`. Use this to filter all spans for a single session. |
+| `DurableChatTelemetry.ConversationIdAttribute` | `conversation.id` | `durable_chat.send`, `durable_chat.turn` | The conversation/session identifier passed to `SendAsync`. Use this to filter all spans for a single session. |
 | `DurableChatTelemetry.RequestModelAttribute` | `gen_ai.request.model` | `durable_chat.send` | The model ID from `ChatOptions.ModelId`, if set. |
 | `DurableChatTelemetry.ResponseModelAttribute` | `gen_ai.response.model` | `durable_chat.send`, `durable_chat.turn` | The model ID returned in the LLM response. |
 | `DurableChatTelemetry.InputTokensAttribute` | `gen_ai.usage.input_tokens` | `durable_chat.send`, `durable_chat.turn` | Prompt token count from `ChatResponse.Usage.InputTokenCount`. |
@@ -201,7 +201,7 @@ You can register both exporters simultaneously during a migration or for local v
 
 ## What Each Span Tells You
 
-**`durable_chat.send` duration** approximates total end-to-end latency from the caller's perspective. It begins when `ChatAsync` is called and ends after the workflow update returns. This includes network round-trips to the Temporal server, activity scheduling, queue time, LLM inference, and the return path. Use this span's duration for SLA measurement.
+**`durable_chat.send` duration** approximates total end-to-end latency from the caller's perspective. It begins when `SendAsync` is called and ends after the workflow update returns. This includes network round-trips to the Temporal server, activity scheduling, queue time, LLM inference, and the return path. Use this span's duration for SLA measurement.
 
 **`durable_chat.turn` duration** approximates actual LLM inference time (plus any synchronous tool call round-trips handled by `UseFunctionInvocation()` in the middleware pipeline). This is the time your activity spent calling `IChatClient.GetResponseAsync`. Use this span for LLM latency analysis.
 
@@ -245,7 +245,7 @@ for (int turn = 0; turn < responses.Count; turn++)
 
 ### Linking a request entry to its response via `CorrelationId`
 
-Every `DurableSessionRequest` and the `DurableSessionResponse` it produced share the same `CorrelationId`. When you supplied a `correlationId` to `ChatAsync`, that value is the link; otherwise the workflow auto-generated one with `Workflow.NewGuid()`.
+Every `DurableSessionRequest` and the `DurableSessionResponse` it produced share the same `CorrelationId`. When you supplied a `correlationId` to `SendAsync`, that value is the link; otherwise the workflow auto-generated one with `Workflow.NewGuid()`.
 
 ```csharp
 // Client — find the request and response for a specific upstream request ID

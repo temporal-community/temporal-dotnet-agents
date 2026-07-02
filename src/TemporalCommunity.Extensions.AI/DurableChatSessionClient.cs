@@ -102,7 +102,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The response entry from the LLM, including per-turn <see cref="UsageDetails"/> and correlation ID.</returns>
-    public async Task<DurableSessionResponse> ChatAsync(
+    public async Task<DurableSessionResponse> SendAsync(
         string conversationId,
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,

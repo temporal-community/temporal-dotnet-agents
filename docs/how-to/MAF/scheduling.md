@@ -278,7 +278,7 @@ await agentClient.RunAgentDelayedAsync(
 // Once the delay elapses and the agent responds, you can send follow-up messages
 // to the same session using the same session ID:
 //
-//   await agentClient.RunAgentAsync(
+//   await agentClient.SendAsync(
 //       sessionId,
 //       new RunRequest("How is the setup going? Do you need help with anything?"));
 ```
@@ -384,7 +384,7 @@ var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
 var sessionId   = new TemporalAgentSessionId("OnboardingAgent", userId);
 
 // Wait for the delayed session to complete its first turn.
-var response = await agentClient.RunAgentAsync(
+var response = await agentClient.SendAsync(
     sessionId,
     new RunRequest("Trial check-in: what features have you tried so far?"));
 

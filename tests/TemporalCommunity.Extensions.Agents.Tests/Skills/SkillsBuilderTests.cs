@@ -19,7 +19,7 @@ public class SkillsBuilderTests
     {
         var builder = new SkillsBuilder();
         // AgentFileSkillScriptRunner is a delegate — create any non-null instance.
-        AgentFileSkillScriptRunner runner = (_, _, _, _) => Task.FromResult<object?>(null);
+        AgentFileSkillScriptRunner runner = (_, _, _, _, _) => Task.FromResult<object?>(null);
 
         Assert.Throws<NotSupportedException>(() =>
             builder.AddSkillsFromDirectory(Path.GetTempPath(), runner: runner));

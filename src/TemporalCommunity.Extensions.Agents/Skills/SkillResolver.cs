@@ -1,4 +1,4 @@
-#pragma warning disable MAAI001 // experimental MAF skills surface (AgentSkill/AgentFileSkill); inventoried in Internal/ExperimentalApiSuppressions.cs
+#pragma warning disable MAAI001 // experimental MAF skills surface (AgentSkill/AgentFileSkill/AgentSkillsSourceContext); inventoried in Internal/ExperimentalApiSuppressions.cs
 using Microsoft.Agents.AI;
 
 namespace TemporalCommunity.Extensions.Agents.Skills;
@@ -51,11 +51,17 @@ internal sealed class SkillResolver : IDisposable
     /// <summary>
     /// Ensures the skill map is loaded. Safe to call concurrently — only one scan runs.
     /// </summary>
+    /// <param name="context">
+    /// Optional MAF context passed through to each <see cref="AgentSkillsSource.GetSkillsAsync"/>.
+    /// May be <see langword="null"/> when called from tool-closure paths that run outside a
+    /// live agent invocation. Sources that require context (e.g. context-aware custom sources)
+    /// should guard against a null value; the built-in <see cref="FileSkillsSource"/> ignores it.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="InvalidOperationException">
     /// Thrown when two or more skills share the same name (case-insensitive).
     /// </exception>
-    internal async Task EnsureLoadedAsync(CancellationToken cancellationToken = default)
+    internal async Task EnsureLoadedAsync(AgentSkillsSourceContext? context = null, CancellationToken cancellationToken = default)
     {
         // Fast path: already loaded.
         if (_loaded is not null)
@@ -91,7 +97,7 @@ internal sealed class SkillResolver : IDisposable
             // Scan all registered sources.
             foreach (var source in _sources)
             {
-                var fromSource = await source.GetSkillsAsync(cancellationToken).ConfigureAwait(false);
+                var fromSource = await source.GetSkillsAsync(context!, cancellationToken).ConfigureAwait(false);
                 if (fromSource is null)
                 {
                     continue;
@@ -132,7 +138,7 @@ internal sealed class SkillResolver : IDisposable
         string name,
         CancellationToken cancellationToken = default)
     {
-        await EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureLoadedAsync(context: null, cancellationToken).ConfigureAwait(false);
         _loaded!.TryGetValue(name, out var skill);
         return skill;
     }

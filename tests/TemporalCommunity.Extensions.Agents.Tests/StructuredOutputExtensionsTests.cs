@@ -25,7 +25,7 @@ public class StructuredOutputExtensionsTests
     {
         RunRequest? capturedRequest = null;
         var fakeClient = A.Fake<ITemporalAgentClient>();
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))
@@ -54,7 +54,7 @@ public class StructuredOutputExtensionsTests
     {
         RunRequest? capturedRequest = null;
         var fakeClient = A.Fake<ITemporalAgentClient>();
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))
@@ -82,7 +82,7 @@ public class StructuredOutputExtensionsTests
         // pattern-match path. Use the proxy directly with a fake client to verify.
         RunRequest? capturedRequest = null;
         var fakeClient = A.Fake<ITemporalAgentClient>();
-        A.CallTo(() => fakeClient.RunAgentAsync(
+        A.CallTo(() => fakeClient.SendAsync(
                 A<TemporalAgentSessionId>._,
                 A<RunRequest>._,
                 A<CancellationToken>._))

@@ -355,7 +355,7 @@ Here is the complete path a message takes from an external caller to the LLM and
 └───────────┬──────────────┘
             │
             │  1. Builds RunRequest { Messages, CorrelationId, ... }
-            │  2. Calls ITemporalAgentClient.RunAgentAsync(sessionId, request)
+            │  2. Calls ITemporalAgentClient.SendAsync(sessionId, request)
             ↓
 ┌──────────────────────────────────────────┐
 │   DefaultTemporalAgentClient             │

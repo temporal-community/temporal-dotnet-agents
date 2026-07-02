@@ -11,14 +11,14 @@ using Xunit;
 namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 
 /// <summary>
-/// CRIT-3 regression tests: the instance-field bridge between <c>ChatAsync</c> and
+/// CRIT-3 regression tests: the instance-field bridge between <c>SendAsync</c> and
 /// <c>ExecuteTurnAsync</c> is unsafe under concurrent queued turns.
 ///
 /// <para>
 /// Root cause: <c>DurableChatWorkflow._lastClientKey</c> and <c>_lastConversationId</c>
-/// are instance fields that <c>ChatAsync</c> writes before the base session loop
+/// are instance fields that <c>SendAsync</c> writes before the base session loop
 /// serializes turn execution. When a prior turn holds <c>_isProcessing == true</c>,
-/// subsequent concurrent <c>ChatAsync</c> calls run, overwrite those fields, then
+/// subsequent concurrent <c>SendAsync</c> calls run, overwrite those fields, then
 /// suspend at <c>WaitConditionAsync</c>. The suspended turn resumes with corrupted
 /// per-turn metadata — most visibly, Turn N dispatches its LLM activity with Turn M's
 /// <see cref="IChatClient"/> key.
@@ -49,7 +49,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
     /// <summary>
     /// Pattern 3 test: two turns sent to the same session, each with a different
     /// <c>WithChatClientKey</c>. Turn 1 has a tool call that blocks long enough for
-    /// Turn 2 to enter <c>ChatAsync</c> and overwrite the instance fields.
+    /// Turn 2 to enter <c>SendAsync</c> and overwrite the instance fields.
     ///
     /// After the fix, Turn 1's SECOND LLM step (post tool result) must still use
     /// <c>key-1-client</c>, not <c>key-2-client</c>.
@@ -101,7 +101,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         // Start Turn 1 in the background; it will block during the tool fan-out.
         var turn1Options = new ChatOptions().WithChatClientKey("key-1");
         var turn1Task = Task.Run(async () =>
-            await sessionClient.ChatAsync(
+            await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-1")],
                 turn1Options));
@@ -109,18 +109,18 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         // Wait until the tool activity has started (Turn 1 is now inside the tool fan-out).
         await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // Send Turn 2 while Turn 1 is blocked. Turn 2's ChatAsync will write _lastClientKey
+        // Send Turn 2 while Turn 1 is blocked. Turn 2's SendAsync will write _lastClientKey
         // to "key-2" and then suspend at WaitConditionAsync (because _isProcessing == true).
         var turn2Options = new ChatOptions().WithChatClientKey("key-2");
         var turn2Task = Task.Run(async () =>
-            await sessionClient.ChatAsync(
+            await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-2")],
                 turn2Options));
 
         // Poll until Turn 2's update has been accepted by the workflow (it has reached
         // WaitConditionAsync and written its metadata). A second WorkflowExecutionUpdateAccepted
-        // event in the history confirms the workflow has processed Turn 2's ChatAsync call.
+        // event in the history confirms the workflow has processed Turn 2's SendAsync call.
         var workflowHandle = env.Client.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
         await PollUntilUpdateCountAsync(workflowHandle, minAcceptedCount: 2, TimeSpan.FromSeconds(30));
 
@@ -149,7 +149,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
     /// <summary>
     /// Pattern 1 test: three turns queued against the same session. Turn 0 blocks
     /// at the LLM call (keeping <c>_isProcessing == true</c>); Turns 1 and 2 both
-    /// enter <c>ChatAsync</c>, each writing their <c>_lastClientKey</c>, and suspend.
+    /// enter <c>SendAsync</c>, each writing their <c>_lastClientKey</c>, and suspend.
     ///
     /// The write order is Turn 1 (writes "key-1") then Turn 2 (writes "key-2").
     /// When Turn 0 finishes and Turn 1 resumes, the unfixed code reads <c>_lastClientKey = "key-2"</c>
@@ -171,7 +171,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         var client2 = new RecordingChatClient("key-2");
 
         // Gate: Turn 0 blocks inside its LLM call until the test releases it,
-        // keeping _isProcessing == true while Turns 1 and 2 enter ChatAsync.
+        // keeping _isProcessing == true while Turns 1 and 2 enter SendAsync.
         var client0Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var client0Started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -196,7 +196,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         // Start Turn 0 — it will block inside the LLM call.
         var turn0Options = new ChatOptions().WithChatClientKey("key-0");
         var turn0Task = Task.Run(async () =>
-            await sessionClient.ChatAsync(
+            await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-0")],
                 turn0Options));
@@ -204,19 +204,19 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         // Wait until Turn 0's activity has started (LLM call in progress).
         await client0Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // Queue Turn 1 and Turn 2 while Turn 0 is blocking. Both ChatAsync calls
+        // Queue Turn 1 and Turn 2 while Turn 0 is blocking. Both SendAsync calls
         // will run on the Temporal task scheduler (FIFO), write their keys in order
         // (key-1 then key-2), then suspend at WaitConditionAsync.
         var turn1Options = new ChatOptions().WithChatClientKey("key-1");
         var turn1Task = Task.Run(async () =>
-            await sessionClient.ChatAsync(
+            await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-1")],
                 turn1Options));
 
         var turn2Options = new ChatOptions().WithChatClientKey("key-2");
         var turn2Task = Task.Run(async () =>
-            await sessionClient.ChatAsync(
+            await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-2")],
                 turn2Options));
@@ -321,7 +321,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
     /// have been recorded, or <paramref name="timeout"/> elapses.
     ///
     /// <para>
-    /// Each <c>ChatAsync</c> call issues a <c>WorkflowExecutionUpdate</c> (via
+    /// Each <c>SendAsync</c> call issues a <c>WorkflowExecutionUpdate</c> (via
     /// <c>ExecuteUpdateAsync</c>). Once the workflow accepts an update it appends a
     /// <c>WorkflowExecutionUpdateAccepted</c> event to the history. Polling for N such
     /// events is a deterministic alternative to a fixed-duration sleep: it confirms

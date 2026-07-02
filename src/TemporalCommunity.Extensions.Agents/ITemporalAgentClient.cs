@@ -14,10 +14,10 @@ namespace TemporalCommunity.Extensions.Agents;
 public interface ITemporalAgentClient : IDurableSessionControl
 {
     /// <summary>
-    /// Runs an agent by sending a Temporal workflow update and waiting for the response.
+    /// Sends a request to an agent session and waits for the response.
     /// Starts the workflow if it is not already running.
     /// </summary>
-    Task<AgentResponse> RunAgentAsync(
+    Task<AgentResponse> SendAsync(
         TemporalAgentSessionId sessionId,
         RunRequest request,
         CancellationToken cancellationToken = default);

@@ -50,7 +50,7 @@ builder.Services
 ```csharp
 var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
 
-var response = await sessionClient.ChatAsync(
+var response = await sessionClient.SendAsync(
     "conv-user-42",
     [new ChatMessage(ChatRole.User, "What is the capital of France?")]);
 ```

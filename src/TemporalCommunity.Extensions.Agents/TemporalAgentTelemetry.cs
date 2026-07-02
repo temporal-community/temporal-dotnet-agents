@@ -57,7 +57,7 @@ public static class TemporalAgentTelemetry
     /// <summary>The originating <c>FunctionCallContent.CallId</c>. Tagged on <see cref="AgentToolInvokeSpanName"/> spans.</summary>
     public const string AgentToolCallIdAttribute = "agent.tool.call_id";
 
-    /// <summary>Span emitted by <c>DefaultTemporalAgentClient.RunAgentAsync</c> when sending an update.</summary>
+    /// <summary>Span emitted by <c>DefaultTemporalAgentClient.SendAsync</c> when sending an update.</summary>
     public const string AgentClientSendSpanName = "agent.client.send";
 
     /// <summary>Span emitted by <c>DefaultTemporalAgentClient.ScheduleAgentAsync</c> when creating a recurring schedule.</summary>

@@ -68,7 +68,7 @@ public class HistoryCaptureTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"cap-p1-{Guid.NewGuid():N}";
 
-        await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, "hello")]);
+        await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, "hello")]);
 
         var workflowId = sessionClient.GetWorkflowId(conversationId);
         var handle = env.Client.GetWorkflowHandle(workflowId);
@@ -110,7 +110,7 @@ public class HistoryCaptureTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"cap-p3-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "weather in Boston?")]);
 
@@ -155,7 +155,7 @@ public class HistoryCaptureTests
         var handle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
 
         // Turn 1
-        await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 1")]);
+        await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 1")]);
         var initialRunId = (await handle.DescribeAsync()).RunId;
 
         // Drive until CAN fires (run ID changes).
@@ -164,7 +164,7 @@ public class HistoryCaptureTests
         {
             try
             {
-                await sessionClient.ChatAsync(conversationId,
+                await sessionClient.SendAsync(conversationId,
                     [new ChatMessage(ChatRole.User, $"turn {i}")]);
             }
             catch (Temporalio.Exceptions.WorkflowUpdateFailedException)
@@ -188,7 +188,7 @@ public class HistoryCaptureTests
         {
             try
             {
-                await sessionClient.ChatAsync(conversationId,
+                await sessionClient.SendAsync(conversationId,
                     [new ChatMessage(ChatRole.User, "turn after CAN")]);
                 break;
             }

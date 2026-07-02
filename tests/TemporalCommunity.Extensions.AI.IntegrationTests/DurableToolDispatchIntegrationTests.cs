@@ -78,7 +78,7 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"single-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "What's the weather in SF?")]);
 
@@ -130,7 +130,7 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"parallel-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "do both")]);
 
@@ -181,7 +181,7 @@ public class DurableToolDispatchIntegrationTests
         var conversationId = $"noretry-{Guid.NewGuid():N}";
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
-            await sessionClient.ChatAsync(conversationId,
+            await sessionClient.SendAsync(conversationId,
                 [new ChatMessage(ChatRole.User, "do the thing")]));
 
         // Exactly one invocation — no retries.
@@ -221,7 +221,7 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"cap-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "loop forever")]);
 
@@ -274,7 +274,7 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"pattern1-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "weather?")],
             new ChatOptions { Tools = [weatherTool] });
@@ -334,7 +334,7 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"feedback-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "Use the flaky tool")]);
 
@@ -393,7 +393,7 @@ public class DurableToolDispatchIntegrationTests
         var conversationId = $"threshold-{Guid.NewGuid():N}";
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
-            await sessionClient.ChatAsync(conversationId,
+            await sessionClient.SendAsync(conversationId,
                 [new ChatMessage(ChatRole.User, "do the broken thing")]));
 
         Assert.True(harness.GetInvocationCount("broken_tool") >= threshold + 1,
@@ -452,7 +452,7 @@ public class DurableToolDispatchIntegrationTests
         // an exception is fine; what we assert is that the FIRST failure (before
         // the success) did NOT trip the threshold.
         await Assert.ThrowsAnyAsync<Exception>(async () =>
-            await sessionClient.ChatAsync(conversationId,
+            await sessionClient.SendAsync(conversationId,
                 [new ChatMessage(ChatRole.User, "drive the sequence")]));
 
         // Counter-reset semantics: the workflow must have made it past the success
@@ -508,7 +508,7 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"mixed-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "mixed run")]);
 
@@ -561,7 +561,7 @@ public class DurableToolDispatchIntegrationTests
         var conversationId = $"immediate-{Guid.NewGuid():N}";
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
-            await sessionClient.ChatAsync(conversationId,
+            await sessionClient.SendAsync(conversationId,
                 [new ChatMessage(ChatRole.User, "fail fast")]));
 
         // Exactly one LLM call. The synthesized-feedback path must not have fired.
@@ -627,7 +627,7 @@ public class DurableToolDispatchIntegrationTests
 
         // Fire the chat turn in the background; it will block at the tool fan-out.
         var chatTask = Task.Run(async () =>
-            await sessionClient.ChatAsync(
+            await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "start the tool")]));
 
@@ -721,11 +721,11 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"can-{Guid.NewGuid():N}";
 
-        var r1 = await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 1")]);
+        var r1 = await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 1")]);
         Assert.NotNull(r1);
-        var r2 = await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 2")]);
+        var r2 = await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 2")]);
         Assert.NotNull(r2);
-        var r3 = await sessionClient.ChatAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 3")]);
+        var r3 = await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 3")]);
         Assert.NotNull(r3);
 
         // Each turn ran its tool exactly once and produced a final response —
@@ -866,7 +866,7 @@ public class DurableToolDispatchIntegrationTests
         var conversationId = $"explicit-{Guid.NewGuid():N}";
 
         // Pass only the weather tool explicitly.
-        var response = await sessionClient.ChatAsync(
+        var response = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "just weather please")],
             new ChatOptions { Tools = [weather] });
