@@ -73,7 +73,7 @@ public class FileSkillsSourceTests
             WriteSkill(sub, "child-skill");
 
             var source = new FileSkillsSource(root, maxDepth: 0);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             // Only root-skill; child-skill is in a subdirectory.
             var single = Assert.Single(skills);
@@ -98,7 +98,7 @@ public class FileSkillsSourceTests
             WriteSkill(root, "root-skill");
 
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             var single = Assert.Single(skills);
             Assert.Equal("root-skill", single.Frontmatter.Name);
@@ -125,7 +125,7 @@ public class FileSkillsSourceTests
             WriteSkill(dirA, "apple-skill");
 
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             Assert.Equal(2, skills.Count);
             Assert.Equal("apple-skill", skills[0].Frontmatter.Name);
@@ -150,11 +150,14 @@ public class FileSkillsSourceTests
             File.WriteAllText(Path.Combine(skillDir, "SKILL.md"), rawContent);
 
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             var single = Assert.Single(skills);
-            // Content must equal the full raw SKILL.md string (including frontmatter).
-            Assert.Equal(rawContent, single.Content);
+            // Content must contain the full raw SKILL.md body (MAF 1.12.0+ may append
+            // resource tags, so we check StartsWith rather than exact equality).
+            var content = await single.GetContentAsync();
+            Assert.NotNull(content);
+            Assert.StartsWith(rawContent, content, StringComparison.Ordinal);
         }
         finally
         {
@@ -172,7 +175,7 @@ public class FileSkillsSourceTests
             WriteSkill(skillDir, "my-skill");
 
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             var single = Assert.Single(skills);
             var fileSkill = Assert.IsType<AgentFileSkill>(single);
@@ -195,7 +198,7 @@ public class FileSkillsSourceTests
             WriteSkill(root, "check-type");
 
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             Assert.Single(skills);
             Assert.IsType<AgentFileSkill>(skills[0]);
@@ -218,7 +221,7 @@ public class FileSkillsSourceTests
         try
         {
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
             Assert.Empty(skills);
         }
         finally
@@ -243,7 +246,7 @@ public class FileSkillsSourceTests
             WriteSkill(depth2, "depth-two");
 
             var source = new FileSkillsSource(root); // default maxDepth = 2
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             Assert.Equal(2, skills.Count);
             var names = skills.Select(s => s.Frontmatter.Name).ToHashSet();
@@ -266,7 +269,7 @@ public class FileSkillsSourceTests
             WriteSkill(depth3, "too-deep");
 
             var source = new FileSkillsSource(root); // default maxDepth = 2
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             Assert.Empty(skills);
         }
@@ -291,7 +294,7 @@ public class FileSkillsSourceTests
             }
 
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
             Assert.Empty(skills);
         }
         finally
@@ -321,7 +324,7 @@ public class FileSkillsSourceTests
                 "---\ndescription: Missing name.\n---\n## Body");
 
             var source = new FileSkillsSource(root, logger: logger);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             // Only the good skill is returned.
             var single = Assert.Single(skills);
@@ -352,7 +355,7 @@ public class FileSkillsSourceTests
                 "---\nname: \"quoted name with spaces\"\ndescription: Bad name.\n---\n## Body");
 
             var source = new FileSkillsSource(root, logger: logger);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             var single = Assert.Single(skills);
             Assert.Equal("good-skill", single.Frontmatter.Name);
@@ -401,7 +404,7 @@ public class FileSkillsSourceTests
             File.SetUnixFileMode(noReadFile, UnixFileMode.None); // removes all permissions
 
             var source = new FileSkillsSource(root, logger: logger);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             // Only the accessible skill is returned; the unreadable file is skipped.
             var single = Assert.Single(skills);
@@ -437,7 +440,7 @@ public class FileSkillsSourceTests
             File.WriteAllText(Path.Combine(skillDir, "SKILL.md"), "﻿" + rawContent);
 
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             var single = Assert.Single(skills);
             Assert.Equal("bom-skill", single.Frontmatter.Name);
@@ -457,7 +460,7 @@ public class FileSkillsSourceTests
     {
         var source = new FileSkillsSource(Path.Combine(Path.GetTempPath(), $"does-not-exist-{Guid.NewGuid():N}"));
         await Assert.ThrowsAsync<DirectoryNotFoundException>(
-            () => source.GetSkillsAsync());
+            () => source.GetSkillsAsync(null!, default));
     }
 
     // ---------------------------------------------------------------------------
@@ -481,7 +484,7 @@ public class FileSkillsSourceTests
 
             var source = new FileSkillsSource(root);
             await Assert.ThrowsAsync<OperationCanceledException>(
-                () => source.GetSkillsAsync(cts.Token));
+                () => source.GetSkillsAsync(null!, cts.Token));
         }
         finally
         {
@@ -511,7 +514,7 @@ public class FileSkillsSourceTests
             File.SetUnixFileMode(lockedDir, UnixFileMode.None); // remove all permissions
 
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             // accessible-skill is still returned despite the locked sibling.
             var single = Assert.Single(skills);

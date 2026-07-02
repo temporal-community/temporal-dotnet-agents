@@ -16,8 +16,8 @@ namespace TemporalCommunity.Extensions.Agents.Skills;
 /// <b>Scanning.</b> The scanner walks the specified directory up to
 /// <paramref name="maxDepth"/> levels deep (default 2: root + children + grandchildren).
 /// Each <c>SKILL.md</c> found is parsed for YAML frontmatter containing <c>name</c> and
-/// <c>description</c>. The entire raw file content is passed as the skill's
-/// <see cref="AgentFileSkill.Content"/> property.
+/// <c>description</c>. The entire raw file content is returned by the skill's
+/// <see cref="AgentFileSkill.GetContentAsync"/> method.
 /// </para>
 /// <para>
 /// <b>Error handling.</b> I/O errors and parse failures on individual files are logged as
@@ -40,7 +40,7 @@ namespace TemporalCommunity.Extensions.Agents.Skills;
 /// </remarks>
 public sealed class FileSkillsSource : AgentSkillsSource
 {
-    // AgentFileSkill has an internal constructor in MAF 1.3.0. We cache the ConstructorInfo
+    // AgentFileSkill has an internal constructor. We cache the ConstructorInfo
     // once per type so the reflection cost is paid only on the first scan.
     private static readonly ConstructorInfo? s_agentFileSkillCtor =
         typeof(AgentFileSkill).GetConstructor(
@@ -92,7 +92,7 @@ public sealed class FileSkillsSource : AgentSkillsSource
     }
 
     /// <inheritdoc/>
-    public override async Task<IList<AgentSkill>> GetSkillsAsync(CancellationToken ct = default)
+    public override async Task<IList<AgentSkill>> GetSkillsAsync(AgentSkillsSourceContext context, CancellationToken ct = default)
     {
         var results = new List<AgentSkill>();
         await VisitDirectoryAsync(_directory, _maxDepth, results, isRoot: true, ct).ConfigureAwait(false);
@@ -201,7 +201,7 @@ public sealed class FileSkillsSource : AgentSkillsSource
 
     /// <summary>
     /// Creates an <see cref="AgentFileSkill"/> instance. Because <c>AgentFileSkill</c> has an
-    /// internal constructor in MAF 1.3.0, reflection is used — the <see cref="ConstructorInfo"/>
+    /// internal constructor, reflection is used — the <see cref="ConstructorInfo"/>
     /// is cached in <see cref="s_agentFileSkillCtor"/> so the cost is paid only once.
     /// </summary>
     private static AgentFileSkill CreateFileSkill(
