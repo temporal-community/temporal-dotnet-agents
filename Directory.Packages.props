@@ -1,0 +1,48 @@
+<Project>
+  <!--
+    Central Package Management (CPM) — all NuGet version pins live here.
+    Individual csproj files must NOT include Version= on <PackageReference> elements.
+    Tools (MinVer) keep PrivateAssets="All" in Directory.Build.props where they are referenced;
+    CPM PackageVersion entries here resolve the version for every package in the repo.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Temporal SDK -->
+    <PackageVersion Include="Temporalio" Version="1.14.1" />
+    <PackageVersion Include="Temporalio.Extensions.Hosting" Version="1.14.1" />
+    <PackageVersion Include="Temporalio.Extensions.OpenTelemetry" Version="1.14.1" />
+
+    <!-- Microsoft Agent Framework + MEAI -->
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.3.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.OpenAI" Version="1.3.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.5.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.5.0" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.7" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
+
+    <!-- OpenAI -->
+    <PackageVersion Include="OpenAI" Version="2.10.0" />
+
+    <!-- OpenTelemetry -->
+    <PackageVersion Include="OpenTelemetry.Exporter.Console" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.15.3" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.15.1" />
+
+    <!-- Testing -->
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+    <PackageVersion Include="FakeItEasy" Version="9.0.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.4.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+
+    <!-- Versioning tooling — MinVer; PrivateAssets="All" in Directory.Build.props -->
+    <PackageVersion Include="MinVer" Version="7.0.0" />
+
+    <!-- Analyzer (Item 11a) -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" />
+  </ItemGroup>
+</Project>
