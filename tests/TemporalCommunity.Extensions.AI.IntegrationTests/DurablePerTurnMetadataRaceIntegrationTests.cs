@@ -118,8 +118,11 @@ public class DurablePerTurnMetadataRaceIntegrationTests
                 [new ChatMessage(ChatRole.User, "turn-2")],
                 turn2Options));
 
-        // Give Turn 2's ChatAsync time to reach WaitConditionAsync and overwrite the fields.
-        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        // Poll until Turn 2's update has been accepted by the workflow (it has reached
+        // WaitConditionAsync and written its metadata). A second WorkflowExecutionUpdateAccepted
+        // event in the history confirms the workflow has processed Turn 2's ChatAsync call.
+        var workflowHandle = env.Client.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
+        await PollUntilUpdateCountAsync(workflowHandle, minAcceptedCount: 2, TimeSpan.FromSeconds(30));
 
         // Release the tool gate so Turn 1 can proceed to its second LLM step.
         toolGate.TrySetResult();
@@ -218,8 +221,11 @@ public class DurablePerTurnMetadataRaceIntegrationTests
                 [new ChatMessage(ChatRole.User, "turn-2")],
                 turn2Options));
 
-        // Allow time for both ChatAsync calls to arrive at the server and queue.
-        await Task.Delay(TimeSpan.FromMilliseconds(700));
+        // Poll until both Turn 1 and Turn 2 have been accepted by the workflow (both have
+        // reached WaitConditionAsync and written their metadata). Three accepted updates in the
+        // history (Turn 0 + Turn 1 + Turn 2) confirms both queued turns are suspended and waiting.
+        var workflowHandleP1 = env.Client.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
+        await PollUntilUpdateCountAsync(workflowHandleP1, minAcceptedCount: 3, TimeSpan.FromSeconds(30));
 
         // Release Turn 0's LLM call.
         client0Gate.TrySetResult();
@@ -306,6 +312,45 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         (string Key, IChatClient Client) pair3,
         Action<ITemporalWorkerServiceOptionsBuilder> registerTools) =>
         BuildHostWithKeyedClients(client, taskQueue, registerTools, pair1, pair2, pair3);
+
+    // ── Deterministic coordination helpers ────────────────────────────────────
+
+    /// <summary>
+    /// Polls <paramref name="handle"/>'s history until at least
+    /// <paramref name="minAcceptedCount"/> <c>WorkflowExecutionUpdateAccepted</c> events
+    /// have been recorded, or <paramref name="timeout"/> elapses.
+    ///
+    /// <para>
+    /// Each <c>ChatAsync</c> call issues a <c>WorkflowExecutionUpdate</c> (via
+    /// <c>ExecuteUpdateAsync</c>). Once the workflow accepts an update it appends a
+    /// <c>WorkflowExecutionUpdateAccepted</c> event to the history. Polling for N such
+    /// events is a deterministic alternative to a fixed-duration sleep: it confirms
+    /// the queued turns have been accepted and their metadata written before releasing
+    /// the gate that advances the in-flight turn.
+    /// </para>
+    /// </summary>
+    private static async Task PollUntilUpdateCountAsync(
+        WorkflowHandle handle,
+        int minAcceptedCount,
+        TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var count = 0;
+            await foreach (var ev in handle.FetchHistoryEventsAsync().ConfigureAwait(false))
+            {
+                if (ev.WorkflowExecutionUpdateAcceptedEventAttributes is not null)
+                    count++;
+            }
+            if (count >= minAcceptedCount)
+                return;
+            await Task.Delay(TimeSpan.FromMilliseconds(100)).ConfigureAwait(false);
+        }
+        throw new TimeoutException(
+            $"Expected at least {minAcceptedCount} WorkflowExecutionUpdateAccepted events " +
+            $"within {timeout}, but did not observe them.");
+    }
 
     // ── Chat client helpers ─────────────────────────────────────────────────
 
