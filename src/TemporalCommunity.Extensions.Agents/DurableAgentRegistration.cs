@@ -31,6 +31,7 @@ internal sealed record DurableAgentRegistration(
     int? MaxEntryCount,
     int MaxToolCallsPerTurn,
     Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer,
+    string? HistoryReducerKey,
     Action<AIAgentBuilder>? ConfigureAgentPipeline,
     string? CompactionStrategyKey,
     Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? ToolInterceptorFactory = null,

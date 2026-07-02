@@ -1,5 +1,6 @@
 #pragma warning disable TAI001
 
+using FakeItEasy;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Temporalio.Client;
@@ -218,6 +219,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddHostedTemporalWorker("my-queue")
             .AddWorkerPlugin(new DurableAIPlugin());
 
@@ -229,6 +231,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddHostedTemporalWorker("my-queue")
             .AddWorkerPlugin(new DurableAIPlugin());
 
@@ -240,6 +243,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddHostedTemporalWorker("my-queue")
             .AddWorkerPlugin(new DurableAIPlugin());
 
@@ -252,6 +256,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddHostedTemporalWorker("my-queue")
             .AddWorkerPlugin(new DurableAIPlugin());
 
@@ -269,6 +274,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         var plugin = new DurableAIPlugin();
         services.AddHostedTemporalWorker("my-queue").AddWorkerPlugin(plugin);
 
@@ -295,11 +301,13 @@ public class DurableAIPluginTests
         // Path A: AddDurableAI()
         var servicesA = new ServiceCollection();
         servicesA.AddLogging();
+        servicesA.AddSingleton(A.Fake<ITemporalClient>());
         servicesA.AddHostedTemporalWorker("my-queue").AddDurableAI();
 
         // Path B: AddWorkerPlugin(new DurableAIPlugin())
         var servicesB = new ServiceCollection();
         servicesB.AddLogging();
+        servicesB.AddSingleton(A.Fake<ITemporalClient>());
         servicesB.AddHostedTemporalWorker("my-queue").AddWorkerPlugin(new DurableAIPlugin());
 
         // Compare the relevant ServiceDescriptors by service type.
@@ -329,6 +337,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddHostedTemporalWorker("localhost:7233", "default", "my-queue")
             .AddDurableAI();
 

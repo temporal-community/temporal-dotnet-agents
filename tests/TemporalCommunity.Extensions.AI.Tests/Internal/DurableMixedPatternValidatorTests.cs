@@ -1,6 +1,8 @@
+using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Temporalio.Client;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Internal;
 using Temporalio.Extensions.Hosting;
@@ -121,6 +123,7 @@ public class DurableMixedPatternValidatorTests
         // refactor that removes the registrar's TryAddEnumerable line fails this test.
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         DurableAIRegistrar.Register(
             services,
             builder: null,

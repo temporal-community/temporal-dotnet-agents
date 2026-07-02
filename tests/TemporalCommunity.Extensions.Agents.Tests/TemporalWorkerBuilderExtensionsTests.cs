@@ -199,4 +199,20 @@ public class TemporalWorkerBuilderExtensionsTests
         Assert.IsType<DefaultTemporalAgentClient>(client);
     }
 #pragma warning restore TA001
+
+    [Fact]
+    public void AddTemporalAgents_WithoutITemporalClient_ThrowsInvalidOperationException()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        // Intentionally omit ITemporalClient registration to verify the fail-fast guard.
+        var builder = services.AddHostedTemporalWorker("test-task-queue");
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            builder.AddTemporalAgents(opts =>
+                opts.AddDurableAgent("agent", ConfigureWithChatClient)));
+
+        Assert.Contains("No ITemporalClient registered in DI", ex.Message);
+        Assert.Contains("AddTemporalAgents", ex.Message);
+    }
 }

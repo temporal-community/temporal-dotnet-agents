@@ -112,11 +112,11 @@ internal class TemporalAIAgentProxy(
 
         if (isFireAndForget)
         {
-            await _agentClient.RunAgentFireAndForgetAsync(sessionId, request, cancellationToken);
+            await _agentClient.RunAgentFireAndForgetAsync(sessionId, request, cancellationToken).ConfigureAwait(false);
             return new AgentResponse();
         }
 
-        return await _agentClient.RunAgentAsync(sessionId, request, cancellationToken);
+        return await _agentClient.RunAgentAsync(sessionId, request, cancellationToken).ConfigureAwait(false);
     }
 
     protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(

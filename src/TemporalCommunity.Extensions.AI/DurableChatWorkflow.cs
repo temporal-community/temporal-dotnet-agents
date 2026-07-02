@@ -100,6 +100,16 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         DateTimeOffset createdAt) =>
         DurableSessionResponse.FromChatResponse(correlationId, output, createdAt);
 
+    /// <inheritdoc/>
+    protected override Task<List<Session.DurableSessionEntry>> ApplyKeyedHistoryReducerAsync(
+        string reducerKey,
+        List<Session.DurableSessionEntry> history,
+        ActivityOptions activityOptions) =>
+        Workflow.ExecuteActivityAsync(
+            (DurableChatActivities a) => a.ReduceHistoryByKeyAsync(
+                new ReduceHistoryByKeyInput { ReducerKey = reducerKey, History = history }),
+            activityOptions);
+
     protected override Task<ChatResponse> ExecuteTurnAsync(
         ActivityOptions activityOptions,
         DurableSessionRequest requestEntry,

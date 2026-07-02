@@ -1,5 +1,7 @@
+using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Temporalio.Client;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -32,6 +34,7 @@ public class DurableAIServiceCollectionExtensionsTests
     public void AddDurableTools_Succeeds_WhenAddDurableAICalledFirst()
     {
         var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         var workerBuilder = services
             .AddHostedTemporalWorker("my-queue")
             .AddDurableAI();

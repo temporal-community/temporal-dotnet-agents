@@ -69,8 +69,34 @@ public class DurableChatWorkflowInput
     /// Optional reducer applied to conversation history before a continue-as-new transition.
     /// Not serialized — the session client re-supplies this on each workflow start.
     /// </summary>
+    /// <remarks>
+    /// This property is kept for in-process and unit-test use where the delegate can be
+    /// supplied directly. For production durable workflows, use
+    /// <see cref="HistoryReducerKey"/> instead: the key is serialized and survives the
+    /// wire, so the reducer is reliably applied at every continue-as-new boundary
+    /// (including after worker restarts and replay).
+    /// </remarks>
     [JsonIgnore]
     public Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer { get; init; }
+
+    /// <summary>
+    /// Keyed-service key under which
+    /// <c>Func&lt;IList&lt;DurableSessionEntry&gt;, IList&lt;DurableSessionEntry&gt;&gt;</c>
+    /// is registered in the worker's DI container. Serialized and carried forward through
+    /// continue-as-new transitions. When non-null, the workflow dispatches a dedicated
+    /// <c>ReduceHistoryByKey</c> activity to apply the reducer at CAN time. Mutually exclusive
+    /// with <see cref="HistoryReducer"/>: if both are set, <see cref="HistoryReducerKey"/>
+    /// takes precedence.
+    /// </summary>
+    /// <remarks>
+    /// <b>Determinism requirement:</b> the delegate registered under this key must be pure
+    /// and deterministic — same inputs must always produce the same output, and the delegate
+    /// must not change behaviour between deployments without a key change. The reducer runs
+    /// inside a Temporal activity that replays from history; an implementation that changes
+    /// between deployments is a nondeterminism hazard for in-flight sessions.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? HistoryReducerKey { get; init; }
 
     /// <summary>
     /// The UTC timestamp at which the session was originally created.

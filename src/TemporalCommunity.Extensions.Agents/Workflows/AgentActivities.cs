@@ -138,6 +138,31 @@ internal sealed class AgentActivities(
     }
 
     /// <summary>
+    /// Applies a keyed history reducer to the supplied history list and returns the result.
+    /// Dispatched by <see cref="AgentWorkflow"/> at continue-as-new time when
+    /// <see cref="TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.HistoryReducerKey"/> is set.
+    /// The reducer delegate is resolved from DI via <see cref="IServiceProvider.GetKeyedService{T}"/>,
+    /// applied to the history, and the trimmed list is returned to the workflow.
+    /// </summary>
+    [Activity("TemporalCommunity.Extensions.Agents.ReduceHistoryByKey")]
+    public Task<List<DurableSessionEntry>> ReduceHistoryByKeyAsync(
+        TemporalCommunity.Extensions.AI.ReduceHistoryByKeyInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var reducer = services.GetKeyedService<
+            Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
+            input.ReducerKey)
+            ?? throw new InvalidOperationException(
+                $"No history reducer registered under key '{input.ReducerKey}'. " +
+                $"Register a Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> " +
+                $"via services.AddKeyedSingleton(\"{input.ReducerKey}\", ...).");
+
+        var result = reducer(input.History);
+        return Task.FromResult(result as List<DurableSessionEntry> ?? result.ToList());
+    }
+
+    /// <summary>
     /// Appends the full turn — request entry + response entry carrying all messages accumulated
     /// across every LLM step and tool call — to the agent's external history store.
     /// Dispatched by <see cref="AgentWorkflow"/> after <c>ExecuteDurableAgentTurnAsync</c>

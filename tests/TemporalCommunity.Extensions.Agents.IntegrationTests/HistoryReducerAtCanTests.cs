@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode;
@@ -99,6 +100,64 @@ public class HistoryReducerAtCanTests
         }
     }
 
+    /// <summary>
+    /// Reproduces the [JsonIgnore] silent-failure bug: a keep-last-1 reducer configured via
+    /// <c>HistoryReducerKey</c> must produce exactly 1 carried entry after CAN.
+    /// Before the fix the reducer was silently stripped on the wire and DefaultBoundedTrim
+    /// produced 3 entries (<c>maxEntryCount/2</c>) instead.
+    /// </summary>
+    [Fact]
+    public async Task ConfiguredReducer_ViaKey_AcrossCan_CarriesExactlyOneEntry()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        const int maxEntryCount = 6;
+        const string reducerKey = "keep-last-1-test-maf";
+        var scripted = new ScriptedChatClient(
+            Enumerable.Range(1, 40).Select(i => new ChatResponse(new ChatMessage(ChatRole.Assistant, $"r{i}"))));
+
+        // Keep-last-1 sentinel: if the reducer fires, carried.Count == 1.
+        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> keepLast1 =
+            entries => entries.Count > 0 ? [entries[^1]] : [];
+
+        using var host = BuildHostWithReducerKey(env.Client, scripted, maxEntryCount, reducerKey, keepLast1);
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("CanAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+            var handle = env.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
+
+            await proxy.RunAsync("turn 1", session);
+            var initialRunId = (await handle.DescribeAsync()).RunId;
+
+            var canFired = false;
+            for (var i = 2; i <= 12 && !canFired; i++)
+            {
+                try { await proxy.RunAsync($"turn {i}", session); }
+                catch (Temporalio.Exceptions.WorkflowUpdateFailedException) { }
+                if ((await handle.DescribeAsync()).RunId != initialRunId) canFired = true;
+            }
+            Assert.True(canFired, "Expected count-driven CAN to fire.");
+
+            await Task.Delay(TimeSpan.FromSeconds(2));
+            var carried = await handle.QueryAsync<AgentWorkflow, IReadOnlyList<DurableSessionEntry>>(
+                wf => wf.GetHistory());
+            _output.WriteLine($"Carried history count after reducer CAN: {carried.Count}");
+
+            // Reducer fired → exactly 1 entry. DefaultBoundedTrim → 3 entries.
+            Assert.Single(carried);
+
+            await host.StopAsync();
+        }
+        catch
+        {
+            await host.StopAsync();
+            throw;
+        }
+    }
+
     [Fact]
     public async Task ConfiguredReducer_AcrossCan_CarriesReducedShape()
     {
@@ -170,6 +229,38 @@ public class HistoryReducerAtCanTests
             .AddTemporalAgents(opts =>
             {
                 if (reducer is not null) opts.DefaultHistoryReducer = reducer;
+                opts.AddDurableAgent("CanAgent", agent =>
+                {
+                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+                    agent.MaxEntryCount = maxEntryCount;
+                    agent.TimeToLive = TimeSpan.FromMinutes(10);
+                });
+            });
+
+        return builder.Build();
+    }
+
+    private static IHost BuildHostWithReducerKey(
+        ITemporalClient client,
+        ScriptedChatClient scripted,
+        int maxEntryCount,
+        string reducerKey,
+        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> reducer)
+    {
+        var taskQueue = $"history-reducer-key-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+
+        // Register the reducer under the key so the activity can resolve it from DI.
+        builder.Services.AddKeyedSingleton<Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
+            reducerKey, (_, _) => reducer);
+
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(opts =>
+            {
+                opts.DefaultHistoryReducerKey = reducerKey;
                 opts.AddDurableAgent("CanAgent", agent =>
                 {
                     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();

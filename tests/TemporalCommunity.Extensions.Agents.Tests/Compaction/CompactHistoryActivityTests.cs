@@ -1,7 +1,9 @@
 #pragma warning disable TA002 // compaction surface is experimental
 
+using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Temporalio.Client;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.Agents.Compaction;
@@ -207,6 +209,7 @@ public class CompactHistoryActivityTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddSingleton(new DurableExecutionOptions { TaskQueue = "test" });
         var options = new TemporalAgentsOptions();
         configure(options);

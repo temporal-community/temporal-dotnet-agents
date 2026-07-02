@@ -51,6 +51,8 @@ builder.Services
     .AddWorkflow<RefundWorkflow>();
 ```
 
+> **`ITemporalClient` prerequisite:** `AddTemporalAgents` requires `ITemporalClient` to be registered in DI before it is called. Call `services.AddTemporalClient(address, namespace)` to register it. The 3-arg `AddHostedTemporalWorker(address, namespace, queue)` overload stores connection settings on the worker service but does **not** register `ITemporalClient` as a DI service — `AddTemporalClient` is still required separately.
+
 ### `DurableAgentBuilder` reference
 
 | Property / Method | Purpose |

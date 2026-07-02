@@ -236,6 +236,7 @@ public class TemporalPluginBuilderExtensionsTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddHostedTemporalWorker("my-queue").AddDurableAI();
 
         Assert.Contains(services, sd =>
@@ -248,6 +249,7 @@ public class TemporalPluginBuilderExtensionsTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddHostedTemporalWorker("my-queue").AddDurableAI();
 
         Assert.Contains(services, sd =>
@@ -260,6 +262,7 @@ public class TemporalPluginBuilderExtensionsTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         var builder = services.AddHostedTemporalWorker("my-queue");
         builder.AddDurableAI();
         builder.AddDurableAI();
@@ -274,5 +277,19 @@ public class TemporalPluginBuilderExtensionsTests
 
         Assert.Equal(1, clientConfiguratorCount);
         Assert.Equal(1, workerConfiguratorCount);
+    }
+
+    [Fact]
+    public void AddDurableAI_WithoutITemporalClient_ThrowsInvalidOperationException()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        // Intentionally omit ITemporalClient registration to verify the fail-fast guard.
+        var builder = services.AddHostedTemporalWorker("my-queue");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => builder.AddDurableAI());
+
+        Assert.Contains("No ITemporalClient registered in DI", ex.Message);
+        Assert.Contains("AddDurableAI", ex.Message);
     }
 }

@@ -150,7 +150,13 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
                 ApprovalTimeout = _options.ApprovalTimeout,
                 EnableSearchAttributes = _options.EnableSearchAttributes,
                 MaxEntryCount = _options.MaxEntryCount,
+                // Both reducer forms are set:
+                // - HistoryReducer: [JsonIgnore] delegate for in-process / embedded-test use.
+                // - HistoryReducerKey: serialized key for production durable workflows.
+                // The durable CAN path uses HistoryReducerKey when present; falls back to
+                // HistoryReducer (inline) only when HistoryReducerKey is null.
                 HistoryReducer = _options.HistoryReducer,
+                HistoryReducerKey = _options.DefaultHistoryReducerKey,
                 ToolActivityOptions = toolActivityOptions,
                 MaxToolCallsPerTurn = _options.MaxToolCallsPerTurn,
                 MaximumConsecutiveErrorsPerRequest = _options.MaximumConsecutiveErrorsPerRequest,
@@ -164,7 +170,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             {
                 IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
                 Rpc = new RpcOptions { CancellationToken = cancellationToken },
-            });
+            }).ConfigureAwait(false);
 
         // Use a handle WITHOUT a pinned RunId so updates follow the continue-as-new chain.
         var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
@@ -184,7 +190,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
 
         var responseEntry = await handle.ExecuteUpdateAsync<DurableChatWorkflow, DurableSessionResponse>(
             wf => wf.ChatAsync(input),
-            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } });
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
 
         span?.SetTag(DurableChatTelemetry.InputTokensAttribute, responseEntry.Usage?.InputTokenCount);
         span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, responseEntry.Usage?.OutputTokenCount);
@@ -208,7 +214,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
 
         return await handle.QueryAsync<DurableChatWorkflow, IReadOnlyList<DurableSessionEntry>>(
             wf => wf.GetHistory(),
-            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } });
+            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
     }
 
     // ── HITL: Tool Approval ─────────────────────────────────────────────
@@ -225,7 +231,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
         return await handle.QueryAsync<DurableChatWorkflow, DurableApprovalRequest?>(
             wf => wf.GetPendingApproval(),
-            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } });
+            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -243,7 +249,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
         await handle.ExecuteUpdateAsync(
             wf => wf.SubmitApprovalAsync(decision),
-            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } });
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -1,8 +1,10 @@
 #pragma warning disable TA002 // strategies are experimental but referenced by name in tests
 
 using System.Runtime.CompilerServices;
+using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Temporalio.Client;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.Agents.Compaction;
@@ -268,6 +270,7 @@ public class BuiltInStrategiesTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddSingleton(new TemporalCommunity.Extensions.AI.DurableExecutionOptions { TaskQueue = "t" });
         var agentsOptions = new TemporalAgentsOptions();
         TemporalAgentsRegistrar.Register(services, builder: null, agentsOptions);
@@ -289,6 +292,7 @@ public class BuiltInStrategiesTests
         // built-in is only a default for users who don't supply their own.
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddSingleton(new TemporalCommunity.Extensions.AI.DurableExecutionOptions { TaskQueue = "t" });
         var custom = new StubStrategy("custom-truncation");
         services.AddKeyedSingleton<ICompactionStrategy>(TruncationCompactionStrategy.Key, custom);

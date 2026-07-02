@@ -195,6 +195,28 @@ public abstract class DurableChatWorkflowBase<TOutput>
     }
 
     /// <summary>
+    /// Dispatches a durable activity to apply a keyed history reducer at continue-as-new time.
+    /// Implemented by concrete subclasses to invoke the library-specific activity type
+    /// (<c>DurableChatActivities.ReduceHistoryByKeyAsync</c> for the MEAI path,
+    /// <c>AgentActivities.ReduceHistoryByKeyAsync</c> for the MAF path).
+    /// </summary>
+    /// <param name="reducerKey">
+    /// The keyed-service key that the activity uses to resolve the
+    /// <c>Func&lt;IList&lt;DurableSessionEntry&gt;, IList&lt;DurableSessionEntry&gt;&gt;</c>
+    /// delegate from DI.
+    /// </param>
+    /// <param name="history">The current history to be reduced.</param>
+    /// <param name="activityOptions">Activity options (timeouts, retry policy) for the dispatch.</param>
+    /// <returns>The reduced history list to carry forward into the new run.</returns>
+    protected virtual Task<List<DurableSessionEntry>> ApplyKeyedHistoryReducerAsync(
+        string reducerKey,
+        List<DurableSessionEntry> history,
+        ActivityOptions activityOptions) =>
+        throw new NotImplementedException(
+            $"{GetType().Name} does not override {nameof(ApplyKeyedHistoryReducerAsync)}. " +
+            "Set HistoryReducerKey only on workflow types that implement this method.");
+
+    /// <summary>
     /// When <see langword="true"/>, response entries appended to the in-workflow history have
     /// their <see cref="DurableSessionEntry.Messages"/> replaced with an empty collection.
     /// Used by external-history modes (when an agent is configured with an external history store):
@@ -262,22 +284,43 @@ public abstract class DurableChatWorkflowBase<TOutput>
 
         if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount) && !_shutdownRequested)
         {
-            // Reducer path: pass _history as IList<T> (no copy needed), then materialize the
-            // reducer's result once into a List<T>.
+            // Reducer selection (priority order):
             //
-            // No-reducer path (C-2): previously passed _history through unchanged. When CAN was
-            // triggered by the count threshold (_history.Count >= MaxEntryCount), carrying the
-            // full history forward meant the very next turn re-tripped the same threshold,
-            // producing a back-to-back continue-as-new loop. Apply a deterministic default
-            // bounded trim that keeps only the most-recent entries and guarantees the carried
-            // count is strictly below MaxEntryCount, so the fresh run has headroom for new turns
-            // before the next CAN. The trim is pure (TakeLast over an ordered list — no
-            // wall-clock, no Guid) and therefore replay-safe. External-store mode (MAF only)
-            // nulls CarriedHistory in its CreateContinueAsNewException override, so this trim is
-            // a harmless no-op there.
-            var carriedHistory = input.HistoryReducer is not null
-                ? input.HistoryReducer(_history).ToList()
-                : DefaultBoundedTrim(_history, input.MaxEntryCount);
+            // 1. HistoryReducerKey — durable path: dispatch a ReduceHistoryByKey activity so
+            //    the reducer delegate is resolved from DI on the worker side. The activity result
+            //    is stored in Temporal history and survives replay deterministically. This is the
+            //    correct fix for the [JsonIgnore] silent-failure bug: the key is serialized and
+            //    travels on the wire; the delegate never does.
+            //
+            // 2. HistoryReducer (inline delegate) — kept for unit-test and in-process use where a
+            //    delegate can be supplied without DI. NOT reliable in production durable workflows
+            //    (the [JsonIgnore] strips it on every serialize/deserialize round-trip).
+            //
+            // 3. DefaultBoundedTrim (C-2 fallback) — no reducer configured. Keeps the most-recent
+            //    Max(1, MaxEntryCount/2) entries so the fresh run has headroom before the next CAN.
+            //    Pure and order-preserving (TakeLast) — replay-safe. External-store mode (MAF only)
+            //    nulls CarriedHistory in its CreateContinueAsNewException override, making this a
+            //    harmless no-op there.
+            List<DurableSessionEntry> carriedHistory;
+            if (input.HistoryReducerKey is not null)
+            {
+                var reducerActivityOptions = new ActivityOptions
+                {
+                    StartToCloseTimeout = input.ActivityTimeout,
+                    HeartbeatTimeout = input.HeartbeatTimeout,
+                };
+                carriedHistory = await ApplyKeyedHistoryReducerAsync(
+                    input.HistoryReducerKey, _history, reducerActivityOptions).ConfigureAwait(true);
+            }
+            else if (input.HistoryReducer is not null)
+            {
+                carriedHistory = input.HistoryReducer(_history).ToList();
+            }
+            else
+            {
+                carriedHistory = DefaultBoundedTrim(_history, input.MaxEntryCount);
+            }
+
             var carriedInput = new DurableChatWorkflowInput
             {
                 TimeToLive = input.TimeToLive,
@@ -288,6 +331,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
                 EnableSearchAttributes = input.EnableSearchAttributes,
                 MaxEntryCount = input.MaxEntryCount,
                 HistoryReducer = input.HistoryReducer,
+                HistoryReducerKey = input.HistoryReducerKey,
                 OriginalCreatedAt = sessionCreatedAt,
             };
             throw CreateContinueAsNewException(carriedInput);
