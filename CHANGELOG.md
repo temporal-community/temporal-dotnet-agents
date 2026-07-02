@@ -42,6 +42,57 @@ workflows before deploying.
   continue-as-new), then deploy. This is the same drain requirement as the v0.3 upgrade; no
   dual-name compatibility shim is provided.
 
+### Added
+
+- **`DurableExecutionOptions.DefaultHistoryReducerKey`** — production-safe keyed reducer
+  registration for `TemporalCommunity.Extensions.AI`. Set a string key and register the
+  corresponding `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>` delegate via
+  `services.AddKeyedSingleton<Func<...>>(key, ...)`. The key is serialized into the workflow
+  input and survives worker restarts and replay; use this instead of `HistoryReducer` (the
+  delegate) for production durable workflows.
+
+- **`IDurableSessionControl` interface** in `TemporalCommunity.Extensions.AI`. Implemented by
+  both `DurableChatSessionClient` (`TemporalCommunity.Extensions.AI`) and
+  `ITemporalAgentClient` / `DefaultTemporalAgentClient`
+  (`TemporalCommunity.Extensions.Agents`). Exposes approval and session-lifecycle operations
+  (`GetPendingApprovalAsync`, `SubmitApprovalAsync`, `CancelPendingApprovalAsync`,
+  `ShutdownAsync`) via a single cross-library abstraction. Approval dashboards and ops tooling
+  can take a single `IDurableSessionControl` dependency and work against either library.
+
+- **`IAgentHistoryStore.GetMetadataAsync`** — default interface method on
+  `IAgentHistoryStore` that returns a `HistoryMetadata` value (entry count + correlation IDs
+  with compaction-marker flags) without loading message payloads. Used by the
+  compaction-trigger evaluation path to avoid a full `LoadAsync` call when the trigger only
+  needs counts and IDs. Default implementation delegates to `LoadAsync(applyCompaction: false)`
+  — existing store implementations get correct behaviour automatically. Store implementations
+  backed by a database can override with a lightweight `COUNT + SELECT id, type` query for
+  better performance when compaction is configured.
+
+### Changed
+
+- **`HistoryReducer` delegate is silently non-functional in production durable workflows.**
+  `DurableExecutionOptions.HistoryReducer` is `[JsonIgnore]` on the workflow input and is
+  never serialized across the Temporal wire, so it is not present during replay or after a
+  worker restart. The delegate is kept for in-process and unit-test scenarios. For production
+  use, set `DurableExecutionOptions.DefaultHistoryReducerKey` to a registered keyed DI delegate
+  instead.
+
+- **Both registrars throw `InvalidOperationException` at registration time when `ITemporalClient`
+  is not in DI.** `DurableAIRegistrar` (MEAI) and `TemporalAgentsRegistrar` (MAF) now detect
+  a missing `ITemporalClient` registration during `AddDurableAI` / `AddTemporalAgents` and
+  throw immediately with an actionable message, instead of producing a cryptic late-binding
+  failure at first resolution.
+
+- **`AIContext.Instructions` from registered `AIContextProvider` instances is now applied to
+  the LLM call.** Previously the value returned by `InvokingAsync` was available in the
+  `AIContext` but not forwarded to `ChatOptions.Instructions` before the LLM call, so custom
+  instructions from providers were silently discarded.
+
+- **Provider-contributed `AIContext.Tools` are explicitly ignored** with a single `LogWarning`
+  per turn. Tools returned by `InvokingAsync` are not dispatched as durable Temporal activities
+  and have no per-tool retry or timeout configuration. Register tools via `agent.AddTool()` to
+  ensure durable execution.
+
 ### Changed
 
 - **Publishing moved to GitHub Packages under the `temporal-community` organization.** Packages

@@ -175,7 +175,7 @@ namespace TemporalCommunity.Extensions.Agents.HistoryStore;
 
 public interface IAgentHistoryStore
 {
-    // Step 5b: bool applyCompaction is REQUIRED — no default value. The choice is
+    // bool applyCompaction is REQUIRED — no default value. The choice is
     // load-bearing (see "Projection modes" below).
     Task<IReadOnlyList<DurableSessionEntry>> LoadAsync(
         string sessionId,
@@ -192,14 +192,26 @@ public interface IAgentHistoryStore
         string sessionId,
         IReadOnlyList<DurableSessionEntry> trimmedEntries,
         CancellationToken cancellationToken = default);
+
+    // Default implementation delegates to LoadAsync(applyCompaction: false).
+    // Override for a lightweight COUNT + SELECT id, type query when compaction is configured.
+    async ValueTask<HistoryMetadata> GetMetadataAsync(
+        string sessionId,
+        CancellationToken cancellationToken = default);
 }
 ```
+
+`GetMetadataAsync` returns a `HistoryMetadata` record containing the total entry count and a list of `(CorrelationId, IsCompactionMarker)` pairs in append order. The compaction-trigger evaluation path calls this method instead of a full `LoadAsync` when the trigger only needs counts and IDs. Notes on the default implementation:
+
+- It calls `LoadAsync(applyCompaction: false)` — the audit-canonical view — so trigger evaluators can see `CompactionMarkerEntry` entries (which the projected view collapses).
+- No override is needed for correctness. Override in production implementations backed by a relational or document store to issue a `COUNT + SELECT id, type FROM ...` query rather than fetching full message payloads.
 
 | Method | Called from | When |
 |---|---|---|
 | `LoadAsync` | `AgentActivities.RunDurableAgentStepAsync` (first step of every turn) + `AgentActivities.CompactHistoryAsync` (compaction dispatch) + `CompactionAwareErasureHelper` (erasure cascade) | See **Projection modes** below — callers pick `applyCompaction: true` (inference + reducer) or `false` (audit + erasure) explicitly |
 | `AppendAsync` | `AgentActivities.AppendAgentTurnAsync` (dispatched by `AgentWorkflow` after the turn loop exits) + `AgentActivities.CompactHistoryAsync` (marker append) | After every completed turn — appends `[requestEntry, responseEntry]`. Compaction also appends a single `CompactionMarkerEntry` when triggered. |
 | `ReplaceAsync` | `AgentActivities.ReduceHistoryInStoreAsync` (dispatched by `AgentWorkflow`) + `CompactionAwareErasureHelper.EraseSessionDataAsync` (GDPR cascade) | Continue-as-new (`MaxEntryCount` tail-trim) and erasure cascades (regenerate / tombstone markers when source entries are deleted) |
+| `GetMetadataAsync` | Compaction-trigger evaluation path (`AgentActivities.CompactHistoryAsync`) | Before deciding whether to run compaction — retrieves count + IDs without loading message payloads. Default implementation delegates to `LoadAsync(applyCompaction: false)`. |
 
 ### Projection modes — the `applyCompaction` parameter
 
