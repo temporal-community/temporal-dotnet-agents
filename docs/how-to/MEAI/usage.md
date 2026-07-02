@@ -584,6 +584,17 @@ if (pending is not null)
 }
 ```
 
+#### `IDurableSessionControl` — shared approval and lifecycle interface
+
+`DurableChatSessionClient` implements `IDurableSessionControl`, defined in `TemporalCommunity.Extensions.AI`. The same interface is also implemented by `ITemporalAgentClient` / `DefaultTemporalAgentClient` in `TemporalCommunity.Extensions.Agents`. This means approval dashboards and ops tooling can take a single `IDurableSessionControl` dependency and work against either library without coupling to a specific client type.
+
+In addition to `GetPendingApprovalAsync` and `SubmitApprovalAsync`, the interface exposes:
+
+- `CancelPendingApprovalAsync(workflowId)` — cancels the pending approval by submitting a rejection on behalf of the external system. No-op when no approval is currently pending.
+- `ShutdownAsync(workflowId)` — sends a graceful shutdown signal so the session workflow exits its loop rather than sitting parked until its TTL expires.
+
+The `workflowId` parameter is the raw Temporal workflow ID. For `DurableChatSessionClient`, derive it from the `conversationId` by prepending `WorkflowIdPrefix` (default `"chat-"`) or by querying the workflow handle directly.
+
 See [Human-in-the-Loop patterns](hitl-patterns.md) for the full approval flow.
 
 ---

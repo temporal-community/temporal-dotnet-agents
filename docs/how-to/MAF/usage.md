@@ -774,6 +774,17 @@ Console.WriteLine("Decision submitted.");
 `SubmitApprovalAsync` unblocks the tool in the workflow, and `RequestApprovalAsync` in the tool returns the same
 `DurableApprovalDecision`.
 
+#### `IDurableSessionControl` — shared approval and lifecycle interface
+
+`ITemporalAgentClient` implements `IDurableSessionControl`, defined in `TemporalCommunity.Extensions.AI`. The same interface is also implemented by `DurableChatSessionClient` in `TemporalCommunity.Extensions.AI`. This gives approval dashboards and ops tooling a single `IDurableSessionControl` dependency that works against either library without coupling to a specific client type.
+
+In addition to `GetPendingApprovalAsync` and `SubmitApprovalAsync`, the interface exposes:
+
+- `CancelPendingApprovalAsync(workflowId)` — cancels the pending approval by submitting a rejection on behalf of the external system. No-op when no approval is currently pending.
+- `ShutdownAsync(workflowId)` — sends a graceful shutdown signal so the session workflow exits its loop rather than sitting parked until its TTL expires.
+
+The `workflowId` parameter on `IDurableSessionControl` is the raw Temporal workflow ID (e.g. `ta-{agentName}-{key}`). For MAF callers, derive it from a `TemporalAgentSessionId` via `.WorkflowId`.
+
 ### Workflow-Parked Approval (compute-free, multi-day waits)
 
 For long approval windows or cost-sensitive workloads where pinning an activity slot is undesirable, use the
