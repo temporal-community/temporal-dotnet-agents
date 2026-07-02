@@ -66,6 +66,16 @@ agent.RunAsync("What's the weather?", session)
 └── return AgentResponse
 ```
 
+### How `AIContext` output is applied (Wave C behaviour)
+
+The three fields on the `AIContext` returned by `InvokingAsync` are handled differently by the durable-agent loop in `AgentActivities`:
+
+> **`AIContext.Instructions`** — applied. The final aggregated `Instructions` (after the full provider chain completes) is assigned to `ChatOptions.Instructions` before the LLM call, replacing the agent's base-registered instructions for that step. Because each provider receives the previous provider's `AIContext` as its `InvokingContext`, providers naturally compose — provider N+1 sees provider N's `Instructions` and can extend or replace it.
+>
+> **`AIContext.Messages`** — applied. The final aggregated `Messages` list becomes the conversation context passed to the LLM. Same chaining semantics as `Instructions`.
+>
+> **`AIContext.Tools`** — ignored. Provider-contributed tools are explicitly dropped. A single `LogWarning` fires per turn when any provider in the chain returns a non-empty tool set. The warning message names the first provider type and tool count. This behaviour exists because tools registered via `AddContextProvider` have no Temporal activity backing — they cannot be individually timed out, retried, or tracked in event history. Register tools via `agent.AddTool()` to get per-tool durable dispatch.
+
 ---
 
 ## What Gets Stored Where
