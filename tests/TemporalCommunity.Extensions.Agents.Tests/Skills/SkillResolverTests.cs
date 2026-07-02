@@ -204,6 +204,7 @@ public class SkillResolverTests
         internal StubSkillsSource(IList<AgentSkill> skills) => _skills = skills;
 
         public override Task<IList<AgentSkill>> GetSkillsAsync(
+            AgentSkillsSourceContext context,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(_skills);
     }
@@ -221,6 +222,7 @@ public class SkillResolverTests
         }
 
         public override async Task<IList<AgentSkill>> GetSkillsAsync(
+            AgentSkillsSourceContext context,
             CancellationToken cancellationToken = default)
         {
             _onScan();

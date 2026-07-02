@@ -214,7 +214,7 @@ public class BaseContractGuardTests
                 "---\nname: guard-skill\ndescription: Base-contract guard skill.\n---\n## Body\nDo stuff.");
 
             var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync();
+            var skills = await source.GetSkillsAsync(null!, default);
 
             var skill = Assert.Single(skills);
             // The production path reflected and invoked the internal AgentFileSkill ctor.

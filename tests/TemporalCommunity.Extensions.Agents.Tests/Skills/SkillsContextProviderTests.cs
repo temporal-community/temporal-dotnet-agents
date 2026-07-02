@@ -273,6 +273,7 @@ public class SkillsContextProviderTests
         }
 
         public override Task<IList<AgentSkill>> GetSkillsAsync(
+            AgentSkillsSourceContext context,
             CancellationToken cancellationToken = default)
         {
             _onScan();

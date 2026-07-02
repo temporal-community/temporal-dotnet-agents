@@ -1,3 +1,4 @@
+#pragma warning disable MAAI001 // experimental MAF skills surface (AgentSkillsSourceContext); inventoried in Internal/ExperimentalApiSuppressions.cs
 using System.Text;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -97,7 +98,9 @@ public sealed class SkillsContextProvider : AIContextProvider
         if (string.IsNullOrEmpty(indexXml))
         {
             // First call: materialise the resolver and build the index.
-            await _resolver.EnsureLoadedAsync(cancellationToken).ConfigureAwait(false);
+            // Pass an AgentSkillsSourceContext so context-aware custom sources receive agent info.
+            var skillsContext = new AgentSkillsSourceContext(context.Agent, context.Session);
+            await _resolver.EnsureLoadedAsync(skillsContext, cancellationToken).ConfigureAwait(false);
 
             indexXml = BuildIndex(_resolver, _scriptsEnabled);
 
