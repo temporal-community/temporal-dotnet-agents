@@ -45,6 +45,22 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     // GAP 6: StateBag persisted across turns so AIContextProvider state survives replay.
     private JsonElement? _currentStateBag;
 
+    // Item 9 (F1 + F3 content-hash gate): tracks the raw-text hash of the last StateBag
+    // value we serialized into an activity input. When the bag hasn't changed between
+    // dispatches we pass null instead of re-sending the full JSON, which at 64 KB × N
+    // activities would add ~700 KB of redundant history bytes per iteration.
+    //
+    // Determinism: we use GetRawText().GetHashCode() — same bytes → same hash — which is
+    // deterministic across replay as long as JsonElement serialization is. SHA-256 would be
+    // cryptographically stronger but costs allocs + crypto; change-detection only needs
+    // determinism, not collision resistance. Hash is a pure int that is never stored in
+    // Temporal history (it is a workflow-thread local variable reset on each CAN).
+    //
+    // Activities receiving null where they previously received a bag must behave identically
+    // to receiving the unchanged bag. The merge target (_currentStateBag) is always authoritative;
+    // passing null just avoids re-serializing unchanged bytes.
+    private int? _lastSentStateBagHash;
+
     // Feature B: tracks whether the always-scopes load has happened in this workflow run.
     // Resets automatically on each continue-as-new (new workflow instance). Not serialized.
     private bool _alwaysScopesLoadedThisRun;
@@ -352,12 +368,16 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             // settings (external-store mode, per-tool activity options) and return them.
             var needsResolution = iteration == 0 && !_input!.WorkerSettingsResolved;
 
+            // F1 optimization: pass the full bag on the first step of each turn (force=true),
+            // and on subsequent steps only when the bag actually changed (hash gate).
+            var bagForStep = GetStateBagForDispatch(force: iteration == 0);
+
             var stepInput = new AgentStepInput
             {
                 AgentName = _input!.AgentName,
                 Request = runRequest,
                 AccumulatedMessages = accumulated,
-                SerializedStateBag = _currentStateBag,
+                SerializedStateBag = bagForStep,
                 SessionId = null,
                 IsFirstStep = iteration == 0,
                 NeedsWorkerSettingsResolution = needsResolution,
@@ -585,6 +605,9 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                     }
                     else
                     {
+                        // F1 optimization: interceptor inputs share the same hash gate.
+                        // All interceptors in a fan-out see the same bag snapshot, so we can
+                        // compute this once outside the loop and pass it to every interceptor.
                         var interceptorInput = new DurableToolInterceptorInput
                         {
                             AgentName = _input!.AgentName,
@@ -593,7 +616,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                                 ? null
                                 : new Dictionary<string, object?>(tc.Arguments),
                             CallId = tc.CallId,
-                            SerializedStateBag = _currentStateBag,
+                            SerializedStateBag = GetStateBagForDispatch(),
                             // Feature B: populate scope-aware fields so the interceptor can
                             // consult scope records and enforce the approval gate.
                             ScopeAware = _input!.ScopeAwareTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
@@ -654,8 +677,8 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             ToolName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
-                            // X-1: seed the tool with accumulated session state (was null before).
-                            SerializedStateBag = _currentStateBag,
+                            // F1 optimization: hash gate — omit bag when unchanged from last dispatch.
+                            SerializedStateBag = GetStateBagForDispatch(),
                         }, ResolveDurableToolActivityOptions(tc.Name)));
                         break;
 
@@ -741,15 +764,17 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             }
 
                             // Buffer the approved tool for dispatch in Phase 2.5.
+                            // F1 optimization: after WriteSessionScopeToStateBag the bag may
+                            // have changed (new scope record written), so force=true to ensure
+                            // the approved tool sees the updated state. The hash is refreshed.
                             pendingToolDispatches.Add((i, new InvokeAgentToolInput
                             {
                                 AgentName = _input!.AgentName,
                                 ToolName = tc.Name,
                                 Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                                 CallId = tc.CallId,
-                                // X-1: seed with state including any session-scope record just
-                                // written by WriteSessionScopeToStateBag above.
-                                SerializedStateBag = _currentStateBag,
+                                // Scope record may have been written above — always send the bag.
+                                SerializedStateBag = GetStateBagForDispatch(force: true),
                             }, ResolveDurableToolActivityOptions(tc.Name)));
                         }
                         else
@@ -1202,6 +1227,40 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             updatedBags,
             _input!.AlwaysScopesStoreKey,
             Workflow.Logger);
+
+    /// <summary>
+    /// Returns the current StateBag for dispatch into an activity input, applying the
+    /// content-hash gate (Item 9 / F1 + F3). When the bag hasn't changed since the last
+    /// dispatch, returns <see langword="null"/> so we avoid re-serializing the full JSON
+    /// into the Temporal event log. Activities that receive null must produce the same
+    /// result as receiving the unchanged bag.
+    /// </summary>
+    /// <param name="force">
+    /// Pass <see langword="true"/> on the first step of each turn to guarantee the activity
+    /// always receives the full bag at the start of a turn, even if the hash matches.
+    /// This keeps the external-history load path simple (activities can trust
+    /// <c>IsFirstStep=true</c> implies a fresh bag snapshot).
+    /// </param>
+    private JsonElement? GetStateBagForDispatch(bool force = false)
+    {
+        if (_currentStateBag is null)
+        {
+            _lastSentStateBagHash = null;
+            return null;
+        }
+
+        var rawText = _currentStateBag.Value.GetRawText();
+        var hash = rawText.GetHashCode();
+
+        if (!force && _lastSentStateBagHash.HasValue && _lastSentStateBagHash.Value == hash)
+        {
+            // Bag hasn't changed — skip re-sending. Activity falls back to its carried state.
+            return null;
+        }
+
+        _lastSentStateBagHash = hash;
+        return _currentStateBag;
+    }
 
     private List<ChatMessage> FlattenHistoryMessages()
     {
