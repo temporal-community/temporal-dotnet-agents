@@ -20,6 +20,8 @@
       inventory: Internal/ExperimentalApiSuppressions.cs · plan §2.2 (S-F-1).
     -->
     <NoWarn>$(NoWarn);MEAI001</NoWarn>
+    <!-- Analysis scoped to library projects only — test/sample projects inherit Directory.Build.props defaults. -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
   </PropertyGroup>
 
   <ItemGroup>

@@ -7,6 +7,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>TemporalCommunity.Extensions.AI</PackageId>
     <PackageTags>temporal;ai;durable;workflow;dotnet;microsoft-extensions-ai</PackageTags>
+    <!-- Analysis scoped to library projects only — test/sample projects inherit Directory.Build.props defaults. -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
   </PropertyGroup>
 
   <ItemGroup>
