@@ -1,4 +1,5 @@
 #pragma warning disable MAAI001 // experimental MAF AIContextProvider.InvokingContext/InvokedContext ctors; inventoried in Internal/ExperimentalApiSuppressions.cs
+#pragma warning disable TA001 // IDurableToolSource is experimental; internal consumption here is intentional
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Agents.AI;
@@ -319,8 +320,22 @@ internal sealed class AgentActivities(
                     cached.Agent, session, aggregated);
                 aggregated = await provider.InvokingAsync(invokingCtx, ct).ConfigureAwait(false);
 
-                // Capture the first provider that returned tools for the per-turn warning below.
-                if (firstToolProviderType is null && aggregated.Tools is { } tools)
+                // Strip tools from IDurableToolSource providers immediately after their iteration.
+                // Their tools are already registered as durable activities; leaving them in aggregated
+                // would contaminate downstream providers' InvokingContext and cause the LogError sentinel
+                // to fire on the wrong provider.
+                // AIContext is a sealed class (not a record), so use explicit property copy instead of `with`.
+                if (provider is IDurableToolSource)
+                    aggregated = new Microsoft.Agents.AI.AIContext
+                    {
+                        Instructions = aggregated.Instructions,
+                        Messages = aggregated.Messages,
+                        Tools = null,
+                    };
+
+                // Capture the first non-IDurableToolSource provider that returned tools for the per-turn warning below.
+                if (firstToolProviderType is null && provider is not IDurableToolSource
+                    && aggregated.Tools is { } tools)
                 {
                     var count = tools is ICollection<Microsoft.Extensions.AI.AITool> c ? c.Count : tools.Count();
                     if (count > 0)
@@ -346,17 +361,19 @@ internal sealed class AgentActivities(
                 chatOptions.Instructions = aggregated.Instructions;
             }
 
-            // Provider-contributed tools are NOT dispatched as durable activities and are ignored.
-            // Emit one LogError per turn (not per provider, not per tool) when any provider returned
-            // tools without implementing IDurableToolSource — this is a configuration error, not a
-            // transient warning: a registered feature is completely non-functional until fixed.
+            // Provider-contributed tools are NOT dispatched as durable activities and are ignored,
+            // unless the provider implements IDurableToolSource (in which case tools were stripped
+            // above and are already registered as durable activities).
+            // Emit one LogWarning per turn (not per provider, not per tool) when any non-IDurableToolSource
+            // provider returned tools — this indicates a misconfiguration where tools will not be dispatched.
+            // IDurableToolSource providers are excluded from this guard (their tools are already registered).
             if (firstToolProviderType is not null)
             {
-                _logger.LogError(
+                _logger.LogWarning(
                     "Context provider {ProviderType} returned {ToolCount} tool(s) for agent {AgentName}. " +
                     "Provider-contributed tools are not dispatched as durable activities and are ignored. " +
-                    "Wrap the provider in DurableContextProviderWrapper or implement IDurableToolSource " +
-                    "to enable durable tool dispatch.",
+                    "Use agent.AddTool() to register tools for durable dispatch, or use " +
+                    "AddContextProvider(provider, durableTools) to combine a context provider with tools.",
                     firstToolProviderType, firstToolCount, input.AgentName);
             }
         }
@@ -903,6 +920,15 @@ internal sealed class AgentActivities(
             var approvalScopeStoreFactory = registration.ApprovalScopesOptions.ApprovalScopeStore
                 ?? agentsOptions.ApprovalScopeStore;
             resolvedApprovalScopeStore = approvalScopeStoreFactory?.Invoke(providerServices);
+        }
+
+        // Audit-log provider-contributed tools so operators can confirm durable registration.
+        if (registration.ProviderContributedTools is { Count: > 0 } providerTools)
+        {
+            foreach (var (toolName, providerType) in providerTools)
+                _logger.LogInformation(
+                    "Agent '{AgentName}': tool '{ToolName}' contributed by context provider {ProviderType} registered as durable activity.",
+                    name, toolName, providerType);
         }
 
         return new CachedDurableAgent(

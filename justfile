@@ -557,7 +557,8 @@ test-samples-maf: build _sample-preflight
         "ToolInterceptor:samples/MAF/ToolInterceptor:120" \
         "WorkingSet:samples/MAF/WorkingSet:90" \
         "Skills:samples/MAF/Skills:90" \
-        "MixedActivities:samples/MAF/MixedActivities:120" ; do
+        "MixedActivities:samples/MAF/MixedActivities:120" \
+        "DurableContextProvider:samples/MAF/DurableContextProvider:90" ; do
         IFS=':' read -r name dir cap <<< "$entry"
         echo "═══ MAF/$name (cap ${cap}s) ═══"
         start=$(date +%s)
