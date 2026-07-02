@@ -1,7 +1,5 @@
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -426,43 +424,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             // These two injection points are mutually exclusive within a single workflow run.
             // After a continue-as-new, the resolved config is carried in AgentWorkflowInput
             // so the next run enters Sub-section A instead.
-            if (needsResolution &&
-                _input!.UseApprovalScopes == true &&
-                _input!.UseApprovalScopeStoreMode == true &&
-                _input!.ApplyAlwaysScopesAtSessionStart == true)
-            {
-                try
-                {
-                    var loaded = await Workflow.ExecuteActivityAsync(
-                        (AgentActivities a) => a.LoadAlwaysScopesAsync(new LoadAlwaysScopesInput
-                        {
-                            AgentName = _input!.AgentName,
-                            StoreKey = _input!.AlwaysScopesStoreKey!,
-                        }),
-                        ApprovalScopeActivityOptions()).ConfigureAwait(true);
-
-                    if (loaded?.Scopes is { Count: > 0 } &&
-                        IsWithinAlwaysScopeCacheBudget(
-                            loaded.Scopes,
-                            _input!.MaxAlwaysScopeCacheRecords,
-                            _input!.MaxAlwaysScopeCacheBytes))
-                    {
-                        MergeAlwaysScopesIntoStateBag(loaded.Scopes);
-                    }
-                }
-                catch (ActivityFailureException ex) when (!IsActivityCancellation(ex))
-                {
-                    Workflow.Logger.LogWarning(
-                        "[{SessionId}] LoadAlwaysScopesAsync failed after retries exhausted. Always-scope cache not " +
-                        "populated. Scope-aware tools will require normal approval this session. {Exception}",
-                        Workflow.Info.WorkflowId, ex);
-                }
-                finally
-                {
-                    _alwaysScopesLoadedThisRun = true;
-                }
-            }
-
+            //
             // Feature B — Sub-section A: load always-scopes at direct-start session start.
             // Guard: first step of the first turn (!needsResolution means direct-start or post-CAN),
             // not already loaded this run, and all three approval-scope flags true.
@@ -470,12 +432,13 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             // the load cannot happen before base.RunAsync because that would create a window where
             // DurableChatWorkflowBase.Input is not yet set (causing RequiredInput failures when
             // the RunAgentAsync update handler fires between the first await and base.RunAsync).
-            if (!needsResolution &&
-                !_alwaysScopesLoadedThisRun &&
-                iteration == 0 &&
+            var shouldLoadAlwaysScopes =
                 _input!.UseApprovalScopes == true &&
                 _input!.UseApprovalScopeStoreMode == true &&
-                _input!.ApplyAlwaysScopesAtSessionStart == true)
+                _input!.ApplyAlwaysScopesAtSessionStart == true &&
+                (needsResolution || (!_alwaysScopesLoadedThisRun && iteration == 0));
+
+            if (shouldLoadAlwaysScopes)
             {
                 try
                 {
@@ -487,14 +450,14 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                         }),
                         ApprovalScopeActivityOptions()).ConfigureAwait(true);
 
-                    if (loaded?.Scopes is { Count: > 0 } &&
-                        IsWithinAlwaysScopeCacheBudget(
-                            loaded.Scopes,
-                            _input!.MaxAlwaysScopeCacheRecords,
-                            _input!.MaxAlwaysScopeCacheBytes))
-                    {
-                        MergeAlwaysScopesIntoStateBag(loaded.Scopes);
-                    }
+                    _currentStateBag = ApprovalScopeCoordinator.ApplyLoadedAlwaysScopes(
+                        _currentStateBag,
+                        loaded,
+                        _input!.MaxAlwaysScopeCacheRecords,
+                        _input!.MaxAlwaysScopeCacheBytes,
+                        _input!.AlwaysScopesStoreKey!,
+                        Workflow.Info.WorkflowId,
+                        Workflow.Logger);
                 }
                 catch (ActivityFailureException ex) when (!IsActivityCancellation(ex))
                 {
@@ -715,10 +678,20 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             var isScopeAwareTool = _input!.ScopeAwareTools?.Contains(
                                 tc.Name, StringComparer.OrdinalIgnoreCase) == true;
 
+
                             if ((scope == ApprovalScope.Session || scope == ApprovalScope.Always) && isScopeAwareTool)
                             {
                                 // Write session-scope record (pure workflow-thread, no I/O).
-                                WriteSessionScopeToStateBag(tc.Name, decision.ScopePattern, decision.RequestId);
+                                _currentStateBag = ApprovalScopeCoordinator.WriteSessionScopeToStateBag(
+                                    _currentStateBag,
+                                    tc.Name,
+                                    decision.ScopePattern,
+                                    decision.RequestId,
+                                    Workflow.UtcNow,
+                                    _input!.MaxAlwaysScopeCacheRecords,
+                                    _input!.MaxAlwaysScopeCacheBytes,
+                                    Workflow.Info.WorkflowId,
+                                    Workflow.Logger);
                             }
                             else if ((scope == ApprovalScope.Session || scope == ApprovalScope.Always) && !isScopeAwareTool)
                             {
@@ -938,166 +911,15 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     }
 
     /// <summary>
-    /// Returns <see langword="true"/> when the given <paramref name="scopes"/> fit within
-    /// both the record-count and byte-size budgets for the always-scope StateBag cache.
-    /// </summary>
-    /// <remarks>
-    /// Deterministic: serializes using <see cref="TemporalAgentJsonUtilities.DefaultOptions"/>
-    /// (no I/O). When either limit is exceeded a <c>LogWarning</c> is emitted and the method
-    /// returns <see langword="false"/> — the workflow skips the always-cache merge for this
-    /// run but continues normally.
-    /// </remarks>
-    private bool IsWithinAlwaysScopeCacheBudget(
-        IReadOnlyList<ApprovalScopeRecord> scopes,
-        int maxRecords,
-        int maxBytes)
-    {
-        if (scopes.Count > maxRecords)
-        {
-            Workflow.Logger.LogWarning(
-                "[{SessionId}] Always-scope cache load skipped: loaded {Count} records exceeds " +
-                "MaxAlwaysScopeCacheRecords ({Max}). Scope-aware tools will require normal " +
-                "approval this session.",
-                Workflow.Info.WorkflowId, scopes.Count, maxRecords);
-            return false;
-        }
-
-        var json = System.Text.Json.JsonSerializer.Serialize(scopes, TemporalAgentJsonUtilities.DefaultOptions);
-        var byteCount = System.Text.Encoding.UTF8.GetByteCount(json);
-        if (byteCount > maxBytes)
-        {
-            Workflow.Logger.LogWarning(
-                "[{SessionId}] Always-scope cache load skipped: serialized size {Bytes:N0} bytes " +
-                "exceeds MaxAlwaysScopeCacheBytes ({Max:N0}). Scope-aware tools will require " +
-                "normal approval this session.",
-                Workflow.Info.WorkflowId, byteCount, maxBytes);
-            return false;
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Writes a session-scope <see cref="ApprovalScopeRecord"/> to the
-    /// <c>temporal.approval_scopes.session</c> key in the workflow's <c>_currentStateBag</c>.
-    /// Pure workflow-thread computation — no I/O, no awaits.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Session scope previously grew unbounded (S-1): no dedup and no cap, so a long-lived
-    /// session that repeatedly re-granted the same tool/pattern would bloat the replay-carried
-    /// StateBag past the 64 KB warn-only guard. This method now:
-    /// </para>
-    /// <list type="number">
-    /// <item>Deduplicates by <c>(ToolName, Pattern)</c> — the latest <see cref="ApprovalScopeRecord.GrantedAt"/>
-    /// wins, so re-granting an existing scope replaces it rather than appending.</item>
-    /// <item>Bounds the record count and serialized byte size by reusing the existing always-scope
-    /// budget (<c>MaxAlwaysScopeCacheRecords</c> / <c>MaxAlwaysScopeCacheBytes</c> via
-    /// <see cref="IsWithinAlwaysScopeCacheBudget"/>) — no new config knobs (per plan §2.5).</item>
-    /// </list>
-    /// <para>
-    /// <strong>Overflow behavior:</strong> when the deduplicated set would exceed the budget the
-    /// new session grant is <em>rejected</em> (not written) and the approval degrades to
-    /// this-call-only — the tool still executes once (the caller dispatches it regardless), but no
-    /// reusable session record is persisted. Deterministic for consistent audit and replay.
-    /// </para>
-    /// </remarks>
-    private void WriteSessionScopeToStateBag(
-        string toolName,
-        ApprovalScopePattern? pattern,
-        string originatingRequestId)
-    {
-        const string sessionScopeKey = "temporal.approval_scopes.session";
-
-        var bag = _currentStateBag is { ValueKind: not System.Text.Json.JsonValueKind.Undefined and not System.Text.Json.JsonValueKind.Null } bagEl
-            ? AgentSessionStateBag.Deserialize(bagEl)
-            : new AgentSessionStateBag();
-
-        bag.TryGetValue<List<ApprovalScopeRecord>>(
-            sessionScopeKey,
-            out var existing,
-            TemporalAgentJsonUtilities.DefaultOptions);
-
-        var records = existing ?? new List<ApprovalScopeRecord>();
-
-        var newRecord = new ApprovalScopeRecord
-        {
-            ToolName = toolName,
-            Pattern = pattern,
-            GrantedAt = Workflow.UtcNow,
-            OriginatingRequestId = originatingRequestId,
-        };
-
-        // Dedup by (ToolName, Pattern): drop any prior record with the same identity so the
-        // latest grant (this one, with the newest GrantedAt) wins. Preserves relative order of
-        // surviving records, appending the new grant last.
-        var newKey = SessionScopeDedupKey(toolName, pattern);
-        var deduped = new List<ApprovalScopeRecord>(records.Count + 1);
-        foreach (var r in records)
-        {
-            if (!string.Equals(SessionScopeDedupKey(r.ToolName, r.Pattern), newKey, StringComparison.Ordinal))
-            {
-                deduped.Add(r);
-            }
-        }
-        deduped.Add(newRecord);
-
-        // Bound the session cache by reusing the always-scope budget. On overflow, reject the
-        // new grant (degrade to this-call-only) and keep the pre-existing records untouched.
-        if (!IsWithinAlwaysScopeCacheBudget(
-                deduped,
-                _input!.MaxAlwaysScopeCacheRecords,
-                _input!.MaxAlwaysScopeCacheBytes))
-        {
-            Workflow.Logger.LogWarning(
-                "[{SessionId}] Session-scope grant for tool '{ToolName}' (RequestId: {RequestId}) " +
-                "rejected: it would exceed the session-scope budget (reusing MaxAlwaysScopeCacheRecords/" +
-                "MaxAlwaysScopeCacheBytes). Degrading this approval to this-call-only; the tool still runs " +
-                "but no reusable session record is persisted.",
-                Workflow.Info.WorkflowId, toolName, originatingRequestId);
-            return;
-        }
-
-        bag.SetValue<List<ApprovalScopeRecord>>(
-            sessionScopeKey,
-            deduped,
-            TemporalAgentJsonUtilities.DefaultOptions);
-
-        _currentStateBag = bag.Serialize();
-
-        Workflow.Logger.LogInformation(
-            "[{SessionId}] Session-scope record written for tool '{ToolName}' " +
-            "(RequestId: {RequestId}).",
-            Workflow.Info.WorkflowId, toolName, originatingRequestId);
-    }
-
-    /// <summary>
-    /// Builds a stable, deterministic dedup key for a session-scope record from its tool name
-    /// and optional argument pattern. A <see langword="null"/> pattern (match-any) collapses to
-    /// a distinct sentinel so it does not collide with concrete patterns.
-    /// </summary>
-    private static string SessionScopeDedupKey(string toolName, ApprovalScopePattern? pattern)
-    {
-        if (pattern is null)
-        {
-            return toolName + " *";
-        }
-
-        return string.Concat(
-            toolName, " ",
-            ((int)pattern.Type).ToString(System.Globalization.CultureInfo.InvariantCulture), " ",
-            pattern.Parameter ?? "*", " ",
-            pattern.Pattern);
-    }
-
-    /// <summary>
     /// Normalizes the <see cref="ApprovalScope"/> from an approved
-    /// <see cref="DurableApprovalDecision"/>, applying all validation rules from spec
-    /// Section 4. Returns <see cref="ApprovalScope.ThisCallOnly"/> for any invalid input.
+    /// <see cref="DurableApprovalDecision"/>, applying all validation rules.
+    /// Returns <see cref="ApprovalScope.ThisCallOnly"/> for any invalid input.
+    /// Delegates to <see cref="ApprovalScopeCoordinator.EvaluateScopeNormalization"/> and logs
+    /// the degradation reason when applicable.
     /// </summary>
     private ApprovalScope NormalizeApprovalScopeForPersistence(DurableApprovalDecision decision)
     {
-        var (result, reason) = EvaluateScopeNormalization(decision);
+        var (result, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
         if (result == ApprovalScope.ThisCallOnly && reason is not null)
         {
             Workflow.Logger.LogWarning(
@@ -1106,112 +928,6 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Pure, static normalization logic — extracted for unit testability.
-    /// Returns the effective <see cref="ApprovalScope"/> and an optional warning reason string
-    /// when the scope is degraded to <see cref="ApprovalScope.ThisCallOnly"/>.
-    /// </summary>
-    /// <remarks>
-    /// Does not log or access workflow context. The instance method
-    /// <see cref="NormalizeApprovalScopeForPersistence"/> delegates here and handles logging.
-    /// </remarks>
-    internal static (ApprovalScope Scope, string? DegradationReason) EvaluateScopeNormalization(
-        DurableApprovalDecision decision)
-    {
-        var scope = decision.Scope;
-
-        // Undefined integer value (e.g. Scope = 99)
-        if (!Enum.IsDefined(typeof(ApprovalScope), scope))
-        {
-            return (ApprovalScope.ThisCallOnly,
-                $"Undefined ApprovalScope value {(int)scope}.");
-        }
-
-        if (scope == ApprovalScope.ThisCallOnly)
-            return (ApprovalScope.ThisCallOnly, null);
-
-        // scope == Session or Always: validate the ScopePattern if non-null.
-        var pattern = decision.ScopePattern;
-        if (pattern is null)
-        {
-            // Null pattern = wildcard; valid for Session and Always.
-            return (scope, null);
-        }
-
-        // Pattern string must not be null, empty, or whitespace.
-        if (string.IsNullOrWhiteSpace(pattern.Pattern))
-        {
-            return (ApprovalScope.ThisCallOnly,
-                $"ApprovalScope {scope} has an empty or whitespace-only Pattern.");
-        }
-
-        // Parameter must be null (wildcard) or non-whitespace.
-        if (pattern.Parameter is not null && string.IsNullOrWhiteSpace(pattern.Parameter))
-        {
-            return (ApprovalScope.ThisCallOnly,
-                $"ApprovalScope {scope} has a whitespace-only Parameter.");
-        }
-
-        // Defense-in-depth for non-standard deserializer paths; normal Temporal payloads reject
-        // numeric PatternMatchType values at the converter boundary.
-        if (!Enum.IsDefined(typeof(PatternMatchType), pattern.Type))
-        {
-            return (ApprovalScope.ThisCallOnly,
-                $"ApprovalScope {scope} has an undefined PatternMatchType value {(int)pattern.Type}.");
-        }
-
-        // For Regex: pattern must also compile.
-        if (pattern.Type == PatternMatchType.Regex)
-        {
-            try
-            {
-                _ = new Regex(pattern.Pattern, RegexOptions.None, TimeSpan.FromMilliseconds(100));
-            }
-            catch (ArgumentException)
-            {
-                return (ApprovalScope.ThisCallOnly,
-                    $"ApprovalScope {scope} has an invalid Regex pattern '{pattern.Pattern}'.");
-            }
-        }
-
-        return (scope, null);
-    }
-
-    /// <summary>
-    /// Replaces the always-scope cache entry in <c>_currentStateBag</c> under
-    /// <c>_input!.AlwaysScopesStoreKey</c> with <paramref name="scopes"/>.
-    /// Uses replacement semantics (not additive append); deduplicates by
-    /// <see cref="ApprovalScopeRecord.OriginatingRequestId"/> while preserving store order.
-    /// Session scopes under <c>temporal.approval_scopes.session</c> are not affected.
-    /// </summary>
-    private void MergeAlwaysScopesIntoStateBag(IReadOnlyList<ApprovalScopeRecord> scopes)
-    {
-        var storeKey = _input!.AlwaysScopesStoreKey!;
-
-        var bag = _currentStateBag is { ValueKind: not System.Text.Json.JsonValueKind.Undefined and not System.Text.Json.JsonValueKind.Null } bagEl
-            ? AgentSessionStateBag.Deserialize(bagEl)
-            : new AgentSessionStateBag();
-
-        // Deduplication by OriginatingRequestId while preserving store order.
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var deduped = new List<ApprovalScopeRecord>(scopes.Count);
-        foreach (var record in scopes)
-        {
-            if (seen.Add(record.OriginatingRequestId))
-            {
-                deduped.Add(record);
-            }
-        }
-
-        // Replace (not append) — replacement semantics per spec Section 7.
-        bag.SetValue<List<ApprovalScopeRecord>>(
-            storeKey,
-            deduped,
-            TemporalAgentJsonUtilities.DefaultOptions);
-
-        _currentStateBag = bag.Serialize();
     }
 
     /// <summary>
