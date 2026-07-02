@@ -392,10 +392,12 @@ public sealed class DurableAgentBuilder
         // Collect provider-contributed tool specs at registration time.
         IReadOnlyList<DurableToolRegistrationSpec>? specs = null;
 
-        if (durableTools?.Any() == true)
+        // Materialise once to avoid double-enumeration of a single-pass IEnumerable.
+        var specsList = durableTools?.ToList();
+        if (specsList is { Count: > 0 })
         {
             // Explicit specs supplied — wrap the provider so it acts as IDurableToolSource.
-            specs = durableTools.ToList();
+            specs = specsList;
             registered = new DurableContextProviderWrapper(provider, specs);
         }
         else if (provider is IDurableToolSource source)

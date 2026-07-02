@@ -41,6 +41,8 @@ if (string.IsNullOrEmpty(apiKey))
         "OPENAI_API_KEY is not configured. Set it with: " +
         "dotnet user-secrets set \"OPENAI_API_KEY\" \"sk-...\" --project samples/MAF/DurableContextProvider");
 
+// OPENAI_API_BASE_URL is always supplied by appsettings.json in this sample;
+// the guard below is defensive and illustrative only.
 if (string.IsNullOrEmpty(apiBaseUrl))
     throw new InvalidOperationException("OPENAI_API_BASE_URL is not configured in appsettings.json.");
 
