@@ -121,7 +121,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         span?.SetTag(DurableChatTelemetry.ConversationIdAttribute, conversationId);
         span?.SetTag(DurableChatTelemetry.RequestModelAttribute, options?.ModelId);
 
-        _logger.LogDebug("Sending chat to session {WorkflowId}", workflowId);
+        _logger.LogClientSendingChat(workflowId);
 
         // Eagerly resolve per-tool ActivityOptions for every registered tool at session
         // start. The resulting dict (or null when no tools are registered) is the

@@ -41,9 +41,7 @@ internal sealed class DurableChatActivities(
     {
         var ctx = ActivityExecutionContext.HasCurrent ? ActivityExecutionContext.Current : null;
 
-        _logger.LogDebug(
-            "Executing durable chat activity for conversation {ConversationId}, turn {TurnNumber}",
-            input.ConversationId, input.TurnNumber);
+        _logger.LogChatActivityStarted(input.ConversationId, input.TurnNumber);
 
         var modelId = input.Options?.ModelId;
         using var span = DurableChatTelemetry.ActivitySource.StartActivity(
@@ -87,9 +85,7 @@ internal sealed class DurableChatActivities(
             chatClient, input.Messages, resolvedOptions, input, span, ctx)
             .ConfigureAwait(false);
 
-        _logger.LogDebug(
-            "Durable chat activity completed for conversation {ConversationId}, turn {TurnNumber}",
-            input.ConversationId, input.TurnNumber);
+        _logger.LogChatActivityCompleted(input.ConversationId, input.TurnNumber);
 
         // Safety net for the silent-failure footgun (Pattern 3 design: OD-6).
         // If the user registered durable tools but neither (a) FunctionInvokingChatClient
@@ -149,9 +145,7 @@ internal sealed class DurableChatActivities(
     {
         var ctx = ActivityExecutionContext.HasCurrent ? ActivityExecutionContext.Current : null;
 
-        _logger.LogDebug(
-            "Executing durable chat step activity for conversation {ConversationId}, turn {TurnNumber}",
-            input.ConversationId, input.TurnNumber);
+        _logger.LogChatStepStarted(input.ConversationId, input.TurnNumber);
 
         var modelId = input.Options?.ModelId;
         using var span = DurableChatTelemetry.ActivitySource.StartActivity(
@@ -173,7 +167,7 @@ internal sealed class DurableChatActivities(
                 ? new ChatOptions()
                 : effectiveOptions.Clone();
             // AIFunction : AITool — direct spread, no intermediate iterator needed.
-            effectiveOptions.Tools = [..registry.Values];
+            effectiveOptions.Tools = [.. registry.Values];
         }
 
         var chatClient = ResolveChatClient(input.ClientKey);
@@ -188,10 +182,7 @@ internal sealed class DurableChatActivities(
         // append to its accumulated transcript.
         var (assistantMessage, toolCalls, isFinal) = CollectAssistantContents(response);
 
-        _logger.LogDebug(
-            "Durable chat step activity completed for conversation {ConversationId}, turn {TurnNumber} " +
-            "(IsFinal={IsFinal}, ToolCalls={ToolCallCount})",
-            input.ConversationId, input.TurnNumber, isFinal, toolCalls.Count);
+        _logger.LogChatStepCompleted(input.ConversationId, input.TurnNumber, isFinal, toolCalls.Count);
 
         return new DurableChatStepResult
         {
@@ -271,9 +262,7 @@ internal sealed class DurableChatActivities(
         catch (Exception ex)
         {
             span?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
-            _logger.LogError(ex,
-                "Durable chat activity failed for conversation {ConversationId}, turn {TurnNumber}",
-                input.ConversationId, input.TurnNumber);
+            _logger.LogChatActivityFailed(ex, input.ConversationId, input.TurnNumber);
             throw;
         }
     }
@@ -443,11 +432,7 @@ internal sealed class DurableChatActivities(
             // Interceptor was removed between workflow dispatch and activity execution
             // (e.g. worker restart without re-registration). Degrade to Proceed so the
             // tool still runs rather than silently blocking the session.
-            _logger.LogWarning(
-                "RunToolInterceptor dispatched for tool '{ToolName}' but no " +
-                "IDurableToolInterceptor<DurableToolContext> is registered in DI. " +
-                "Defaulting to Proceed.",
-                input.ToolName);
+            _logger.LogToolInterceptorNotRegistered(input.ToolName);
             return new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed };
         }
 
@@ -475,10 +460,7 @@ internal sealed class DurableChatActivities(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex,
-                "IDurableToolInterceptor.BeforeToolCallAsync threw for tool '{ToolName}'. " +
-                "Defaulting to Block.",
-                input.ToolName);
+            _logger.LogToolInterceptorThrew(ex, input.ToolName);
             return new DurableToolInterceptorResult
             {
                 Outcome = DurableToolOutcome.Block,

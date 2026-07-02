@@ -39,7 +39,7 @@ internal sealed class DurableFunctionActivities(
         span?.SetTag(DurableChatTelemetry.OperationNameAttribute, DurableChatTelemetry.ExecuteToolOperationName);
         span?.SetTag(DurableChatTelemetry.ToolNameAttribute, input.FunctionName);
 
-        _logger.LogDebug("Invoking durable function {FunctionName}", input.FunctionName);
+        _logger.LogFunctionInvoking(input.FunctionName);
 
         try
         {
@@ -50,13 +50,13 @@ internal sealed class DurableFunctionActivities(
 
             var result = await function.InvokeAsync(arguments, ct).ConfigureAwait(false);
 
-            _logger.LogDebug("Durable function {FunctionName} completed", input.FunctionName);
+            _logger.LogFunctionCompleted(input.FunctionName);
             return new DurableFunctionOutput { Result = result };
         }
         catch (Exception ex)
         {
             span?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            _logger.LogError(ex, "Durable function {FunctionName} failed", input.FunctionName);
+            _logger.LogFunctionFailed(ex, input.FunctionName);
             throw;
         }
     }
