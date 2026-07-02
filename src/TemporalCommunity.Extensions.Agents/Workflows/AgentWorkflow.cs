@@ -596,6 +596,10 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             if (interceptorOpts is not null)
             {
                 var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
+                // F1 optimization: all interceptors in a fan-out see the same bag snapshot.
+                // Compute once here so the hash gate fires exactly once for the entire fan-out
+                // (subsequent calls inside the loop would return null via the unchanged-hash path).
+                var bagForInterceptors = GetStateBagForDispatch();
                 foreach (var tc in toolCalls)
                 {
                     if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, skippedTools))
@@ -605,9 +609,6 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                     }
                     else
                     {
-                        // F1 optimization: interceptor inputs share the same hash gate.
-                        // All interceptors in a fan-out see the same bag snapshot, so we can
-                        // compute this once outside the loop and pass it to every interceptor.
                         var interceptorInput = new DurableToolInterceptorInput
                         {
                             AgentName = _input!.AgentName,
@@ -616,7 +617,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                                 ? null
                                 : new Dictionary<string, object?>(tc.Arguments),
                             CallId = tc.CallId,
-                            SerializedStateBag = GetStateBagForDispatch(),
+                            SerializedStateBag = bagForInterceptors,
                             // Feature B: populate scope-aware fields so the interceptor can
                             // consult scope records and enforce the approval gate.
                             ScopeAware = _input!.ScopeAwareTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
