@@ -20,7 +20,7 @@ namespace TemporalCommunity.Extensions.Agents.Tests.Workflows;
 /// <list type="bullet">
 ///   <item><description>Provider chaining: provider N+1 sees provider N's contributions.</description></item>
 ///   <item><description>Instructions propagation: provider-returned instructions reach <c>ChatOptions</c>.</description></item>
-///   <item><description>Tool warning: a single <see cref="LogLevel.Warning"/> fires when any provider returns tools.</description></item>
+///   <item><description>Tool error: a single <see cref="LogLevel.Error"/> fires when any provider returns tools.</description></item>
 /// </list>
 /// </summary>
 public class AgentActivitiesContextProviderTests
@@ -58,11 +58,11 @@ public class AgentActivitiesContextProviderTests
 
     /// <summary>
     /// When a context provider returns <see cref="AIContext.Tools"/>, exactly one
-    /// <see cref="LogLevel.Warning"/> is emitted per turn, regardless of how many tools
+    /// <see cref="LogLevel.Error"/> is emitted per turn, regardless of how many tools
     /// the provider returned.
     /// </summary>
     [Fact]
-    public async Task ContextProvider_ReturningTools_EmitsExactlyOneWarning()
+    public async Task ContextProvider_ReturningTools_EmitsExactlyOneError()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -84,21 +84,21 @@ public class AgentActivitiesContextProviderTests
         };
         await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("ProviderToolAgent")));
 
-        var warnings = logFactory.Warnings;
-        // Exactly one warning, not two (once per provider-returned tool count).
-        Assert.Single(warnings);
-        var warning = warnings[0];
-        Assert.Contains("ToolReturningContextProvider", warning);
-        Assert.Contains("2", warning);           // ToolCount = 2
-        Assert.Contains("ProviderToolAgent", warning);
-        Assert.Contains("agent.AddTool()", warning);
+        var errors = logFactory.Errors;
+        // Exactly one error, not two (once per provider-returned tool count).
+        Assert.Single(errors);
+        var error = errors[0];
+        Assert.Contains("ToolReturningContextProvider", error);
+        Assert.Contains("2", error);           // ToolCount = 2
+        Assert.Contains("ProviderToolAgent", error);
+        Assert.Contains("Wrap the provider in DurableContextProviderWrapper", error);
     }
 
     /// <summary>
-    /// When no context provider is registered, no warning is emitted.
+    /// When no context provider is registered, no error is emitted.
     /// </summary>
     [Fact]
-    public async Task NoContextProviders_NoWarningEmitted()
+    public async Task NoContextProviders_NoErrorEmitted()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -114,14 +114,14 @@ public class AgentActivitiesContextProviderTests
         };
         await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("PlainAgent")));
 
-        Assert.Empty(logFactory.Warnings);
+        Assert.Empty(logFactory.Errors);
     }
 
     /// <summary>
-    /// When a context provider returns no tools, no warning is emitted.
+    /// When a context provider returns no tools, no error is emitted.
     /// </summary>
     [Fact]
-    public async Task ContextProvider_ReturningNoTools_NoWarningEmitted()
+    public async Task ContextProvider_ReturningNoTools_NoErrorEmitted()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -138,15 +138,15 @@ public class AgentActivitiesContextProviderTests
         };
         await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("NoToolProviderAgent")));
 
-        Assert.Empty(logFactory.Warnings);
+        Assert.Empty(logFactory.Errors);
     }
 
     /// <summary>
-    /// When two providers are registered and the first returns tools, exactly one warning
+    /// When two providers are registered and the first returns tools, exactly one error
     /// is emitted (not two — one per provider).
     /// </summary>
     [Fact]
-    public async Task TwoContextProviders_OnlyFirstReturnsTools_ExactlyOneWarning()
+    public async Task TwoContextProviders_OnlyFirstReturnsTools_ExactlyOneError()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -165,7 +165,7 @@ public class AgentActivitiesContextProviderTests
         };
         await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("TwoProviderAgent")));
 
-        Assert.Single(logFactory.Warnings);
+        Assert.Single(logFactory.Errors);
     }
 
     // ── Test helpers ────────────────────────────────────────────────────────────
@@ -231,6 +231,7 @@ public class AgentActivitiesContextProviderTests
     private sealed class CapturingLoggerFactory : ILoggerFactory
     {
         private readonly List<string> _warnings = [];
+        private readonly List<string> _errors = [];
 
         public IReadOnlyList<string> Warnings
         {
@@ -240,13 +241,21 @@ public class AgentActivitiesContextProviderTests
             }
         }
 
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(_warnings);
+        public IReadOnlyList<string> Errors
+        {
+            get
+            {
+                lock (_errors) return _errors.ToArray();
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(_warnings, _errors);
 
         public void AddProvider(ILoggerProvider provider) { }
 
         public void Dispose() { }
 
-        private sealed class CapturingLogger(List<string> warnings) : ILogger
+        private sealed class CapturingLogger(List<string> warnings, List<string> errors) : ILogger
         {
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -263,6 +272,11 @@ public class AgentActivitiesContextProviderTests
                 {
                     lock (warnings)
                         warnings.Add(formatter(state, exception));
+                }
+                else if (logLevel == LogLevel.Error)
+                {
+                    lock (errors)
+                        errors.Add(formatter(state, exception));
                 }
             }
         }
