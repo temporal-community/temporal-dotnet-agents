@@ -41,7 +41,7 @@ public class AgentActivitiesContextProviderTests
         var sp = services.BuildServiceProvider();
 
         var loggerFactory = new CapturingLoggerFactory();
-        var activities = new AgentActivities(sp, loggerFactory);
+        var activities = new AgentActivities(sp, sp.GetRequiredService<IServiceScopeFactory>(), loggerFactory);
         return (activities, loggerFactory);
     }
 

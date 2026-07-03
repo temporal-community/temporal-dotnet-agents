@@ -219,7 +219,7 @@ public class CompactHistoryActivityTests
         TemporalAgentsRegistrar.Register(services, builder: null, options);
 
         var sp = services.BuildServiceProvider();
-        var activities = new AgentActivities(sp);
+        var activities = new AgentActivities(sp, sp.GetRequiredService<IServiceScopeFactory>());
 
         if (dispatchOnce)
         {
