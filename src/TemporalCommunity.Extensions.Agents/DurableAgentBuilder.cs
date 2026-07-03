@@ -302,7 +302,14 @@ public sealed class DurableAgentBuilder
     /// an explicit parameter so duplicate-name detection happens synchronously at registration —
     /// without it, the duplicate check would be deferred to first dispatch when the factory runs.
     /// </param>
-    /// <param name="factory">Factory that produces the <see cref="AIFunction"/>.</param>
+    /// <param name="factory">
+    /// Factory that produces the <see cref="AIFunction"/>. Receives the worker's root
+    /// <see cref="IServiceProvider"/> — any service you resolve inside this factory is held for
+    /// the worker's lifetime (singleton semantics), regardless of how it was registered in DI.
+    /// If you need per-call scoped resolution inside the tool body itself, resolve services via
+    /// <c>TemporalAgentContext.Current?.Services</c> at invocation time rather than capturing
+    /// them in the factory.
+    /// </param>
     /// <param name="configure">Optional configuration callback for per-tool activity overrides.</param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentException">
