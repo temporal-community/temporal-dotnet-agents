@@ -372,8 +372,9 @@ internal sealed class AgentActivities(
                 _logger.LogError(
                     "Context provider {ProviderType} returned {ToolCount} tool(s) for agent {AgentName}. " +
                     "Provider-contributed tools are not dispatched as durable activities and are ignored. " +
-                    "Wrap the provider in DurableContextProviderWrapper or implement IDurableToolSource " +
-                    "to enable durable tool dispatch.",
+                    "To register these tools with durable execution: " +
+                    "(a) implement IDurableToolSource on the provider type and use AddContextProvider(provider), or " +
+                    "(b) pass tools explicitly via AddContextProvider(provider, durableTools: [new DurableToolRegistrationSpec(yourTool, opts => opts.NoRetry())]).",
                     firstToolProviderType, firstToolCount, input.AgentName);
             }
         }
