@@ -10,6 +10,19 @@ Demonstrates registering durable tools alongside a context provider using two ap
   parameter to `AddContextProvider(provider, durableTools)`. Use this when you don't own the
   provider type. The framework transparently wraps the provider in `DurableContextProviderWrapper`.
 
+## Why durable dispatch matters for tools
+
+Without `IDurableToolSource` or explicit `DurableToolRegistrationSpec` entries, a context
+provider's tools execute in-process inside the `RunDurableAgentStep` activity — MAF's
+`FunctionInvokingChatClient` handles them inline. If the worker crashes mid-tool, the tool
+re-runs from scratch when the activity retries (double-execution risk for write operations).
+The tool call also produces no individual entry in the Temporal event history, so it is
+invisible in the Web UI.
+
+With durable dispatch, each tool call becomes its own `InvokeAgentTool` activity: it appears
+in the workflow history, has its own retry/timeout policy, and completed tool calls are never
+re-executed on replay.
+
 ## When to use which approach
 
 | Scenario | Approach |

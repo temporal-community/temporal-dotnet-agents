@@ -457,6 +457,14 @@ public sealed class DurableAgentBuilder
     /// tool alongside a context provider, use the instance overload
     /// <c>AddContextProvider(AIContextProvider, IEnumerable{DurableToolRegistrationSpec})</c> instead.
     /// </para>
+    /// <para>
+    /// If the provider resolved by this factory implements <see cref="IDurableToolSource"/> or
+    /// returns tools from <c>InvokingAsync</c>, the framework cannot detect this at startup — the
+    /// <c>LogError</c> fires only at the first workflow execution. If the provider contributes
+    /// tools, prefer the instance overload
+    /// <c>AddContextProvider(AIContextProvider, IEnumerable{DurableToolRegistrationSpec}?)</c>
+    /// so tool registration can occur at startup.
+    /// </para>
     /// </remarks>
     public DurableAgentBuilder AddContextProvider(Func<IServiceProvider, AIContextProvider> factory)
     {
