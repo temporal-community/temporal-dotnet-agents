@@ -182,7 +182,7 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
                     var greetingSvc = sp.GetRequiredService<IGreetingService>();
                     return new GreetingChatClient(greetingSvc);
                 };
-            }));
+            }); });
 
         using var host = builder.Build();
         await host.StartAsync();
