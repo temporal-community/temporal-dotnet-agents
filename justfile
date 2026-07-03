@@ -22,6 +22,59 @@ info:
     @echo "Config    : {{configuration}}"
     @echo "Artifacts : {{artifacts_dir}}"
     @echo "Coverage  : {{coverage_dir}}"
+
+# Check prerequisites for running samples
+doctor:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    FAILED=0
+
+    # Check 1 — temporal CLI installed
+    if command -v temporal >/dev/null 2>&1; then
+        echo "✓ temporal CLI: $(temporal version 2>/dev/null | head -1)"
+    else
+        echo "✗ temporal CLI not found. Install: https://docs.temporal.io/cli"
+        FAILED=1
+    fi
+
+    # Check 2 — OPENAI_API_KEY configured
+    if [ -n "${OPENAI_API_KEY:-}" ]; then
+        echo "✓ OPENAI_API_KEY: configured"
+    elif dotnet user-secrets list --project samples/MEAI/DurableChat 2>/dev/null | grep -q "OPENAI_API_KEY"; then
+        echo "✓ OPENAI_API_KEY: configured"
+    else
+        echo "✗ OPENAI_API_KEY not found. Set via env or: dotnet user-secrets set \"OPENAI_API_KEY\" \"sk-...\" --project samples/MEAI/DurableChat"
+        FAILED=1
+    fi
+
+    # Check 3 — OPENAI_API_BASE_URL configured
+    if [ -n "${OPENAI_API_BASE_URL:-}" ]; then
+        echo "✓ OPENAI_API_BASE_URL: configured"
+    elif dotnet user-secrets list --project samples/MEAI/DurableChat 2>/dev/null | grep -q "OPENAI_API_BASE_URL"; then
+        echo "✓ OPENAI_API_BASE_URL: configured"
+    else
+        echo "✗ OPENAI_API_BASE_URL not found. Set in samples/MEAI/DurableChat/appsettings.json or user-secrets"
+        FAILED=1
+    fi
+
+    # Check 4 — Temporal server reachable
+    if nc -z localhost 7233 2>/dev/null; then
+        echo "✓ Temporal server: reachable on localhost:7233"
+    else
+        echo "✗ Temporal server not running. Start with: temporal server start-dev"
+        FAILED=1
+    fi
+
+    echo ""
+    echo "Available samples:"
+    echo "  MAF:"
+    ls samples/MAF/ | sed 's/^/    /'
+    echo "  MEAI:"
+    ls samples/MEAI/ | sed 's/^/    /'
+    echo "  Run: dotnet run --project samples/<MAF|MEAI>/<Name>/<Name>.csproj"
+
+    exit $FAILED
+
 # Remove all build output
 clean: clean-source clean-tests
     @echo "Clean complete."
