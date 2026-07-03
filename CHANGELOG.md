@@ -95,6 +95,13 @@ workflows before deploying.
 
 ### Changed
 
+- **Provider-contributed tool logging severity changed from `LogWarning` to `LogError`**
+  (`AgentActivities`). The message text now references `DurableContextProviderWrapper` and
+  `IDurableToolSource`. Operators who filter or alert on `LogError` for the "context provider
+  returned tools without durable dispatch" condition should update their alert definitions.
+  Providers that implement `IDurableToolSource` (or use the `AddContextProvider` overload with
+  an explicit `DurableToolRegistrationSpec`) do not trigger this error at all.
+
 - **Publishing moved to GitHub Packages under the `temporal-community` organization.** Packages
   are no longer published to NuGet.org.
 

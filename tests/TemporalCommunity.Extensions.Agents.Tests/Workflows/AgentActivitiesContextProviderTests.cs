@@ -1,4 +1,5 @@
 #pragma warning disable MAAI001 // experimental AIContextProvider.InvokingContext ctor; see ExperimentalApiSuppressions.cs
+#pragma warning disable TA001 // IDurableToolSource is experimental; intentional consumption in these tests
 using System.Runtime.CompilerServices;
 using FakeItEasy;
 using Microsoft.Agents.AI;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Temporalio.Client;
 using Temporalio.Testing;
@@ -20,7 +22,7 @@ namespace TemporalCommunity.Extensions.Agents.Tests.Workflows;
 /// <list type="bullet">
 ///   <item><description>Provider chaining: provider N+1 sees provider N's contributions.</description></item>
 ///   <item><description>Instructions propagation: provider-returned instructions reach <c>ChatOptions</c>.</description></item>
-///   <item><description>Tool warning: a single <see cref="LogLevel.Warning"/> fires when any provider returns tools.</description></item>
+///   <item><description>Tool error: a single <see cref="LogLevel.Error"/> fires when any provider returns tools.</description></item>
 /// </list>
 /// </summary>
 public class AgentActivitiesContextProviderTests
@@ -58,11 +60,11 @@ public class AgentActivitiesContextProviderTests
 
     /// <summary>
     /// When a context provider returns <see cref="AIContext.Tools"/>, exactly one
-    /// <see cref="LogLevel.Warning"/> is emitted per turn, regardless of how many tools
+    /// <see cref="LogLevel.Error"/> is emitted per turn, regardless of how many tools
     /// the provider returned.
     /// </summary>
     [Fact]
-    public async Task ContextProvider_ReturningTools_EmitsExactlyOneWarning()
+    public async Task RunDurableAgentStep_ProviderReturnsTools_EmitsExactlyOneLogError()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -84,21 +86,21 @@ public class AgentActivitiesContextProviderTests
         };
         await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("ProviderToolAgent")));
 
-        var warnings = logFactory.Warnings;
-        // Exactly one warning, not two (once per provider-returned tool count).
-        Assert.Single(warnings);
-        var warning = warnings[0];
-        Assert.Contains("ToolReturningContextProvider", warning);
-        Assert.Contains("2", warning);           // ToolCount = 2
-        Assert.Contains("ProviderToolAgent", warning);
-        Assert.Contains("agent.AddTool()", warning);
+        var errors = logFactory.Errors;
+        // Exactly one error, not two (once per provider-returned tool count).
+        Assert.Single(errors);
+        var error = errors[0];
+        Assert.Contains("ToolReturningContextProvider", error);
+        Assert.Contains("2", error);           // ToolCount = 2
+        Assert.Contains("ProviderToolAgent", error);
+        Assert.Contains("IDurableToolSource", error);
     }
 
     /// <summary>
-    /// When no context provider is registered, no warning is emitted.
+    /// When no context provider is registered, no error is emitted.
     /// </summary>
     [Fact]
-    public async Task NoContextProviders_NoWarningEmitted()
+    public async Task RunDurableAgentStep_NoProviders_EmitsNoLogError()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -114,14 +116,14 @@ public class AgentActivitiesContextProviderTests
         };
         await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("PlainAgent")));
 
-        Assert.Empty(logFactory.Warnings);
+        Assert.Empty(logFactory.Errors);
     }
 
     /// <summary>
-    /// When a context provider returns no tools, no warning is emitted.
+    /// When a context provider returns no tools, no error is emitted.
     /// </summary>
     [Fact]
-    public async Task ContextProvider_ReturningNoTools_NoWarningEmitted()
+    public async Task ContextProvider_ReturningNoTools_NoErrorEmitted()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -138,15 +140,15 @@ public class AgentActivitiesContextProviderTests
         };
         await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("NoToolProviderAgent")));
 
-        Assert.Empty(logFactory.Warnings);
+        Assert.Empty(logFactory.Errors);
     }
 
     /// <summary>
-    /// When two providers are registered and the first returns tools, exactly one warning
+    /// When two providers are registered and the first returns tools, exactly one error
     /// is emitted (not two — one per provider).
     /// </summary>
     [Fact]
-    public async Task TwoContextProviders_OnlyFirstReturnsTools_ExactlyOneWarning()
+    public async Task RunDurableAgentStep_TwoProviders_OnlyFirstReturnsTools_EmitsExactlyOneLogError()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -165,7 +167,41 @@ public class AgentActivitiesContextProviderTests
         };
         await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("TwoProviderAgent")));
 
-        Assert.Single(logFactory.Warnings);
+        Assert.Single(logFactory.Errors);
+    }
+
+    /// <summary>
+    /// When a context provider implements <see cref="IDurableToolSource"/>, the per-iteration strip
+    /// in <c>AgentActivities</c> nulls out its <c>AIContext.Tools</c> before the LogError sentinel
+    /// fires. No <see cref="LogLevel.Error"/> should be emitted even though the provider's
+    /// <c>ProvideAIContextAsync</c> returns tools — those tools are already registered as durable
+    /// activities and are intentionally stripped from the aggregated context.
+    /// </summary>
+    [Fact]
+    public async Task RunDurableAgentStep_IDurableToolSourceProvider_EmitsNoLogError()
+    {
+        var durableTool = AIFunctionFactory.Create(() => "result", "durable_provider_tool");
+
+        var (activities, logFactory) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("DurableToolSourceAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                // Register the provider via instance overload — this also calls AddToolCore
+                // for the spec's tool, mirroring what IDurableToolSource auto-detection does.
+                agent.AddContextProvider(new DurableToolSourceProvider(durableTool));
+            });
+        });
+
+        var env = new ActivityEnvironment
+        {
+            TemporalClient = A.Fake<ITemporalClient>(),
+        };
+        await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("DurableToolSourceAgent")));
+
+        // IDurableToolSource providers have their tools stripped before the LogError check;
+        // no error should be emitted.
+        Assert.Empty(logFactory.Errors);
     }
 
     // ── Test helpers ────────────────────────────────────────────────────────────
@@ -231,6 +267,7 @@ public class AgentActivitiesContextProviderTests
     private sealed class CapturingLoggerFactory : ILoggerFactory
     {
         private readonly List<string> _warnings = [];
+        private readonly List<string> _errors = [];
 
         public IReadOnlyList<string> Warnings
         {
@@ -240,13 +277,21 @@ public class AgentActivitiesContextProviderTests
             }
         }
 
-        public ILogger CreateLogger(string categoryName) => new CapturingLogger(_warnings);
+        public IReadOnlyList<string> Errors
+        {
+            get
+            {
+                lock (_errors) return _errors.ToArray();
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(_warnings, _errors);
 
         public void AddProvider(ILoggerProvider provider) { }
 
         public void Dispose() { }
 
-        private sealed class CapturingLogger(List<string> warnings) : ILogger
+        private sealed class CapturingLogger(List<string> warnings, List<string> errors) : ILogger
         {
             public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -264,7 +309,51 @@ public class AgentActivitiesContextProviderTests
                     lock (warnings)
                         warnings.Add(formatter(state, exception));
                 }
+                else if (logLevel == LogLevel.Error)
+                {
+                    lock (errors)
+                        errors.Add(formatter(state, exception));
+                }
             }
+        }
+    }
+
+    /// <summary>
+    /// A combined <see cref="AIContextProvider"/> / <see cref="IDurableToolSource"/> stub.
+    /// <para>
+    /// <c>ProvideAIContextAsync</c> returns the tool in <c>AIContext.Tools</c> — simulating what a
+    /// real provider (e.g. a search or code-act provider) does internally. The per-iteration strip
+    /// in <c>AgentActivities</c> removes those tools from the aggregated context before the
+    /// <c>LogError</c> sentinel fires, so no error should appear.
+    /// </para>
+    /// <para>
+    /// <c>GetDurableTools()</c> returns one <see cref="DurableToolRegistrationSpec"/> so the tool
+    /// is registered as a durable activity at <c>AddContextProvider</c> time (via <c>AddToolCore</c>).
+    /// </para>
+    /// </summary>
+    private sealed class DurableToolSourceProvider : AIContextProvider, IDurableToolSource
+    {
+        private readonly AIFunction _tool;
+
+        internal DurableToolSourceProvider(AIFunction tool)
+            : base(provideInputMessageFilter: m => m)
+        {
+            _tool = tool;
+        }
+
+        public IReadOnlyList<DurableToolRegistrationSpec> GetDurableTools() =>
+            [new DurableToolRegistrationSpec(_tool)];
+
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context,
+            CancellationToken cancellationToken = default)
+        {
+            // Return the tool in AIContext.Tools just as a real provider would.
+            // AgentActivities strips these out because this provider implements IDurableToolSource.
+            return ValueTask.FromResult(new AIContext
+            {
+                Tools = [(AITool)_tool],
+            });
         }
     }
 }

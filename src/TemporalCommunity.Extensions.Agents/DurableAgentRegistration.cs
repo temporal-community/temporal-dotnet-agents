@@ -36,4 +36,5 @@ internal sealed record DurableAgentRegistration(
     string? CompactionStrategyKey,
     Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? ToolInterceptorFactory = null,
     bool UseApprovalScopes = false,
-    ApprovalScopesOptions? ApprovalScopesOptions = null);
+    ApprovalScopesOptions? ApprovalScopesOptions = null,
+    IReadOnlyList<(string ToolName, string SourceProviderType)>? ProviderContributedTools = null);

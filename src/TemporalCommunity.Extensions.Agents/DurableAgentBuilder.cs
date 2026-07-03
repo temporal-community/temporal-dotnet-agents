@@ -1,3 +1,4 @@
+#pragma warning disable TA001 // IDurableToolSource is experimental; intentional consumption in builder registration path
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
@@ -27,7 +28,7 @@ internal sealed record DurableToolRegistration(
 /// <summary>
 /// Fluent builder for registering a durable agent via <c>TemporalAgentsOptions.AddDurableAgent</c>.
 /// Properties capture per-agent scalars; <see cref="AddTool(AIFunction, Action{DurableToolOptions}?)"/> and
-/// <see cref="AddContextProvider(AIContextProvider)"/> capture per-agent collections.
+/// <c>AddContextProvider</c> capture per-agent collections.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -58,6 +59,7 @@ public sealed class DurableAgentBuilder
     private readonly List<DurableToolRegistration> _tools = new();
     private readonly HashSet<string> _toolNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Func<IServiceProvider, AIContextProvider>> _contextProviders = new();
+    private readonly List<(string ToolName, string SourceProviderType)> _providerContributedTools = new();
     private Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? _toolInterceptorFactory;
     private bool _useApprovalScopes;
     private ApprovalScopesOptions? _approvalScopesOptions;
@@ -342,34 +344,88 @@ public sealed class DurableAgentBuilder
     }
 
     /// <summary>
-    /// Registers a concrete <see cref="AIContextProvider"/> for this agent.
+    /// Registers a concrete <see cref="AIContextProvider"/> for this agent, with optional durable
+    /// tool specs that are registered as separate Temporal activities at the same time.
     /// </summary>
     /// <param name="provider">The provider instance.</param>
+    /// <param name="durableTools">
+    /// Optional collection of <see cref="DurableToolRegistrationSpec"/> entries contributed by
+    /// this provider. When supplied, the provider is transparently wrapped in a
+    /// <c>DurableContextProviderWrapper</c> that implements <see cref="IDurableToolSource"/>.
+    /// Each spec is registered via <c>AddTool</c> (case-insensitive uniqueness is enforced —
+    /// an <see cref="ArgumentException"/> is thrown on collision with any tool already registered
+    /// via <c>agent.AddTool()</c> or another <c>AddContextProvider</c> call).
+    /// </param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="provider"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// Thrown when any spec's tool name collides with a name already registered on this agent.
+    /// Check both <c>agent.AddTool()</c> calls and <c>DurableToolRegistrationSpec</c> entries
+    /// in <c>AddContextProvider</c>.
+    /// </exception>
     /// <remarks>
     /// <para>
     /// In durable agents, the provider's <c>InvokingAsync</c> and <c>InvokedAsync</c> hooks fire
     /// once per LLM call (per <c>RunAgentStep</c> activity), not once per turn. Make these hooks
     /// idempotent and cheap, or cache results via <c>StateBag</c> to skip redundant work within a
-    /// turn. The provider instance is constructed once per agent per worker process and shared
-    /// across all sessions on that worker — treat fields as effectively read-only after
-    /// construction; per-session state must live in the <c>StateBag</c>.
+    /// turn.
     /// </para>
     /// <para>
-    /// <b>Tool definitions returned in <c>AIContext.Tools</c> by context providers are ignored</b>
-    /// and will not be dispatched as durable activities. Providers that contribute tools
-    /// (e.g., <c>HyperlightCodeActProvider</c>, <c>LocalCodeActProvider</c>,
-    /// <c>TextSearchProvider</c> in on-demand mode, <c>AgentSkillsProvider</c>) are designed for
-    /// MAF's in-process function-invocation harness; their tools are not compatible with
-    /// per-tool durable activity dispatch. To register a tool with durable execution semantics,
-    /// use <see cref="AddTool(AIFunction, Action{DurableToolOptions}?)"/> instead.
+    /// When <paramref name="durableTools"/> is provided (or the provider implements
+    /// <see cref="IDurableToolSource"/>), the per-iteration strip in <c>AgentActivities</c>
+    /// automatically nulls out <c>AIContext.Tools</c> after this provider's <c>InvokingAsync</c>
+    /// call, preventing downstream providers from seeing stale tool lists.
+    /// </para>
+    /// <para>
+    /// <b>Non-idempotent tools MUST set <c>Configure = opts =&gt; opts.NoRetry()</c></b>
+    /// to prevent double-execution on activity retry.
     /// </para>
     /// </remarks>
-    public DurableAgentBuilder AddContextProvider(AIContextProvider provider)
+    public DurableAgentBuilder AddContextProvider(
+        AIContextProvider provider,
+        IEnumerable<DurableToolRegistrationSpec>? durableTools = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
-        _contextProviders.Add(_ => provider);
+
+        AIContextProvider registered = provider;
+
+        // Collect provider-contributed tool specs at registration time.
+        IReadOnlyList<DurableToolRegistrationSpec>? specs = null;
+
+        // Materialise once to avoid double-enumeration of a single-pass IEnumerable.
+        var specsList = durableTools?.ToList();
+        if (specsList is { Count: > 0 })
+        {
+            // Explicit specs supplied — wrap the provider so it acts as IDurableToolSource.
+            specs = specsList;
+            registered = new DurableContextProviderWrapper(provider, specs);
+        }
+        else if (provider is IDurableToolSource source)
+        {
+            // Provider self-declares its tools.
+            var extracted = source.GetDurableTools();
+            if (extracted?.Count > 0)
+                specs = extracted;
+        }
+
+        // Register provider-contributed tools via AddToolCore (same path as AddTool —
+        // enforces case-insensitive uniqueness, throws ArgumentException on collision).
+        // Collision error message names both AddTool and AddContextProvider as possible sources.
+        if (specs is not null)
+        {
+            foreach (var spec in specs)
+                AddToolCore(
+                    spec.Tool.Name,
+                    _ => spec.Tool,
+                    spec.Configure,
+                    sourceHint: $"DurableToolRegistrationSpec in AddContextProvider (provider: {provider.GetType().Name})");
+
+            // Record for audit logging at ComposeDurableAgent time.
+            _providerContributedTools.AddRange(
+                specs.Select(s => (s.Tool.Name, provider.GetType().Name)));
+        }
+
+        _contextProviders.Add(_ => registered);
         return this;
     }
 
@@ -397,7 +453,17 @@ public sealed class DurableAgentBuilder
     /// <c>TextSearchProvider</c> in on-demand mode, <c>AgentSkillsProvider</c>) are designed for
     /// MAF's in-process function-invocation harness; their tools are not compatible with
     /// per-tool durable activity dispatch. To register a tool with durable execution semantics,
-    /// use <see cref="AddTool(AIFunction, Action{DurableToolOptions}?)"/> instead.
+    /// use <see cref="AddTool(AIFunction, Action{DurableToolOptions}?)"/> instead. To register a
+    /// tool alongside a context provider, use the instance overload
+    /// <c>AddContextProvider(AIContextProvider, IEnumerable{DurableToolRegistrationSpec})</c> instead.
+    /// </para>
+    /// <para>
+    /// If the provider resolved by this factory implements <see cref="IDurableToolSource"/> or
+    /// returns tools from <c>InvokingAsync</c>, the framework cannot detect this at startup — the
+    /// <c>LogError</c> fires only at the first workflow execution. If the provider contributes
+    /// tools, prefer the instance overload
+    /// <c>AddContextProvider(AIContextProvider, IEnumerable{DurableToolRegistrationSpec}?)</c>
+    /// so tool registration can occur at startup.
     /// </para>
     /// </remarks>
     public DurableAgentBuilder AddContextProvider(Func<IServiceProvider, AIContextProvider> factory)
@@ -409,7 +475,7 @@ public sealed class DurableAgentBuilder
 
     /// <summary>
     /// Registers progressive-disclosure skills support for this agent. Internally creates a
-    /// <see cref="SkillsContextProvider"/> (registered via <see cref="AddContextProvider(AIContextProvider)"/>)
+    /// <see cref="SkillsContextProvider"/> (registered via <c>AddContextProvider(AIContextProvider)</c>)
     /// and the skill tools <c>load_skill</c>, <c>read_skill_resource</c>, and optionally
     /// <c>run_skill_script</c> (when <see cref="SkillsBuilder.EnableScriptExecution"/> is called).
     /// </summary>
@@ -751,16 +817,26 @@ public sealed class DurableAgentBuilder
             CompactionStrategyKey: CompactionStrategyKey,
             ToolInterceptorFactory: _toolInterceptorFactory,
             UseApprovalScopes: _useApprovalScopes,
-            ApprovalScopesOptions: _approvalScopesOptions);
+            ApprovalScopesOptions: _approvalScopesOptions,
+            ProviderContributedTools: _providerContributedTools.Count > 0
+                ? _providerContributedTools.ToArray()
+                : null);
     }
 
-    private void AddToolCore(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure)
+    private void AddToolCore(
+        string name,
+        Func<IServiceProvider, AIFunction> factory,
+        Action<DurableToolOptions>? configure,
+        string? sourceHint = null)
     {
         if (_toolNames.Contains(name))
         {
-            throw new ArgumentException(
-                $"Tool '{name}' is already registered on agent '{Name}'.",
-                nameof(name));
+            var source = sourceHint is null
+                ? $"Tool '{name}' is already registered on agent '{Name}'."
+                : $"Tool '{name}' is already registered on agent '{Name}'. " +
+                  $"Source of duplicate: {sourceHint}. " +
+                  "Check both agent.AddTool() calls and DurableToolRegistrationSpec entries in AddContextProvider.";
+            throw new ArgumentException(source, nameof(name));
         }
 
         var options = new DurableToolOptions();
