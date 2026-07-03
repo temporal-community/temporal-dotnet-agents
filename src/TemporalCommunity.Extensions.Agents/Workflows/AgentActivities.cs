@@ -23,40 +23,34 @@ using Temporalio.Workflows;
 namespace TemporalCommunity.Extensions.Agents.Workflows;
 
 /// <summary>
-/// Cached state for a durable agent registered via <c>TemporalAgentsOptions.AddDurableAgent</c>.
-/// Composed once at first activity dispatch (lazy) and reused for the lifetime of the worker.
+/// Immutable blueprint for a durable agent registered via <c>TemporalAgentsOptions.AddDurableAgent</c>.
+/// Computed once at first activity dispatch (lazy) and reused for the lifetime of the worker.
+/// Contains only things that depend on registration <em>shape</em>, not live DI instances:
+/// the tool registry, frozen per-tool activity options, structural chain-walk booleans, and the
+/// source-of-truth <see cref="DurableAgentRegistration"/>. Live DI instances
+/// (<see cref="IChatClient"/>, context providers, history store, tool interceptor, approval scope
+/// store) are resolved fresh per activity call via an <see cref="IServiceScope"/> so that scoped
+/// services (e.g. <c>DbContext</c>) are never captured as implicit captive singletons.
 /// </summary>
-/// <param name="Agent">
-/// The composed agent pipeline — either the bare <c>ChatClientAgent</c> (when no
-/// <c>ConfigureAgentPipeline</c> was provided) or the chain of user-supplied
-/// <c>DelegatingAIAgent</c> decorators wrapping it.
-/// </param>
 /// <param name="Tools">Resolved per-agent tool registry keyed by case-insensitive name.</param>
 /// <param name="Registration">Source-of-truth registration snapshot from the builder.</param>
-/// <param name="HistoryStore">Resolved external history store (per-agent override or worker-level default), or null.</param>
-/// <param name="ContextProviders">Resolved AIContextProvider list, invoked explicitly per-turn (not by MAF).</param>
 /// <param name="AgentsOptions">Reference to the shared agents-options snapshot.</param>
 /// <param name="SuppressAgentTurnSpan">
 /// Step 3c.3 (2b-enriched OTel): when <see langword="true"/>, the activity skips emitting its
 /// own <c>agent.turn</c> span and instead tags <c>Activity.Current</c> with the
 /// Temporal-namespaced correlation ID — deferring the canonical GenAI span to MAF's
 /// <c>OpenTelemetryAgent</c> (or MEAI's <c>OpenTelemetryChatClient</c>) if either is present in
-/// the pipeline. Computed once at compose time via <c>AgentChainWalker</c> so the per-turn
+/// the pipeline. Computed once at blueprint-build time via <c>AgentChainWalker</c> so the per-turn
 /// dispatch path does no extra walks.
 /// </param>
-internal sealed record CachedDurableAgent(
-    AIAgent Agent,
+internal sealed record AgentBlueprint(
     IReadOnlyDictionary<string, AIFunction> Tools,
     DurableAgentRegistration Registration,
-    IAgentHistoryStore? HistoryStore,
-    IReadOnlyList<AIContextProvider> ContextProviders,
     TemporalAgentsOptions AgentsOptions,
     bool SuppressAgentTurnSpan,
     string? CompactionStrategyKey,
     Compaction.ICompactionStrategy? CompactionStrategy,
-    IReadOnlyList<AITool> ToolsAsAITools,
-    IDurableToolInterceptor<AgentToolContext>? ToolInterceptor = null,
-    IApprovalScopeStore? ApprovalScopeStore = null);
+    IReadOnlyList<AITool> ToolsAsAITools);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
@@ -64,13 +58,15 @@ internal sealed record CachedDurableAgent(
 /// </summary>
 internal sealed class AgentActivities(
     IServiceProvider services,
+    IServiceScopeFactory serviceScopeFactory,
     ILoggerFactory? loggerFactory = null)
 {
     private readonly ILogger _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<AgentActivities>();
 
-    // Per-durable-agent cache. Composed lazily at first dispatch and reused for the lifetime of
-    // the worker. Concurrent first-dispatches for the same agent compose at most once.
-    private readonly ConcurrentDictionary<string, CachedDurableAgent> _durableAgentCache =
+    // Per-durable-agent blueprint cache. Computed lazily at first dispatch and reused for the
+    // lifetime of the worker. Contains only frozen config (tool registry, chain-walk booleans,
+    // registration shape) — no live DI instances. Live instances are resolved per call via scope.
+    private readonly ConcurrentDictionary<string, AgentBlueprint> _blueprintCache =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -90,13 +86,18 @@ internal sealed class AgentActivities(
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        // Resolve the agent's history store via the cache (lazy compose). The activity context's
-        // workflow ID is the session ID; the agent name is carried on the input so the cache
-        // entry resolves correctly even though the activity is dispatched without an agent-name
-        // argument by some legacy callers — for v0.3 every dispatch comes from
-        // ExecuteDurableAgentTurnAsync which has access to the agent name on AgentWorkflowInput.
-        var cached = ResolveDurableAgent(input.AgentName);
-        if (cached.HistoryStore is null)
+        // Resolve the agent's blueprint (lazy build). The activity context's workflow ID is the
+        // session ID; the agent name is carried on the input so the blueprint resolves correctly.
+        var blueprint = ResolveBlueprint(input.AgentName);
+        var registration = blueprint.Registration;
+        var agentsOptions = blueprint.AgentsOptions;
+
+        // Resolve HistoryStore fresh per call from a scoped service provider.
+        using var scope = serviceScopeFactory.CreateScope();
+        var storeFactory = registration.HistoryStore ?? agentsOptions.HistoryStore;
+        var historyStore = storeFactory?.Invoke(scope.ServiceProvider);
+
+        if (historyStore is null)
         {
             throw new InvalidOperationException(
                 $"ReduceHistoryInStoreAsync was dispatched but no IAgentHistoryStore is configured " +
@@ -108,13 +109,13 @@ internal sealed class AgentActivities(
         // view the LLM actually saw. Compaction markers (Step 5+) are pre-collapsed by the
         // store; the reducer never sees a marker, only the rolled-up summary or filtered
         // entries the strategy chose.
-        var prior = await cached.HistoryStore
+        var prior = await historyStore
             .LoadAsync(input.SessionId, applyCompaction: true, ct)
             .ConfigureAwait(false);
 
         // Resolve effective reducer: per-agent first, then worker default.
-        var reducer = cached.Registration.HistoryReducer
-                   ?? cached.AgentsOptions.DefaultHistoryReducer;
+        var reducer = registration.HistoryReducer
+                   ?? agentsOptions.DefaultHistoryReducer;
 
         IReadOnlyList<DurableSessionEntry> reduced;
         if (reducer is not null)
@@ -135,7 +136,7 @@ internal sealed class AgentActivities(
             reduced = prior.Skip(prior.Count - input.MaxEntryCount).ToList();
         }
 
-        await cached.HistoryStore.ReplaceAsync(input.SessionId, reduced, ct).ConfigureAwait(false);
+        await historyStore.ReplaceAsync(input.SessionId, reduced, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -175,8 +176,14 @@ internal sealed class AgentActivities(
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        var cached = ResolveDurableAgent(input.AgentName);
-        if (cached.HistoryStore is null)
+        var blueprint = ResolveBlueprint(input.AgentName);
+
+        // Resolve HistoryStore fresh per call from a scoped service provider.
+        using var scope = serviceScopeFactory.CreateScope();
+        var storeFactory = blueprint.Registration.HistoryStore ?? blueprint.AgentsOptions.HistoryStore;
+        var historyStore = storeFactory?.Invoke(scope.ServiceProvider);
+
+        if (historyStore is null)
         {
             throw new InvalidOperationException(
                 $"AppendAgentTurn dispatched for agent '{input.AgentName}' but no IAgentHistoryStore is configured. " +
@@ -192,7 +199,7 @@ internal sealed class AgentActivities(
             input.TurnResponse,
             now);
 
-        await cached.HistoryStore.AppendAsync(
+        await historyStore.AppendAsync(
             input.SessionId,
             [requestEntry, responseEntry],
             ct).ConfigureAwait(false);
@@ -212,7 +219,29 @@ internal sealed class AgentActivities(
         var ctx = ActivityExecutionContext.Current;
         var ct = ctx.CancellationToken;
 
-        var cached = ResolveDurableAgent(input.AgentName);
+        var blueprint = ResolveBlueprint(input.AgentName);
+        var registration = blueprint.Registration;
+        var agentsOptions = blueprint.AgentsOptions;
+
+        // Resolve all live DI instances fresh per call from a scoped service provider.
+        // The scope is disposed at the end of this activity call, ensuring scoped services
+        // (e.g. DbContext) are not captured as captive singletons.
+        using var scope = serviceScopeFactory.CreateScope();
+        var scopedServices = scope.ServiceProvider;
+
+        var chatClient = registration.ChatClient(scopedServices);
+        AIContextProvider[] contextProviders = registration.ContextProviderFactories.Count == 0
+            ? []
+            : registration.ContextProviderFactories.Select(f => f(scopedServices)).ToArray();
+
+        var storeFactory = registration.HistoryStore ?? agentsOptions.HistoryStore;
+        var historyStore = storeFactory?.Invoke(scopedServices);
+
+        var interceptorFactory = registration.ToolInterceptorFactory ?? agentsOptions.DefaultToolInterceptor;
+        var toolInterceptor = interceptorFactory?.Invoke(scopedServices);
+
+        // Build a fresh AIAgent from the scoped IChatClient (and optional decorator pipeline).
+        var agent = BuildLiveAgent(blueprint, chatClient, scopedServices);
 
         // When the workflow was started by a proxy-only client, resolve
         // and return worker-side settings so the workflow can patch its input on the first turn.
@@ -220,18 +249,18 @@ internal sealed class AgentActivities(
         Dictionary<string, ActivityOptions>? resolvedToolOpts = null;
         if (input.NeedsWorkerSettingsResolution)
         {
-            resolvedExternalStore = cached.HistoryStore is not null
-                                 || cached.AgentsOptions.HistoryStore is not null;
+            resolvedExternalStore = historyStore is not null
+                                 || agentsOptions.HistoryStore is not null;
 
-            var effectiveActivityTimeout = cached.Registration.ActivityTimeout
-                ?? cached.AgentsOptions.DefaultActivityTimeout;
-            var effectiveHeartbeatTimeout = cached.Registration.HeartbeatTimeout
-                ?? cached.AgentsOptions.DefaultHeartbeatTimeout;
-            var effectiveRetryPolicy = cached.Registration.RetryPolicy
-                ?? cached.AgentsOptions.DefaultRetryPolicy;
+            var effectiveActivityTimeout = registration.ActivityTimeout
+                ?? agentsOptions.DefaultActivityTimeout;
+            var effectiveHeartbeatTimeout = registration.HeartbeatTimeout
+                ?? agentsOptions.DefaultHeartbeatTimeout;
+            var effectiveRetryPolicy = registration.RetryPolicy
+                ?? agentsOptions.DefaultRetryPolicy;
 
             resolvedToolOpts = DefaultTemporalAgentClient.BuildDurableAgentToolActivityOptions(
-                cached.Registration,
+                registration,
                 effectiveActivityTimeout,
                 effectiveHeartbeatTimeout,
                 effectiveRetryPolicy);
@@ -242,13 +271,13 @@ internal sealed class AgentActivities(
         var session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
 
         IReadOnlyList<ChatMessage> messagesForLlm = input.AccumulatedMessages;
-        if (cached.HistoryStore is not null && input.IsFirstStep)
+        if (historyStore is not null && input.IsFirstStep)
         {
             // Inference-time load — feed the LLM the post-compact view. Compaction markers
             // are collapsed in place; the LLM sees rolled-up summaries instead of the full
             // pre-compact run. The audit-canonical raw history is reachable separately via
             // applyCompaction: false (used by the erasure helper added in Step 5c).
-            var prior = await cached.HistoryStore
+            var prior = await historyStore
                 .LoadAsync(sessionId.WorkflowId, applyCompaction: true, ct)
                 .ConfigureAwait(false);
             if (prior.Count > 0)
@@ -272,12 +301,11 @@ internal sealed class AgentActivities(
             }
         }
 
-        var registration = cached.Registration;
         var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
         chatOptions.Instructions = registration.Instructions;
         // Spread [..] makes a per-call copy so downstream mutation (EnableToolNames filter below)
         // cannot corrupt the cached IReadOnlyList.
-        chatOptions.Tools = cached.ToolsAsAITools.Count > 0 ? [.. cached.ToolsAsAITools] : null;
+        chatOptions.Tools = blueprint.ToolsAsAITools.Count > 0 ? [.. blueprint.ToolsAsAITools] : null;
         chatOptions.ResponseFormat = input.Request.ResponseFormat;
 
         if (!input.Request.EnableToolCalls)
@@ -291,12 +319,10 @@ internal sealed class AgentActivities(
 
         // LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
         // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire
-        // around the call. The pipeline was composed once at ComposeDurableAgent time and
-        // cached on cached.Agent — it may be the bare ChatClientAgent (no user decorators) or
-        // a chain of wrappers terminating in one. Either way the chain handles the call.
+        // around the call. The agent is built fresh per call via BuildLiveAgent above.
 
         var augmentedMessages = messagesForLlm;
-        if (cached.ContextProviders.Count > 0)
+        if (contextProviders.Length > 0)
         {
             // Seed the aggregated context with the current chatOptions state so providers see the
             // agent's registered instructions and tools as the starting point — matching
@@ -314,10 +340,10 @@ internal sealed class AgentActivities(
             string? firstToolProviderType = null;
             int firstToolCount = 0;
 
-            foreach (var provider in cached.ContextProviders)
+            foreach (var provider in contextProviders)
             {
                 var invokingCtx = new Microsoft.Agents.AI.AIContextProvider.InvokingContext(
-                    cached.Agent, session, aggregated);
+                    agent, session, aggregated);
                 aggregated = await provider.InvokingAsync(invokingCtx, ct).ConfigureAwait(false);
 
                 // Strip tools from IDurableToolSource providers immediately after their iteration.
@@ -379,7 +405,7 @@ internal sealed class AgentActivities(
             }
         }
 
-        var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
+        var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, scopedServices);
         TemporalAgentContext.SetCurrent(temporalContext);
 
         // When the user's pipeline installs OpenTelemetryAgent or
@@ -390,7 +416,7 @@ internal sealed class AgentActivities(
         // ID so the canonical GenAI semconv data (from MAF) carries our additive context too.
         // The `using var` keeps disposal correct: when suppressed, span is null and the using
         // statement is a no-op; when emitted, the span is disposed at method exit.
-        using var span = cached.SuppressAgentTurnSpan
+        using var span = blueprint.SuppressAgentTurnSpan
             ? null
             : TemporalAgentTelemetry.ActivitySource.StartActivity(
                 TemporalAgentTelemetry.AgentTurnSpanName,
@@ -431,7 +457,7 @@ internal sealed class AgentActivities(
             // AIContextProvider invocation) is managed outside MAF and passed explicitly
             // via the TemporalAgentSession to context providers at the call site above
             // (AIContextProvider.InvokingContext) and via TemporalAgentContext for tools.
-            await foreach (var update in cached.Agent.RunStreamingAsync(
+            await foreach (var update in agent.RunStreamingAsync(
                     augmentedMessages, session: null, runOptions, ct).WithCancellation(ct).ConfigureAwait(false))
             {
                 collected.Add(update);
@@ -457,14 +483,14 @@ internal sealed class AgentActivities(
             _logger.LogAgentActivityCompleted(input.AgentName, sessionId.WorkflowId,
                 response.Usage?.InputTokenCount, response.Usage?.OutputTokenCount, response.Usage?.TotalTokenCount);
 
-            if (cached.ContextProviders.Count > 0)
+            if (contextProviders.Length > 0)
             {
                 var invokedCtx = new Microsoft.Agents.AI.AIContextProvider.InvokedContext(
-                    cached.Agent,
+                    agent,
                     session,
                     requestMessages: augmentedMessages,
                     responseMessages: response.Messages);
-                foreach (var provider in cached.ContextProviders)
+                foreach (var provider in contextProviders)
                 {
                     await provider.InvokedAsync(invokedCtx, ct).ConfigureAwait(false);
                 }
@@ -475,7 +501,7 @@ internal sealed class AgentActivities(
 
 
             int? resolvedMaxToolCalls = input.NeedsWorkerSettingsResolution
-                ? cached.Registration.MaxToolCallsPerTurn
+                ? registration.MaxToolCallsPerTurn
                 : null;
 
 
@@ -497,7 +523,7 @@ internal sealed class AgentActivities(
                 // (BLOCK-2 fix). Only interceptorActivityOpts and the skip list need the interceptor guard.
                 // Feature B: RequiresApprovalTools exclusion guard — scope-aware required tools go into
                 // scopeAwareApprovalTools, NOT requiresApprovalTools (spec Section 13, critical guard).
-                foreach (var toolReg in cached.Registration.Tools)
+                foreach (var toolReg in registration.Tools)
                 {
                     var toolOpts = toolReg.Options;
                     if (toolOpts.RequireApprovalFlag && !toolOpts.ScopeAwareFlag)
@@ -516,7 +542,7 @@ internal sealed class AgentActivities(
                 }
 
                 // Feature B: DefaultToolInterceptor incompatibility check at proxy-start resolution.
-                if (cached.Registration.UseApprovalScopes && cached.AgentsOptions.DefaultToolInterceptor is not null)
+                if (registration.UseApprovalScopes && agentsOptions.DefaultToolInterceptor is not null)
                 {
                     throw new InvalidOperationException(
                         "UseApprovalScopes() cannot be combined with TemporalAgentsOptions.DefaultToolInterceptor. " +
@@ -525,13 +551,13 @@ internal sealed class AgentActivities(
                 }
 
                 // Feature B: startup validation for scope-aware required tools at proxy-start resolution.
-                foreach (var toolReg in cached.Registration.Tools)
+                foreach (var toolReg in registration.Tools)
                 {
                     var toolOpts = toolReg.Options;
-                    if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && !cached.Registration.UseApprovalScopes)
+                    if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && !registration.UseApprovalScopes)
                     {
                         throw new InvalidOperationException(
-                            $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{cached.Registration.Name}'. " +
+                            $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{registration.Name}'. " +
                             "Call UseApprovalScopes() before registering scope-aware required tools.");
                     }
 
@@ -545,14 +571,14 @@ internal sealed class AgentActivities(
 
                 Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
 
-                if (cached.ToolInterceptor is not null)
+                if (toolInterceptor is not null)
                 {
-                    var effectiveTimeout = cached.Registration.ActivityTimeout
-                        ?? cached.AgentsOptions.DefaultActivityTimeout;
-                    var effectiveHeartbeat = cached.Registration.HeartbeatTimeout
-                        ?? cached.AgentsOptions.DefaultHeartbeatTimeout;
-                    var effectiveRetry = cached.Registration.RetryPolicy
-                        ?? cached.AgentsOptions.DefaultRetryPolicy;
+                    var effectiveTimeout = registration.ActivityTimeout
+                        ?? agentsOptions.DefaultActivityTimeout;
+                    var effectiveHeartbeat = registration.HeartbeatTimeout
+                        ?? agentsOptions.DefaultHeartbeatTimeout;
+                    var effectiveRetry = registration.RetryPolicy
+                        ?? agentsOptions.DefaultRetryPolicy;
 
                     interceptorActivityOpts = new ActivityOptions
                     {
@@ -562,7 +588,7 @@ internal sealed class AgentActivities(
                         // Summary is set per-tool at dispatch time: $"intercept:{toolName}"
                     };
 
-                    foreach (var toolReg in cached.Registration.Tools)
+                    foreach (var toolReg in registration.Tools)
                     {
                         if (toolReg.Options.SkipInterceptorFlag)
                         {
@@ -584,7 +610,7 @@ internal sealed class AgentActivities(
                 }
 
                 // Feature B: resolve approval-scopes config for proxy-start resolution.
-                var useApprovalScopes = cached.Registration.UseApprovalScopes;
+                var useApprovalScopes = registration.UseApprovalScopes;
                 bool useApprovalScopeStoreMode = false;
                 string? alwaysScopesStoreKey = null;
                 bool applyAlwaysScopesAtSessionStart = false;
@@ -595,20 +621,20 @@ internal sealed class AgentActivities(
 
                 if (useApprovalScopes)
                 {
-                    var scopeOpts = cached.Registration.ApprovalScopesOptions!;
+                    var scopeOpts = registration.ApprovalScopesOptions!;
 
                     // Options validation (positive bounds) — same as direct-start path.
                     if (scopeOpts.MaxAlwaysScopeCacheRecords <= 0)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheRecords for agent '{cached.Registration.Name}' must be a positive integer.");
+                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheRecords for agent '{registration.Name}' must be a positive integer.");
                     if (scopeOpts.MaxAlwaysScopeCacheBytes <= 0)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheBytes for agent '{cached.Registration.Name}' must be a positive integer.");
+                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheBytes for agent '{registration.Name}' must be a positive integer.");
                     if (scopeOpts.ApprovalScopeActivityMaximumAttempts <= 0)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts for agent '{cached.Registration.Name}' must be a positive integer.");
+                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts for agent '{registration.Name}' must be a positive integer.");
                     if (scopeOpts.ApprovalScopeActivityTimeout <= TimeSpan.Zero)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityTimeout for agent '{cached.Registration.Name}' must be greater than TimeSpan.Zero.");
+                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityTimeout for agent '{registration.Name}' must be greater than TimeSpan.Zero.");
 
                     useApprovalScopeStoreMode = scopeOpts.ApprovalScopeStore is not null
-                                             || cached.AgentsOptions.ApprovalScopeStore is not null;
+                                             || agentsOptions.ApprovalScopeStore is not null;
                     alwaysScopesStoreKey = scopeOpts.AlwaysScopesStoreKey;
                     applyAlwaysScopesAtSessionStart = scopeOpts.ApplyAlwaysScopesAtSessionStart;
                     maxAlwaysScopeCacheRecords = scopeOpts.MaxAlwaysScopeCacheRecords;
@@ -619,10 +645,10 @@ internal sealed class AgentActivities(
 
                 resolvedConfig = new ProxyResolvedWorkerConfig
                 {
-                    MaxToolCallsPerTurn = resolvedMaxToolCalls ?? cached.Registration.MaxToolCallsPerTurn,
+                    MaxToolCallsPerTurn = resolvedMaxToolCalls ?? registration.MaxToolCallsPerTurn,
                     UseExternalStoreMode = resolvedExternalStore ?? false,
                     ToolActivityOptions = resolvedToolOpts ?? new Dictionary<string, ActivityOptions>(),
-                    CompactionStrategyKey = cached.CompactionStrategyKey,
+                    CompactionStrategyKey = blueprint.CompactionStrategyKey,
                     InterceptorActivityOptions = interceptorActivityOpts,
                     InterceptorToolActivityOptions = perToolInterceptorOpts,
                     InterceptorSkippedTools = interceptorSkippedTools,
@@ -647,7 +673,7 @@ internal sealed class AgentActivities(
             // CompactHistory after AppendAgentTurn writes the current turn.
             bool compactionNeeded = false;
             IReadOnlyList<string>? compactionTargets = null;
-            if (cached.CompactionStrategy is not null && cached.HistoryStore is not null && isFinal)
+            if (blueprint.CompactionStrategy is not null && historyStore is not null && isFinal)
             {
                 // Only evaluate at end-of-turn (isFinal) — tool-call iterations are
                 // mid-turn and not the right boundary for compaction.
@@ -665,7 +691,7 @@ internal sealed class AgentActivities(
                 // access message content via the history parameter — if any such strategy exists it
                 // will see empty Messages lists in the stubs below. If that is a problem, fall back
                 // to the full LoadAsync call and remove the stub reconstruction below.
-                var metadata = await cached.HistoryStore
+                var metadata = await historyStore
                     .GetMetadataAsync(sessionId.WorkflowId, ct)
                     .ConfigureAwait(false);
 
@@ -700,7 +726,7 @@ internal sealed class AgentActivities(
                     }
                 }
 
-                var targets = cached.CompactionStrategy.EvaluateTrigger(stubEntries);
+                var targets = blueprint.CompactionStrategy.EvaluateTrigger(stubEntries);
                 if (targets is { Count: > 0 })
                 {
                     compactionNeeded = true;
@@ -726,11 +752,11 @@ internal sealed class AgentActivities(
             span?.SetStatus(ActivityStatusCode.Error, ex.Message);
             _logger.LogAgentActivityFailed(input.AgentName, sessionId.WorkflowId, ex);
 
-            if (cached.ContextProviders.Count > 0)
+            if (contextProviders.Length > 0)
             {
                 var invokedCtx = new Microsoft.Agents.AI.AIContextProvider.InvokedContext(
-                    cached.Agent, session, requestMessages: augmentedMessages, invokeException: ex);
-                foreach (var provider in cached.ContextProviders)
+                    agent, session, requestMessages: augmentedMessages, invokeException: ex);
+                foreach (var provider in contextProviders)
                 {
                     try
                     {
@@ -752,23 +778,35 @@ internal sealed class AgentActivities(
     }
 
     /// <summary>
-    /// Resolves (and lazily composes) a durable agent's cached state.
+    /// Resolves (and lazily builds) the immutable blueprint for a durable agent.
+    /// The blueprint contains only frozen config — live DI instances are resolved per call.
     /// </summary>
     /// <exception cref="AgentNotRegisteredException">
     /// Thrown when no durable agent with this name is registered.
     /// </exception>
-    internal CachedDurableAgent ResolveDurableAgent(string name)
+    internal AgentBlueprint ResolveBlueprint(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        return _durableAgentCache.GetOrAdd(name, static (n, ctx) =>
+        return _blueprintCache.GetOrAdd(name, static (n, ctx) =>
         {
             var (self, providerServices) = ctx;
-            return self.ComposeDurableAgent(n, providerServices);
+            return self.BuildAgentBlueprint(n, providerServices);
         }, (this, services));
     }
 
-    private CachedDurableAgent ComposeDurableAgent(string name, IServiceProvider providerServices)
+    /// <summary>
+    /// Builds an <see cref="AgentBlueprint"/> for the named agent. Called at most once per agent
+    /// name (per worker lifetime) — subsequent calls reuse the cached blueprint.
+    /// <para>
+    /// Resolves a temporary <see cref="IChatClient"/> from the root provider solely to perform the
+    /// structural chain-walk checks (function-invocation conflict, OTel suppression detection).
+    /// That temporary client is discarded immediately after the checks; it is NOT stored on the
+    /// blueprint. All per-call live instances are resolved fresh from an <see cref="IServiceScope"/>
+    /// inside each activity method.
+    /// </para>
+    /// </summary>
+    private AgentBlueprint BuildAgentBlueprint(string name, IServiceProvider providerServices)
     {
         var agentsOptions = providerServices.GetService<TemporalAgentsOptions>()
             ?? throw new InvalidOperationException(
@@ -780,13 +818,9 @@ internal sealed class AgentActivities(
             throw new AgentNotRegisteredException(name);
         }
 
-        var userClient = registration.ChatClient(providerServices);
-        AIContextProvider[] providers = registration.ContextProviderFactories.Count == 0
-            ? []
-            : registration.ContextProviderFactories.Select(f => f(providerServices)).ToArray();
-
-        IChatClient chatClient = userClient;
-
+        // ── Tool registry (Bucket 1 — frozen, stateless) ──────────────────────────────
+        // AIFunction is a delegate wrapper; it holds no scoped state. Resolve tools from
+        // the root provider so the registry is available for all per-call invocations.
         var resolvedTools = new Dictionary<string, AIFunction>(StringComparer.OrdinalIgnoreCase);
         var toolList = new List<AIFunction>(registration.Tools.Count);
         foreach (var tool in registration.Tools)
@@ -810,6 +844,12 @@ internal sealed class AgentActivities(
             toolList.Add(resolved);
         }
 
+        // ── Structural chain-walk checks (computed once, result cached as bool) ────────
+        // Resolve a temporary IChatClient from the root provider only for structural inspection.
+        // This client is used to build a temporary ChatClientAgent for pipeline validation and
+        // OTel detection; it is discarded immediately after — NOT stored on the blueprint.
+        var tempChatClient = registration.ChatClient(providerServices);
+
         var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
         chatOptions.Instructions = registration.Instructions;
         chatOptions.Tools = toolList.Count > 0 ? toolList.Cast<AITool>().ToList() : null;
@@ -819,31 +859,25 @@ internal sealed class AgentActivities(
             Name = registration.Name,
             Description = registration.Description,
             ChatOptions = chatOptions,
-            // Q1 (β): keep our explicit AIContextProvider loop inside RunDurableAgentStepAsync
-            // rather than delegating to MAF's ChatClientAgent. Setting null here suppresses MAF's
-            // own provider lifecycle so providers fire exactly once per turn from our loop.
             AIContextProviders = null,
             UseProvidedChatClientAsIs = true,
         };
 
-        var chatClientAgent = new ChatClientAgent(chatClient, agentOptions);
+        var tempChatClientAgent = new ChatClientAgent(tempChatClient, agentOptions);
 
-        // Compose the user's ConfigureAgentPipeline around the ChatClientAgent. Per-agent
-        // callback wins; worker-level DefaultConfigureAgentPipeline is the fallback. If neither
-        // is set, the cached agent IS the bare ChatClientAgent (no decorators).
         var configurePipeline = registration.ConfigureAgentPipeline
             ?? agentsOptions.DefaultConfigureAgentPipeline;
 
-        AIAgent agent;
+        AIAgent tempAgent;
         if (configurePipeline is null)
         {
-            agent = chatClientAgent;
+            tempAgent = tempChatClientAgent;
         }
         else
         {
-            var agentBuilder = new AIAgentBuilder(chatClientAgent);
+            var agentBuilder = new AIAgentBuilder(tempChatClientAgent);
             configurePipeline.Invoke(agentBuilder);
-            agent = agentBuilder.Build(providerServices);
+            tempAgent = agentBuilder.Build(providerServices);
         }
 
         // Step 3c.3: B-check (runtime fallback to startup C-check). Walk the composed agent
@@ -853,7 +887,7 @@ internal sealed class AgentActivities(
         // patterns where the chat-client factory isn't resolvable at host build time, or
         // worker-only paths that bypass the IPostConfigureOptions hook entirely. Same exception
         // shape, same OffendingType field as the C-check.
-        foreach (var link in AgentChainWalker.WalkAIAgent(agent))
+        foreach (var link in AgentChainWalker.WalkAIAgent(tempAgent))
         {
             if (link.GetType().FullName == FunctionInvocationDelegatingAgentFullName)
             {
@@ -874,19 +908,19 @@ internal sealed class AgentActivities(
         // OpenTelemetryAgent (agent-pipeline level) OR OpenTelemetryChatClient (chat-client
         // level), suppress our own agent.turn span — otherwise downstream consumers receive
         // duplicate gen_ai.usage.* attributes and cost-aggregation queries double-count.
-        // Computed once here; the per-turn dispatch path just reads the cached bool.
-        var hasOTelAgent = AgentChainWalker.Contains<OpenTelemetryAgent>(agent);
-        var hasOTelChatClient = AgentChainWalker.Contains<OpenTelemetryChatClient>(chatClient);
+        // Computed once here using the temporary agent; the per-turn dispatch path reads the bool.
+        var hasOTelAgent = AgentChainWalker.Contains<OpenTelemetryAgent>(tempAgent);
+        var hasOTelChatClient = AgentChainWalker.Contains<OpenTelemetryChatClient>(tempChatClient);
         var suppressAgentTurnSpan = hasOTelAgent || hasOTelChatClient;
 
-        // Per-agent factory wins; worker-level factory is the fallback.
-        var storeFactory = registration.HistoryStore ?? agentsOptions.HistoryStore;
-        var resolvedStore = storeFactory?.Invoke(providerServices);
+        // Discard tempAgent and tempChatClient — they are NOT stored on the blueprint.
+        // Per-call live instances are resolved fresh from an IServiceScope in each activity method.
 
+        // ── Compaction-strategy resolution (keyed singleton — safe to cache) ────────────
         // Step 6d: resolve the effective compaction-strategy key (per-agent →
         // worker default → null) and pre-resolve the keyed strategy instance from DI.
-        // Compaction is opt-in; null strategy means "no compaction" and the per-turn path
-        // will short-circuit without consulting the strategy.
+        // ICompactionStrategy is registered as TryAddKeyedSingleton — it is a true singleton and
+        // safe to cache on the blueprint.
         var effectiveCompactionKey =
             registration.CompactionStrategyKey
             ?? agentsOptions.DefaultCompactionStrategy;
@@ -907,22 +941,6 @@ internal sealed class AgentActivities(
 
         IReadOnlyList<AITool> toolsAsAITools = [.. resolvedTools.Values.Cast<AITool>()];
 
-        // Resolve tool interceptor: per-agent factory wins over worker-level default (H1 rule).
-        var interceptorFactory = registration.ToolInterceptorFactory
-            ?? agentsOptions.DefaultToolInterceptor;
-        var resolvedInterceptor = interceptorFactory?.Invoke(providerServices);
-
-        // Feature B: resolve approval-scope store only when this agent has opted into
-        // approval scopes. A worker-default store must not introduce construction side effects
-        // for agents that did not call UseApprovalScopes().
-        IApprovalScopeStore? resolvedApprovalScopeStore = null;
-        if (registration.UseApprovalScopes && registration.ApprovalScopesOptions is not null)
-        {
-            var approvalScopeStoreFactory = registration.ApprovalScopesOptions.ApprovalScopeStore
-                ?? agentsOptions.ApprovalScopeStore;
-            resolvedApprovalScopeStore = approvalScopeStoreFactory?.Invoke(providerServices);
-        }
-
         // Audit-log provider-contributed tools so operators can confirm durable registration.
         if (registration.ProviderContributedTools is { Count: > 0 } providerTools)
         {
@@ -932,19 +950,55 @@ internal sealed class AgentActivities(
                     name, toolName, providerType);
         }
 
-        return new CachedDurableAgent(
-            agent,
+        return new AgentBlueprint(
             resolvedTools,
             registration,
-            resolvedStore,
-            providers,
             agentsOptions,
             suppressAgentTurnSpan,
             effectiveCompactionKey,
             resolvedStrategy,
-            toolsAsAITools,
-            resolvedInterceptor,
-            resolvedApprovalScopeStore);
+            toolsAsAITools);
+    }
+
+    // ── Per-call helper: build a live AIAgent from a scoped IChatClient ──────────────────────
+    // Creates a fresh ChatClientAgent (+ optional decorator pipeline) per activity call.
+    // This is the per-call equivalent of what BuildAgentBlueprint does once for structural checks.
+    private AIAgent BuildLiveAgent(AgentBlueprint blueprint, IChatClient chatClient, IServiceProvider scopedServices)
+    {
+        var registration = blueprint.Registration;
+        var agentsOptions = blueprint.AgentsOptions;
+
+        var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
+        chatOptions.Instructions = registration.Instructions;
+        chatOptions.Tools = blueprint.ToolsAsAITools.Count > 0
+            ? [.. blueprint.ToolsAsAITools]
+            : null;
+
+        var agentOptions = new ChatClientAgentOptions
+        {
+            Name = registration.Name,
+            Description = registration.Description,
+            ChatOptions = chatOptions,
+            // Q1 (β): keep our explicit AIContextProvider loop inside RunDurableAgentStepAsync
+            // rather than delegating to MAF's ChatClientAgent. Setting null here suppresses MAF's
+            // own provider lifecycle so providers fire exactly once per turn from our loop.
+            AIContextProviders = null,
+            UseProvidedChatClientAsIs = true,
+        };
+
+        var chatClientAgent = new ChatClientAgent(chatClient, agentOptions);
+
+        var configurePipeline = registration.ConfigureAgentPipeline
+            ?? agentsOptions.DefaultConfigureAgentPipeline;
+
+        if (configurePipeline is null)
+        {
+            return chatClientAgent;
+        }
+
+        var agentBuilder = new AIAgentBuilder(chatClientAgent);
+        configurePipeline.Invoke(agentBuilder);
+        return agentBuilder.Build(scopedServices);
     }
 
     /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
@@ -978,15 +1032,22 @@ internal sealed class AgentActivities(
         var ctx = ActivityExecutionContext.Current;
         var ct = ctx.CancellationToken;
 
-        var cached = ResolveDurableAgent(input.AgentName);
-        if (cached.CompactionStrategy is null)
+        var blueprint = ResolveBlueprint(input.AgentName);
+
+        if (blueprint.CompactionStrategy is null)
         {
             throw new InvalidOperationException(
                 $"CompactHistory was dispatched for agent '{input.AgentName}' but no " +
                 $"ICompactionStrategy was resolved at compose time. This indicates a workflow " +
                 $"dispatching compaction for an agent that does not have UseCompaction configured.");
         }
-        if (cached.HistoryStore is null)
+
+        // Resolve HistoryStore and IChatClient fresh per call from a scoped service provider.
+        using var scope = serviceScopeFactory.CreateScope();
+        var storeFactory = blueprint.Registration.HistoryStore ?? blueprint.AgentsOptions.HistoryStore;
+        var historyStore = storeFactory?.Invoke(scope.ServiceProvider);
+
+        if (historyStore is null)
         {
             throw new InvalidOperationException(
                 $"CompactHistory was dispatched for agent '{input.AgentName}' but no " +
@@ -997,10 +1058,10 @@ internal sealed class AgentActivities(
         ctx.Heartbeat($"compacting {input.TargetMessageIds.Count} entries for agent '{input.AgentName}'");
 
         // Resolve a chat client for strategies that need one (summarization). Truncation and
-        // sliding-window ignore the client.
-        var chatClient = cached.Registration.ChatClient(services);
+        // sliding-window ignore the client. Resolved from the per-call scope, not the root provider.
+        var chatClient = blueprint.Registration.ChatClient(scope.ServiceProvider);
 
-        var rawHistory = await cached.HistoryStore
+        var rawHistory = await historyStore
             .LoadAsync(input.SessionId, applyCompaction: false, ct)
             .ConfigureAwait(false);
 
@@ -1014,11 +1075,11 @@ internal sealed class AgentActivities(
             ChatClient = chatClient,
         };
 
-        var result = await cached.CompactionStrategy
+        var result = await blueprint.CompactionStrategy
             .CompactAsync(context, ct)
             .ConfigureAwait(false);
 
-        await cached.HistoryStore
+        await historyStore
             .AppendAsync(input.SessionId, [result.Marker], ct)
             .ConfigureAwait(false);
     }
@@ -1049,9 +1110,15 @@ internal sealed class AgentActivities(
         var ctx = ActivityExecutionContext.Current;
         var ct = ctx.CancellationToken;
 
-        var cached = ResolveDurableAgent(input.AgentName);
+        var blueprint = ResolveBlueprint(input.AgentName);
 
-        if (cached.ToolInterceptor is null)
+        // Resolve tool interceptor fresh per call from a scoped service provider.
+        using var scope = serviceScopeFactory.CreateScope();
+        var interceptorFactory = blueprint.Registration.ToolInterceptorFactory
+            ?? blueprint.AgentsOptions.DefaultToolInterceptor;
+        var toolInterceptor = interceptorFactory?.Invoke(scope.ServiceProvider);
+
+        if (toolInterceptor is null)
         {
             // Interceptor was removed between workflow dispatch and activity execution
             // (e.g. worker restart without interceptor re-registration).
@@ -1118,7 +1185,7 @@ internal sealed class AgentActivities(
         DurableToolDecision decision;
         try
         {
-            decision = await cached.ToolInterceptor
+            decision = await toolInterceptor
                 .BeforeToolCallAsync(toolContext, ct)
                 .ConfigureAwait(false);
         }
@@ -1169,15 +1236,25 @@ internal sealed class AgentActivities(
         ArgumentNullException.ThrowIfNull(input);
 
         var ct = ActivityExecutionContext.Current.CancellationToken;
-        var cached = ResolveDurableAgent(input.AgentName);
+        var blueprint = ResolveBlueprint(input.AgentName);
 
-        if (cached.ApprovalScopeStore is null)
+        // Resolve ApprovalScopeStore fresh per call from a scoped service provider.
+        using var scope = serviceScopeFactory.CreateScope();
+        IApprovalScopeStore? approvalScopeStore = null;
+        if (blueprint.Registration.UseApprovalScopes && blueprint.Registration.ApprovalScopesOptions is not null)
+        {
+            var storeFactory = blueprint.Registration.ApprovalScopesOptions.ApprovalScopeStore
+                ?? blueprint.AgentsOptions.ApprovalScopeStore;
+            approvalScopeStore = storeFactory?.Invoke(scope.ServiceProvider);
+        }
+
+        if (approvalScopeStore is null)
         {
             // No store configured — return empty result gracefully.
             return new LoadAlwaysScopesResult { Scopes = [] };
         }
 
-        var records = await cached.ApprovalScopeStore
+        var records = await approvalScopeStore
             .LoadAsync(input.AgentName, input.StoreKey, ct)
             .ConfigureAwait(false);
 
@@ -1201,9 +1278,19 @@ internal sealed class AgentActivities(
         ArgumentNullException.ThrowIfNull(input);
 
         var ct = ActivityExecutionContext.Current.CancellationToken;
-        var cached = ResolveDurableAgent(input.AgentName);
+        var blueprint = ResolveBlueprint(input.AgentName);
 
-        if (cached.ApprovalScopeStore is null)
+        // Resolve ApprovalScopeStore fresh per call from a scoped service provider.
+        using var scope = serviceScopeFactory.CreateScope();
+        IApprovalScopeStore? approvalScopeStore = null;
+        if (blueprint.Registration.UseApprovalScopes && blueprint.Registration.ApprovalScopesOptions is not null)
+        {
+            var storeFactory = blueprint.Registration.ApprovalScopesOptions.ApprovalScopeStore
+                ?? blueprint.AgentsOptions.ApprovalScopeStore;
+            approvalScopeStore = storeFactory?.Invoke(scope.ServiceProvider);
+        }
+
+        if (approvalScopeStore is null)
         {
             _logger.LogWarning(
                 "[{SessionId}] AppendAlwaysScopeAsync: no IApprovalScopeStore is configured for agent " +
@@ -1221,7 +1308,7 @@ internal sealed class AgentActivities(
             OriginatingRequestId = input.OriginatingRequestId,
         };
 
-        await cached.ApprovalScopeStore
+        await approvalScopeStore
             .AppendAsync(input.AgentName, input.StoreKey, record, ct)
             .ConfigureAwait(false);
     }
@@ -1234,9 +1321,13 @@ internal sealed class AgentActivities(
         var ctx = ActivityExecutionContext.Current;
         var ct = ctx.CancellationToken;
 
-        var cached = ResolveDurableAgent(input.AgentName);
+        // Tools live on the blueprint (Bucket 1 — stateless AIFunction delegates).
+        // No scope is needed for the tool lookup itself; however a scope is opened below for
+        // the TemporalAgentContext so any scoped services the tool resolves via the context are
+        // properly lifetime-managed.
+        var blueprint = ResolveBlueprint(input.AgentName);
 
-        if (!cached.Tools.TryGetValue(input.ToolName, out var fn))
+        if (!blueprint.Tools.TryGetValue(input.ToolName, out var fn))
         {
             throw new InvalidOperationException(
                 $"Tool '{input.ToolName}' is not registered on agent '{input.AgentName}'.");
@@ -1253,6 +1344,10 @@ internal sealed class AgentActivities(
         {
             span?.SetTag(TemporalAgentTelemetry.AgentToolCallIdAttribute, input.CallId);
         }
+
+        // Open a per-call scope so any scoped services the tool resolves via TemporalAgentContext
+        // are properly lifetime-managed and not captured as captive singletons.
+        using var scope = serviceScopeFactory.CreateScope();
 
         // Set up TemporalAgentContext for the tool invocation so tools that call
         // TemporalAgentContext.Current (e.g. for RequestApprovalAsync) work in the
@@ -1290,7 +1385,7 @@ internal sealed class AgentActivities(
                 // X-1: build the session from the carried StateBag (was literal null before),
                 // so tools and any AIContextProvider they consult see accumulated state.
                 session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
-                var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, services);
+                var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, scope.ServiceProvider);
                 TemporalAgentContext.SetCurrent(temporalContext);
                 contextSetUp = true;
             }

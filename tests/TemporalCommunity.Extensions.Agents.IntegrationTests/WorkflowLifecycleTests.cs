@@ -395,7 +395,7 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
-            .AddTemporalAgents(options => options.AddDurableAgent("EchoAgent", a => a.ChatClient = _ => new Helpers.EchoChatClient()));
+            .AddTemporalAgents(options => { options.EnableSearchAttributes = false; options.AddDurableAgent("EchoAgent", a => a.ChatClient = _ => new Helpers.EchoChatClient()); });
         return builder.Build();
     }
 }

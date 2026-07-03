@@ -33,7 +33,7 @@ public class Crit2AppendAgentTurnThrowsWhenHistoryStoreIsNull
         services.AddSingleton(options);
         var sp = services.BuildServiceProvider();
 
-        var activities = new AgentActivities(sp);
+        var activities = new AgentActivities(sp, sp.GetRequiredService<IServiceScopeFactory>());
 
         var input = new AppendAgentTurnInput
         {

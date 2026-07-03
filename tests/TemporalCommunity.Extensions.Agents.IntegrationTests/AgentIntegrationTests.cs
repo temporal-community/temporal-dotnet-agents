@@ -175,14 +175,14 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
 
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
-            .AddTemporalAgents(options => options.AddDurableAgent("DIAgent", a =>
+            .AddTemporalAgents(options => { options.EnableSearchAttributes = false; options.AddDurableAgent("DIAgent", a =>
             {
                 a.ChatClient = sp =>
                 {
                     var greetingSvc = sp.GetRequiredService<IGreetingService>();
                     return new GreetingChatClient(greetingSvc);
                 };
-            }));
+            }); });
 
         using var host = builder.Build();
         await host.StartAsync();

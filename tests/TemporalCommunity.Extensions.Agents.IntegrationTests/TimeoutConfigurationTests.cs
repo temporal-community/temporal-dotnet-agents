@@ -42,6 +42,7 @@ public class TimeoutConfigurationTests : IClassFixture<IntegrationTestFixture>
             .AddHostedTemporalWorker(taskQueue)
             .AddTemporalAgents(options =>
             {
+                options.EnableSearchAttributes = false;
                 options.AddDurableAgent("TimeoutAgent", a => a.ChatClient = _ => new Helpers.EchoChatClient());
                 options.DefaultActivityTimeout = TimeSpan.FromMinutes(2);
                 options.DefaultHeartbeatTimeout = TimeSpan.FromSeconds(30);
@@ -85,6 +86,7 @@ public class TimeoutConfigurationTests : IClassFixture<IntegrationTestFixture>
             .AddHostedTemporalWorker(taskQueue)
             .AddTemporalAgents(options =>
             {
+                options.EnableSearchAttributes = false;
                 options.AddDurableAgent("DefaultTimeoutAgent", a => a.ChatClient = _ => new Helpers.EchoChatClient());
                 // ActivityTimeout / HeartbeatTimeout default to 5 minutes / 2 minutes when unset.
             });
@@ -122,6 +124,7 @@ public class TimeoutConfigurationTests : IClassFixture<IntegrationTestFixture>
             .AddHostedTemporalWorker(taskQueue)
             .AddTemporalAgents(options =>
             {
+                options.EnableSearchAttributes = false;
                 options.AddDurableAgent("ShortTTLAgent", a =>
                 {
                     a.ChatClient = _ => new Helpers.EchoChatClient();

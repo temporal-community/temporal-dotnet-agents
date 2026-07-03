@@ -24,7 +24,7 @@ public class InvokeAgentToolActivityTests
         serviceCollection.AddSingleton(options);
         var sp = serviceCollection.BuildServiceProvider();
 
-        var activities = new AgentActivities(sp);
+        var activities = new AgentActivities(sp, sp.GetRequiredService<IServiceScopeFactory>());
         return (activities, sp, options);
     }
 
