@@ -175,7 +175,7 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
 
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
-            .AddTemporalAgents(options => options.AddDurableAgent("DIAgent", a =>
+            .AddTemporalAgents(options => { options.EnableSearchAttributes = false; options.AddDurableAgent("DIAgent", a =>
             {
                 a.ChatClient = sp =>
                 {

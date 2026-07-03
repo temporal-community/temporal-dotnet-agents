@@ -152,7 +152,7 @@ public class ErrorHandlingTests : IClassFixture<IntegrationTestFixture>
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
-            .AddTemporalAgents(options => options.AddDurableAgent("FailAgent", a => a.ChatClient = _ => agent));
+            .AddTemporalAgents(options => { options.EnableSearchAttributes = false; options.AddDurableAgent("FailAgent", a => a.ChatClient = _ => agent));
 
         using var host = builder.Build();
         await host.StartAsync();
@@ -192,7 +192,7 @@ public class ErrorHandlingTests : IClassFixture<IntegrationTestFixture>
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
-            .AddTemporalAgents(options => options.AddDurableAgent("RecoveryAgent", a => a.ChatClient = _ => agent));
+            .AddTemporalAgents(options => { options.EnableSearchAttributes = false; options.AddDurableAgent("RecoveryAgent", a => a.ChatClient = _ => agent));
 
         using var host = builder.Build();
         await host.StartAsync();
