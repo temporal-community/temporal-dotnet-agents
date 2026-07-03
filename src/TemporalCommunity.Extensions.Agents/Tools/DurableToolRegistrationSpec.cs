@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.Agents.Tools;
 
-namespace TemporalCommunity.Extensions.Agents.Tools;
+namespace TemporalCommunity.Extensions.Agents;
 
 /// <summary>
 /// Specifies a tool and its per-tool options for registration via

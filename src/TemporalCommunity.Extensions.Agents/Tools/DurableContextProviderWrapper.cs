@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using TemporalCommunity.Extensions.Agents;
 
 #pragma warning disable MAAI001 // experimental MAF AIContextProvider.InvokingContext/InvokedContext ctors; inventoried in Internal/ExperimentalApiSuppressions.cs
 

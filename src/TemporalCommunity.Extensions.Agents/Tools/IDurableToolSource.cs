@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using TemporalCommunity.Extensions.Agents;
 
 namespace TemporalCommunity.Extensions.Agents.Tools;
 

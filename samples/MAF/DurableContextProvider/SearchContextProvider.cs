@@ -16,6 +16,7 @@ using System.ComponentModel;
 using DurableContextProvider;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.Tools;
 
 namespace DurableContextProvider;
