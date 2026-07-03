@@ -30,5 +30,5 @@ public interface IDurableToolSource
     /// Called once at registration time; the specs are passed to <c>AddToolCore</c>
     /// and registered as durable activities.
     /// </summary>
-    IEnumerable<DurableToolRegistrationSpec> GetDurableTools();
+    IReadOnlyList<DurableToolRegistrationSpec> GetDurableTools();
 }

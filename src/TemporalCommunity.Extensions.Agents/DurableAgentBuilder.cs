@@ -403,7 +403,7 @@ public sealed class DurableAgentBuilder
         else if (provider is IDurableToolSource source)
         {
             // Provider self-declares its tools.
-            var extracted = source.GetDurableTools()?.ToList();
+            var extracted = source.GetDurableTools();
             if (extracted?.Count > 0)
                 specs = extracted;
         }

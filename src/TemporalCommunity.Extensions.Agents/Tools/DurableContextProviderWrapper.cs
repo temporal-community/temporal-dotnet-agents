@@ -38,7 +38,7 @@ internal sealed class DurableContextProviderWrapper : AIContextProvider, IDurabl
     }
 
     /// <inheritdoc/>
-    public IEnumerable<DurableToolRegistrationSpec> GetDurableTools() => _specs;
+    public IReadOnlyList<DurableToolRegistrationSpec> GetDurableTools() => _specs;
 
     /// <summary>
     /// Delegates to the inner provider's <c>InvokingAsync</c> template-method entry point,

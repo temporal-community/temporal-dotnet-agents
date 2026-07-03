@@ -300,7 +300,7 @@ public class DurableAgentBuilderContextProviderTests
             _specs = specs;
         }
 
-        public IEnumerable<DurableToolRegistrationSpec> GetDurableTools() => _specs;
+        public IReadOnlyList<DurableToolRegistrationSpec> GetDurableTools() => _specs;
     }
 
     /// <summary>

@@ -61,7 +61,7 @@ public sealed class SearchContextProvider : AIContextProvider, IDurableToolSourc
     /// <summary>
     /// Returns the durable tools this provider contributes. Called once at registration time.
     /// </summary>
-    public IEnumerable<DurableToolRegistrationSpec> GetDurableTools() => _specs;
+    public IReadOnlyList<DurableToolRegistrationSpec> GetDurableTools() => _specs;
 
     /// <inheritdoc/>
     protected override ValueTask<AIContext> ProvideAIContextAsync(

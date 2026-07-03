@@ -93,7 +93,7 @@ public class AgentActivitiesContextProviderTests
         Assert.Contains("ToolReturningContextProvider", error);
         Assert.Contains("2", error);           // ToolCount = 2
         Assert.Contains("ProviderToolAgent", error);
-        Assert.Contains("Wrap the provider in DurableContextProviderWrapper", error);
+        Assert.Contains("IDurableToolSource", error);
     }
 
     /// <summary>
@@ -341,7 +341,7 @@ public class AgentActivitiesContextProviderTests
             _tool = tool;
         }
 
-        public IEnumerable<DurableToolRegistrationSpec> GetDurableTools() =>
+        public IReadOnlyList<DurableToolRegistrationSpec> GetDurableTools() =>
             [new DurableToolRegistrationSpec(_tool)];
 
         protected override ValueTask<AIContext> ProvideAIContextAsync(
