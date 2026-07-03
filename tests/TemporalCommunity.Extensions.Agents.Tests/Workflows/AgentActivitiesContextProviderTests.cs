@@ -1,4 +1,5 @@
 #pragma warning disable MAAI001 // experimental AIContextProvider.InvokingContext ctor; see ExperimentalApiSuppressions.cs
+#pragma warning disable TA001 // IDurableToolSource is experimental; intentional consumption in these tests
 using System.Runtime.CompilerServices;
 using FakeItEasy;
 using Microsoft.Agents.AI;
@@ -7,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Temporalio.Client;
 using Temporalio.Testing;
@@ -168,6 +170,40 @@ public class AgentActivitiesContextProviderTests
         Assert.Single(logFactory.Errors);
     }
 
+    /// <summary>
+    /// When a context provider implements <see cref="IDurableToolSource"/>, the per-iteration strip
+    /// in <c>AgentActivities</c> nulls out its <c>AIContext.Tools</c> before the LogError sentinel
+    /// fires. No <see cref="LogLevel.Error"/> should be emitted even though the provider's
+    /// <c>ProvideAIContextAsync</c> returns tools — those tools are already registered as durable
+    /// activities and are intentionally stripped from the aggregated context.
+    /// </summary>
+    [Fact]
+    public async Task RunDurableAgentStep_IDurableToolSourceProvider_EmitsNoLogError()
+    {
+        var durableTool = AIFunctionFactory.Create(() => "result", "durable_provider_tool");
+
+        var (activities, logFactory) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("DurableToolSourceAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                // Register the provider via instance overload — this also calls AddToolCore
+                // for the spec's tool, mirroring what IDurableToolSource auto-detection does.
+                agent.AddContextProvider(new DurableToolSourceProvider(durableTool));
+            });
+        });
+
+        var env = new ActivityEnvironment
+        {
+            TemporalClient = A.Fake<ITemporalClient>(),
+        };
+        await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("DurableToolSourceAgent")));
+
+        // IDurableToolSource providers have their tools stripped before the LogError check;
+        // no error should be emitted.
+        Assert.Empty(logFactory.Errors);
+    }
+
     // ── Test helpers ────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -279,6 +315,45 @@ public class AgentActivitiesContextProviderTests
                         errors.Add(formatter(state, exception));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// A combined <see cref="AIContextProvider"/> / <see cref="IDurableToolSource"/> stub.
+    /// <para>
+    /// <c>ProvideAIContextAsync</c> returns the tool in <c>AIContext.Tools</c> — simulating what a
+    /// real provider (e.g. a search or code-act provider) does internally. The per-iteration strip
+    /// in <c>AgentActivities</c> removes those tools from the aggregated context before the
+    /// <c>LogError</c> sentinel fires, so no error should appear.
+    /// </para>
+    /// <para>
+    /// <c>GetDurableTools()</c> returns one <see cref="DurableToolRegistrationSpec"/> so the tool
+    /// is registered as a durable activity at <c>AddContextProvider</c> time (via <c>AddToolCore</c>).
+    /// </para>
+    /// </summary>
+    private sealed class DurableToolSourceProvider : AIContextProvider, IDurableToolSource
+    {
+        private readonly AIFunction _tool;
+
+        internal DurableToolSourceProvider(AIFunction tool)
+            : base(provideInputMessageFilter: m => m)
+        {
+            _tool = tool;
+        }
+
+        public IEnumerable<DurableToolRegistrationSpec> GetDurableTools() =>
+            [new DurableToolRegistrationSpec(_tool)];
+
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context,
+            CancellationToken cancellationToken = default)
+        {
+            // Return the tool in AIContext.Tools just as a real provider would.
+            // AgentActivities strips these out because this provider implements IDurableToolSource.
+            return ValueTask.FromResult(new AIContext
+            {
+                Tools = [(AITool)_tool],
+            });
         }
     }
 }
