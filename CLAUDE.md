@@ -149,7 +149,7 @@ For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how
 
 - **`Assert.Throws<T>` requires exact type, not subtype.** Use `Assert.Throws<ArgumentNullException>` for null, not `ArgumentException`. xUnit will fail the test if the thrown exception is a subtype of the expected.
 - **Hand-written stubs preferred** over FakeItEasy/Moq in this project. See `StubAIAgent` and `TestChatClient` in the test helpers.
-- **Search-attribute pre-registration is conditional.** Agents integration tests only need `TestEnvironmentHelper.StartLocalAsync()` (which pre-registers `AgentName`/`SessionCreatedAt`/`TurnCount`) when `EnableSearchAttributes = true`. Bare `WorkflowEnvironment.StartLocalAsync()` works otherwise. AI integration tests never need pre-registration.
+- **Search-attribute pre-registration is required by default.** `EnableSearchAttributes` now defaults to `true`. Agents integration tests must use `TestEnvironmentHelper.StartLocalAsync()` (which pre-registers `AgentName`/`SessionCreatedAt`/`TurnCount`) unless `opts.EnableSearchAttributes = false` is explicitly set. Bare `WorkflowEnvironment.StartLocalAsync()` is only sufficient when search attributes are disabled. AI integration tests never need pre-registration.
 - **Both suites use embedded server** — `WorkflowEnvironment.StartLocalAsync()`. No external `temporal server start-dev` process.
 
 ---
@@ -275,8 +275,8 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 | `GetTypeInfo metadata not provided` for `TemporalAgentSession` | Don't serialize via `DefaultOptions`; use `StateBag.Serialize()` |
 | Activity timeout (HITL) | Increase `DefaultActivityTimeout` (or per-agent `ActivityTimeout`) to accommodate human review time |
 | Worker won't start | `temporal server start-dev` running on `localhost:7233`? |
-| Search attributes missing in UI | `opts.EnableSearchAttributes = true` (opt-in, default `false`); pre-register on production clusters |
-| Integration test "Unexpected workflow task failure" | Either set `EnableSearchAttributes = true` AND use `TestEnvironmentHelper.StartLocalAsync()`, or leave search attributes disabled |
+| Search attributes missing in UI | `opts.EnableSearchAttributes` defaults to `true`; pre-register `AgentName`/`SessionCreatedAt`/`TurnCount` on production clusters — automatic with `temporal server start-dev` |
+| Integration test "Unexpected workflow task failure" | `EnableSearchAttributes` defaults to `true` — use `TestEnvironmentHelper.StartLocalAsync()`, or set `opts.EnableSearchAttributes = false` to disable search attribute upserts |
 | Integration test suite hangs; can't tell which test | `just test-individual <project>` — per-test loop, reports PASS/FAIL/HANG. Default 180s cap, parameterizable. |
 | Test command hangs and pipe-buffering hides output | `just test-logged <project>` — writes to `/tmp/temporalagents-test-*.log`; `tail -f` separately. 600s default cap. |
 | Orphaned `temporal-sdk-dotnet` processes after `pkill` | `just list-orphans` + `just kill-orphans` — narrow to .NET SDK's extracted binary; safe across projects. |

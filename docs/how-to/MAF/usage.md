@@ -1169,19 +1169,7 @@ TemporalAgentTelemetry.AgentClientSendSpanName // "agent.client.send"
 
 ### Search Attributes
 
-Search attribute upserts are **opt-in** — set `EnableSearchAttributes = true` in `TemporalAgentsOptions` to enable them:
-
-```csharp
-builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
-    .AddTemporalAgents(opts =>
-    {
-        opts.AddDurableAgent("Agent", a => a.ChatClient = sp => sp.GetRequiredService<IChatClient>());
-        opts.EnableSearchAttributes = true;
-    });
-```
-
-When enabled, `AgentWorkflow` upserts three [custom search attributes](https://docs.temporal.io/visibility#custom-search-attributes)
+Search attribute upserts are **on by default**. `AgentWorkflow` upserts three [custom search attributes](https://docs.temporal.io/visibility#custom-search-attributes)
 on each workflow, enabling operational queries in the Temporal Web UI and via `ListWorkflowsAsync`:
 
 | Attribute          | Type           | Description                                            |
@@ -1197,12 +1185,15 @@ AgentName = "BillingAgent" AND TurnCount > 10
 SessionCreatedAt > "2026-03-01T00:00:00Z"
 ```
 
-> **Note:** Custom search attributes must be registered with the Temporal server before use.
-> With `temporal server start-dev` they are created automatically. For production clusters, register
-> them via the CLI:
+> **Production clusters:** search attributes (`AgentName`, `SessionCreatedAt`, `TurnCount`) must be
+> pre-registered on your Temporal cluster before workers start. On `temporal server start-dev` they
+> are registered automatically. On production clusters, register them once using the Temporal CLI:
 >
 > ```bash
-> temporal operator search-attribute create --name AgentName --type Keyword
-> temporal operator search-attribute create --name SessionCreatedAt --type Datetime
+> temporal operator search-attribute create --name AgentName --type Text
+> temporal operator search-attribute create --name SessionCreatedAt --type DateTime
 > temporal operator search-attribute create --name TurnCount --type Int
 > ```
+>
+> Set `opts.EnableSearchAttributes = false` to disable search attribute writes if your cluster does
+> not have these attributes registered.
