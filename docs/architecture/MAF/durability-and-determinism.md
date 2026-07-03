@@ -29,7 +29,7 @@ Temporal workflows are designed to be **deterministic** — they must produce th
 [WorkflowRun]
 public async Task<string> RunAsync(string userQuestion)
 {
-    var agent = GetAgent("WeatherAssistant");
+    var agent = GetTemporalAgent("WeatherAssistant");
     var session = await agent.CreateSessionAsync();
 
     // First agent call
@@ -162,12 +162,12 @@ External Caller (e.g. TemporalAIAgentProxy)
 
 ### Path B — Orchestrating Workflow → Sub-Agent (via `TemporalAIAgent`)
 
-Inside an orchestrating `[Workflow]`, `GetAgent()` returns a `TemporalAIAgent` that dispatches inference by calling `Workflow.ExecuteActivityAsync` directly — without starting a separate session workflow:
+Inside an orchestrating `[Workflow]`, `GetTemporalAgent()` returns a `TemporalAIAgent` that dispatches inference by calling `Workflow.ExecuteActivityAsync` directly — without starting a separate session workflow:
 
 ```
 Orchestrating [Workflow] (e.g. ResearchWorkflow)
     ↓
-    var agent = GetAgent("ResearcherAgent");
+    var agent = GetTemporalAgent("ResearcherAgent");
     var session = await agent.CreateSessionAsync();
     await agent.RunAsync(messages, session)
     ↓

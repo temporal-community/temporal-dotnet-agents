@@ -18,7 +18,7 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 
 /// <summary>
 /// Regression tests for the sub-agent execution path (<see cref="TemporalAIAgent"/> via
-/// <see cref="TemporalWorkflowExtensions.GetAgent"/>) combined with an external
+/// <see cref="TemporalWorkflowExtensions.GetTemporalAgent"/>) combined with an external
 /// <see cref="IAgentHistoryStore"/>.
 /// <para>
 /// The bug fixed in commit f0da244: <c>TemporalAIAgent.RunCoreAsync</c> drove the durable
@@ -331,7 +331,7 @@ public class SubAgentHistoryStoreTests
         [WorkflowRun]
         public async Task<string[]> RunAsync(string turn1Msg, string turn2Msg)
         {
-            var agent = GetAgent("SubAgent");
+            var agent = GetTemporalAgent("SubAgent");
             var session = await agent.CreateSessionAsync().ConfigureAwait(true);
             var r1 = await agent.RunAsync(
                 [new ChatMessage(ChatRole.User, turn1Msg)],
@@ -355,7 +355,7 @@ public class SubAgentHistoryStoreTests
         [WorkflowRun]
         public async Task<string> RunAsync(string userMsg)
         {
-            var agent = GetAgent("SubAgent");
+            var agent = GetTemporalAgent("SubAgent");
             var session = await agent.CreateSessionAsync().ConfigureAwait(true);
             var response = await agent.RunAsync(
                 [new ChatMessage(ChatRole.User, userMsg)],

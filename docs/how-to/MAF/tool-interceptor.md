@@ -349,7 +349,7 @@ This matters for write tools. If a turn fans out three tool calls and one of the
 
 `PauseForApproval` requires a workflow with a persistent session — it relies on the `[WorkflowUpdate]` handlers on `AgentWorkflow` to park and resume the turn loop.
 
-On `AgentJobWorkflow` (the workflow backing `AddScheduledAgentRun` and `ScheduleAgentAsync`) and on `TemporalAIAgent` (workflow-context sub-agents accessed via `GetAgent()`), neither has the approval mixin. If an interceptor returns `PauseForApproval` on these paths, the decision degrades automatically to `Block` and a warning is logged. The tool is not dispatched and the LLM receives a block error result.
+On `AgentJobWorkflow` (the workflow backing `AddScheduledAgentRun` and `ScheduleAgentAsync`) and on `TemporalAIAgent` (workflow-context sub-agents accessed via `GetTemporalAgent()`), neither has the approval mixin. If an interceptor returns `PauseForApproval` on these paths, the decision degrades automatically to `Block` and a warning is logged. The tool is not dispatched and the LLM receives a block error result.
 
 If an interceptor may return `PauseForApproval`, use it only with session-backed agents (`TemporalAIAgentProxy` → `AgentWorkflow`). For scheduled jobs and sub-agents, prefer `Skip` or `Block` for policy enforcement.
 

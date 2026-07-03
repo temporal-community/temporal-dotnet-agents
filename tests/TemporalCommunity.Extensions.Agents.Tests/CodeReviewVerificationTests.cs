@@ -137,26 +137,26 @@ public class Conv1WhitespaceName_TemporalAgentsOptions
 
 public class Conv1WhitespaceName_TemporalWorkflowExtensions
 {
-    // GetAgent and NewAgentSessionId both have a Workflow.InWorkflow guard that fires before
+    // GetTemporalAgent and NewAgentSessionId both have a Workflow.InWorkflow guard that fires before
     // the name validation when called outside a workflow. The whitespace ArgumentException is
     // only reachable inside workflow context. These tests document the expected post-fix
-    // behaviour for the whitespace guard on GetAgent and NewAgentSessionId; the outside-workflow
+    // behaviour for the whitespace guard on GetTemporalAgent and NewAgentSessionId; the outside-workflow
     // guard behaviour is already pinned by TemporalWorkflowExtensionsGuardTests.
 
     [Fact]
-    public void GetAgent_OutsideWorkflow_WhitespaceName_ThrowsInvalidOperationException()
+    public void GetTemporalAgent_OutsideWorkflow_WhitespaceName_ThrowsInvalidOperationException()
     {
         // Outside workflow: the Workflow.InWorkflow guard fires first, regardless of name.
         // This confirms the current observable behaviour and prevents a regression where
         // the whitespace check is accidentally moved before the workflow guard.
         Assert.Throws<InvalidOperationException>(() =>
-            TemporalWorkflowExtensions.GetAgent("   "));
+            TemporalWorkflowExtensions.GetTemporalAgent("   "));
     }
 
     [Fact]
     public void NewAgentSessionId_OutsideWorkflow_WhitespaceName_ThrowsInvalidOperationException()
     {
-        // Same guard-ordering constraint as GetAgent above.
+        // Same guard-ordering constraint as GetTemporalAgent above.
         Assert.Throws<InvalidOperationException>(() =>
             TemporalWorkflowExtensions.NewAgentSessionId("   "));
     }

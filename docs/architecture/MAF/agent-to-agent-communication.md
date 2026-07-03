@@ -21,7 +21,7 @@ TemporalAgents supports three distinct patterns for agent-to-agent communication
 
 | Pattern | Context | Mechanism | Use Case |
 |---------|---------|-----------|----------|
-| **GetAgent** | Inside a `[Workflow]` | Activity-based execution | Sequential sub-agent orchestration |
+| **GetTemporalAgent** | Inside a `[Workflow]` | Activity-based execution | Sequential sub-agent orchestration |
 | **ExecuteAgentsInParallelAsync** | Inside a `[Workflow]` | `Workflow.WhenAllAsync` | Concurrent fan-out to multiple agents |
 | **TemporalAgentContext** | Inside an agent tool (activity) | Temporal client operations | Cross-workflow signaling and workflow creation |
 
@@ -29,16 +29,16 @@ All three patterns produce **durable** communication — results are recorded in
 
 ---
 
-## Pattern 1: Workflow → Sub-Agent (GetAgent)
+## Pattern 1: Workflow → Sub-Agent (GetTemporalAgent)
 
 The most common pattern: an orchestrating workflow calls one or more agents sequentially.
 
 ### How It Works
 
-`TemporalWorkflowExtensions.GetAgent()` returns a `TemporalAIAgent` — a workflow-safe `AIAgent` that executes inference via `Workflow.ExecuteActivityAsync`. The agent's conversation history is stored as workflow state and replayed from event history:
+`TemporalWorkflowExtensions.GetTemporalAgent()` returns a `TemporalAIAgent` — a workflow-safe `AIAgent` that executes inference via `Workflow.ExecuteActivityAsync`. The agent's conversation history is stored as workflow state and replayed from event history:
 
 ```csharp
-public static TemporalAIAgent GetAgent(
+public static TemporalAIAgent GetTemporalAgent(
     string agentName,
     ActivityOptions? activityOptions = null)
 {
@@ -55,13 +55,13 @@ public class ResearchWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
-        var researcher = TemporalWorkflowExtensions.GetAgent("ResearcherAgent");
+        var researcher = TemporalWorkflowExtensions.GetTemporalAgent("ResearcherAgent");
         var session = await researcher.CreateSessionAsync();
 
         var outline = await researcher.RunAsync(
             $"Create an outline about: {topic}", session);
 
-        var writer = TemporalWorkflowExtensions.GetAgent("WriterAgent");
+        var writer = TemporalWorkflowExtensions.GetTemporalAgent("WriterAgent");
         var writerSession = await writer.CreateSessionAsync();
 
         var draft = await writer.RunAsync(
@@ -99,15 +99,15 @@ var sessionId = TemporalWorkflowExtensions.NewAgentSessionId("MyAgent");
 
 ### Important: One Instance Per Conversation
 
-Two sessions on the same `TemporalAIAgent` instance share history because history is stored on the instance. If you need independent conversations, create separate `GetAgent` calls:
+Two sessions on the same `TemporalAIAgent` instance share history because history is stored on the instance. If you need independent conversations, create separate `GetTemporalAgent` calls:
 
 ```csharp
 // CORRECT: two independent agents with independent histories
-var agent1 = TemporalWorkflowExtensions.GetAgent("Analyst");
-var agent2 = TemporalWorkflowExtensions.GetAgent("Analyst");
+var agent1 = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
+var agent2 = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
 
 // WRONG: session2 will see session1's history
-var agent = TemporalWorkflowExtensions.GetAgent("Analyst");
+var agent = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
 var session1 = await agent.CreateSessionAsync();
 await agent.RunAsync("Question 1", session1);
 var session2 = await agent.CreateSessionAsync();
@@ -125,8 +125,8 @@ public class EvaluatorOptimizerWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string task, int maxIterations = 3)
     {
-        var generator = GetAgent("Generator");
-        var evaluator = GetAgent("Evaluator");
+        var generator = GetTemporalAgent("Generator");
+        var evaluator = GetTemporalAgent("Evaluator");
 
         var genSession = await generator.CreateSessionAsync();
         var evalSession = await evaluator.CreateSessionAsync();
@@ -202,9 +202,9 @@ public class RoutingWorkflow
     [WorkflowRun]
     public async Task<string[]> RunAsync(string userQuery)
     {
-        var weather = GetAgent("WeatherAgent");
-        var billing = GetAgent("BillingAgent");
-        var techSupport = GetAgent("TechSupportAgent");
+        var weather = GetTemporalAgent("WeatherAgent");
+        var billing = GetTemporalAgent("BillingAgent");
+        var techSupport = GetTemporalAgent("TechSupportAgent");
 
         var wSession = await weather.CreateSessionAsync();
         var bSession = await billing.CreateSessionAsync();
@@ -284,7 +284,7 @@ public class MonitorWorkflow
         // ... wait for enough health-check signals ...
 
         // Analyze via LLM agent
-        var analysisAgent = GetAgent("AnalysisAgent");
+        var analysisAgent = GetTemporalAgent("AnalysisAgent");
         var session = await analysisAgent.CreateSessionAsync();
         var response = await analysisAgent.RunAsync(
             [new ChatMessage(ChatRole.User, summary)], session);
@@ -347,7 +347,7 @@ public class AlertWorkflow
             // Process pending alerts with an LLM agent
             foreach (var alert in _pendingAlerts.ToList())
             {
-                var alertAgent = GetAgent("AlertAgent");
+                var alertAgent = GetTemporalAgent("AlertAgent");
                 var session = await alertAgent.CreateSessionAsync();
                 var response = await alertAgent.RunAsync(
                     [new ChatMessage(ChatRole.User, /* prompt */)], session);
@@ -364,7 +364,7 @@ This demonstrates a three-stage pipeline: **Signal ingestion → LLM analysis �
 
 ## Pattern Comparison
 
-| | GetAgent | ExecuteAgentsInParallelAsync | TemporalAgentContext |
+| | GetTemporalAgent | ExecuteAgentsInParallelAsync | TemporalAgentContext |
 |---|---|---|---|
 | **Context** | Inside `[Workflow]` | Inside `[Workflow]` | Inside agent tool (activity) |
 | **Mechanism** | `ExecuteActivityAsync` | `Workflow.WhenAllAsync` | Direct `ITemporalClient` calls |
@@ -379,7 +379,7 @@ This demonstrates a three-stage pipeline: **Signal ingestion → LLM analysis �
 ## Choosing the Right Pattern
 
 **Do your agents need to run sequentially with shared context?**
-- **Yes** → Use **Pattern 1** (GetAgent). Each agent can build on the previous agent's output.
+- **Yes** → Use **Pattern 1** ( GetTemporalAgent). Each agent can build on the previous agent's output.
 
 **Do your agents work independently on the same input?**
 - **Yes** → Use **Pattern 2** (ExecuteAgentsInParallelAsync). Get results faster by running agents concurrently.
@@ -400,7 +400,7 @@ Absolutely. A common composition:
 public async Task<string> RunAsync(string question)
 {
     // Pattern 1: classify
-    var classifier = GetAgent("Classifier");
+    var classifier = GetTemporalAgent("Classifier");
     var session = await classifier.CreateSessionAsync();
     var intent = await classifier.RunAsync(question, session);
 
@@ -418,7 +418,7 @@ public async Task<string> RunAsync(string question)
 
 ## References
 
-- `src/TemporalCommunity.Extensions.Agents/TemporalWorkflowExtensions.cs` — `GetAgent`, `ExecuteAgentsInParallelAsync`
+- `src/TemporalCommunity.Extensions.Agents/TemporalWorkflowExtensions.cs` — `GetTemporalAgent`, `ExecuteAgentsInParallelAsync`
 - `src/TemporalCommunity.Extensions.Agents/TemporalAIAgent.cs` — workflow-safe agent with activity-based execution
 - `src/TemporalCommunity.Extensions.Agents/Session/TemporalAgentContext.cs` — async-local Temporal capabilities for tools
 - `samples/MAF/WorkflowOrchestration/` — Pattern 1 example

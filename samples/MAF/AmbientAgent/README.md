@@ -20,14 +20,14 @@ External System (simulated in Program.cs)
     ▼
 MonitorWorkflow (custom [Workflow])
     ├─ _buffer: bounded rolling window of HealthCheckData
-    ├─ Every N readings → GetAgent("AnalysisAgent") via activity
+    ├─ Every N readings → GetTemporalAgent("AnalysisAgent") via activity
     ├─ If response contains "ANOMALY" → signal AlertWorkflow via activity
     ├─ [WorkflowQuery("GetStatus")] for external monitoring
     └─ Continue-as-new when history grows (carries buffer forward)
 
 AlertWorkflow (custom [Workflow])
     ├─ [WorkflowSignal("IngestAnomaly")] receives AnomalyAlert
-    ├─ GetAgent("AlertAgent") via activity → compose notification
+    ├─ GetTemporalAgent("AlertAgent") via activity → compose notification
     ├─ Stores notifications for query inspection
     └─ [WorkflowQuery("GetNotifications")] for inspection
 ```
@@ -52,7 +52,7 @@ External code inspects workflow state via `[WorkflowQuery]` — e.g., `GetStatus
 
 - **Custom workflows, not AgentWorkflow.** `AgentWorkflow` is designed for conversational sessions with history/HITL. The monitor needs signal-driven data ingestion + periodic batch analysis — a fundamentally different loop structure.
 
-- **`GetAgent()` inside workflows for LLM calls.** This is the standard sub-agent pattern. Each LLM call runs as a durable activity — crash-safe and automatically replayed on recovery.
+- **`GetTemporalAgent()` inside workflows for LLM calls.** This is the standard sub-agent pattern. Each LLM call runs as a durable activity — crash-safe and automatically replayed on recovery.
 
 - **Cross-workflow signal via activity.** Since the Temporal .NET SDK doesn't have `Workflow.SignalExternalWorkflow`, we use the established pattern of an activity with `ITemporalClient`.
 

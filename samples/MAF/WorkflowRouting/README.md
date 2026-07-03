@@ -16,12 +16,12 @@ User Question
     ▼
 CustomerServiceWorkflow
     │
-    ├─ GetAgent("Classifier")  →  "ORDERS" / "TECH_SUPPORT" / "GENERAL"
+    ├─ GetTemporalAgent("Classifier")  →  "ORDERS" / "TECH_SUPPORT" / "GENERAL"
     │
     ├─ switch (classification)
-    │     "ORDERS"       → GetAgent("OrdersAgent")
-    │     "TECH_SUPPORT" → GetAgent("TechSupportAgent")
-    │     _              → GetAgent("GeneralAgent")
+    │     "ORDERS"       → GetTemporalAgent("OrdersAgent")
+    │     "TECH_SUPPORT" → GetTemporalAgent("TechSupportAgent")
+    │     _              → GetTemporalAgent("GeneralAgent")
     │
     └─ Return specialist response
 ```
@@ -162,7 +162,7 @@ DynamicRoutingWorkflow
     │    └─ returns: [("OrdersAgent", "Handles orders..."), ("TechSupportAgent", "..."), ...]
     │    └─ result cached in event history (replay-safe)
     │
-    ├─ GetAgent("Classifier") with dynamic prompt:
+    ├─ GetTemporalAgent("Classifier") with dynamic prompt:
     │    "Available agents:\n  OrdersAgent — Handles orders...\n  ..."
     │    └─ LLM picks: "OrdersAgent"
     │
@@ -170,7 +170,7 @@ DynamicRoutingWorkflow
     │    └─ confirms agent exists in registry
     │    └─ result cached in event history (replay-safe)
     │
-    └─ GetAgent("OrdersAgent") → specialist response
+    └─ GetTemporalAgent("OrdersAgent") → specialist response
 ```
 
 ### Why This is Truly Dynamic

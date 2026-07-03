@@ -28,7 +28,7 @@ namespace TemporalCommunity.Extensions.Agents;
 /// </summary>
 /// <remarks>
 /// Use this type only from inside a Temporal workflow (e.g., via
-/// <see cref="TemporalWorkflowExtensions.GetAgent"/>). For external/host code
+/// <see cref="TemporalWorkflowExtensions.GetTemporalAgent"/>). For external/host code
 /// (API servers, CLIs, console apps), resolve a Temporal agent proxy via
 /// <see cref="ServiceCollectionExtensions.GetTemporalAgentProxy"/>.
 /// </remarks>

@@ -15,7 +15,7 @@ Client
   ▼
 SupportWorkflow ([Workflow])
   │
-  ├─ GetAgent("TriageAgent")
+  ├─ GetTemporalAgent("TriageAgent")
   │    ├─ RunAsync(customerMessage)           ← RunDurableAgentStep activity
   │    │    └─ LookupOrder tool              ← InvokeAgentTool activity
   │    └─ response contains [ESCALATE: ...]?
@@ -24,7 +24,7 @@ SupportWorkflow ([Workflow])
   │
   └─── Yes → extract caseSummary
                │
-               ├─ GetAgent("EscalationAgent")
+               ├─ GetTemporalAgent("EscalationAgent")
                │    └─ RunAsync(caseSummary + original message)
                │         ├─ RunDurableAgentStep activity
                │         └─ GetReturnPolicy tool   ← InvokeAgentTool activity

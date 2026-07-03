@@ -27,12 +27,12 @@ public static class TemporalWorkflowExtensions
     /// resolve a <see cref="TemporalAIAgentProxy"/> via <c>GetTemporalAgentProxy(name)</c>.
     /// </remarks>
     /// <exception cref="InvalidOperationException">Thrown when called outside a Temporal workflow.</exception>
-    public static TemporalAIAgent GetAgent(string agentName, ActivityOptions? activityOptions = null)
+    public static TemporalAIAgent GetTemporalAgent(string agentName, ActivityOptions? activityOptions = null)
     {
         if (!Workflow.InWorkflow)
         {
             throw new InvalidOperationException(
-                $"{nameof(GetAgent)} can only be called from within a Temporal workflow. " +
+                $"{nameof(GetTemporalAgent)} can only be called from within a Temporal workflow. " +
                 "If you need to invoke an agent from external code, resolve a TemporalAIAgentProxy " +
                 "from your service provider via GetTemporalAgentProxy(name) instead.");
         }
@@ -84,9 +84,9 @@ public static class TemporalWorkflowExtensions
     /// <code>
     /// var results = await ExecuteAgentsInParallelAsync(new[]
     /// {
-    ///     (GetAgent("Researcher"),  researchMessages,  researchSession),
-    ///     (GetAgent("Summarizer"),  summaryMessages,   summarySession),
-    ///     (GetAgent("Critic"),      criticMessages,    criticSession),
+    ///     (GetTemporalAgent("Researcher"),  researchMessages,  researchSession),
+    ///     (GetTemporalAgent("Summarizer"),  summaryMessages,   summarySession),
+    ///     (GetTemporalAgent("Critic"),      criticMessages,    criticSession),
     /// });
     /// </code>
     /// </example>

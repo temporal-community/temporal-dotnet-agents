@@ -18,10 +18,10 @@ User Question
     ▼
 RoutingWorkflow                         ParallelAgentWorkflow
     │                                       │
-    ├─ Activity: ClassifyRequest()          ├─ GetAgent("WeatherAgent")    ─┐
-    │    └─ returns: "WeatherAgent"         ├─ GetAgent("BillingAgent")    ─┼─ ExecuteAgentsInParallelAsync
-    │                                       └─ GetAgent("TechSupportAgent") ┘
-    └─ GetAgent(agentName).RunAsync()              │
+    ├─ Activity: ClassifyRequest()          ├─ GetTemporalAgent("WeatherAgent")    ─┐
+    │    └─ returns: "WeatherAgent"         ├─ GetTemporalAgent("BillingAgent")    ─┼─ ExecuteAgentsInParallelAsync
+    │                                       └─ GetTemporalAgent("TechSupportAgent") ┘
+    └─ GetTemporalAgent(agentName).RunAsync()              │
          └─ specialist response               IReadOnlyList<AgentResponse>
 ```
 

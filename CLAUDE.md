@@ -77,7 +77,7 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 **Configuration**: see `docs/how-to/MAF/usage.md` for the full `TemporalAgentsOptions` reference. Worker-level defaults are prefixed `Default*` (e.g. `DefaultActivityTimeout`, `DefaultHeartbeatTimeout`, `DefaultApprovalTimeout`, `DefaultMaxEntryCount`, `DefaultRetryPolicy`, `DefaultHistoryReducer`, `DefaultTimeToLive`); per-agent overrides on `DurableAgentBuilder` use the unprefixed names. Inheritance rule: `effective = registration.X ?? options.DefaultX`. The worker-level `HistoryStore` factory keeps the unprefixed name (presence is opt-in).
 
 **Two agent types** (use the right one for context):
-- `TemporalAIAgent` — workflow-context sub-agent. Access via `TemporalWorkflowExtensions.GetAgent("Name")`.
+- `TemporalAIAgent` — workflow-context sub-agent. Access via `TemporalWorkflowExtensions.GetTemporalAgent("Name")`.
 - `TemporalAIAgentProxy` — external-context proxy. Access via `services.GetTemporalAgentProxy("Name")`.
 
 **HITL**: see `docs/how-to/MAF/hitl-patterns.md`. Activity timeout must accommodate human review time.
@@ -158,7 +158,7 @@ For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how
 
 ### ✅ DO
 - Use the fluent `.AddTemporalAgents()` builder
-- Use `GetAgent()` inside workflows for sub-agent orchestration
+- Use `GetTemporalAgent()` inside workflows for sub-agent orchestration
 - Use `Workflow.UtcNow` and `Workflow.NewGuid()` (not `DateTime.UtcNow` / `Guid.NewGuid()`)
 - Set appropriate per-agent TTLs (default: 14 days)
 - Validate config eagerly — `string.IsNullOrEmpty` + `InvalidOperationException` for missing config (not `is null` + `ArgumentNullException`)
@@ -271,7 +271,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 |---|---|
 | "Cannot find Temporalio package" | Use NuGet, not project refs; `dotnet restore` |
 | "Agent not registered" | Verify `.AddTemporalAgents()` includes the agent |
-| `InvalidOperationException` from `TemporalAIAgent` (called outside workflow) | `TemporalAIAgent` is workflow-context only. Obtain it via `TemporalWorkflowExtensions.GetAgent` inside a `[Workflow]` method. For external callers, use `services.GetTemporalAgentProxy("Name")` instead. |
+| `InvalidOperationException` from `TemporalAIAgent` (called outside workflow) | `TemporalAIAgent` is workflow-context only. Obtain it via `TemporalWorkflowExtensions.GetTemporalAgent` inside a `[Workflow]` method. For external callers, use `services.GetTemporalAgentProxy("Name")` instead. |
 | `GetTypeInfo metadata not provided` for `TemporalAgentSession` | Don't serialize via `DefaultOptions`; use `StateBag.Serialize()` |
 | Activity timeout (HITL) | Increase `DefaultActivityTimeout` (or per-agent `ActivityTimeout`) to accommodate human review time |
 | Worker won't start | `temporal server start-dev` running on `localhost:7233`? |

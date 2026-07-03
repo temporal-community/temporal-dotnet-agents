@@ -227,7 +227,7 @@ public class ResearchWorkflow
     public async Task RunAsync(string topic)
     {
         // Run the initial analysis now.
-        var analyst = GetAgent("AnalystAgent");
+        var analyst = GetTemporalAgent("AnalystAgent");
         var session = await analyst.CreateSessionAsync();
         await analyst.RunAsync($"Analyze the current state of: {topic}", session);
 

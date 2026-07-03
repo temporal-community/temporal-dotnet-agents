@@ -69,7 +69,7 @@ builder.Services
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
 | `RetryPolicy` | Retry policy for the agent's `RunAgentStep` activity (the LLM call). Per-tool retry is configured separately via `DurableToolOptions`. |
 | `MaxEntryCount`, `HistoryReducer` | Per-agent continue-as-new bounds and reducer. Inherit worker defaults when unset. |
-| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
+| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
 | `HistoryStore` | Per-agent `IAgentHistoryStore` factory. `null` inherits `opts.HistoryStore`; if both are `null`, history is carried in workflow state. |
 | `CompactionStrategyKey` | Keyed-DI name of the `ICompactionStrategy` to use for in-session compaction. `null` inherits `opts.DefaultCompactionStrategy`; both `null` disables compaction. Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"`. Requires an external history store. `[Experimental("TA002")]`. See [`compaction.md`](./compaction.md). |
 | `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
@@ -307,7 +307,7 @@ var report = await agentProxy.RunAsync<WeatherReport>(
 
 ```csharp
 // Inside a workflow
-var agent = TemporalWorkflowExtensions.GetAgent("AnalystAgent");
+var agent = TemporalWorkflowExtensions.GetTemporalAgent("AnalystAgent");
 var session = await agent.CreateSessionAsync();
 var analysis = await agent.RunAsync<AnalysisResult>(messages, session);
 
@@ -350,7 +350,7 @@ var response = await agentProxy.RunAsync("Look up the latest news.", session, op
 
 ## Agent Orchestration (Inside Workflows)
 
-Use `TemporalWorkflowExtensions.GetAgent` to interact with agents from within an orchestrating Temporal workflow. The
+Use `TemporalWorkflowExtensions.GetTemporalAgent` to interact with agents from within an orchestrating Temporal workflow. The
 agent's conversation history is stored in the workflow's event history and replayed automatically.
 
 ```csharp
@@ -364,12 +364,12 @@ public class ResearchWorkflow
     public async Task<string> RunAsync(string topic)
     {
         // Get a TemporalAIAgent — runs inference via activity, history tracked in workflow state
-        var researcher = TemporalWorkflowExtensions.GetAgent("ResearcherAgent");
+        var researcher = TemporalWorkflowExtensions.GetTemporalAgent("ResearcherAgent");
         var session = await researcher.CreateSessionAsync();
 
         var outline = await researcher.RunAsync($"Create an outline about: {topic}", session);
 
-        var writer = TemporalWorkflowExtensions.GetAgent("WriterAgent");
+        var writer = TemporalWorkflowExtensions.GetTemporalAgent("WriterAgent");
         var writerSession = await writer.CreateSessionAsync();
 
         var draft = await writer.RunAsync(
@@ -381,7 +381,7 @@ public class ResearchWorkflow
 }
 ```
 
-`TemporalAIAgent` (returned by `GetAgent`) stores the conversation history as workflow state. This means it survives
+`TemporalAIAgent` (returned by `GetTemporalAgent`) stores the conversation history as workflow state. This means it survives
 worker restarts, supports retries, and is durable by design — all without any extra persistence code.
 
 ---
@@ -390,7 +390,7 @@ worker restarts, supports retries, and is durable by design — all without any 
 
 Use `TemporalAIAgentProxy` to interact with a registered agent from outside a Temporal workflow — for example, from an
 ASP.NET handler, a background service, or a console application. The proxy communicates with the running `AgentWorkflow`
-via Temporal workflow updates and is the correct counterpart to `TemporalWorkflowExtensions.GetAgent`, which is
+via Temporal workflow updates and is the correct counterpart to `TemporalWorkflowExtensions.GetTemporalAgent`, which is
 workflow-context only.
 
 `TemporalAIAgentProxy` is `internal`; callers always reference it as `AIAgent` (MAF's base class). Resolution is always
@@ -398,12 +398,12 @@ via `services.GetTemporalAgentProxy("Name")`.
 
 | | `TemporalAIAgent` | `TemporalAIAgentProxy` |
 |---|---|---|
-| Returned by | `TemporalWorkflowExtensions.GetAgent("Name")` | `services.GetTemporalAgentProxy("Name")` |
+| Returned by | `TemporalWorkflowExtensions.GetTemporalAgent("Name")` | `services.GetTemporalAgentProxy("Name")` |
 | Context | Inside a `[Workflow]` method | Outside a workflow (ASP.NET, console, background service) |
 | History | Stored in the calling workflow's event history | Stored in the target `AgentWorkflow`'s event history |
 | Session | New or existing `TemporalAgentSession` | Same |
 
-> **Misuse guard:** `TemporalWorkflowExtensions.GetAgent` throws `InvalidOperationException` when called outside a
+> **Misuse guard:** `TemporalWorkflowExtensions.GetTemporalAgent` throws `InvalidOperationException` when called outside a
 > workflow context with the message: _"If you need to invoke an agent from external code, resolve a
 > TemporalAIAgentProxy from your service provider via GetTemporalAgentProxy(name) instead."_
 > Additionally, `TemporalAIAgent.RunAsync` (via `RunCoreAsync`) throws `InvalidOperationException` if invoked
@@ -570,11 +570,11 @@ builder.Services
 
 ### Activity Timeouts for In-Workflow Agents
 
-When using `TemporalWorkflowExtensions.GetAgent` inside an orchestrating workflow, pass `ActivityOptions` directly at
+When using `TemporalWorkflowExtensions.GetTemporalAgent` inside an orchestrating workflow, pass `ActivityOptions` directly at
 the call site:
 
 ```csharp
-var researcher = TemporalWorkflowExtensions.GetAgent(
+var researcher = TemporalWorkflowExtensions.GetTemporalAgent(
     "ResearcherAgent",
     activityOptions: new ActivityOptions
     {
@@ -666,8 +666,8 @@ public class ResearchAndSummarizeWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
-        var researchAgent  = TemporalWorkflowExtensions.GetAgent("ResearchAgent");
-        var summaryAgent   = TemporalWorkflowExtensions.GetAgent("SummaryAgent");
+        var researchAgent  = TemporalWorkflowExtensions.GetTemporalAgent("ResearchAgent");
+        var summaryAgent   = TemporalWorkflowExtensions.GetTemporalAgent("SummaryAgent");
 
         var researchSession = TemporalWorkflowExtensions.NewAgentSessionId("ResearchAgent");
         var summarySession  = TemporalWorkflowExtensions.NewAgentSessionId("SummaryAgent");
@@ -905,7 +905,7 @@ public class ResearchWorkflow
     public async Task RunAsync(string topic)
     {
         // Run the main analysis immediately
-        var analyst = TemporalWorkflowExtensions.GetAgent("AnalystAgent");
+        var analyst = TemporalWorkflowExtensions.GetTemporalAgent("AnalystAgent");
         var session = await analyst.CreateSessionAsync();
         await analyst.RunAsync($"Analyze: {topic}", session);
 
@@ -1072,7 +1072,7 @@ Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activ
 | `WithMaxAttempts(int n)` | Sugar for fixed-attempt retry. |
 | `WithTimeout(TimeSpan t)` | Sugar for `StartToCloseTimeout`. |
 
-`agent.MaxToolCallsPerTurn` (default `20` when not set) caps step-loop iterations per single agent turn. The value propagates from the agent's registration into session-based workflows, scheduled jobs, and sub-agent calls via `GetAgent()` — you configure it once on the builder and it takes effect everywhere. When exceeded, the workflow returns a structured "iteration cap exceeded" assistant message rather than letting workflow history grow unbounded.
+`agent.MaxToolCallsPerTurn` (default `20` when not set) caps step-loop iterations per single agent turn. The value propagates from the agent's registration into session-based workflows, scheduled jobs, and sub-agent calls via `GetTemporalAgent()` — you configure it once on the builder and it takes effect everywhere. When exceeded, the workflow returns a structured "iteration cap exceeded" assistant message rather than letting workflow history grow unbounded.
 
 ```csharp
 builder.Services

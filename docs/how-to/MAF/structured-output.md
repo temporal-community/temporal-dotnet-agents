@@ -210,7 +210,7 @@ This is useful when:
 ### Inside a Workflow (TemporalAIAgent)
 
 ```csharp
-var agent = TemporalWorkflowExtensions.GetAgent("AnalystAgent");
+var agent = TemporalWorkflowExtensions.GetTemporalAgent("AnalystAgent");
 var session = await agent.CreateSessionAsync();
 
 var analysis = await agent.RunAsync<AnalysisResult>(

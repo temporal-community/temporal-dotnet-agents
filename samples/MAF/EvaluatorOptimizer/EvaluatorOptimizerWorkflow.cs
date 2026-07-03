@@ -34,8 +34,8 @@ public class EvaluatorOptimizerWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string task, int maxIterations = 3)
     {
-        var generator = GetAgent("Generator");
-        var evaluator = GetAgent("Evaluator");
+        var generator = GetTemporalAgent("Generator");
+        var evaluator = GetTemporalAgent("Evaluator");
 
         var genSession = await generator.CreateSessionAsync().ConfigureAwait(true);
         var evalSession = await evaluator.CreateSessionAsync().ConfigureAwait(true);

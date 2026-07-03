@@ -24,12 +24,12 @@ public class TemporalWorkflowExtensionsTests
     }
 
     [Fact]
-    public void GetAgent_IsPublicStaticMethod()
+    public void GetTemporalAgent_IsPublicStaticMethod()
     {
-        // GetAgent is now guarded with a runtime workflow-context check, so we can't invoke
+        // GetTemporalAgent is now guarded with a runtime workflow-context check, so we can't invoke
         // it from a unit test. Verify the surface remains discoverable via reflection.
         var method = typeof(TemporalWorkflowExtensions).GetMethod(
-            nameof(TemporalWorkflowExtensions.GetAgent));
+            nameof(TemporalWorkflowExtensions.GetTemporalAgent));
 
         Assert.NotNull(method);
         Assert.True(method.IsStatic);

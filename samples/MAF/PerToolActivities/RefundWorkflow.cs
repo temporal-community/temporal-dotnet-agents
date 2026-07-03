@@ -29,7 +29,7 @@ public sealed class RefundWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string customerComplaint)
     {
-        var agent = GetAgent("RefundAgent");
+        var agent = GetTemporalAgent("RefundAgent");
         var session = await agent.CreateSessionAsync().ConfigureAwait(true);
 
         var response = await agent.RunAsync(

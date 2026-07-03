@@ -17,10 +17,10 @@ EvaluatorOptimizerWorkflow.RunAsync(task, maxIterations)
     │
     ├─ loop (up to maxIterations)
     │     │
-    │     ├─ GetAgent("Generator").RunAsync(prompt)    ← activity (cached in history)
+    │     ├─ GetTemporalAgent("Generator").RunAsync(prompt)    ← activity (cached in history)
     │     │     └─ produces: draft text
     │     │
-    │     ├─ GetAgent("Evaluator").RunAsync(draft)     ← activity (cached in history)
+    │     ├─ GetTemporalAgent("Evaluator").RunAsync(draft)     ← activity (cached in history)
     │     │     └─ produces: "APPROVED" or feedback
     │     │
     │     └─ if "APPROVED" → break; else → revise prompt with feedback

@@ -16,7 +16,7 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 
 /// <summary>
 /// X-3 — <see cref="TemporalAIAgent"/> (orchestration sub-agent via
-/// <see cref="TemporalWorkflowExtensions.GetAgent"/>) threads its StateBag across steps. A context
+/// <see cref="TemporalWorkflowExtensions.GetTemporalAgent"/>) threads its StateBag across steps. A context
 /// provider's StateBag write in step N must be visible to the provider in step N+1.
 ///
 /// <para>
@@ -106,7 +106,7 @@ public class SubAgentStateBagThreadingTests
         [WorkflowRun]
         public async Task<string> RunAsync(string userMsg)
         {
-            var agent = GetAgent("SubAgent");
+            var agent = GetTemporalAgent("SubAgent");
             var session = await agent.CreateSessionAsync().ConfigureAwait(true);
             var response = await agent.RunAsync(
                 [new ChatMessage(ChatRole.User, userMsg)], session).ConfigureAwait(true);

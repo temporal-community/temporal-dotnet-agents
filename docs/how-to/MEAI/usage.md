@@ -625,7 +625,7 @@ Non-sensitive settings (`OPENAI_API_BASE_URL`, `OPENAI_MODEL`) remain in `sample
 Reach for `TemporalCommunity.Extensions.Agents` when your use case calls for any of the following:
 
 - **LLM-powered routing** — automatically dispatching user messages to a specialist agent based on intent
-- **Multi-agent orchestration** — running sub-agents from inside a workflow with `GetAgent` and parallel fan-out with `ExecuteAgentsInParallelAsync`
+- **Multi-agent orchestration** — running sub-agents from inside a workflow with `GetTemporalAgent` and parallel fan-out with `ExecuteAgentsInParallelAsync`
 - **The Microsoft Agent Framework model** — building with `AIAgent`, `ChatClientAgent`, `AgentSessionStateBag`, and `AIContextProvider`
 - **Scheduled agent runs** — recurring or deferred agent invocations managed by Temporal Schedules
 

@@ -42,7 +42,7 @@ public class RoutingWorkflow
             ClassifyActivityOptions).ConfigureAwait(true);
 
         // ── Step 2: Dispatch to the chosen specialist ────────────────────────
-        var specialist = GetAgent(agentName);
+        var specialist = GetTemporalAgent(agentName);
         var session = await specialist.CreateSessionAsync().ConfigureAwait(true);
         var response = await specialist.RunAsync(
             [new ChatMessage(ChatRole.User, userQuestion)],
@@ -67,9 +67,9 @@ public class ParallelAgentWorkflow
     [WorkflowRun]
     public async Task<string[]> RunAsync(string userQuery)
     {
-        var weather     = GetAgent("WeatherAgent");
-        var billing     = GetAgent("BillingAgent");
-        var techSupport = GetAgent("TechSupportAgent");
+        var weather     = GetTemporalAgent("WeatherAgent");
+        var billing     = GetTemporalAgent("BillingAgent");
+        var techSupport = GetTemporalAgent("TechSupportAgent");
 
         var wSession = await weather.CreateSessionAsync().ConfigureAwait(true);
         var bSession = await billing.CreateSessionAsync().ConfigureAwait(true);
