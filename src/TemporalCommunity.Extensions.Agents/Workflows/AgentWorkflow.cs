@@ -48,11 +48,16 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     // dispatches we pass null instead of re-sending the full JSON, which at 64 KB × N
     // activities would add ~700 KB of redundant history bytes per iteration.
     //
-    // Determinism: we use GetRawText().GetHashCode() — same bytes → same hash — which is
-    // deterministic across replay as long as JsonElement serialization is. SHA-256 would be
-    // cryptographically stronger but costs allocs + crypto; change-detection only needs
-    // determinism, not collision resistance. Hash is a pure int that is never stored in
-    // Temporal history (it is a workflow-thread local variable reset on each CAN).
+    // Determinism: we use StableHash(rawText) — a fixed-seed FNV-1a 32-bit hash — to detect
+    // whether the bag changed between dispatches. We deliberately do NOT use string.GetHashCode()
+    // because .NET randomizes it per-process to prevent hash-flooding; two runs of the workflow
+    // would compute different hashes for identical bytes, making the "did it change?" comparison
+    // diverge and producing a NonDeterministicWorkflowException in rare hash-collision cases.
+    //
+    // The hash is a workflow-thread local variable that is NEVER stored in Temporal history and
+    // never crosses a process boundary — it is reset on every CAN (line ~948). The only risk
+    // is a collision (probability ~1/2^32 per turn-pair); using a stable hash makes that risk
+    // consistent across replay runs instead of process-seed-dependent.
     //
     // Activities receiving null where they previously received a bag must behave identically
     // to receiving the unchanged bag. The merge target (_currentStateBag) is always authoritative;
@@ -950,7 +955,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         }
 
         var rawText = _currentStateBag.Value.GetRawText();
-        var hash = rawText.GetHashCode();
+        var hash = StableHash(rawText);
 
         if (!force && _lastSentStateBagHash.HasValue && _lastSentStateBagHash.Value == hash)
         {
@@ -960,6 +965,30 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
 
         _lastSentStateBagHash = hash;
         return _currentStateBag;
+    }
+
+    /// <summary>
+    /// FNV-1a 32-bit hash — fixed-seed, deterministic across process restarts.
+    /// Used for StateBag change detection. We cannot use <see cref="string.GetHashCode"/>
+    /// because .NET randomizes it per-process (hash-flooding protection); a collision
+    /// between two different bags under one seed but not another would cause the
+    /// null-vs-full-bag dispatch decision to diverge on replay and produce a
+    /// <c>WorkflowNondeterminismException</c>.
+    /// </summary>
+    private static int StableHash(string s)
+    {
+        unchecked
+        {
+            const int offsetBasis = -2128831035; // FNV-1a 32-bit offset basis
+            const int prime = 16777619;          // FNV-1a 32-bit prime
+            var hash = offsetBasis;
+            foreach (var c in s)
+            {
+                hash ^= c;
+                hash *= prime;
+            }
+            return hash;
+        }
     }
 
     private List<ChatMessage> FlattenHistoryMessages()
