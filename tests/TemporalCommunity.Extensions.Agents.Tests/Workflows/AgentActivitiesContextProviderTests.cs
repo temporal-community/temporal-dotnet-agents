@@ -62,7 +62,7 @@ public class AgentActivitiesContextProviderTests
     /// the provider returned.
     /// </summary>
     [Fact]
-    public async Task ContextProvider_ReturningTools_EmitsExactlyOneError()
+    public async Task RunDurableAgentStep_ProviderReturnsTools_EmitsExactlyOneLogError()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -98,7 +98,7 @@ public class AgentActivitiesContextProviderTests
     /// When no context provider is registered, no error is emitted.
     /// </summary>
     [Fact]
-    public async Task NoContextProviders_NoErrorEmitted()
+    public async Task RunDurableAgentStep_NoProviders_EmitsNoLogError()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
@@ -146,7 +146,7 @@ public class AgentActivitiesContextProviderTests
     /// is emitted (not two — one per provider).
     /// </summary>
     [Fact]
-    public async Task TwoContextProviders_OnlyFirstReturnsTools_ExactlyOneError()
+    public async Task RunDurableAgentStep_TwoProviders_OnlyFirstReturnsTools_EmitsExactlyOneLogError()
     {
         var (activities, logFactory) = BuildHarness(opts =>
         {
