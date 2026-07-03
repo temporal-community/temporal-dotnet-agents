@@ -2,18 +2,18 @@
 
 ## Overview
 
-Shows how to call an AI agent from inside a custom Temporal workflow using `TemporalWorkflowExtensions.GetAgent()`. The workflow itself is the orchestrator — it starts the agent, passes a question, and returns the result as its final output.
+Shows how to call an AI agent from inside a custom Temporal workflow using `TemporalWorkflowExtensions.GetTemporalAgent()`. The workflow itself is the orchestrator — it starts the agent, passes a question, and returns the result as its final output.
 
 This sample demonstrates:
 - A custom `[Workflow]` (`WeatherOrchestrationWorkflow`) driving an agent call
-- `GetAgent("WeatherAssistant")` resolving a registered agent by name inside workflow code
+- `GetTemporalAgent("WeatherAssistant")` resolving a registered agent by name inside workflow code
 - Deterministic agent execution via `Workflow.ExecuteActivityAsync()` under the hood
 - A weather tool registered via `agent.AddTool(weatherTool)` on the durable-agent builder
 
 ## Highlights
 
 - **Workflow as orchestrator, not just session container.** Unlike the external-caller pattern (where a client sends updates to `AgentWorkflow`), here a custom workflow controls the agent lifecycle and composes its output into a larger result.
-- **Replay safety.** `GetAgent().RunAsync()` dispatches through `Workflow.ExecuteActivityAsync()`. After the activity completes, its result is cached in event history — a worker restart replays the cached value and never re-calls the LLM.
+- **Replay safety.** `GetTemporalAgent().RunAsync()` dispatches through `Workflow.ExecuteActivityAsync()`. After the activity completes, its result is cached in event history — a worker restart replays the cached value and never re-calls the LLM.
 - **Composability.** Additional agents, activities, signals, or timers can be added to `WeatherOrchestrationWorkflow.RunAsync` alongside the agent call — standard Temporal workflow composition applies.
 - **`.AddWorkflow<T>()` on the same builder.** The orchestrating workflow is registered on the same hosted worker as the agents, keeping the setup to a single `AddHostedTemporalWorker` call.
 

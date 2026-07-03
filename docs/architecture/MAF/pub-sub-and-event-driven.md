@@ -45,9 +45,9 @@ public class EventDrivenFanOutWorkflow
     public async Task<string> RunAsync(string topic, string payload)
     {
         // Simulate a "NewArticlePublished" event fan-out to three independent agents.
-        var summarySession  = await GetAgent("Summarizer").CreateSessionAsync();
-        var taggingSession  = await GetAgent("Tagger").CreateSessionAsync();
-        var moderationSession = await GetAgent("Moderator").CreateSessionAsync();
+        var summarySession  = await GetTemporalAgent("Summarizer").CreateSessionAsync();
+        var taggingSession  = await GetTemporalAgent("Tagger").CreateSessionAsync();
+        var moderationSession = await GetTemporalAgent("Moderator").CreateSessionAsync();
 
         var prompt = new List<ChatMessage> { new(ChatRole.User, payload) };
 
@@ -55,9 +55,9 @@ public class EventDrivenFanOutWorkflow
         // each independently processing the same event.
         var results = await ExecuteAgentsInParallelAsync(new[]
         {
-            (GetAgent("Summarizer"),  prompt, summarySession),
-            (GetAgent("Tagger"),      prompt, taggingSession),
-            (GetAgent("Moderator"),   prompt, moderationSession),
+            (GetTemporalAgent("Summarizer"),  prompt, summarySession),
+            (GetTemporalAgent("Tagger"),      prompt, taggingSession),
+            (GetTemporalAgent("Moderator"),   prompt, moderationSession),
         });
 
         // Aggregate results (fan-in)
@@ -122,7 +122,7 @@ foreach (var name in subscriberNames)
 
 > **Workflow-internal path:** If you are inside an orchestrating `[Workflow]` and need to
 > kick off sub-agents without waiting for their results, use `TemporalAIAgent.RunAsync`
-> inside `Workflow.ExecuteActivityAsync` (via `GetAgent`) — or use
+> inside `Workflow.ExecuteActivityAsync` (via `GetTemporalAgent`) — or use
 > `ExecuteAgentsInParallelAsync` if you do want to collect results later.
 > `AgentActivities`, `AgentStepInput`, and `InvokeAgentToolInput` are `internal` and cannot be
 > referenced from consumer code.

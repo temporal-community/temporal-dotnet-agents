@@ -86,7 +86,7 @@ public class MonitorWorkflow
 
             // M3: Analyze only the most recent AnalysisInterval readings, not the full buffer.
             var summary = FormatReadingsForAnalysis(_buffer.TakeLast(input.AnalysisInterval));
-            var analysisAgent = GetAgent("AnalysisAgent");
+            var analysisAgent = GetTemporalAgent("AnalysisAgent");
 
             // Fresh session per cycle: each LLM call is a stateless analysis of the current window.
             // To accumulate cross-cycle conversation history, store the session in a field and reuse it.

@@ -175,7 +175,7 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 
 - **`AgentWorkflow`** — Long-lived workflow with `[WorkflowUpdate]` for request/response
 - **`AgentJobWorkflow`** — Fire-and-forget workflow for scheduled and deferred runs
-- **`TemporalAIAgent`** — For use inside Temporal workflows (via `GetAgent`)
+- **`TemporalAIAgent`** — For use inside Temporal workflows (via `GetTemporalAgent`)
 - **`TemporalAIAgentProxy`** — For external callers (via `GetTemporalAgentProxy`)
 - **`ITemporalAgentClient`** — Update-based client with routing, scheduling, and HITL support
 - **`TemporalAgentContext`** — Async-local context for agent tools running inside activities

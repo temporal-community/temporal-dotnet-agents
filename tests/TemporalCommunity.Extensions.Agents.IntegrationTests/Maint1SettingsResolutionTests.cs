@@ -208,7 +208,7 @@ public class Maint1SettingsResolutionTests
         [WorkflowRun]
         public async Task<string[]> RunAsync(string turn1Msg, string turn2Msg)
         {
-            var agent = GetAgent("SubAgent");
+            var agent = GetTemporalAgent("SubAgent");
             var session = await agent.CreateSessionAsync().ConfigureAwait(true);
 
             var r1 = await agent.RunAsync(

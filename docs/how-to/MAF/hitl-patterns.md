@@ -588,7 +588,7 @@ agent.UseApprovalScopes(scopes =>
 |---|---|
 | `TemporalAIAgentProxy` → `AgentWorkflow` | Full support: Session and Always scopes work as documented |
 | `AgentJobWorkflow` (scheduled jobs, `ScheduleAgentAsync`) | Session scope: `LogWarning`, record dropped. Always scope: `LogWarning`, record not persisted (store call skipped) |
-| `TemporalAIAgent` (sub-agent via `GetAgent()`) | Same as `AgentJobWorkflow` — no persistent session |
+| `TemporalAIAgent` (sub-agent via `GetTemporalAgent()`) | Same as `AgentJobWorkflow` — no persistent session |
 
 For scheduled jobs and sub-agents, configure `RequireApproval()` tools without `.ScopeAware()` if you do not want silent scope-record failures.
 

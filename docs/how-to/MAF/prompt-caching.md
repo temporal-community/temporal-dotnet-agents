@@ -216,7 +216,7 @@ Create a summarization step inside a workflow that condenses long histories befo
 [WorkflowRun]
 public async Task<string> RunAsync(string question)
 {
-    var researcher = GetAgent("Researcher");
+    var researcher = GetTemporalAgent("Researcher");
     var session = await researcher.CreateSessionAsync();
 
     // Multiple turns build up history on the researcher agent
@@ -226,7 +226,7 @@ public async Task<string> RunAsync(string question)
     }
 
     // Summarize the researcher's findings with a fresh agent (no history baggage)
-    var summarizer = GetAgent("Summarizer");
+    var summarizer = GetTemporalAgent("Summarizer");
     var sumSession = await summarizer.CreateSessionAsync();
     var summary = await summarizer.RunAsync(
         $"Summarize these findings concisely: {lastResponse.Text}",

@@ -77,7 +77,7 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 **Configuration**: see `docs/how-to/MAF/usage.md` for the full `TemporalAgentsOptions` reference. Worker-level defaults are prefixed `Default*` (e.g. `DefaultActivityTimeout`, `DefaultHeartbeatTimeout`, `DefaultApprovalTimeout`, `DefaultMaxEntryCount`, `DefaultRetryPolicy`, `DefaultHistoryReducer`, `DefaultTimeToLive`); per-agent overrides on `DurableAgentBuilder` use the unprefixed names. Inheritance rule: `effective = registration.X ?? options.DefaultX`. The worker-level `HistoryStore` factory keeps the unprefixed name (presence is opt-in).
 
 **Two agent types** (use the right one for context):
-- `TemporalAIAgent` — workflow-context sub-agent. Access via `TemporalWorkflowExtensions.GetAgent("Name")`.
+- `TemporalAIAgent` — workflow-context sub-agent. Access via `TemporalWorkflowExtensions.GetTemporalAgent("Name")`.
 - `TemporalAIAgentProxy` — external-context proxy. Access via `services.GetTemporalAgentProxy("Name")`.
 
 **HITL**: see `docs/how-to/MAF/hitl-patterns.md`. Activity timeout must accommodate human review time.
@@ -149,7 +149,7 @@ For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how
 
 - **`Assert.Throws<T>` requires exact type, not subtype.** Use `Assert.Throws<ArgumentNullException>` for null, not `ArgumentException`. xUnit will fail the test if the thrown exception is a subtype of the expected.
 - **Hand-written stubs preferred** over FakeItEasy/Moq in this project. See `StubAIAgent` and `TestChatClient` in the test helpers.
-- **Search-attribute pre-registration is conditional.** Agents integration tests only need `TestEnvironmentHelper.StartLocalAsync()` (which pre-registers `AgentName`/`SessionCreatedAt`/`TurnCount`) when `EnableSearchAttributes = true`. Bare `WorkflowEnvironment.StartLocalAsync()` works otherwise. AI integration tests never need pre-registration.
+- **Search-attribute pre-registration is required by default.** `EnableSearchAttributes` now defaults to `true`. Agents integration tests must use `TestEnvironmentHelper.StartLocalAsync()` (which pre-registers `AgentName`/`SessionCreatedAt`/`TurnCount`) unless `opts.EnableSearchAttributes = false` is explicitly set. Bare `WorkflowEnvironment.StartLocalAsync()` is only sufficient when search attributes are disabled. AI integration tests never need pre-registration.
 - **Both suites use embedded server** — `WorkflowEnvironment.StartLocalAsync()`. No external `temporal server start-dev` process.
 
 ---
@@ -158,7 +158,7 @@ For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how
 
 ### ✅ DO
 - Use the fluent `.AddTemporalAgents()` builder
-- Use `GetAgent()` inside workflows for sub-agent orchestration
+- Use `GetTemporalAgent()` inside workflows for sub-agent orchestration
 - Use `Workflow.UtcNow` and `Workflow.NewGuid()` (not `DateTime.UtcNow` / `Guid.NewGuid()`)
 - Set appropriate per-agent TTLs (default: 14 days)
 - Validate config eagerly — `string.IsNullOrEmpty` + `InvalidOperationException` for missing config (not `is null` + `ArgumentNullException`)
@@ -271,12 +271,12 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 |---|---|
 | "Cannot find Temporalio package" | Use NuGet, not project refs; `dotnet restore` |
 | "Agent not registered" | Verify `.AddTemporalAgents()` includes the agent |
-| `InvalidOperationException` from `TemporalAIAgent` (called outside workflow) | `TemporalAIAgent` is workflow-context only. Obtain it via `TemporalWorkflowExtensions.GetAgent` inside a `[Workflow]` method. For external callers, use `services.GetTemporalAgentProxy("Name")` instead. |
+| `InvalidOperationException` from `TemporalAIAgent` (called outside workflow) | `TemporalAIAgent` is workflow-context only. Obtain it via `TemporalWorkflowExtensions.GetTemporalAgent` inside a `[Workflow]` method. For external callers, use `services.GetTemporalAgentProxy("Name")` instead. |
 | `GetTypeInfo metadata not provided` for `TemporalAgentSession` | Don't serialize via `DefaultOptions`; use `StateBag.Serialize()` |
 | Activity timeout (HITL) | Increase `DefaultActivityTimeout` (or per-agent `ActivityTimeout`) to accommodate human review time |
 | Worker won't start | `temporal server start-dev` running on `localhost:7233`? |
-| Search attributes missing in UI | `opts.EnableSearchAttributes = true` (opt-in, default `false`); pre-register on production clusters |
-| Integration test "Unexpected workflow task failure" | Either set `EnableSearchAttributes = true` AND use `TestEnvironmentHelper.StartLocalAsync()`, or leave search attributes disabled |
+| Search attributes missing in UI | `opts.EnableSearchAttributes` defaults to `true`; pre-register `AgentName`/`SessionCreatedAt`/`TurnCount` on production clusters — automatic with `temporal server start-dev` |
+| Integration test "Unexpected workflow task failure" | `EnableSearchAttributes` defaults to `true` — use `TestEnvironmentHelper.StartLocalAsync()`, or set `opts.EnableSearchAttributes = false` to disable search attribute upserts |
 | Integration test suite hangs; can't tell which test | `just test-individual <project>` — per-test loop, reports PASS/FAIL/HANG. Default 180s cap, parameterizable. |
 | Test command hangs and pipe-buffering hides output | `just test-logged <project>` — writes to `/tmp/temporalagents-test-*.log`; `tail -f` separately. 600s default cap. |
 | Orphaned `temporal-sdk-dotnet` processes after `pkill` | `just list-orphans` + `just kill-orphans` — narrow to .NET SDK's extracted binary; safe across projects. |

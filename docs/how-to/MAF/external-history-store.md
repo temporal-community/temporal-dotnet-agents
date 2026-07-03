@@ -400,7 +400,7 @@ If you need reduction logic beyond what the registered `HistoryReducer` provides
 
 ### Sub-agent orchestration
 
-External history store works correctly for both the session-based path (`TemporalAIAgentProxy` / `AgentWorkflow`) and the sub-agent orchestration path (`TemporalAIAgent` via `TemporalWorkflowExtensions.GetAgent("Name")`).
+External history store works correctly for both the session-based path (`TemporalAIAgentProxy` / `AgentWorkflow`) and the sub-agent orchestration path (`TemporalAIAgent` via `TemporalWorkflowExtensions.GetTemporalAgent("Name")`).
 
 When a `TemporalAIAgent` sub-agent runs inside an orchestrating workflow and the agent has a configured `HistoryStore`:
 

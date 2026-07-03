@@ -116,7 +116,7 @@ public class ResearchWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
-        var researcher = TemporalWorkflowExtensions.GetAgent("ResearchAgent");
+        var researcher = TemporalWorkflowExtensions.GetTemporalAgent("ResearchAgent");
         var session    = await researcher.CreateSessionAsync();
         var result     = await researcher.RunAsync($"Research: {topic}", session);
         return result.Messages[0].Text;
@@ -140,7 +140,7 @@ On top of everything in Combination 1:
 
 - Requires `Microsoft.Agents.AI`.
 - Search attribute upserts are opt-in: set `EnableSearchAttributes = true` in `TemporalAgentsOptions` to enable them. When enabled, `AgentName`, `SessionCreatedAt`, and `TurnCount` must be pre-registered before the worker starts. With `temporal server start-dev` this is automatic; on a production cluster it requires a one-time CLI command. Integration tests that enable search attributes should use `TestEnvironmentHelper.StartLocalAsync()` to handle pre-registration.
-- Two proxy types exist for the same agent: `TemporalAIAgentProxy` for external callers and `TemporalAIAgent` (via `GetAgent()`) for workflow code. Using the wrong one in the wrong context raises an exception.
+- Two proxy types exist for the same agent: `TemporalAIAgentProxy` for external callers and `TemporalAIAgent` (via `GetTemporalAgent()`) for workflow code. Using the wrong one in the wrong context raises an exception.
 - Custom `[Workflow]` classes must follow Temporal determinism rules (`Workflow.UtcNow`, `Workflow.NewGuid()`, no `ActivitySource.StartActivity()` inside workflow code).
 
 ---

@@ -17,7 +17,7 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <remarks>
 /// Use from external/host code (API servers, CLIs, console apps) to interact with
 /// a Temporal-hosted agent. For workflow-internal sub-agent calls, use
-/// <see cref="TemporalAIAgent"/> via <see cref="TemporalWorkflowExtensions.GetAgent"/>.
+/// <see cref="TemporalAIAgent"/> via <see cref="TemporalWorkflowExtensions.GetTemporalAgent"/>.
 /// </remarks>
 internal class TemporalAIAgentProxy(
     string name,

@@ -30,7 +30,7 @@ public class CustomerServiceWorkflow
     public async Task<string> RunAsync(string userQuestion)
     {
         // ── Step 1: Classify the user's intent ──────────────────────────────
-        var classifier = GetAgent("Classifier");
+        var classifier = GetTemporalAgent("Classifier");
         var classifierSession = await classifier.CreateSessionAsync().ConfigureAwait(true);
 
         var classifierResponse = await classifier.RunAsync(
@@ -53,7 +53,7 @@ public class CustomerServiceWorkflow
             specialistName);
 
         // ── Step 3: Call the specialist agent ────────────────────────────────
-        var specialist = GetAgent(specialistName);
+        var specialist = GetTemporalAgent(specialistName);
         var specialistSession = await specialist.CreateSessionAsync().ConfigureAwait(true);
 
         var specialistResponse = await specialist.RunAsync(

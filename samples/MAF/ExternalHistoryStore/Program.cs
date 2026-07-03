@@ -171,7 +171,7 @@ Console.WriteLine();
 
 // Inspect the most recent RunDurableAgentStep activity payload from the
 // orchestrating workflow's history. In this sample's pattern (an orchestrating
-// workflow that calls GetAgent("SupportAgent")), the agent's RunDurableAgentStep
+// workflow that calls GetTemporalAgent("SupportAgent")), the agent's RunDurableAgentStep
 // activities are scheduled on the parent SupportSessionWorkflow itself —
 // TemporalAIAgent dispatches activities directly, no child workflow is created.
 // The agent-session ID (ta-supportagent-{key}) is purely a logical key for the
@@ -263,7 +263,7 @@ namespace ExternalHistoryStore
         [WorkflowUpdate("Ask")]
         public async Task<string> AskAsync(AskInput input)
         {
-            var agent = GetAgent("SupportAgent");
+            var agent = GetTemporalAgent("SupportAgent");
             if (_session is null)
             {
                 if (await agent.CreateSessionAsync().ConfigureAwait(true) is not TemporalAgentSession s)

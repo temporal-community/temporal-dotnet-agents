@@ -403,7 +403,7 @@ This means calling `CreateSessionAsync` twice on the same `TemporalAIAgent` and 
 
 ```csharp
 // ⚠️ FOOTGUN — do not do this
-var agent = GetAgent("WeatherAgent");  // one TemporalAIAgent instance
+var agent = GetTemporalAgent("WeatherAgent");  // one TemporalAIAgent instance
 var s1 = await agent.CreateSessionAsync();
 var s2 = await agent.CreateSessionAsync();
 
@@ -415,12 +415,12 @@ await agent.RunAsync("Question B", s2);
 //            ↑ s2 turn sees Question A — they are NOT isolated
 ```
 
-`TemporalAIAgent` is designed for a single conversation thread inside an orchestrating workflow. If you need two truly independent sub-agents, get two separate instances via `GetAgent`:
+`TemporalAIAgent` is designed for a single conversation thread inside an orchestrating workflow. If you need two truly independent sub-agents, get two separate instances via `GetTemporalAgent`:
 
 ```csharp
 // ✅ CORRECT — two separate TemporalAIAgent instances, each with its own _history
-var researchAgent = GetAgent("ResearchAgent");
-var summaryAgent  = GetAgent("SummaryAgent");
+var researchAgent = GetTemporalAgent("ResearchAgent");
+var summaryAgent  = GetTemporalAgent("SummaryAgent");
 
 var researchSession = await researchAgent.CreateSessionAsync();
 var summarySession  = await summaryAgent.CreateSessionAsync();

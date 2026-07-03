@@ -196,7 +196,7 @@ public class SupportWorkflow
         Workflow.Logger.LogInformation(
             "[TriageAgent] Handling: \"{Message}\"", customerMessage);
 
-        var triage = GetAgent("TriageAgent");
+        var triage = GetTemporalAgent("TriageAgent");
         var triageSession = await triage.CreateSessionAsync().ConfigureAwait(true);
         var triageResponse = await triage.RunAsync(
             [new ChatMessage(ChatRole.User, customerMessage)], triageSession).ConfigureAwait(true);
@@ -232,7 +232,7 @@ public class SupportWorkflow
         Workflow.Logger.LogInformation(
             "[EscalationAgent] Taking over with triage context.");
 
-        var escalation = GetAgent("EscalationAgent");
+        var escalation = GetTemporalAgent("EscalationAgent");
         var escalationSession = await escalation.CreateSessionAsync().ConfigureAwait(true);
 
         var handoffMessage =

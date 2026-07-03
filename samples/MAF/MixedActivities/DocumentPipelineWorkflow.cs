@@ -20,7 +20,7 @@ namespace MixedActivities;
 /// pipeline: fetch, AI analysis, store, notify.
 /// <para>
 /// The key pattern: regular Temporal activities (<see cref="DocumentActivities"/>)
-/// and a durable AI agent turn (<c>GetAgent("DocumentAnalyst").RunAsync</c>) coexist
+/// and a durable AI agent turn (<c>GetTemporalAgent("DocumentAnalyst").RunAsync</c>) coexist
 /// in the same workflow. The Temporal runtime treats both as durable, replay-safe
 /// operations — the author does not need to coordinate them specially.
 /// </para>
@@ -47,10 +47,10 @@ public sealed class DocumentPipelineWorkflow
             DefaultActivityOptions).ConfigureAwait(true);
 
         // Step 2 — Durable agent turn: analyze the document.
-        // GetAgent resolves "DocumentAnalyst" from the worker's registered agents.
+        // GetTemporalAgent resolves "DocumentAnalyst" from the worker's registered agents.
         // RunAsync dispatches a RunDurableAgentStep activity internally — the LLM call
         // is durable and replay-cached just like the plain activities above and below.
-        var agent = GetAgent("DocumentAnalyst");
+        var agent = GetTemporalAgent("DocumentAnalyst");
         var session = await agent.CreateSessionAsync().ConfigureAwait(true);
 
         var prompt = $"Analyze the following support document and reply with exactly two lines:\n" +

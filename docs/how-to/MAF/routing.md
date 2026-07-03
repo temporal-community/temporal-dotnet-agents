@@ -42,7 +42,7 @@ The `samples/MAF/WorkflowRouting/` sample demonstrates both patterns described h
 
 ### How It Works
 
-A classifier agent runs as the first step inside a Temporal workflow. The workflow inspects the classifier's output and uses `GetAgent("name")` with hardcoded agent names to dispatch to the right specialist.
+A classifier agent runs as the first step inside a Temporal workflow. The workflow inspects the classifier's output and uses `GetTemporalAgent("name")` with hardcoded agent names to dispatch to the right specialist.
 
 ### Registration
 
@@ -91,7 +91,7 @@ public class CustomerServiceWorkflow
     public async Task<string> RunAsync(string userQuestion)
     {
         // Step 1: Classify the intent
-        var classifier = GetAgent("Classifier");
+        var classifier = GetTemporalAgent("Classifier");
         var classifierSession = await classifier.CreateSessionAsync();
         var classification = (await classifier.RunAsync(
             [new ChatMessage(ChatRole.User, userQuestion)],
@@ -110,7 +110,7 @@ public class CustomerServiceWorkflow
             classification, specialistName);
 
         // Step 3: Call the specialist
-        var specialist = GetAgent(specialistName);
+        var specialist = GetTemporalAgent(specialistName);
         var specialistSession = await specialist.CreateSessionAsync();
         var response = await specialist.RunAsync(
             [new ChatMessage(ChatRole.User, userQuestion)],
@@ -251,7 +251,7 @@ public class DynamicRoutingWorkflow
             $"User question: {userQuestion}\n\n" +
             $"Respond with the agent name only. No explanation, no punctuation.";
 
-        var classifier = GetAgent("Classifier");
+        var classifier = GetTemporalAgent("Classifier");
         var classifierSession = await classifier.CreateSessionAsync();
         var chosenAgent = (await classifier.RunAsync(
             [new ChatMessage(ChatRole.User, routingPrompt)], classifierSession))
@@ -268,7 +268,7 @@ public class DynamicRoutingWorkflow
 
     private static async Task<string> CallAgent(string agentName, string userQuestion)
     {
-        var specialist = GetAgent(agentName);
+        var specialist = GetTemporalAgent(agentName);
         var specialistSession = await specialist.CreateSessionAsync();
         var response = await specialist.RunAsync(
             [new ChatMessage(ChatRole.User, userQuestion)], specialistSession);
@@ -311,7 +311,7 @@ See `samples/MAF/WorkflowRouting/` (`DynamicRoutingWorkflow.cs` and `RoutingActi
 ### DO
 
 - Route inside a workflow — the decision is durable, visible in history, and replayed from cache
-- Use `GetAgent("name")` with string constants or activity results inside workflows
+- Use `GetTemporalAgent("name")` with string constants or activity results inside workflows
 - Query `TemporalAgentsOptions` inside **activities** — activity results are cached; the registry is never re-queried on replay
 - Provide a default/fallback agent for unrecognized or empty classifications
 - Validate LLM-chosen agent names via an activity before dispatching (LLMs can hallucinate names)
@@ -344,7 +344,7 @@ The rule is simple: **if the code runs inside a workflow execution context, do n
 
 **Is the agent set fixed at compile time?**
 
-- **Yes** — Use **Pattern 1** (static routing). Plain switch expressions and `GetAgent("name")` give you full control with minimal ceremony.
+- **Yes** — Use **Pattern 1** (static routing). Plain switch expressions and `GetTemporalAgent("name")` give you full control with minimal ceremony.
 - **No** (agents change across deployments: feature flags, A/B tests, gradual rollouts) — Use **Pattern 2** (dynamic routing via activity).
 
 **Do you need fallback chains or multi-step classification?**

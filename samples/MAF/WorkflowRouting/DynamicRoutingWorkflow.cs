@@ -61,7 +61,7 @@ public class DynamicRoutingWorkflow
             $"User question: {userQuestion}\n\n" +
             $"Respond with the agent name only. No explanation, no punctuation.";
 
-        var classifier = GetAgent("Classifier");
+        var classifier = GetTemporalAgent("Classifier");
         var classifierSession = await classifier.CreateSessionAsync().ConfigureAwait(true);
         var classifierResponse = await classifier.RunAsync(
             [new ChatMessage(ChatRole.User, routingPrompt)], classifierSession).ConfigureAwait(true);
@@ -85,7 +85,7 @@ public class DynamicRoutingWorkflow
 
     private async Task<string> CallAgent(string agentName, string userQuestion)
     {
-        var specialist = GetAgent(agentName);
+        var specialist = GetTemporalAgent(agentName);
         var specialistSession = await specialist.CreateSessionAsync().ConfigureAwait(true);
         var response = await specialist.RunAsync(
             [new ChatMessage(ChatRole.User, userQuestion)], specialistSession).ConfigureAwait(true);

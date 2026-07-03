@@ -81,7 +81,7 @@ The exact LLM phrasing varies, but the structural assertions are stable:
 ```
 ┌───────────────────────── Workflow (durable, deterministic) ─────────────────────┐
 │                                                                                 │
-│  [WorkflowUpdate("Ask")]  ──►  GetAgent("SupportAgent").RunAsync(messages)      │
+│  [WorkflowUpdate("Ask")]  ──►  GetTemporalAgent("SupportAgent").RunAsync(messages)      │
 │                                       │                                         │
 │                                       │  ExecuteActivityAsync(                  │
 │                                       │     RunDurableAgentStepAsync(           │

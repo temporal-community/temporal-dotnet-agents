@@ -58,7 +58,7 @@ public class AlertWorkflow
                              string.Join("\n", alert.RecentReadings.Select(r =>
                                  $"  [{r.Timestamp:HH:mm:ss}] CPU={r.CpuPercent:F1}% Mem={r.MemoryPercent:F1}% Temp={r.TemperatureCelsius:F1}°C"));
 
-                var alertAgent = GetAgent("AlertAgent");
+                var alertAgent = GetTemporalAgent("AlertAgent");
 
                 // Fresh session per cycle: each LLM call is a stateless analysis of the current window.
                 // To accumulate cross-cycle conversation history, store the session in a field and reuse it.

@@ -101,17 +101,17 @@ await Workflow.ExecuteActivityAsync(...).ConfigureAwait(true);
 
 **Why:** `ConfigureAwait(false)` bypasses the Temporal workflow scheduler's `SynchronizationContext`, putting the continuation on the ThreadPool. The workflow loses the ability to register `CompleteWorkflowExecution` and hangs at `WorkflowTaskCompleted`. This is a `[Workflow]`-only rule — `AgentActivities.cs` and `DefaultTemporalAgentClient.cs` correctly use `ConfigureAwait(false)` because they are not workflow code. The pattern also applies to `DurableAIFunction.cs` and `DurableEmbeddingGenerator.cs` (workflow-context middleware) — they explicitly note this in inline comments.
 
-### Do use GetAgent() with string constants or activity results
+### Do use GetTemporalAgent() with string constants or activity results
 
 ```csharp
 // GOOD — string literal, deterministic
-var agent = TemporalWorkflowExtensions.GetAgent("WeatherAgent");
+var agent = TemporalWorkflowExtensions.GetTemporalAgent("WeatherAgent");
 
 // GOOD — agent name from a cached activity result
 var agentName = await Workflow.ExecuteActivityAsync(
     (RoutingActivities a) => a.ValidateAgent(chosenName, "FallbackAgent"),
     new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(10) });
-var agent = TemporalWorkflowExtensions.GetAgent(agentName);
+var agent = TemporalWorkflowExtensions.GetTemporalAgent(agentName);
 ```
 
 ---
@@ -167,15 +167,15 @@ Every slot on the builder (`ChatClient`, `AddTool(name, factory)`, `AddContextPr
 
 ```csharp
 // WRONG — session2 sees session1's history because they share the instance
-var agent = TemporalWorkflowExtensions.GetAgent("Analyst");
+var agent = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
 var s1 = await agent.CreateSessionAsync();
 await agent.RunAsync("Question A", s1);
 var s2 = await agent.CreateSessionAsync();
 await agent.RunAsync("Question B", s2); // sees "Question A" in context!
 
 // CORRECT — separate instances have independent histories
-var agent1 = TemporalWorkflowExtensions.GetAgent("Analyst");
-var agent2 = TemporalWorkflowExtensions.GetAgent("Analyst");
+var agent1 = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
+var agent2 = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
 var s1 = await agent1.CreateSessionAsync();
 var s2 = await agent2.CreateSessionAsync();
 ```
@@ -231,10 +231,10 @@ opts.DefaultHeartbeatTimeout   = TimeSpan.FromMinutes(30);
 
 **Why:** `HeartbeatTimeout` detects stuck activities by checking for periodic progress signals. If it exceeds `ActivityTimeout`, the activity times out before a heartbeat check can trigger.
 
-### Do pass ActivityOptions when using GetAgent() for workflow sub-agents
+### Do pass ActivityOptions when using GetTemporalAgent() for workflow sub-agents
 
 ```csharp
-var agent = TemporalWorkflowExtensions.GetAgent(
+var agent = TemporalWorkflowExtensions.GetTemporalAgent(
     "ResearcherAgent",
     activityOptions: new ActivityOptions
     {
