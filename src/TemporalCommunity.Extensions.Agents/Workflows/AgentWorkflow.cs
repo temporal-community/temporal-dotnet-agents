@@ -403,7 +403,14 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             // (developer-registered, same trust as the workflow), so their StateBag output is
             // applied unfiltered here — unlike tool/interceptor write-backs, which are deny-list
             // filtered via StateBagMerge.
-            _currentStateBag = stepResult.UpdatedStateBag;
+            //
+            // Overlay (not replace) the activity's StateBag output on top of the carried
+            // _currentStateBag. A replace loses workflow-thread writes (e.g. approval-scope records
+            // written by WriteSessionScopeToStateBag between activities, or a context provider's
+            // temporal.working_set) whenever a turn ends on a hash-gated LLM step that returns a
+            // null/subset bag. The overlay is unfiltered here because context-provider output is
+            // trusted-tier — see StateBagMerge.OverlayTrustedStateBag.
+            _currentStateBag = StateBagMerge.OverlayTrustedStateBag(_currentStateBag, stepResult.UpdatedStateBag);
 
             // Feature B — Sub-section B: load always-scopes at proxy-start session start.
             // Guard: needsResolution AND all three approval-scope flags true.
@@ -548,9 +555,19 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             {
                 var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
                 // F1 optimization: all interceptors in a fan-out see the same bag snapshot.
-                // Compute once here so the hash gate fires exactly once for the entire fan-out
-                // (subsequent calls inside the loop would return null via the unchanged-hash path).
-                var bagForInterceptors = GetStateBagForDispatch();
+                // Compute once here so the (non-forced) hash gate fires exactly once for the entire
+                // fan-out (subsequent calls inside the loop would return null via the unchanged-hash
+                // path).
+                //
+                // The scope-aware approval interceptor reads session-scope records straight from
+                // the dispatched StateBag (RunToolInterceptorAsync is stateless — it has NO carried
+                // bag to fall back to, unlike the LLM step). If the hash gate returns null here, the
+                // interceptor sees an empty bag, cannot find an existing session-scope grant, and
+                // re-prompts a tool that should auto-approve. So when any scope-aware tool is
+                // registered, force the full bag for the interceptor fan-out; the F1 hash-gate
+                // optimization only holds for consumers that can fall back to carried state.
+                var forceInterceptorBag = _input!.ScopeAwareTools is { Count: > 0 };
+                var bagForInterceptors = GetStateBagForDispatch(force: forceInterceptorBag);
                 foreach (var tc in toolCalls)
                 {
                     if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, skippedTools))
@@ -610,6 +627,21 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
 
             var requiresApprovalTools = _input!.RequiresApprovalTools;
 
+            // StateBag starvation guard (Fix 1): a user tool on the Proceed path may read ANY
+            // workflow-thread-written StateBag key — approval-scope records (scope-aware tools),
+            // context-provider output (e.g. WorkingSetContextProvider's "temporal.working_set"),
+            // or any custom key. InvokeAgentToolAsync is stateless: FromStateBag(id, null) builds
+            // an EMPTY session, so a null dispatch (F1 hash gate, unchanged bag) starves the tool
+            // on step 2+ of a hash-unchanged turn. Unlike the interceptor (only scope records
+            // matter → force gated on ScopeAwareTools), there is NO clean workflow-side signal for
+            // "context providers registered" — ContextProviderFactories live on the activity-side
+            // registration, never serialized into ProxyResolvedWorkerConfig. So we always force the
+            // Proceed-path tool bag: correctness over the marginal F1 saving. Tool calls are far
+            // rarer than LLM steps and already do real activity work, so the extra bag payload is
+            // negligible. Computed ONCE here and shared across the whole Proceed fan-out (do not
+            // re-serialize per tool). The approved/PauseForApproval path (~L756) already forces.
+            var bagForProceedTools = GetStateBagForDispatch(force: true);
+
             for (var i = 0; i < toolCalls.Count; i++)
             {
                 var tc = toolCalls[i];
@@ -629,8 +661,10 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                             ToolName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
-                            // F1 optimization: hash gate — omit bag when unchanged from last dispatch.
-                            SerializedStateBag = GetStateBagForDispatch(),
+                            // Forced above (bagForProceedTools) — a Proceed tool may read any
+                            // workflow-thread StateBag key; null-gating would starve it. Shared
+                            // across the whole fan-out, computed once.
+                            SerializedStateBag = bagForProceedTools,
                         }, ResolveDurableToolActivityOptions(tc.Name)));
                         break;
 
@@ -937,14 +971,36 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     /// Returns the current StateBag for dispatch into an activity input, applying the
     /// content-hash gate (Item 9 / F1 + F3). When the bag hasn't changed since the last
     /// dispatch, returns <see langword="null"/> so we avoid re-serializing the full JSON
-    /// into the Temporal event log. Activities that receive null must produce the same
-    /// result as receiving the unchanged bag.
+    /// into the Temporal event log.
+    /// <para>
+    /// <b>Two-tier consumer contract — read this before adding a new dispatch site.</b>
+    /// There is NO carried-state fallback. A null return means "the bag is unchanged since the
+    /// last dispatch"; an activity that receives null and reads the bag builds an EMPTY session
+    /// via <c>TemporalAgentSession.FromStateBag(id, null)</c>. Consumers therefore split into two
+    /// tiers:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>
+    /// <b>Stateful / forced consumers</b> — read workflow-thread StateBag state, so they MUST pass
+    /// <c>force: true</c> or they will silently see an empty bag on a hash-unchanged step:
+    /// the LLM step at turn start (<c>force: iteration == 0</c>); the scope interceptor fan-out when
+    /// scope-aware tools are present; and the <c>InvokeAgentTool</c> dispatch (both the Proceed path,
+    /// which always forces because a user tool may read any workflow-written key, and the
+    /// approved/PauseForApproval path, which forces after writing a scope record).
+    /// </item>
+    /// <item>
+    /// <b>Non-reading consumers</b> — do NOT read the bag (they load from external stores instead),
+    /// so the non-forced hash gate is correct for them: <c>LoadAlwaysScopes</c>,
+    /// <c>AppendAlwaysScope</c>, and <c>CompactHistory</c>. These do not call this method at all,
+    /// but the same reasoning would apply if they did.
+    /// </item>
+    /// </list>
     /// </summary>
     /// <param name="force">
-    /// Pass <see langword="true"/> on the first step of each turn to guarantee the activity
-    /// always receives the full bag at the start of a turn, even if the hash matches.
-    /// This keeps the external-history load path simple (activities can trust
-    /// <c>IsFirstStep=true</c> implies a fresh bag snapshot).
+    /// Pass <see langword="true"/> whenever the consuming activity reads workflow-thread StateBag
+    /// state, to guarantee it receives the full bag even if the hash matches (see the two-tier
+    /// contract above). Also passed on the first step of each turn (<c>iteration == 0</c>) so the
+    /// external-history load path can trust <c>IsFirstStep=true</c> implies a fresh bag snapshot.
     /// </param>
     private JsonElement? GetStateBagForDispatch(bool force = false)
     {
@@ -959,7 +1015,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
 
         if (!force && _lastSentStateBagHash.HasValue && _lastSentStateBagHash.Value == hash)
         {
-            // Bag hasn't changed — skip re-sending. Activity falls back to its carried state.
+            // Bag unchanged since last dispatch — omit it (hash gate) to avoid re-serializing the
+            // full JSON into the event log. IMPORTANT: there is NO carried-state fallback. An
+            // activity that receives null and reads the bag builds an EMPTY session via
+            // FromStateBag(id, null). Only correct for consumers that DON'T read workflow-thread
+            // StateBag state. Any consumer that does read it MUST pass force: true (see the
+            // two-tier contract on the method summary).
             return null;
         }
 

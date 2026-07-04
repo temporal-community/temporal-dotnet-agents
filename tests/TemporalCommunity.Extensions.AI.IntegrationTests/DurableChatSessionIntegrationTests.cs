@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.AI.Session;
@@ -160,5 +161,44 @@ public class DurableChatSessionIntegrationTests
         // Auto-generated correlation IDs are 32-char hex (Guid "N" format).
         Assert.False(string.IsNullOrEmpty(response.CorrelationId));
         Assert.Equal(32, response.CorrelationId.Length);
+    }
+
+    /// <summary>
+    /// Verify the Update-with-Start failure path: when the workflow's
+    /// <c>[WorkflowUpdateValidator]</c> rejects the update (empty messages list),
+    /// <see cref="DurableChatSessionClient.SendAsync"/> surfaces a
+    /// <see cref="WorkflowUpdateFailedException"/> AND the workflow was still started
+    /// by the atomic RPC — i.e. <c>DescribeAsync</c> succeeds and reports an extant
+    /// execution.
+    /// </summary>
+    /// <remarks>
+    /// Failure-injection mechanism: the validator <c>ValidateChat</c> in
+    /// <c>DurableChatWorkflow</c> throws <c>ArgumentException</c> ("At least one
+    /// message is required.") when the message list is empty. The Temporal SDK
+    /// converts that into a <see cref="WorkflowUpdateFailedException"/> on the client
+    /// side. Because <c>ExecuteUpdateWithStartWorkflowAsync</c> delivers the start and
+    /// the update as a single atomic RPC the workflow is always started before the
+    /// validator runs — the "SDK caveat" comment in the production code.
+    /// </remarks>
+    [Fact]
+    public async Task SendAsync_UpdateValidatorRejects_ThrowsUpdateFailedAndWorkflowStarted()
+    {
+        var conversationId = $"update-fail-{Guid.NewGuid():N}";
+
+        // Pass an empty message list — ValidateChat throws ArgumentException
+        // ("At least one message is required.") which the SDK surfaces as
+        // WorkflowUpdateFailedException.
+        await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            _fixture.SessionClient.SendAsync(
+                conversationId,
+                messages: []));
+
+        // The workflow was still started atomically before the validator ran.
+        // DescribeAsync throws RpcException("not found") when the workflow does not
+        // exist — asserting it succeeds (no throw) proves the workflow was started.
+        var workflowId = _fixture.SessionClient.GetWorkflowId(conversationId);
+        var handle = _fixture.Client.GetWorkflowHandle(workflowId);
+        var description = await handle.DescribeAsync();
+        Assert.NotNull(description);
     }
 }

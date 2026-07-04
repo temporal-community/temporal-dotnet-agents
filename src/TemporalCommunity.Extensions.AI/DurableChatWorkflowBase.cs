@@ -278,7 +278,9 @@ public abstract class DurableChatWorkflowBase<TOutput>
 
         if (!conditionMet)
         {
-            // TTL elapsed — session complete.
+            // TTL elapsed — session complete. Drain any in-flight handlers (e.g. fire-and-forget
+            // turns) before completing so we don't abort them with TMPRL1102.
+            await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished).ConfigureAwait(true);
             return;
         }
 
@@ -334,6 +336,12 @@ public abstract class DurableChatWorkflowBase<TOutput>
                 HistoryReducerKey = input.HistoryReducerKey,
                 OriginalCreatedAt = sessionCreatedAt,
             };
+            // Drain in-flight update/signal handlers before completing-as-new. _isProcessing is a
+            // turn-serialization mutex that clears in RunTurnAsync's finally BEFORE the update handler's
+            // continuation (logging + result delivery) finishes, so gating CAN on !_isProcessing alone
+            // races the handler and aborts it with TMPRL1102 (a lost user turn). AllHandlersFinished is
+            // the SDK-sanctioned completion barrier that tracks both update and signal handlers.
+            await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished).ConfigureAwait(true);
             throw CreateContinueAsNewException(carriedInput);
         }
     }

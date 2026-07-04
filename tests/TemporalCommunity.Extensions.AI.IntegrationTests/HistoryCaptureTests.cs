@@ -21,8 +21,10 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Run this class when the workflow logic changes (new activity type, new wire string,
-/// new CAN trigger condition) and commit the updated JSON.
+/// These tests are trait-gated out of the normal integration run (<c>just test-integration-ai</c>)
+/// so they do not overwrite the checked-in golden JSON on every run. Regenerate the corpus on
+/// demand with <c>just capture-histories</c> — run it ONLY when the workflow logic changes
+/// (new activity type, new wire string, new CAN trigger condition), then commit the updated JSON.
 /// </para>
 /// <para>
 /// The output directory is resolved relative to the repository root, not the test binary
@@ -158,10 +160,14 @@ public class HistoryCaptureTests
         await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, "turn 1")]);
         var initialRunId = (await handle.DescribeAsync()).RunId;
 
-        // Drive until CAN fires (run ID changes).
-        var canFired = false;
-        for (var i = 2; i <= 10 && !canFired; i++)
+        // Drive until CAN fires (run ID changes). Check BEFORE each dispatch so we capture
+        // the exact post-CAN run ID without landing an extra turn on it.
+        string? postCanRunId = null;
+        for (var i = 2; i <= 10; i++)
         {
+            var rid = (await handle.DescribeAsync()).RunId;
+            if (rid != initialRunId) { postCanRunId = rid; break; }
+
             try
             {
                 await sessionClient.SendAsync(conversationId,
@@ -171,15 +177,18 @@ public class HistoryCaptureTests
             {
                 // CAN in flight — expected transient.
             }
-
-            var rid = (await handle.DescribeAsync()).RunId;
-            if (rid != initialRunId)
-            {
-                canFired = true;
-            }
         }
+        // Catch the case where CAN fired while the last SendAsync was in flight.
+        postCanRunId ??= (await handle.DescribeAsync()).RunId is var last && last != initialRunId
+            ? last
+            : null;
 
-        Assert.True(canFired, "Expected MaxEntryCount-driven CAN to fire within 10 turns.");
+        Assert.True(postCanRunId is not null, "Expected MaxEntryCount-driven CAN to fire within 10 turns.");
+
+        // Pin a handle to the exact post-CAN run so FetchHistoryAsync always queries that run,
+        // not the run-less latest-resolving handle (which may resolve to a stale pre-CAN run
+        // or a later CAN run in a race).
+        var postCanHandle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId, runId: postCanRunId);
 
         // Send one more turn so the new run has its own activity history (not just WorkflowStarted).
         // Retry if the new run is still starting up (WorkflowUpdateFailedException is transient here).
@@ -198,14 +207,15 @@ public class HistoryCaptureTests
             }
         }
 
-        // Poll until the fetched history contains at least one ACTIVITY_TASK_COMPLETED event —
+        // Poll until the post-CAN run's history contains at least one ACTIVITY_TASK_COMPLETED —
         // this confirms the post-CAN run has dispatched and finished an activity, giving the
-        // replay test a meaningful history to exercise.
+        // replay test a meaningful history to exercise. Use the pinned postCanHandle so we always
+        // query the right run regardless of further CAN transitions.
         WorkflowHistory history;
         deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
         while (true)
         {
-            history = await handle.FetchHistoryAsync();
+            history = await postCanHandle.FetchHistoryAsync();
             if (history.Events.Any(e => e.ActivityTaskCompletedEventAttributes is not null))
                 break;
             if (DateTime.UtcNow >= deadline)

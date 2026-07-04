@@ -245,4 +245,91 @@ public class StateBagMergeTests
         var sorted = keys.OrderBy(k => k, StringComparer.Ordinal).ToList();
         Assert.Equal(sorted, keys);
     }
+
+    // ── OverlayTrustedStateBag — unfiltered trusted overlay (StateBag durability fix) ──────────
+    //
+    // Regression coverage for the cross-turn StateBag wipe: a turn ending on a hash-gated LLM step
+    // returns a null/subset bag, and a plain REPLACE at the call site would wipe carried keys the
+    // workflow thread wrote between activities. The overlay preserves carried keys the activity
+    // did not touch, and applies NO reserved-key deny-list (context-provider output is trusted).
+
+    [Fact]
+    public void OverlayTrustedStateBag_NullUpdated_ReturnsCurrentUnchanged()
+    {
+        // A hash-gated LLM step returns a null bag; carried scope record must survive.
+        var current = Bag(("temporal.approval_scopes.session", "grant"));
+
+        var result = StateBagMerge.OverlayTrustedStateBag(current, updated: null);
+
+        Assert.Equal("grant", GetString(result, "temporal.approval_scopes.session"));
+    }
+
+    [Fact]
+    public void OverlayTrustedStateBag_NullCurrent_ReturnsUpdated()
+    {
+        var updated = Bag(("temporal.working_set", "file.cs"));
+
+        var result = StateBagMerge.OverlayTrustedStateBag(current: null, updated);
+
+        Assert.Equal("file.cs", GetString(result, "temporal.working_set"));
+    }
+
+    [Fact]
+    public void OverlayTrustedStateBag_KeyCollision_UpdatedWins()
+    {
+        var current = Bag(("shared", "old"));
+        var updated = Bag(("shared", "new"));
+
+        var result = StateBagMerge.OverlayTrustedStateBag(current, updated);
+
+        Assert.Equal("new", GetString(result, "shared"));
+    }
+
+    [Fact]
+    public void OverlayTrustedStateBag_PreservesCarriedKeysTheActivityDidNotTouch()
+    {
+        // The core durability guarantee: a subset bag from a context provider (only its key) must
+        // NOT wipe the carried approval-scope record.
+        var current = Bag(("temporal.approval_scopes.session", "grant"), ("carried", "keep"));
+        var updated = Bag(("temporal.working_set", "file.cs"));
+
+        var result = StateBagMerge.OverlayTrustedStateBag(current, updated);
+
+        Assert.Equal("grant", GetString(result, "temporal.approval_scopes.session"));
+        Assert.Equal("keep", GetString(result, "carried"));
+        Assert.Equal("file.cs", GetString(result, "temporal.working_set"));
+    }
+
+    [Fact]
+    public void OverlayTrustedStateBag_DoesNotFilterReservedApprovalScopeKeys()
+    {
+        // Unlike Merge, the overlay is UNFILTERED — a trusted context provider may legitimately
+        // carry any key forward, including reserved approval-scope keys. No deny-list applies.
+        var current = Bag(("other", "x"));
+        var updated = Bag(("temporal.approval_scopes.session", "provider-value"));
+
+        var result = StateBagMerge.OverlayTrustedStateBag(current, updated);
+
+        Assert.Equal("provider-value", GetString(result, "temporal.approval_scopes.session"));
+    }
+
+    [Fact]
+    public void OverlayTrustedStateBag_EmitsKeysInOrdinalSortedOrder_ForReplayStableHash()
+    {
+        var current = Bag(("zebra", "1"), ("mango", "2"));
+        var updated = Bag(("alpha", "3"));
+
+        var result = StateBagMerge.OverlayTrustedStateBag(current, updated);
+
+        Assert.NotNull(result);
+        var keys = result!.Value.EnumerateObject().Select(p => p.Name).ToList();
+        var sorted = keys.OrderBy(k => k, StringComparer.Ordinal).ToList();
+        Assert.Equal(sorted, keys);
+
+        // Byte-stable: overlaying the same logical inputs must produce identical raw text (feeds
+        // the FNV-1a content-hash gate; a divergence here would break replay determinism).
+        var again = StateBagMerge.OverlayTrustedStateBag(
+            Bag(("zebra", "1"), ("mango", "2")), Bag(("alpha", "3")));
+        Assert.Equal(result!.Value.GetRawText(), again!.Value.GetRawText());
+    }
 }

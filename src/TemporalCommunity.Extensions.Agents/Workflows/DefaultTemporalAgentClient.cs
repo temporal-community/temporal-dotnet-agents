@@ -43,25 +43,28 @@ internal sealed class DefaultTemporalAgentClient(
         span?.SetTag(TemporalAgentTelemetry.AgentNameAttribute, sessionId.AgentName);
         span?.SetTag(TemporalAgentTelemetry.AgentSessionIdAttribute, sessionId.WorkflowId);
 
-        var workflowOptions = new WorkflowOptions(sessionId.WorkflowId, taskQueue)
-        {
-            IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
-            IdReusePolicy = WorkflowIdReusePolicy.AllowDuplicate
-        };
+        var startOp = WithStartWorkflowOperation.Create(
+            (AgentWorkflow wf) => wf.RunAsync(BuildAgentWorkflowInput(sessionId.AgentName)),
+            new WorkflowOptions(sessionId.WorkflowId, taskQueue)
+            {
+                IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+                IdReusePolicy = WorkflowIdReusePolicy.AllowDuplicate,
+                // Rpc is disallowed on the start operation — cancellation goes on the update options below.
+            });
 
         _logger.LogClientSendingUpdate(sessionId.AgentName, sessionId.WorkflowId);
 
-        workflowOptions.Rpc = new RpcOptions { CancellationToken = cancellationToken };
-        await client.StartWorkflowAsync(
-            (AgentWorkflow wf) => wf.RunAsync(BuildAgentWorkflowInput(sessionId.AgentName)),
-            workflowOptions).ConfigureAwait(false);
-
-        var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
-
-        var response = await handle.ExecuteUpdateAsync<AgentWorkflow, AgentResponse>(
+        // Atomic update-with-start: starts the workflow if absent (UseExisting) and delivers the
+        // update in a single RPC, closing the client-crash window between start and update. Targets
+        // by workflow-id, so it follows the continue-as-new chain like the previous run-less handle.
+        // SDK caveat: this call may fail while the workflow still gets started (same partial-failure
+        // window that the prior two-RPC sequence had).
+        var response = await client.ExecuteUpdateWithStartWorkflowAsync<AgentWorkflow, AgentResponse>(
             wf => wf.RunAgentAsync(request),
-            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
-            .ConfigureAwait(false);
+            new WorkflowUpdateWithStartOptions(startOp)
+            {
+                Rpc = new RpcOptions { CancellationToken = cancellationToken },
+            }).ConfigureAwait(false);
 
         _logger.LogClientUpdateCompleted(sessionId.AgentName, sessionId.WorkflowId);
         return response;
