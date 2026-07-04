@@ -132,17 +132,34 @@ public class HistoryReducerAtCanTests
             await proxy.RunAsync("turn 1", session);
             var initialRunId = (await handle.DescribeAsync()).RunId;
 
-            var canFired = false;
-            for (var i = 2; i <= 12 && !canFired; i++)
+            // Drive turns until the FIRST count-driven CAN fires (run id changes), pinning the
+            // exact run id created by that CAN. We check BEFORE each dispatch and stop the moment
+            // CAN is detected, so no extra turn ever lands on the new run and inflates its history.
+            string? firstCanRunId = null;
+            for (var i = 2; i <= 12; i++)
             {
+                var rid = (await handle.DescribeAsync()).RunId;
+                if (rid != initialRunId) { firstCanRunId = rid; break; }
+
                 try { await proxy.RunAsync($"turn {i}", session); }
                 catch (Temporalio.Exceptions.WorkflowUpdateFailedException) { }
-                if ((await handle.DescribeAsync()).RunId != initialRunId) canFired = true;
             }
-            Assert.True(canFired, "Expected count-driven CAN to fire.");
+            // Catch the case where CAN fired while the last RunAsync was in flight.
+            firstCanRunId ??= (await handle.DescribeAsync()).RunId is var last && last != initialRunId
+                ? last
+                : null;
 
-            await Task.Delay(TimeSpan.FromSeconds(2));
-            var carried = await handle.QueryAsync<AgentWorkflow, IReadOnlyList<DurableSessionEntry>>(
+            Assert.True(firstCanRunId is not null, "Expected count-driven CAN to fire.");
+
+            // Pin the query to the exact run created by the first CAN — not the run-less handle
+            // that resolves to the latest run (which may be a LATER run created by a subsequent
+            // count-driven CAN if turns are still in flight). Querying the pinned run returns that
+            // run's history deterministically: exactly the reducer output, regardless of whether
+            // additional CANs have since occurred on the session. This removes the timing race
+            // entirely — no Task.Delay needed.
+            var runHandle = env.Client.GetWorkflowHandle<AgentWorkflow>(
+                session.SessionId.WorkflowId, runId: firstCanRunId);
+            var carried = await runHandle.QueryAsync<AgentWorkflow, IReadOnlyList<DurableSessionEntry>>(
                 wf => wf.GetHistory());
             _output.WriteLine($"Carried history count after reducer CAN: {carried.Count}");
 
