@@ -56,6 +56,7 @@ internal sealed class DefaultTemporalAgentClient(
             (AgentWorkflow wf) => wf.RunAsync(BuildAgentWorkflowInput(sessionId.AgentName)),
             workflowOptions).ConfigureAwait(false);
 
+        // Use a handle WITHOUT a pinned RunId so updates follow the continue-as-new chain.
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
 
         var response = await handle.ExecuteUpdateAsync<AgentWorkflow, AgentResponse>(

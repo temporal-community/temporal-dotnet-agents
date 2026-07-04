@@ -131,6 +131,17 @@ test-integration-ai: build
     dotnet test {{integration_tests_ai_dir}} \
         --configuration {{configuration}} \
         --no-build \
+        --filter "Category!=HistoryCapture" \
+        --logger "console;verbosity=normal"
+
+# Regenerate the checked-in replay-corpus history JSON files. Run this ONLY when the
+# workflow command sequence legitimately changes (new activity/wire name, CAN logic, SDK bump),
+# then commit the updated files under tests/TemporalCommunity.Extensions.AI.Tests/Compat/Histories/.
+capture-histories: build
+    dotnet test {{integration_tests_ai_dir}} \
+        --configuration {{configuration}} \
+        --no-build \
+        --filter "Category=HistoryCapture" \
         --logger "console;verbosity=normal"
 
 # Run both unit and integration tests (all libraries)
@@ -163,6 +174,7 @@ test-coverage: build
     dotnet test {{integration_tests_ai_dir}} \
         --configuration {{configuration}} \
         --no-build \
+        --filter "Category!=HistoryCapture" \
         --collect "XPlat Code Coverage" \
         --results-directory {{coverage_dir}}/ai-integration \
         --logger "console;verbosity=normal" \

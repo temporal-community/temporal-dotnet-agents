@@ -21,8 +21,10 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Run this class when the workflow logic changes (new activity type, new wire string,
-/// new CAN trigger condition) and commit the updated JSON.
+/// These tests are trait-gated out of the normal integration run (<c>just test-integration-ai</c>)
+/// so they do not overwrite the checked-in golden JSON on every run. Regenerate the corpus on
+/// demand with <c>just capture-histories</c> — run it ONLY when the workflow logic changes
+/// (new activity type, new wire string, new CAN trigger condition), then commit the updated JSON.
 /// </para>
 /// <para>
 /// The output directory is resolved relative to the repository root, not the test binary
