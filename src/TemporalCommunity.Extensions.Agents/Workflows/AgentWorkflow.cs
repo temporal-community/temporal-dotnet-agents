@@ -555,9 +555,19 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             {
                 var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
                 // F1 optimization: all interceptors in a fan-out see the same bag snapshot.
-                // Compute once here so the hash gate fires exactly once for the entire fan-out
-                // (subsequent calls inside the loop would return null via the unchanged-hash path).
-                var bagForInterceptors = GetStateBagForDispatch();
+                // Compute once here so the (non-forced) hash gate fires exactly once for the entire
+                // fan-out (subsequent calls inside the loop would return null via the unchanged-hash
+                // path).
+                //
+                // The scope-aware approval interceptor reads session-scope records straight from
+                // the dispatched StateBag (RunToolInterceptorAsync is stateless — it has NO carried
+                // bag to fall back to, unlike the LLM step). If the hash gate returns null here, the
+                // interceptor sees an empty bag, cannot find an existing session-scope grant, and
+                // re-prompts a tool that should auto-approve. So when any scope-aware tool is
+                // registered, force the full bag for the interceptor fan-out; the F1 hash-gate
+                // optimization only holds for consumers that can fall back to carried state.
+                var forceInterceptorBag = _input!.ScopeAwareTools is { Count: > 0 };
+                var bagForInterceptors = GetStateBagForDispatch(force: forceInterceptorBag);
                 foreach (var tc in toolCalls)
                 {
                     if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, skippedTools))
