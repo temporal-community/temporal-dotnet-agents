@@ -403,7 +403,14 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             // (developer-registered, same trust as the workflow), so their StateBag output is
             // applied unfiltered here — unlike tool/interceptor write-backs, which are deny-list
             // filtered via StateBagMerge.
-            _currentStateBag = stepResult.UpdatedStateBag;
+            //
+            // Overlay (not replace) the activity's StateBag output on top of the carried
+            // _currentStateBag. A replace loses workflow-thread writes (e.g. approval-scope records
+            // written by WriteSessionScopeToStateBag between activities, or a context provider's
+            // temporal.working_set) whenever a turn ends on a hash-gated LLM step that returns a
+            // null/subset bag. The overlay is unfiltered here because context-provider output is
+            // trusted-tier — see StateBagMerge.OverlayTrustedStateBag.
+            _currentStateBag = StateBagMerge.OverlayTrustedStateBag(_currentStateBag, stepResult.UpdatedStateBag);
 
             // Feature B — Sub-section B: load always-scopes at proxy-start session start.
             // Guard: needsResolution AND all three approval-scope flags true.
