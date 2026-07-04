@@ -140,7 +140,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         // Start the workflow if it doesn't exist, or reuse the existing one.
         // OriginalCreatedAt is intentionally omitted here — the workflow sets it to
         // Workflow.UtcNow on the first run and carries it forward through CAN transitions.
-        await _client.StartWorkflowAsync(
+        var startOp = WithStartWorkflowOperation.Create(
             (DurableChatWorkflow wf) => wf.RunAsync(new DurableChatWorkflowInput
             {
                 TimeToLive = _options.SessionTimeToLive,
@@ -169,11 +169,8 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
             new WorkflowOptions(workflowId, _options.TaskQueue!)
             {
                 IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
-                Rpc = new RpcOptions { CancellationToken = cancellationToken },
-            }).ConfigureAwait(false);
-
-        // Use a handle WITHOUT a pinned RunId so updates follow the continue-as-new chain.
-        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+                // Rpc is disallowed on the start operation — cancellation goes on the update options below.
+            });
 
         // Resolve effective client key: per-call override wins, then worker-level default.
         var effectiveKey = options.GetChatClientKey() ?? _options.DefaultChatClientKey;
@@ -188,9 +185,17 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
             CorrelationId = string.IsNullOrEmpty(correlationId) ? null : correlationId,
         };
 
-        var responseEntry = await handle.ExecuteUpdateAsync<DurableChatWorkflow, DurableSessionResponse>(
+        // Atomic update-with-start: starts the workflow if absent (UseExisting) and delivers the
+        // chat turn in a single RPC, closing the client-crash window between start and update. Targets
+        // by workflow-id, so it follows the continue-as-new chain like the previous run-less handle.
+        // SDK caveat: this call may fail while the workflow still gets started (same partial-failure
+        // window that the prior two-RPC sequence had).
+        var responseEntry = await _client.ExecuteUpdateWithStartWorkflowAsync<DurableChatWorkflow, DurableSessionResponse>(
             wf => wf.ChatAsync(input),
-            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
+            new WorkflowUpdateWithStartOptions(startOp)
+            {
+                Rpc = new RpcOptions { CancellationToken = cancellationToken },
+            }).ConfigureAwait(false);
 
         span?.SetTag(DurableChatTelemetry.InputTokensAttribute, responseEntry.Usage?.InputTokenCount);
         span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, responseEntry.Usage?.OutputTokenCount);
