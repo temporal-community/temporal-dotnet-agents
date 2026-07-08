@@ -227,15 +227,17 @@ just clean-test-artifacts  # remove artifacts/{test-individual,sample-runs}/
 
 **Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release with `git tag -a X.Y.Z -m "..."` then `just pack`. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention (`0.1.0`, `0.1.1`, ..., `0.3.0`).
 
-**Publish**: `just publish-github` (needs `NUGET_GITHUB_PAT`) — publishes to GitHub Packages under the `temporal-community` organization.
+**Publish**: to NuGet.org, either `just publish-nuget` (local — needs `NUGET_API_KEY` env var) or the `.github/workflows/publish.yml` workflow (`workflow_dispatch`, OIDC Trusted Publishing — no stored API key/secret; the `nuget-publish` GitHub environment must be configured). Remember: tags carry no `v` prefix.
 
 ---
 
 ## CI/CD — GitHub Actions
 
-`.github/workflows/build.yml`. Three jobs: `build` (ubuntu+macOS matrix on push to `main`, runs `just build` + `just test-unit`), `package` (after `build`, `just pack`, uploads artifact), `publish` (`workflow_dispatch` only — pushes pre-built artifact to GitHub Packages). Integration tests are excluded from CI.
+`.github/workflows/build.yml`. Two jobs: `build` (ubuntu+macOS matrix on push to `main`, runs `just build` + `just test-unit`) and `package` (after `build`, `just pack`, uploads artifact). Integration tests are excluded from CI.
 
-**Required secrets**: `NUGET_GITHUB_PAT` (GitHub Packages).
+`.github/workflows/publish.yml`. `workflow_dispatch`-only `publish` job (`nuget-publish` environment, `id-token: write`). Verifies MinVer resolved a real tag (fails on the `0.0.0-*` fallback), `just pack`, then publishes to NuGet.org via OIDC Trusted Publishing (`NuGet/login@v1` exchanges the GitHub OIDC token for a short-lived key — no long-lived secret stored).
+
+**Required secrets**: none — publishing uses OIDC Trusted Publishing.
 
 ---
 
