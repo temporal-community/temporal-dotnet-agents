@@ -163,8 +163,23 @@ public class HistoryReducerAtCanTests
                 wf => wf.GetHistory());
             _output.WriteLine($"Carried history count after reducer CAN: {carried.Count}");
 
-            // Reducer fired → exactly 1 entry. DefaultBoundedTrim → 3 entries.
-            Assert.Single(carried);
+            // Assert on CONTENT, not count. Even with the query pinned to the first-CAN run,
+            // a turn dispatched via the run-less proxy handle can straddle onto the new run
+            // (the server resolves the run at update-admission time, after CAN commits),
+            // appending a req/resp pair. That is a benign timing artifact, not a reducer failure
+            // — and it is exactly what CI timing surfaced as an intermittent "collection had 3 items".
+            //
+            // The deterministic discriminator is the FIRST carried entry — the reduced base:
+            //   keep-last-1 reducer → carried[0] is the single last pre-CAN response ("r3")
+            //   DefaultBoundedTrim  → carried[0] would be "r2" (TakeLast(maxEntryCount/2)=3 of
+            //                         [req1,r1,req2,r2,req3,r3] starts at r2)
+            // CAN fires deterministically at history count == maxEntryCount (6), i.e. after turn 3,
+            // so the reduced entry is reliably "r3".
+            // IsAssignableFrom (not IsType): the MAF entry is AgentSessionResponse, a subtype
+            // of DurableSessionResponse.
+            Assert.NotEmpty(carried);
+            var reducedBase = Assert.IsAssignableFrom<DurableSessionResponse>(carried[0]);
+            Assert.Equal("r3", reducedBase.Text);
 
             await host.StopAsync();
         }
