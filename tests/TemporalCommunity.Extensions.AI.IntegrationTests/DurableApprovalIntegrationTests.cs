@@ -36,28 +36,63 @@ public class DurableApprovalIntegrationTests
         // Request approval in a background task (it blocks until decision).
         var requestTask = RequestApprovalAsync(conversationId, request);
 
-        // Give the update a moment to register.
-        await Task.Delay(500);
-
-        // Check pending approval.
-        var pending = await _fixture.SessionClient.GetPendingApprovalAsync(conversationId);
-        Assert.NotNull(pending);
-        Assert.Equal(request.RequestId, pending!.RequestId);
-
-        // Submit approval decision.
-        var decision = new DurableApprovalDecision
+        // Poll deterministically for the pending approval — no fixed-duration sleep.
+        // Loop up to 30 × 200ms = 6 s before giving up.
+        DurableApprovalRequest? pending = null;
+        for (var i = 0; i < 30 && pending is null; i++)
         {
-            RequestId = request.RequestId,
-            Approved = true,
-            Reason = "Approved by test",
-        };
+            await Task.Delay(200);
+            pending = await _fixture.SessionClient.GetPendingApprovalAsync(conversationId);
+        }
 
-        await _fixture.SessionClient.SubmitApprovalAsync(conversationId, decision);
+        // Guarantee the background approval task is always unblocked on any exit path
+        // (assertion failure or success) so the workflow never stays parked on its
+        // 7-day WaitConditionAsync and never leaks into the shared fixture environment.
+        try
+        {
+            Assert.NotNull(pending);
+            Assert.Equal(request.RequestId, pending!.RequestId);
 
-        // The request task should complete now.
-        var result = await requestTask;
-        Assert.True(result.Approved);
-        Assert.Equal(request.RequestId, result.RequestId);
+            // Submit approval decision.
+            var decision = new DurableApprovalDecision
+            {
+                RequestId = request.RequestId,
+                Approved = true,
+                Reason = "Approved by test",
+            };
+
+            await _fixture.SessionClient.SubmitApprovalAsync(conversationId, decision);
+
+            // The request task should complete now.
+            var result = await requestTask.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(result.Approved);
+            Assert.Equal(request.RequestId, result.RequestId);
+        }
+        finally
+        {
+            // If requestTask is still running (assertion failed before SubmitApprovalAsync),
+            // inject a reject decision to unblock the workflow, then drain the task.
+            if (!requestTask.IsCompleted)
+            {
+                try
+                {
+                    await _fixture.SessionClient.SubmitApprovalAsync(
+                        conversationId,
+                        new DurableApprovalDecision
+                        {
+                            RequestId = request.RequestId,
+                            Approved = false,
+                            Reason = "Test cleanup — forced reject to unblock",
+                        });
+                }
+                catch
+                {
+                    // Best-effort: ignore errors from a cleanup reject.
+                }
+
+                try { await requestTask.WaitAsync(TimeSpan.FromSeconds(15)); } catch { /* drain */ }
+            }
+        }
     }
 
     [Fact]
@@ -75,21 +110,62 @@ public class DurableApprovalIntegrationTests
             FunctionName = "dangerous_operation",
         };
 
+        // Request approval in a background task (it blocks until decision).
         var requestTask = RequestApprovalAsync(conversationId, request);
-        await Task.Delay(500);
 
-        var decision = new DurableApprovalDecision
+        // Poll deterministically for the pending approval — no fixed-duration sleep.
+        // Without this poll the SubmitApprovalAsync below could arrive BEFORE the
+        // workflow's WaitConditionAsync is entered, leaving the workflow permanently
+        // parked. 30 × 200ms = 6 s deadline.
+        DurableApprovalRequest? pending = null;
+        for (var i = 0; i < 30 && pending is null; i++)
         {
-            RequestId = request.RequestId,
-            Approved = false,
-            Reason = "Too risky",
-        };
+            await Task.Delay(200);
+            pending = await _fixture.SessionClient.GetPendingApprovalAsync(conversationId);
+        }
 
-        await _fixture.SessionClient.SubmitApprovalAsync(conversationId, decision);
+        // Guarantee cleanup on any exit path so the shared fixture stays clean.
+        try
+        {
+            Assert.NotNull(pending);
+            Assert.Equal(request.RequestId, pending!.RequestId);
 
-        var result = await requestTask;
-        Assert.False(result.Approved);
-        Assert.Equal("Too risky", result.Reason);
+            var decision = new DurableApprovalDecision
+            {
+                RequestId = request.RequestId,
+                Approved = false,
+                Reason = "Too risky",
+            };
+
+            await _fixture.SessionClient.SubmitApprovalAsync(conversationId, decision);
+
+            var result = await requestTask.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.False(result.Approved);
+            Assert.Equal("Too risky", result.Reason);
+        }
+        finally
+        {
+            if (!requestTask.IsCompleted)
+            {
+                try
+                {
+                    await _fixture.SessionClient.SubmitApprovalAsync(
+                        conversationId,
+                        new DurableApprovalDecision
+                        {
+                            RequestId = request.RequestId,
+                            Approved = false,
+                            Reason = "Test cleanup — forced reject to unblock",
+                        });
+                }
+                catch
+                {
+                    // Best-effort: ignore errors from a cleanup reject.
+                }
+
+                try { await requestTask.WaitAsync(TimeSpan.FromSeconds(15)); } catch { /* drain */ }
+            }
+        }
     }
 
     [Fact]

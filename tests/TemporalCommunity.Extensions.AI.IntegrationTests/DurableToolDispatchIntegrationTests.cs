@@ -595,12 +595,24 @@ public class DurableToolDispatchIntegrationTests
         var toolStartedSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var blockingTool = AIFunctionFactory.Create(
-            async (string? _ = null) =>
+            async (string? _ = null, CancellationToken cancellationToken = default) =>
             {
                 // Signal that the tool activity has started so the test knows when to cancel.
                 toolStartedSignal.TrySetResult();
-                // Block until released or the activity's CancellationToken fires.
-                await toolGate.Task.ConfigureAwait(false);
+                // Block until released OR the activity's CancellationToken fires.
+                // Honoring the token is critical: when the workflow is cancelled the
+                // activity receives cancellation and we must unblock promptly rather than
+                // waiting for the test's toolGate.TrySetResult() call (which may never
+                // arrive if the test exits early).
+                try
+                {
+                    await toolGate.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Activity was cancelled — propagate so the worker stops cleanly.
+                    throw;
+                }
                 return (object?)"unblocked";
             },
             "blocking_cancel_tool",
