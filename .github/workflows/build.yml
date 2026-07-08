@@ -50,7 +50,7 @@ jobs:
         run: just build
 
       - name: Run unit tests
-        run: just test-unit
+        run: just test-unit-all
 
   package:
     name: Package
