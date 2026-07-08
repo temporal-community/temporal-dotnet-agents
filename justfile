@@ -212,7 +212,7 @@ publish-nuget: pack
         --api-key "$NUGET_API_KEY" \
         --skip-duplicate
 
-# Push main branch and all tags to the temporal remote (our only remote).
+# Push main branch and all tags to origin (our only remote).
 # Refuses to run if the current branch is not main.
 sync-remotes:
     #!/usr/bin/env bash
@@ -223,9 +223,9 @@ sync-remotes:
         echo "       Checkout main before pushing."
         exit 1
     fi
-    echo "Pushing main + tags → temporal..."
-    git push temporal main --tags
-    echo "✓ temporal remote synced."
+    echo "Pushing main + tags → origin..."
+    git push origin main --tags
+    echo "✓ origin synced."
 
 # Alias: build
 compile: build

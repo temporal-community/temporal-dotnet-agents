@@ -37,7 +37,7 @@ jobs:
           echo "MinVer resolved version: $version"
           if [[ "$version" == 0.0.0-* ]]; then
             echo "::error::Version resolved to '$version' — no release tag exists on this commit."
-            echo "::error::Tag the commit first: git tag <major>.<minor>.<patch> && git push temporal <tag>"
+            echo "::error::Tag the commit first: git tag <major>.<minor>.<patch> && git push origin <tag>"
             exit 1
           fi
 
