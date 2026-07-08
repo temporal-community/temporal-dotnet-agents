@@ -205,20 +205,14 @@ pack: clean build
         --output {{artifacts_dir}}
     @echo "Packages written to {{artifacts_dir}}/"
 
-# Publish to GitHub Packages (requires NUGET_GITHUB_PAT env var)
-publish-github: pack
-    @echo "Publishing to GitHub Package Registry..."
-    @if [ -z "$${NUGET_GITHUB_PAT:-}" ]; then \
-        echo "❌ NUGET_GITHUB_PAT environment variable is not set"; \
-        exit 1; \
-    fi
-    @dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
-        --api-key "$NUGET_GITHUB_PAT" \
-        --source "https://nuget.pkg.github.com/temporal-community/index.json" \
+# Push to NuGet.org (NUGET_API_KEY required for local; CI uses OIDC Trusted Publishing in publish.yml)
+publish-nuget: pack
+    dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
+        --source "https://api.nuget.org/v3/index.json" \
+        --api-key "$NUGET_API_KEY" \
         --skip-duplicate
-    @echo "✓ Packages published to GitHub"
 
-# Push main branch and all tags to both origin and temporal remotes.
+# Push main branch and all tags to origin (our only remote).
 # Refuses to run if the current branch is not main.
 sync-remotes:
     #!/usr/bin/env bash
@@ -226,14 +220,12 @@ sync-remotes:
     current=$(git branch --show-current)
     if [ "$current" != "main" ]; then
         echo "ERROR: Not on main branch (current: $current)."
-        echo "       Checkout main before syncing remotes."
+        echo "       Checkout main before pushing."
         exit 1
     fi
     echo "Pushing main + tags → origin..."
     git push origin main --tags
-    echo "Pushing main + tags → temporal..."
-    git push temporal main --tags
-    echo "✓ Both remotes synced."
+    echo "✓ origin synced."
 
 # Alias: build
 compile: build

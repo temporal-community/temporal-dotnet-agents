@@ -1,0 +1,67 @@
+name: Publish to NuGet
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Pack and publish to NuGet.org
+    runs-on: ubuntu-latest
+    environment: nuget-publish   # configure this environment in GitHub repo settings
+    permissions:
+      contents: read
+      id-token: write   # required for OIDC Trusted Publishing token exchange
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # MinVer needs full history
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Setup just
+        uses: extractions/setup-just@v4.0.0
+
+      - name: Verify version is not a MinVer fallback (a git tag must exist on this commit)
+        run: |
+          version=$(dotnet tool run minver --default-pre-release-identifiers preview)
+          echo "MinVer resolved version: $version"
+          if [[ "$version" == 0.0.0-* ]]; then
+            echo "::error::Version resolved to '$version' — no release tag exists on this commit."
+            echo "::error::Tag the commit first: git tag <major>.<minor>.<patch> && git push origin <tag>"
+            exit 1
+          fi
+
+      - name: Restore packages
+        run: dotnet restore TemporalAgents.slnx
+
+      - name: Pack
+        run: just pack
+
+      # Exchange the GitHub OIDC JWT for a short-lived NuGet API key.
+      # NuGet/login hits https://www.nuget.org/api/v2/token with the OIDC token
+      # and returns a single-use key valid for ~1 hour.
+      - name: NuGet login (Trusted Publishing)
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: cecilphillip
+          token-service-url: https://www.nuget.org/api/v2/token
+
+      - name: Publish to NuGet.org
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "artifacts/packages/*.nupkg" \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "$NUGET_API_KEY" \
+            --skip-duplicate
