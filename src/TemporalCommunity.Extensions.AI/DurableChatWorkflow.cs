@@ -205,9 +205,42 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
                 CorrelationId = requestEntry.CorrelationId,
             };
 
-            var stepResult = await Workflow.ExecuteActivityAsync(
-                (DurableChatActivities a) => a.GetChatStepAsync(stepInput),
-                stepActivityOptions).ConfigureAwait(true);
+            DurableChatStepResult stepResult;
+            try
+            {
+                stepResult = await Workflow.ExecuteActivityAsync(
+                    (DurableChatActivities a) => a.GetChatStepAsync(stepInput),
+                    stepActivityOptions).ConfigureAwait(true);
+            }
+            catch (ActivityFailureException) when (Workflow.CancellationToken.IsCancellationRequested)
+            {
+                // Workflow cancellation delivered as a faulted activity — propagate, never count.
+                throw;
+            }
+            catch (ActivityFailureException llmFailure)
+            {
+                // Retry-hardening (Part 3): the LLM-step activity exhausted its RetryPolicy (bounded
+                // backstop) or failed fast (non-retryable HTTP 4xx classified in the activity). This
+                // arrives as an ActivityFailureException. Route it through the SAME consecutive-error
+                // counter that tool failures use so the MaximumConsecutiveErrorsPerRequest bound
+                // terminates the turn instead of the loop swallowing the failure and re-dispatching
+                // the same doomed call forever. At threshold we surface a terminal non-retryable
+                // failure so SendAsync returns rather than hanging.
+                consecutiveErrors++;
+                if (consecutiveErrors > RequiredInput.MaximumConsecutiveErrorsPerRequest)
+                {
+                    throw new ApplicationFailureException(
+                        $"LLM step failed and exceeded MaximumConsecutiveErrorsPerRequest " +
+                        $"({RequiredInput.MaximumConsecutiveErrorsPerRequest}).",
+                        llmFailure,
+                        errorType: "LlmStepConsecutiveErrors",
+                        nonRetryable: true);
+                }
+
+                // Below threshold — retry the LLM step on the next iteration. No assistant message
+                // was produced, so nothing is appended to the accumulated transcript this iteration.
+                continue;
+            }
 
             if (stepResult.Usage is not null)
             {
@@ -526,8 +559,8 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             HeartbeatTimeout = RequiredInput.HeartbeatTimeout,
             // Apply the configured retry policy so an unmapped tool does not fall back to
             // Temporal's default (unlimited retries) — a non-idempotent unregistered tool
-            // would otherwise retry forever. The MAF path already does this.
-            RetryPolicy = RequiredInput.RetryPolicy,
+            // would otherwise retry forever. Bounded default when unset. The MAF path already does this.
+            RetryPolicy = Internal.DefaultRetryPolicy.Resolve(RequiredInput.RetryPolicy),
             Summary = toolName,
         };
     }
