@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
+using Temporalio.Exceptions;
 
 namespace TemporalCommunity.Extensions.Tests.Shared;
 
@@ -80,8 +81,16 @@ public sealed class ScriptedChatClient : IChatClient
         {
             if (_scripted.Count == 0)
             {
-                throw new InvalidOperationException(
-                    "ScriptedChatClient ran out of scripted responses; the test script is too short.");
+                // Thrown as a non-retryable ApplicationFailureException (not a plain
+                // exception) so that, inside a workflow LLM-call activity, this fails the
+                // test FAST with a clear message instead of being classified as a
+                // transient/retryable error. A plain exception would burn the bounded
+                // default RetryPolicy's attempts (or, pre-bounded-retry, retry forever)
+                // before the real problem — an under-scripted test — became visible.
+                throw new ApplicationFailureException(
+                    "ScriptedChatClient ran out of scripted responses; the test script is too short.",
+                    errorType: nameof(ScriptedChatClient),
+                    nonRetryable: true);
             }
             response = _scripted.Dequeue();
             _calls.Add(new CapturedCall(snapshot, options, response));
