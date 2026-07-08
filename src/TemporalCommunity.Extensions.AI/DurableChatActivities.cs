@@ -23,6 +23,14 @@ internal sealed class DurableChatActivities(
         .CreateLogger<DurableChatActivities>();
 
     /// <summary>
+    /// <see cref="ApplicationFailureException.ErrorType"/> stamped on a non-retryable LLM-call
+    /// failure (deterministic HTTP 4xx classified by <see cref="Internal.LlmErrorClassifier"/>).
+    /// Workflow loops match on this so an LLM step failing fast advances the consecutive-error
+    /// counter instead of being mistaken for a transient fault.
+    /// </summary>
+    internal const string LlmNonRetryableErrorType = "LlmNonRetryable";
+
+    /// <summary>
     /// Per-instance cache of <see cref="IChatClient"/> references that already passed the
     /// mixed-pattern B-check, keyed by object identity. The walk is cheap (small chain of
     /// <see cref="DelegatingChatClient"/> nodes) but cached anyway so the second activity
@@ -259,10 +267,30 @@ internal sealed class DurableChatActivities(
 
             return response;
         }
+        catch (OperationCanceledException)
+        {
+            // Activity/workflow cancellation — never reclassify; let Temporal handle it.
+            throw;
+        }
         catch (Exception ex)
         {
             span?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
             _logger.LogChatActivityFailed(ex, input.ConversationId, input.TurnNumber);
+
+            // Retry-hardening: a deterministic LLM error (HTTP 400/401/403/404/422) will never
+            // succeed on retry. With RetryPolicy defaults (unlimited attempts) it would loop
+            // forever and hang the workflow. Rethrow it as a non-retryable ApplicationFailure so
+            // Temporal stops immediately; retryable/transient errors propagate unchanged so the
+            // activity's RetryPolicy governs them. ErrorType lets workflow callers recognize it.
+            if (Internal.LlmErrorClassifier.IsNonRetryable(ex))
+            {
+                throw new ApplicationFailureException(
+                    $"Non-retryable LLM error: {ex.Message}",
+                    ex,
+                    errorType: LlmNonRetryableErrorType,
+                    nonRetryable: true);
+            }
+
             throw;
         }
     }

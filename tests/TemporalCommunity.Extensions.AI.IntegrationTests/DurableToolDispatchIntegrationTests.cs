@@ -12,6 +12,7 @@
 //   dotnet build -c Debug -p:DefineConstants=PATTERN3
 // or by adding <DefineConstants>PATTERN3</DefineConstants> to the csproj
 // once the library types land.
+using System.Diagnostics;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -402,31 +403,55 @@ public class DurableToolDispatchIntegrationTests
         await host.StopAsync();
     }
 
+    /// <summary>
+    /// Verifies counter-RESET semantics: a successful tool call zeroes the
+    /// consecutive-error counter (<see cref="DurableChatWorkflow"/> line ~516), so a
+    /// single failure right before a success does NOT contribute toward tripping
+    /// <c>MaximumConsecutiveErrorsPerRequest</c> — only a genuinely consecutive run of
+    /// failures AFTER the reset can exceed the threshold.
+    /// </summary>
+    /// <remarks>
+    /// Script (threshold = 2): fail, success, fail, fail, fail.
+    /// <list type="bullet">
+    ///   <item>call 1 fails → consecutiveErrors = 1 (not &gt; 2)</item>
+    ///   <item>call 2 succeeds → consecutiveErrors resets to 0 — if the reset did NOT
+    ///     happen, the pre-existing count of 1 plus this turn's failures would trip
+    ///     the threshold one call earlier than asserted below, so an early trip is
+    ///     itself a failure signal for this test</item>
+    ///   <item>call 3 fails → consecutiveErrors = 1</item>
+    ///   <item>call 4 fails → consecutiveErrors = 2 (not &gt; 2 yet — reset gave it a
+    ///     "fresh" budget of <c>threshold</c> failures, not <c>threshold - 1</c>)</item>
+    ///   <item>call 5 fails → consecutiveErrors = 3 (&gt; 2) — workflow surfaces the
+    ///     terminal non-retryable <see cref="ApplicationFailureException"/> deterministically</item>
+    /// </list>
+    /// The script provides exactly 5 responses so the threshold-exceeded path is the
+    /// only way the turn ends — termination is never an accident of script exhaustion.
+    /// </remarks>
     [Fact]
     public async Task MaximumConsecutiveErrorsPerRequest_SuccessResetsCounter()
     {
         await using var env = await WorkflowEnvironment.StartLocalAsync();
 
-        // We need a deterministic per-invocation behaviour: fail / success / fail / fail.
-        // Use a closure counter rather than the harness so the sequence is bespoke to this test.
+        // Deterministic per-invocation behaviour: fail, success, fail, fail, fail.
+        // Use a closure counter rather than the harness so the exact sequence is
+        // bespoke to this test's threshold-tripping arithmetic.
         var callIndex = 0;
         var sequenceTool = AIFunctionFactory.Create(
             (string? _ = null) =>
             {
                 callIndex++;
-                if (callIndex == 1) throw new InvalidOperationException("first failure");
                 if (callIndex == 2) return (object?)"success-resets-counter";
-                throw new InvalidOperationException($"failure #{callIndex - 1} after reset");
+                throw new InvalidOperationException($"scripted failure #{callIndex}");
             },
             "sequence_tool",
-            "fail/success/fail/fail");
+            "fail/success/fail/fail/fail");
 
-        // Script: 4 tool calls → fail, success, fail, fail. Threshold = 2.
-        var scripted = new ScriptedChatClient(Enumerable.Range(0, 4).Select(i =>
+        const int threshold = 2;
+        const int scriptLength = 5;
+        var scripted = new ScriptedChatClient(Enumerable.Range(0, scriptLength).Select(i =>
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
                 [new FunctionCallContent($"call-{i}", "sequence_tool")]))));
 
-        const int threshold = 2;
         var taskQueue = $"pattern3-reset-{Guid.NewGuid():N}";
         using var host = BuildHost(
             env.Client,
@@ -443,22 +468,22 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"reset-{Guid.NewGuid():N}";
 
-        // With a reset on success, only 2 consecutive failures occur (calls 3 & 4),
-        // which equals the threshold but does NOT exceed it on its own — the third
-        // consecutive failure would be needed. The expected behaviour per plan:
-        // counter > MaximumConsecutiveErrorsPerRequest throws. So 2 in a row should
-        // trip threshold=2 only if the test allows a third. We exit at the LLM-script
-        // end deterministically — if the workflow survives until script exhaustion
-        // an exception is fine; what we assert is that the FIRST failure (before
-        // the success) did NOT trip the threshold.
-        await Assert.ThrowsAnyAsync<Exception>(async () =>
+        var ex = await Assert.ThrowsAnyAsync<Exception>(async () =>
             await sessionClient.SendAsync(conversationId,
                 [new ChatMessage(ChatRole.User, "drive the sequence")]));
 
-        // Counter-reset semantics: the workflow must have made it past the success
-        // (call 2). That means callIndex should have advanced beyond 2.
-        Assert.True(callIndex >= 3,
-            $"After a successful turn, the consecutive-error counter must reset; observed callIndex={callIndex}.");
+        // The turn must end via the genuine threshold-exceeded path (call 5, the
+        // third consecutive failure after the reset) — never via script exhaustion,
+        // which would mean the fixture under-scripted the sequence.
+        var afe = AssertContainsApplicationFailureFromErrorThreshold(ex);
+        Assert.Contains($"({threshold})", afe.Message);
+
+        // callIndex == scriptLength confirms every scripted response — including the
+        // reset-granting success at call 2 — was actually consumed by the workflow
+        // before the threshold tripped, i.e. the reset gave the post-success failures
+        // a fresh budget rather than the threshold being tripped early by call 1's
+        // failure surviving the reset.
+        Assert.Equal(scriptLength, callIndex);
 
         await host.StopAsync();
     }
@@ -686,6 +711,32 @@ public class DurableToolDispatchIntegrationTests
                     "not increment the consecutive-error counter.");
             }
         }
+    }
+
+    /// <summary>
+    /// Walks the full exception chain and returns the first
+    /// <see cref="ApplicationFailureException"/> whose message contains the
+    /// "Exceeded MaximumConsecutiveErrorsPerRequest" threshold-exceeded sentinel.
+    /// Fails the test if no such exception is present in the chain — used by tests
+    /// that must terminate via the genuine threshold path, not an incidental failure
+    /// (e.g. script exhaustion) that happens to also throw.
+    /// </summary>
+    private static ApplicationFailureException AssertContainsApplicationFailureFromErrorThreshold(Exception ex)
+    {
+        for (var e = (Exception?)ex; e is not null; e = e.InnerException)
+        {
+            if (e is ApplicationFailureException afe &&
+                afe.Message.Contains("Exceeded MaximumConsecutiveErrorsPerRequest",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return afe;
+            }
+        }
+
+        Assert.Fail(
+            $"Expected an ApplicationFailureException with the 'Exceeded MaximumConsecutiveErrorsPerRequest' " +
+            $"sentinel somewhere in the exception chain, but none was found. Full exception: {ex}");
+        throw new UnreachableException(); // Assert.Fail always throws; satisfies flow analysis.
     }
 
     // ── Other gaps ──────────────────────────────────────────────────────────

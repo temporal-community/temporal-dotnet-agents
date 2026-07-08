@@ -20,6 +20,7 @@
     <Authors>Cecil Phillip</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <RepositoryUrl>https://github.com/temporal-community/temporal-dotnet-agents</RepositoryUrl>
     <PackageProjectUrl>$(RepositoryUrl)</PackageProjectUrl>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
@@ -42,6 +43,8 @@
 
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)README.md"
+          Visible="false" Pack="true" PackagePath="\" />
+    <None Include="$(MSBuildThisFileDirectory)assets/icon.png"
           Visible="false" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>

@@ -72,8 +72,12 @@ public sealed class TemporalAgentsOptions
     /// <summary>
     /// Gets or sets the worker-level default retry policy applied to the agent's
     /// <c>RunAgentStep</c> activity. Agents inherit this value when
-    /// <see cref="DurableAgentBuilder.RetryPolicy"/> is unset. When <see langword="null"/>,
-    /// Temporal SDK defaults apply. Per-tool retry policies are configured separately via
+    /// <see cref="DurableAgentBuilder.RetryPolicy"/> is unset. When <see langword="null"/> (and no
+    /// per-agent policy is set), a bounded backstop of <c>new RetryPolicy { MaximumAttempts = 5 }</c>
+    /// is applied at session start rather than the Temporal server default (<c>MaximumAttempts = 0</c>,
+    /// i.e. unlimited retries) — this prevents an unrecoverable LLM error from retrying forever and
+    /// hanging the agent workflow. Set an explicit policy to override the bounded default. Per-tool
+    /// retry policies are configured separately via
     /// <see cref="DurableAgentBuilder.AddTool(Microsoft.Extensions.AI.AIFunction, Action{DurableToolOptions}?)"/>.
     /// </summary>
     public RetryPolicy? DefaultRetryPolicy { get; set; }
