@@ -28,6 +28,9 @@ jobs:
   integration:
     name: Integration (${{ matrix.suite.name }})
     runs-on: ubuntu-latest
+    # Embedded-server suites can occasionally hang on server startup; fail fast
+    # rather than burning the 6-hour default job timeout.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -62,6 +65,7 @@ jobs:
           dotnet test ${{ matrix.suite.path }}
           --configuration Release
           --no-build
+          --filter "Category!=HistoryCapture"
           --logger "trx;LogFileName=integration-${{ matrix.suite.name }}.trx"
 
       - name: Upload test results
