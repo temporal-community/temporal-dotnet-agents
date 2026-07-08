@@ -61,11 +61,18 @@ jobs:
         run: just build
 
       - name: Integration tests (${{ matrix.suite.name }})
+        # console logger streams per-test Starting/Finished so a hang is visible in the log.
+        # --blame-hang-timeout terminates and NAMES any test exceeding the per-test budget
+        # (most integration tests finish in seconds), turning an opaque 20-min job hang into a
+        # named culprit and a fast failure. --blame-hang-dump-type none skips the (large) dump.
         run: >
           dotnet test ${{ matrix.suite.path }}
           --configuration Release
           --no-build
           --filter "Category!=HistoryCapture"
+          --blame-hang-timeout 4m
+          --blame-hang-dump-type none
+          --logger "console;verbosity=normal"
           --logger "trx;LogFileName=integration-${{ matrix.suite.name }}.trx"
 
       - name: Upload test results
@@ -74,4 +81,4 @@ jobs:
         with:
           name: integration-test-results-${{ matrix.suite.name }}
           path: ${{ matrix.suite.path }}/**/*.trx
-          if-no-files-found: error
+          if-no-files-found: ignore
