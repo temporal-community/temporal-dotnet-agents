@@ -318,7 +318,12 @@ internal sealed class DefaultTemporalAgentClient(
         var perAgentActivityTimeout = registration.ActivityTimeout ?? options.DefaultActivityTimeout;
         var perAgentHeartbeatTimeout = registration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
         var perAgentApprovalTimeout = registration.ApprovalTimeout ?? options.DefaultApprovalTimeout;
-        var perAgentRetryPolicy = registration.RetryPolicy ?? options.DefaultRetryPolicy;
+        // Bounded backstop: when neither the per-agent nor worker-level policy is set, use a
+        // bounded default (MaximumAttempts = 5) instead of null. A null RetryPolicy is transmitted
+        // as the server default (unlimited retries), which lets an unrecoverable LLM error loop
+        // forever and hang the agent workflow. See TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.
+        var perAgentRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.Resolve(
+            registration.RetryPolicy ?? options.DefaultRetryPolicy);
         var perAgentMaxEntryCount = registration.MaxEntryCount ?? options.DefaultMaxEntryCount;
         var perAgentHistoryReducer = registration.HistoryReducer ?? options.DefaultHistoryReducer;
         var perAgentHistoryReducerKey = registration.HistoryReducerKey ?? options.DefaultHistoryReducerKey;
@@ -521,7 +526,9 @@ internal sealed class DefaultTemporalAgentClient(
     {
         var effectiveActivityTimeout = options.DefaultActivityTimeout;
         var effectiveHeartbeatTimeout = options.DefaultHeartbeatTimeout;
-        var effectiveRetryPolicy = options.DefaultRetryPolicy;
+        // Bounded backstop (MaximumAttempts = 5) when unset — see DefaultRetryPolicy.
+        var effectiveRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.Resolve(
+            options.DefaultRetryPolicy);
         Dictionary<string, ActivityOptions>? toolActivityOptions = null;
         ActivityOptions? interceptorActivityOpts = null;
         Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
@@ -534,7 +541,8 @@ internal sealed class DefaultTemporalAgentClient(
         {
             effectiveActivityTimeout = registration.ActivityTimeout ?? options.DefaultActivityTimeout;
             effectiveHeartbeatTimeout = registration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
-            effectiveRetryPolicy = registration.RetryPolicy ?? options.DefaultRetryPolicy;
+            effectiveRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.Resolve(
+                registration.RetryPolicy ?? options.DefaultRetryPolicy);
             toolActivityOptions = BuildDurableAgentToolActivityOptions(
                 registration, effectiveActivityTimeout, effectiveHeartbeatTimeout, effectiveRetryPolicy);
 
@@ -656,7 +664,9 @@ internal sealed class DefaultTemporalAgentClient(
             ActivityTimeout = options.DefaultActivityTimeout,
             HeartbeatTimeout = options.DefaultHeartbeatTimeout,
             ApprovalTimeout = options.DefaultApprovalTimeout,
-            RetryPolicy = options.DefaultRetryPolicy,
+            // Bounded backstop (MaximumAttempts = 5) when unset — see DefaultRetryPolicy.
+            RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.Resolve(
+                options.DefaultRetryPolicy),
             MaxEntryCount = options.DefaultMaxEntryCount,
             HistoryReducer = options.DefaultHistoryReducer,
             HistoryReducerKey = options.DefaultHistoryReducerKey,

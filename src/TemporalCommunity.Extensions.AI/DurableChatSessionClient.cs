@@ -88,6 +88,13 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         return opts;
     }
 
+    // Effective retry policy for LLM/tool activities: the user's configured policy, or a bounded
+    // backstop (MaximumAttempts = 5) when unset. A null RetryPolicy is transmitted as the server
+    // default (unlimited retries), which lets an unrecoverable LLM error loop forever and hang the
+    // workflow — this bounds that. See Internal.DefaultRetryPolicy.
+    private Temporalio.Common.RetryPolicy EffectiveRetryPolicy =>
+        Internal.DefaultRetryPolicy.Resolve(_options.RetryPolicy);
+
     /// <summary>
     /// Sends messages to a durable chat session and returns the response entry.
     /// Starts the session workflow if not already running.
@@ -146,7 +153,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
                 TimeToLive = _options.SessionTimeToLive,
                 ActivityTimeout = _options.ActivityTimeout,
                 HeartbeatTimeout = _options.HeartbeatTimeout,
-                RetryPolicy = _options.RetryPolicy,
+                RetryPolicy = EffectiveRetryPolicy,
                 ApprovalTimeout = _options.ApprovalTimeout,
                 EnableSearchAttributes = _options.EnableSearchAttributes,
                 MaxEntryCount = _options.MaxEntryCount,
@@ -315,7 +322,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
             {
                 StartToCloseTimeout = perTool?.StartToCloseTimeout ?? _options.ActivityTimeout,
                 HeartbeatTimeout = perTool?.HeartbeatTimeout ?? _options.HeartbeatTimeout,
-                RetryPolicy = perTool?.RetryPolicy ?? _options.RetryPolicy,
+                RetryPolicy = perTool?.RetryPolicy ?? EffectiveRetryPolicy,
                 Summary = kvp.Key,
             };
         }
@@ -339,7 +346,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         {
             StartToCloseTimeout = _options.ActivityTimeout,
             HeartbeatTimeout = _options.HeartbeatTimeout,
-            RetryPolicy = _options.RetryPolicy,
+            RetryPolicy = EffectiveRetryPolicy,
         };
     }
 
@@ -367,7 +374,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
                 {
                     StartToCloseTimeout = kvp.Value.InterceptorTimeout,
                     HeartbeatTimeout = _options.HeartbeatTimeout,
-                    RetryPolicy = _options.RetryPolicy,
+                    RetryPolicy = EffectiveRetryPolicy,
                 };
             }
         }

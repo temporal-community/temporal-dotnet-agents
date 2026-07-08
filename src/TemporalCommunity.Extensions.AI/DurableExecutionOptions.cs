@@ -29,7 +29,12 @@ public sealed class DurableExecutionOptions
     public TimeSpan ActivityTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Gets or sets the Temporal retry policy for activities. When null, Temporal defaults apply.
+    /// Gets or sets the Temporal retry policy for LLM-call (and related) activities. When
+    /// <see langword="null"/> (the default), a bounded backstop of
+    /// <c>new RetryPolicy { MaximumAttempts = 5 }</c> is applied at session start rather than the
+    /// Temporal server default (<c>MaximumAttempts = 0</c>, i.e. unlimited retries). This prevents
+    /// an unrecoverable LLM error from retrying forever and hanging the workflow. Set an explicit
+    /// policy to override the bounded default.
     /// </summary>
     public RetryPolicy? RetryPolicy { get; set; }
 
