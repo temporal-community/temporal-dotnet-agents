@@ -32,7 +32,23 @@ internal static class DefaultRetryPolicy
     /// bounded default (<see cref="DefaultMaximumAttempts"/> attempts) instead of <see langword="null"/>
     /// (which the server treats as unlimited retries).
     /// </summary>
+    /// <remarks>
+    /// The bounded default also caps the inter-attempt backoff at
+    /// <see cref="DefaultMaximumIntervalSeconds"/> seconds (vs the server default of 100s). Bounding
+    /// both the attempt <em>count</em> and the backoff <em>interval</em> keeps a permanently-failing
+    /// LLM step from taking minutes to surface its terminal failure — the whole point of the
+    /// hardening is that the caller's <c>SendAsync</c> returns promptly instead of hanging.
+    /// </remarks>
     /// <param name="configured">The user-configured policy, or <see langword="null"/> when unset.</param>
     internal static RetryPolicy Resolve(RetryPolicy? configured) =>
-        configured ?? new RetryPolicy { MaximumAttempts = DefaultMaximumAttempts };
+        configured ?? new RetryPolicy
+        {
+            MaximumAttempts = DefaultMaximumAttempts,
+            MaximumInterval = TimeSpan.FromSeconds(DefaultMaximumIntervalSeconds),
+        };
+
+    /// <summary>
+    /// Caps the inter-attempt backoff for the bounded default policy (seconds).
+    /// </summary>
+    internal const int DefaultMaximumIntervalSeconds = 2;
 }
