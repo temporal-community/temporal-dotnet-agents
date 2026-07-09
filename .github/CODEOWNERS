@@ -1,0 +1,9 @@
+# CODEOWNERS — https://docs.github.com/articles/about-code-owners
+#
+# @cecilphillip is the default owner for everything in this repository.
+# Owners are automatically requested for review on pull requests that
+# modify matching files. More specific rules below a line override the
+# ones above it.
+
+# Global owner — applies to all files unless a more specific rule matches.
+*                           @cecilphillip
