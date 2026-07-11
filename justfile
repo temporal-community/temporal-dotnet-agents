@@ -205,6 +205,13 @@ pack: clean build
         --output {{artifacts_dir}}
     @echo "Packages written to {{artifacts_dir}}/"
 
+# Run the down-level packed-package gate on the local net8 proxy. This verifies both
+# netstandard2.1 assets are selected and execute, but does not replace the netcoreapp3.1
+# container gate in publish.yml.
+smoke-downlevel-proxy: pack
+    dotnet restore tests/smoke/DownLevelSmokeTest -p:SmokeProxy=true -p:PackedVersion={{version}}
+    dotnet run --project tests/smoke/DownLevelSmokeTest --no-restore --configuration Debug -p:SmokeProxy=true -p:PackedVersion={{version}}
+
 # Push to NuGet.org (NUGET_API_KEY required for local; CI uses OIDC Trusted Publishing in publish.yml)
 publish-nuget: pack
     dotnet nuget push "{{artifacts_dir}}/*.nupkg" \

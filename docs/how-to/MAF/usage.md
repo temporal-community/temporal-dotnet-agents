@@ -17,6 +17,7 @@ builder.Services.AddSingleton<OrderService>();
 builder.Services.AddSingleton<RefundService>();
 builder.Services.AddSingleton<EmailService>();
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient()).Build();
+builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
     .AddHostedTemporalWorker(taskQueue)
@@ -51,7 +52,7 @@ builder.Services
     .AddWorkflow<RefundWorkflow>();
 ```
 
-> **`ITemporalClient` prerequisite:** `AddTemporalAgents` requires `ITemporalClient` to be registered in DI before it is called. Call `services.AddTemporalClient(address, namespace)` to register it. The 3-arg `AddHostedTemporalWorker(address, namespace, queue)` overload stores connection settings on the worker service but does **not** register `ITemporalClient` as a DI service — `AddTemporalClient` is still required separately.
+> **`ITemporalClient` prerequisite:** `AddTemporalAgents` requires `ITemporalClient` to be registered in DI before it is called. Call `services.AddTemporalClient(address, namespace)` when using the one-argument `AddHostedTemporalWorker(queue)` overload. The three-argument `AddHostedTemporalWorker(address, namespace, queue)` overload registers the client for you.
 
 ### `DurableAgentBuilder` reference
 

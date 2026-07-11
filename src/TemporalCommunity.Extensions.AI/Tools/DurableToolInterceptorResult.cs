@@ -26,10 +26,10 @@ internal sealed class DurableToolInterceptorResult
                 EnrichedDescription = p.EnrichedDescription,
                 ModifiedArguments = p.ModifiedArguments is null
                     ? null
-                    : new Dictionary<string, object?>(p.ModifiedArguments),
+                    : p.ModifiedArguments.ToDictionary(kv => kv.Key, kv => kv.Value),
                 Metadata = p.Metadata is null
                     ? null
-                    : new Dictionary<string, string>(p.Metadata),
+                    : p.Metadata.ToDictionary(kv => kv.Key, kv => kv.Value),
             },
             DurableToolDecision.ApprovalRequiredDecision a => new DurableToolInterceptorResult
             {
@@ -38,7 +38,7 @@ internal sealed class DurableToolInterceptorResult
                 Message = a.Description,
                 Metadata = a.Metadata is null
                     ? null
-                    : new Dictionary<string, string>(a.Metadata),
+                    : a.Metadata.ToDictionary(kv => kv.Key, kv => kv.Value),
             },
             DurableToolDecision.SkipDecision s => new DurableToolInterceptorResult
             {
@@ -46,7 +46,7 @@ internal sealed class DurableToolInterceptorResult
                 Message = s.SyntheticResult,
                 Metadata = s.Metadata is null
                     ? null
-                    : new Dictionary<string, string>(s.Metadata),
+                    : s.Metadata.ToDictionary(kv => kv.Key, kv => kv.Value),
             },
             DurableToolDecision.BlockDecision b => new DurableToolInterceptorResult
             {
@@ -54,7 +54,7 @@ internal sealed class DurableToolInterceptorResult
                 Message = b.Reason,
                 Metadata = b.Metadata is null
                     ? null
-                    : new Dictionary<string, string>(b.Metadata),
+                    : b.Metadata.ToDictionary(kv => kv.Key, kv => kv.Value),
             },
             _ => new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed },
         };

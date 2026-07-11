@@ -135,6 +135,7 @@ The worker-level factory applies to every durable agent that does not override i
 builder.Services.AddSingleton<MyStore>();
 builder.Services.AddSingleton<HipaaStore>();
 builder.Services.AddChatClient(chatClient);
+builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
     .AddHostedTemporalWorker(taskQueue)

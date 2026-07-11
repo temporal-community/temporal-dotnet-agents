@@ -57,7 +57,7 @@ The **worker process** hosts `DurableChatWorkflow` and `DurableChatActivities` a
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) or later
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) or later to run the samples below
 - A running [Temporal server](https://docs.temporal.io/cli#start-dev) (`temporal server start-dev`)
 - An LLM provider (e.g., Azure OpenAI, OpenAI, Ollama)
 
@@ -66,6 +66,28 @@ Install the NuGet package:
 ```bash
 dotnet add package TemporalCommunity.Extensions.AI
 ```
+
+## Target framework support
+
+The package ships `net10.0` and `netstandard2.1` assets. The latter supports .NET Core 3.1+
+and modern .NET; .NET Framework is not supported. On the `netstandard2.1` asset, raw
+`HttpRequestException` failures have no status-code metadata for deterministic retry
+classification, and `System.Half` is unavailable, so half-precision embedding converter support
+is not present. OpenAI/Azure exceptions continue to use their reflected status path.
+
+The repository samples and test projects remain `net10.0`.
+
+## Samples
+
+| Sample | Focus |
+|---|---|
+| [DurableChat](../../samples/MEAI/DurableChat) | Multi-turn chat, history, and durable tool dispatch |
+| [DurableTools](../../samples/MEAI/DurableTools) | Per-tool Temporal activities with `AsDurable()` |
+| [DurableEmbeddings](../../samples/MEAI/DurableEmbeddings) | Durable embedding generation for indexing/RAG |
+| [HumanInTheLoop](../../samples/MEAI/HumanInTheLoop) | Approval gates for durable chat |
+| [ToolInterceptor](../../samples/MEAI/ToolInterceptor) | Proceed, pause, skip, and block decisions before tools run |
+| [OpenTelemetry](../../samples/MEAI/OpenTelemetry) | Distributed tracing and token attributes |
+| [CustomWorkflow](../../samples/MEAI/CustomWorkflow) | Domain-typed workflow output |
 
 ## Getting Started
 

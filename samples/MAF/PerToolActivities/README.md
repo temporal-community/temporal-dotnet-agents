@@ -105,6 +105,7 @@ builder.Services.AddSingleton<OrderService>();
 builder.Services.AddSingleton<RefundService>();
 builder.Services.AddSingleton<EmailService>();
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient());
+builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
     .AddHostedTemporalWorker(taskQueue)

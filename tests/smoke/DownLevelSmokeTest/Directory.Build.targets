@@ -1,0 +1,6 @@
+<!--
+  Empty Directory.Build.targets — same purpose as the sibling .props: stop the
+  upward search so the repo-root Directory.Build.targets is not imported.
+-->
+<Project>
+</Project>

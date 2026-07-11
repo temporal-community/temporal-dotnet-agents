@@ -47,6 +47,22 @@ jobs:
       - name: Pack
         run: just pack
 
+      # This must run before NuGet authentication/publishing. It consumes the freshly packed
+      # local nupkgs and executes both libraries' netstandard2.1 assets on a real .NET Core 3.1
+      # runtime, rather than relying on the development-machine net8 proxy.
+      - name: Run down-level runtime gate
+        run: |
+          package=$(find artifacts/packages -maxdepth 1 -name 'TemporalCommunity.Extensions.AI.*.nupkg' -print -quit)
+          test -n "$package"
+          packed_version=$(basename "$package" | sed -E 's/^TemporalCommunity\.Extensions\.AI\.(.*)\.nupkg$/\1/')
+          docker run --rm \
+            -v "$PWD/tests/smoke/DownLevelSmokeTest:/src" \
+            -v "$PWD/artifacts/packages:/artifacts/packages:ro" \
+            -e PACKED_VERSION="$packed_version" \
+            -w /src \
+            mcr.microsoft.com/dotnet/sdk:3.1 \
+            dotnet run --configuration Debug
+
       # Exchange the GitHub OIDC JWT for a short-lived NuGet API key.
       # NuGet/login hits https://www.nuget.org/api/v2/token with the OIDC token
       # and returns a single-use key valid for ~1 hour.

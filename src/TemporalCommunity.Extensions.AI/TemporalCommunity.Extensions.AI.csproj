@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <TargetFrameworks>net10.0;netstandard2.1</TargetFrameworks>
     <AssemblyName>TemporalCommunity.Extensions.AI</AssemblyName>
     <RootNamespace>TemporalCommunity.Extensions.AI</RootNamespace>
     <Description>Temporal durable execution middleware for Microsoft.Extensions.AI</Description>
@@ -18,6 +19,28 @@
     <PackageReference Include="Temporalio.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- netstandard2.1 down-level support -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <PolyArgumentExceptions>true</PolyArgumentExceptions>
+    <!-- Mark Polyfill's shim types with [Microsoft.CodeAnalysis.EmbeddedAttribute] so they
+         are compiler-private and NOT importable across the assembly boundary — even through
+         the [InternalsVisibleTo] this library grants to Extensions.Agents. Without this,
+         Agents sees BOTH its own Polyfill copy and this assembly's via IVT, producing
+         CS0436 (duplicate ExperimentalAttribute) and CS0121 (ambiguous extension methods).
+         Trade-off: on the ns2.1 asset the [Experimental] diagnostic is not surfaced to
+         downstream consumers (compile-time nicety only); the net10 asset uses the real BCL
+         attribute and is unaffected. -->
+    <PolyUseEmbeddedAttribute>true</PolyUseEmbeddedAttribute>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <PackageReference Include="System.Text.Json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Polyfill" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

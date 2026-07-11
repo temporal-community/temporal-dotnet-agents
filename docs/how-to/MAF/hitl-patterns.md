@@ -201,6 +201,7 @@ var response = await agentTask; // Agent resumes and returns final response
 Controls how long the workflow waits for a human response before auto-rejecting:
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
 builder.Services
     .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
@@ -740,6 +741,7 @@ var sendEmailTool = AIFunctionFactory.Create(
 **Worker configuration** — 24-hour activity timeout for human review:
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
 builder.Services
     .AddHostedTemporalWorker("hitl-sample")
     .AddTemporalAgents(opts =>

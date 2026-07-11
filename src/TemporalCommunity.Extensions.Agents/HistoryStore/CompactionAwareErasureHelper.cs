@@ -65,12 +65,17 @@ public static class CompactionAwareErasureHelper
     public static async Task<EraseResult> EraseSessionDataAsync(
         IAgentHistoryStore store,
         string sessionId,
-        IReadOnlySet<string> erasedMessageIds,
+        IEnumerable<string> erasedMessageIds,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentException.ThrowIfNullOrEmpty(sessionId);
         ArgumentNullException.ThrowIfNull(erasedMessageIds);
+
+        // Use a common, immutable-at-the-boundary contract across both target assets. The
+        // implementation needs set lookup semantics, so materialize once instead of exposing
+        // IReadOnlySet<T> (net5+) on one TFM and ISet<T> on the other.
+        var erasedSet = new HashSet<string>(erasedMessageIds);
 
         // 1) Load raw (audit canonical) view — the only mode that surfaces all entries
         //    including markers untouched.
@@ -98,7 +103,7 @@ public static class CompactionAwareErasureHelper
         {
             if (entry is CompactionMarkerEntry marker)
             {
-                var surviving = ComputeSurvivors(marker.CompactedMessageIds, erasedMessageIds);
+                var surviving = ComputeSurvivors(marker.CompactedMessageIds, erasedSet);
 
                 if (surviving.Count == marker.CompactedMessageIds.Count)
                 {
@@ -132,13 +137,13 @@ public static class CompactionAwareErasureHelper
                     // rewritten marker does not retain references to erased turns
                     // (store-consistency after GDPR erasure).
                     OriginatingTurnCorrelationIds =
-                        ComputeSurvivors(marker.OriginatingTurnCorrelationIds, erasedMessageIds),
+                        ComputeSurvivors(marker.OriginatingTurnCorrelationIds, erasedSet),
                 });
                 continue;
             }
 
             // Non-marker: drop if its correlation ID is in the erasure set; otherwise keep.
-            if (erasedMessageIds.Contains(entry.CorrelationId))
+            if (erasedSet.Contains(entry.CorrelationId))
             {
                 continue;
             }
@@ -158,7 +163,8 @@ public static class CompactionAwareErasureHelper
     }
 
     private static IReadOnlyList<string> ComputeSurvivors(
-        IReadOnlyList<string> compactedIds, IReadOnlySet<string> erased)
+        IReadOnlyList<string> compactedIds,
+        ISet<string> erased)
     {
         // Fast path: no overlap — return the original list, no allocation.
         bool anyOverlap = false;

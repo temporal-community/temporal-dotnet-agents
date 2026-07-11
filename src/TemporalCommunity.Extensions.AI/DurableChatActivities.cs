@@ -37,7 +37,7 @@ internal sealed class DurableChatActivities(
     /// invocation on the same resolved client is allocation-free.
     /// </summary>
     private readonly System.Collections.Generic.HashSet<IChatClient> _mixedPatternCheckedClients =
-        new(ReferenceEqualityComparer.Instance);
+        new(Internal.ReferenceComparer<IChatClient>.Instance);
 
     private readonly object _mixedPatternCheckLock = new();
 

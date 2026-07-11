@@ -862,6 +862,7 @@ new ActivityOptions
 
 ```csharp
 // Configure via options
+builder.Services.AddTemporalClient("localhost:7233", "default");
 builder.Services.AddHostedTemporalWorker("task-queue")
     .AddTemporalAgents(opts =>
     {

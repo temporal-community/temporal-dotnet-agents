@@ -53,11 +53,17 @@ Activity  ←── calls real IChatClient / AIAgent — retried automatically o
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) or later
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) or later to build the repository and run samples
 - A running [Temporal server](https://docs.temporal.io/cli#start-dev): `temporal server start-dev`
 - An LLM provider (e.g., Azure OpenAI, OpenAI, Ollama)
 
+The published libraries ship `net10.0` and `netstandard2.1` assets. `netstandard2.1` supports
+.NET Core 3.1+ and modern .NET; .NET Framework is out of scope. See each package README for
+down-level limitations.
+
 ## Samples
+
+### `TemporalCommunity.Extensions.AI`
 
 | Sample | Package | Description |
 |--------|---------|-------------|
@@ -66,12 +72,32 @@ Activity  ←── calls real IChatClient / AIAgent — retried automatically o
 | [OpenTelemetry](samples/MEAI/OpenTelemetry) | `Extensions.AI` | OTel tracing — span hierarchy, ActivitySource names, and token attributes |
 | [HumanInTheLoop](samples/MEAI/HumanInTheLoop) | `Extensions.AI` | HITL approval gates via `RequestApprovalAsync` and `SubmitApprovalAsync` |
 | [DurableEmbeddings](samples/MEAI/DurableEmbeddings) | `Extensions.AI` | `IEmbeddingGenerator` wrapped for durable per-chunk activity dispatch |
+| [ToolInterceptor](samples/MEAI/ToolInterceptor) | `Extensions.AI` | Intercept, pause, skip, or block tool calls |
+| [CustomWorkflow](samples/MEAI/CustomWorkflow) | `Extensions.AI` | Extend the durable chat workflow with a domain-typed result |
+
+### `TemporalCommunity.Extensions.Agents`
+
+| Sample | Package | Description |
+|--------|---------|-------------|
 | [BasicAgent](samples/MAF/BasicAgent) | `Extensions.Agents` | External caller pattern — send messages to an agent from a console app |
 | [SplitWorkerClient](samples/MAF/SplitWorkerClient) | `Extensions.Agents` | Worker and client in separate processes |
 | [WorkflowOrchestration](samples/MAF/WorkflowOrchestration) | `Extensions.Agents` | Sub-agent orchestration inside a Temporal workflow |
 | [EvaluatorOptimizer](samples/MAF/EvaluatorOptimizer) | `Extensions.Agents` | Generator + evaluator loop pattern |
 | [MultiAgentRouting](samples/MAF/MultiAgentRouting) | `Extensions.Agents` | LLM-powered routing, parallel execution, and OpenTelemetry |
 | [HumanInTheLoop](samples/MAF/HumanInTheLoop) | `Extensions.Agents` | HITL approval gates via `[WorkflowUpdate]` |
+| [WorkflowRouting](samples/MAF/WorkflowRouting) | `Extensions.Agents` | Static and dynamic durable routing patterns |
+| [AmbientAgent](samples/MAF/AmbientAgent) | `Extensions.Agents` | Signal-driven ambient monitoring agent |
+| [ConfigurableAgent](samples/MAF/ConfigurableAgent) | `Extensions.Agents` | Per-agent settings and read-only tools |
+| [ExternalHistoryStore](samples/MAF/ExternalHistoryStore) | `Extensions.Agents` | External history, context, and reduction |
+| [PerToolActivities](samples/MAF/PerToolActivities) | `Extensions.Agents` | Per-tool activity options and no-retry write tools |
+| [Compaction](samples/MAF/Compaction) | `Extensions.Agents` | History compaction and GDPR erasure |
+| [ContextProviders](samples/MAF/ContextProviders) | `Extensions.Agents` | Custom `AIContextProvider` implementations |
+| [DurableContextProvider](samples/MAF/DurableContextProvider) | `Extensions.Agents` | Context-provided tools dispatched durably |
+| [MixedActivities](samples/MAF/MixedActivities) | `Extensions.Agents` | Regular and AI activities in one workflow |
+| [ApprovalScopes](samples/MAF/ApprovalScopes) | `Extensions.Agents` | Scope-aware approvals persisted across turns |
+| [ToolInterceptor](samples/MAF/ToolInterceptor) | `Extensions.Agents` | Pre-tool policy decisions and approval pauses |
+| [WorkingSet](samples/MAF/WorkingSet) | `Extensions.Agents` | Working-set file context for coding agents |
+| [Skills](samples/MAF/Skills) | `Extensions.Agents` | Progressive-disclosure skill catalog and durable loading |
 
 ### Sample credentials
 
@@ -84,7 +110,7 @@ dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MEAI/Durable
 ```
 
 
-Non-sensitive settings (`OPENAI_API_BASE_URL`, `OPENAI_MODEL`, `TEMPORAL_ADDRESS`) have working defaults in each project's committed `appsettings.json` and do not need to be set via user-secrets unless you want to override them.
+Non-sensitive settings (`OPENAI_API_BASE_URL`, `OPENAI_MODEL`, `TEMPORAL_ADDRESS`) have working defaults in each sample's committed `appsettings.json` where applicable, or directly in its code. They do not need user-secrets unless you want to override them.
 
 Alternatively, set `OPENAI_API_KEY` as an environment variable — the samples pick it up automatically via `IConfiguration`.
 
@@ -102,7 +128,7 @@ dotnet run --project samples/MAF/BasicAgent
 ```bash
 just build        # Restore + Release build
 just test-unit    # Unit tests (no server required)
-just test         # Unit + integration tests (requires temporal server start-dev)
+just test         # Unit + integration tests (starts embedded Temporal test servers)
 just pack         # Build NuGet packages → artifacts/packages/
 just ci           # Full pipeline: clean → build → test-unit → pack
 ```

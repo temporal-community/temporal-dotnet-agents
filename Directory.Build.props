@@ -1,6 +1,14 @@
 <Project>
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <!--
+      Default single-TFM for every project EXCEPT the two shipped libraries, which
+      multi-target net10.0;netstandard2.1 (set via <TargetFrameworks> in their own csproj).
+      MSBuild imports Directory.Build.props at the TOP of each csproj, so a condition on
+      $(TargetFrameworks) would not yet see the libraries' value — gate on project name
+      instead. A project may not set both TargetFramework and TargetFrameworks.
+      Samples and test projects keep net10.0 only.
+    -->
+    <TargetFramework Condition="'$(MSBuildProjectName)' != 'TemporalCommunity.Extensions.AI' AND '$(MSBuildProjectName)' != 'TemporalCommunity.Extensions.Agents'">net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

@@ -106,11 +106,19 @@ internal static class LlmErrorClassifier
     /// </summary>
     private static bool TryGetHttpStatus(Exception ex, out int status)
     {
+#if NET5_0_OR_GREATER
+        // HttpRequestException.StatusCode is a net5.0+ API — absent on netstandard2.1.
+        // On the down-level leg a raw HttpRequestException carries no status code, so it
+        // cannot be deterministically classified and falls through to default-retryable
+        // (bounded by the retry backstop). This is an accepted down-level limitation for
+        // arbitrary non-OpenAI HTTP providers; the OpenAI/Azure path below still classifies
+        // via ClientResultException.Status on both TFMs.
         if (ex is HttpRequestException { StatusCode: { } httpStatus })
         {
             status = (int)httpStatus;
             return true;
         }
+#endif
 
         // System.ClientModel.ClientResultException — the OpenAI/Azure OpenAI SDK error type.
         // Read its int Status property via reflection to avoid taking a package dependency.

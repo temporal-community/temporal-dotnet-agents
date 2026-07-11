@@ -44,7 +44,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     // The entry is removed in the finally block of ChatAsync so cancelled/failed turns do
     // not leak entries for the workflow's lifetime.
     private readonly Dictionary<DurableSessionRequest, (string? ClientKey, string? ConversationId)>
-        _perTurnMeta = new(ReferenceEqualityComparer.Instance);
+        _perTurnMeta = new(Internal.ReferenceComparer<DurableSessionRequest>.Instance);
 
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);

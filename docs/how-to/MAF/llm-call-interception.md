@@ -126,6 +126,7 @@ builder.Services.AddSingleton<LoggingChatClient>(sp =>
         sp.GetRequiredService<ILogger<LoggingChatClient>>()));
 
 builder.Services.AddChatClient(sp => sp.GetRequiredService<LoggingChatClient>());
+builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
     .AddHostedTemporalWorker("agents")

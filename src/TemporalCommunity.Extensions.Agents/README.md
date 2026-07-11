@@ -56,7 +56,7 @@ determinism.
 
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) or later
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) or later to run the samples below
 - A running [Temporal server](https://docs.temporal.io/cli#start-dev) (`temporal server start-dev`)
 - An LLM provider (e.g., Azure OpenAI, OpenAI)
 
@@ -66,27 +66,44 @@ Install the NuGet package:
 dotnet add package TemporalCommunity.Extensions.Agents
 ```
 
+## Target framework support
+
+The package ships `net10.0` and `netstandard2.1` assets. The latter supports .NET Core 3.1+
+and modern .NET; .NET Framework is not supported. The repository samples and test projects
+remain `net10.0`.
+
 ## Getting Started
 
-### 1. Register an Agent
+### 1. Register and start an Agent worker
 
-Two equivalent entry points register the agent workflow, activities, proxies, and `DurableAIDataConverter` auto-wiring:
+The following is a complete single-process OpenAI example. Install the provider package and set
+`OPENAI_API_KEY` first; substitute another provider if preferred. For a longer runnable example,
+see [BasicAgent](../../samples/MAF/BasicAgent).
+
+```bash
+dotnet add package Microsoft.Extensions.AI.OpenAI
+```
 
 ```csharp
+using System.ClientModel;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using OpenAI;
 using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = Host.CreateApplicationBuilder(args);
+var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
+    ?? throw new InvalidOperationException("Set OPENAI_API_KEY before starting the worker.");
+var openAiClient = new OpenAIClient(new ApiKeyCredential(apiKey));
+IChatClient chatClient = openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient();
 
-var chatAgent = new ChatClientAgent(chatClient, "MyAgent")
-{
-    Instructions = "You are a helpful assistant."
-};
-
-// Path A — DI extension (primary, recommended)
+builder.Services.AddChatClient(chatClient);
+builder.Services.AddTemporalClient("localhost:7233", "default");
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("MyAgent", a =>
@@ -95,38 +112,30 @@ builder.Services
             a.Instructions = "You are a helpful assistant.";
             a.TimeToLive = TimeSpan.FromHours(24);
         });
-        opts.EnableSearchAttributes = true;  // opt in to search attribute upserts
+        // Optional: requires AgentName, SessionCreatedAt, and TurnCount attributes
+        // to be registered on the Temporal server.
+        opts.EnableSearchAttributes = false;
     });
 
-// Path B — Worker plugin ([Experimental("TA001")])
-#pragma warning disable TA001
-builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
-    .AddWorkerPlugin(new TemporalAgentsPlugin(opts =>
-    {
-        opts.AddDurableAgent("MyAgent", a =>
-        {
-            a.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-            a.Instructions = "You are a helpful assistant.";
-            a.TimeToLive = TimeSpan.FromHours(24);
-        });
-        opts.EnableSearchAttributes = true;
-    }));
-#pragma warning restore TA001
+using var host = builder.Build();
+await host.StartAsync();
 ```
 
 ### 2. Send a Message
 
 ```csharp
-// Resolve the agent proxy from DI
-AIAgent proxy = services.GetTemporalAgentProxy("MyAgent");
+// Resolve the agent proxy from the started host.
+AIAgent proxy = host.Services.GetTemporalAgentProxy("MyAgent");
 
 // Create a session and send a message
 var session = await proxy.CreateSessionAsync();
 var response = await proxy.RunAsync("Hello, agent!", session);
 
-Console.WriteLine(response.Messages[0].Text);
+Console.WriteLine(response.Text);
 ```
+
+For the experimental plugin alternative, see `TemporalAgentsPlugin` and
+`AddWorkerPlugin()` in the API documentation; keep it out of the first-run path.
 
 ### 3. Run a Sample
 
@@ -170,6 +179,12 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 | [PerToolActivities](../../samples/MAF/PerToolActivities) | Per-tool Temporal activities with write-tool no-retry |
 | [Compaction](../../samples/MAF/Compaction) | In-session compaction with `"summarization"` strategy + GDPR erasure |
 | [ContextProviders](../../samples/MAF/ContextProviders) | `TodoProvider` and `AgentModeProvider` via `AddContextProvider` |
+| [DurableContextProvider](../../samples/MAF/DurableContextProvider) | Context-provided tools dispatched through durable activities |
+| [MixedActivities](../../samples/MAF/MixedActivities) | Regular and AI activities in one workflow |
+| [ApprovalScopes](../../samples/MAF/ApprovalScopes) | Scope-aware HITL approvals persisted across turns |
+| [ToolInterceptor](../../samples/MAF/ToolInterceptor) | Proceed, pause, skip, and block decisions before tools run |
+| [WorkingSet](../../samples/MAF/WorkingSet) | File-reference working-set context injected per turn |
+| [Skills](../../samples/MAF/Skills) | Progressive disclosure with durable `load_skill` tool calls |
 
 ## Core Components
 

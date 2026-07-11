@@ -35,6 +35,13 @@
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <!-- Versioning tooling — MinVer; PrivateAssets="All" in Directory.Build.props -->
     <PackageVersion Include="MinVer" Version="7.0.0" />
+    <!-- netstandard2.1 multi-target support (library projects only) -->
+    <!-- Polyfill: source-only compiler/runtime shims (IsExternalInit, required members,
+         [Experimental], Argument*Exception.ThrowIf*) for the down-level leg. PrivateAssets="all". -->
+    <PackageVersion Include="Polyfill" Version="10.5.1" />
+    <!-- System.Text.Json 10.0.9 matches Microsoft.Extensions.AI 10.7.0's transitive STJ dep;
+         referenced only on netstandard2.1 to supply the STJ API surface for source-gen. -->
+    <PackageVersion Include="System.Text.Json" Version="10.0.9" />
     <!-- Analyzer (Item 11a) -->
     <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" />
   </ItemGroup>

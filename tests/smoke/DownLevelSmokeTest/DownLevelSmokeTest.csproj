@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    DOWN-LEVEL RUNTIME GATE (Trinity)
+    =================================
+    Standalone console app that proves the netstandard2.1 assets of both
+    libraries actually RUN on a down-level runtime (.NET Core 3.1) — not just
+    that they compile. A green `just build` proves API compatibility only; this
+    project loads the ns2.1 asset, spins up an embedded Temporal dev server, and
+    drives a real durable chat turn + one durable tool call end-to-end.
+
+    Deliberately OUTSIDE TemporalAgents.slnx: it consumes the PACKED .nupkg from
+    a local feed (see nuget.config), not a ProjectReference, so restore and
+    nearest-TFM asset selection are part of the test.
+
+    Targets netcoreapp3.1 → NuGet selects lib/netstandard2.1 from our packages
+    and lib/netcoreapp3.1 from Temporalio (which ships a dedicated 3.1 asset +
+    osx-arm64 native core).
+
+    RUN:  requires the .NET Core 3.1 runtime to be present (see README.md).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- SmokeProxy=true is the runnable local net8 proxy. Keep this property-driven rather
+         than overriding TargetFramework on the command line: restore/build otherwise evaluate
+         the project's explicit netcoreapp3.1 target inconsistently. -->
+    <TargetFramework Condition="'$(SmokeProxy)' == 'true'">net8.0</TargetFramework>
+    <TargetFramework Condition="'$(SmokeProxy)' != 'true'">netcoreapp3.1</TargetFramework>
+    <Nullable>enable</Nullable>
+    <!-- Compile with the same C# version available in the .NET Core 3.1 SDK. -->
+    <LangVersion>8.0</LangVersion>
+    <!-- This project is self-contained: do not let repo-wide props/analyzers leak in. -->
+    <ImportDirectoryBuildProps>false</ImportDirectoryBuildProps>
+    <ImportDirectoryBuildTargets>false</ImportDirectoryBuildTargets>
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- The probe intentionally executes newer transitive packages on netcoreapp3.1. -->
+    <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
+    <!-- Newer package-provided source generators cannot load in the C# 8 compiler;
+         the smoke app does not use them, and the runtime gate is still fail-closed. -->
+    <NoWarn>$(NoWarn);CS8032</NoWarn>
+    <!-- Version of the packed packages under test. Bump when re-packing, pass
+         -p:PackedVersion=X.Y.Z-preview.N on current SDKs, or set PACKED_VERSION
+         for the .NET Core 3.1 container gate (whose dotnet run lacks -p support). -->
+    <PackedVersion Condition="'$(PackedVersion)' == '' and '$(PACKED_VERSION)' != ''">$(PACKED_VERSION)</PackedVersion>
+    <PackedVersion Condition="'$(PackedVersion)' == ''">0.8.1-preview.20</PackedVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The libraries under test, consumed from the packed .nupkg (ns2.1 asset). -->
+    <PackageReference Include="TemporalCommunity.Extensions.AI" Version="$(PackedVersion)" />
+    <PackageReference Include="TemporalCommunity.Extensions.Agents" Version="$(PackedVersion)" />
+
+    <!-- Host + hosting-worker plumbing used by AddDurableAI. Versions match the
+         libraries' transitive expectations; restore will unify them. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
+    <PackageReference Include="Temporalio.Extensions.Hosting" Version="1.16.0" />
+  </ItemGroup>
+
+</Project>

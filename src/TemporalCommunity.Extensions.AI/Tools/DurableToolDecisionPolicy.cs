@@ -105,7 +105,9 @@ internal static class DurableToolDecisionPolicy
             return interceptorModifiedArgs;
         }
 
-        return originalArgs is null ? null : new Dictionary<string, object?>(originalArgs);
+        return originalArgs is null
+            ? null
+            : originalArgs.ToDictionary(kv => kv.Key, kv => kv.Value);
     }
 
     /// <summary>

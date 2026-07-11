@@ -1,0 +1,8 @@
+<!--
+  Empty Directory.Build.props to STOP MSBuild from walking up to the repo root
+  Directory.Build.props (which injects MinVer, central package management, and
+  the net10.0 default TFM). This smoke test is a standalone packed-package
+  consumer and must not inherit any repo-wide build wiring.
+-->
+<Project>
+</Project>

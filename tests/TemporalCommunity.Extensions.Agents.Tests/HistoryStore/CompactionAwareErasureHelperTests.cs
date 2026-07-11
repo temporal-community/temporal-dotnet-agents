@@ -133,6 +133,28 @@ public class CompactionAwareErasureHelperTests
     }
 
     [Fact]
+    public async Task IteratorErasureIds_AreConsumedOnceAndApplied()
+    {
+        var store = new FakeAgentHistoryStore();
+        store.Seed("s-iterator", new DurableSessionEntry[] { MakeSource("erase"), MakeSource("keep") });
+        int enumerations = 0;
+
+        IEnumerable<string> ErasedIds()
+        {
+            enumerations++;
+            yield return "erase";
+        }
+
+        var result = await CompactionAwareErasureHelper.EraseSessionDataAsync(
+            store, "s-iterator", ErasedIds());
+
+        Assert.Equal(1, enumerations);
+        Assert.Equal(1, result.RemainingMessageCount);
+        Assert.DoesNotContain(store.Snapshot("s-iterator"), e => e.CorrelationId == "erase");
+        Assert.Contains(store.Snapshot("s-iterator"), e => e.CorrelationId == "keep");
+    }
+
+    [Fact]
     public async Task UsesAuditCanonicalLoad_Not_Projected()
     {
         // The helper MUST call LoadAsync(applyCompaction: false) — otherwise it would only

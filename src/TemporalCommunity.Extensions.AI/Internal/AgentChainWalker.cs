@@ -90,7 +90,7 @@ internal static class AgentChainWalker
             yield break;
         }
 
-        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var visited = new HashSet<object>(ReferenceComparer<object>.Instance);
         var current = root;
         while (current is not null && visited.Add(current))
         {
@@ -122,7 +122,7 @@ internal static class AgentChainWalker
             yield break;
         }
 
-        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var visited = new HashSet<object>(ReferenceComparer<object>.Instance);
         var current = root;
         while (current is not null && visited.Add(current))
         {
