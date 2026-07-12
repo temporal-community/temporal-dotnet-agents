@@ -10,7 +10,8 @@ This document gives load-bearing project context: structure, gotchas, behavioral
 
 ## Quick Facts
 
-- **Language**: C# (.NET 10.0)
+- **Development target**: C# (.NET 10.0). The two published libraries also ship
+  `netstandard2.1` assets; samples and tests remain `net10.0`.
 - **Solution File**: `TemporalAgents.slnx` (.slnx format, not .sln)
 
 ---
@@ -28,8 +29,8 @@ TemporalAgents/
 │   └── TemporalCommunity.Extensions.AI/       # MEAI IChatClient middleware (no Agent Framework)
 ├── tests/                     # Four projects: {Agents,AI} × {Tests, IntegrationTests}
 └── samples/
-    ├── MAF/                   # 14 samples — run: ls samples/MAF
-    └── MEAI/                  # 6 samples  — run: ls samples/MEAI
+    ├── MAF/                   # 19 samples — run: ls samples/MAF
+    └── MEAI/                  # 7 samples  — run: ls samples/MEAI
 ```
 
 Use `Glob` / `ls` to discover specific files. Notable types and their locations are documented inline elsewhere in this guide (Key Type Locations, JSON Serialization, etc.).
@@ -326,4 +327,3 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **Custom Workflow Output**: `docs/how-to/MEAI/custom-workflow-output.md`
 - **Durable Chat Pipeline**: `docs/architecture/MEAI/durable-chat-pipeline.md`
 - **Cross-Library Integration**: `docs/architecture/MEAI/cross-library-integration.md`
-

@@ -35,6 +35,8 @@ dotnet add package TemporalCommunity.Extensions.Agents
 
 [Full documentation →](src/TemporalCommunity.Extensions.Agents/README.md)
 
+For help choosing between the two packages, see the [Library Combinations Guide](docs/library-combinations.md).
+
 ## How It Works
 
 Both packages share the same core pattern: LLM calls run inside Temporal **activities** (never directly in workflows), and conversation turns are delivered via Temporal **Updates** — a durable, acknowledged request/response primitive that eliminates polling.

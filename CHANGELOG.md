@@ -19,6 +19,18 @@ workflows before deploying.
 
 ### Changed (BREAKING)
 
+- **Target framework support and API compatibility.** Both published libraries now ship
+  `net10.0` and `netstandard2.1` assets. The down-level asset supports .NET Core 3.1+ and
+  modern .NET, but does not support .NET Framework. On that asset, half-precision
+  (`Embedding<Half>`) serialization is unavailable; raw `HttpRequestException` values do not
+  expose a status code for deterministic retry classification. See the package README for
+  details.
+
+- **`CompactionAwareErasureHelper.EraseSessionDataAsync` accepts `IEnumerable<string>`.**
+  This lets the public API compile on `netstandard2.1`; callers can provide any enumerable of
+  correlation IDs. The previous `IReadOnlySet<string>` overload remains on the `net10.0` asset
+  for binary compatibility.
+
 - **Package rename.** `Temporalio.Extensions.AI` → `TemporalCommunity.Extensions.AI` and
   `Temporalio.Extensions.Agents` → `TemporalCommunity.Extensions.Agents`. Install with
   `dotnet add package TemporalCommunity.Extensions.AI` and

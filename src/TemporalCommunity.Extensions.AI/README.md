@@ -89,6 +89,16 @@ The repository samples and test projects remain `net10.0`.
 | [OpenTelemetry](../../samples/MEAI/OpenTelemetry) | Distributed tracing and token attributes |
 | [CustomWorkflow](../../samples/MEAI/CustomWorkflow) | Domain-typed workflow output |
 
+## Documentation
+
+- [Getting Started and configuration](../../docs/how-to/MEAI/usage.md)
+- [Tool functions](../../docs/how-to/MEAI/tool-functions.md)
+- [Durable embeddings](../../docs/how-to/MEAI/embeddings.md)
+- [Observability](../../docs/how-to/MEAI/observability.md)
+- [Testing](../../docs/how-to/MEAI/testing.md)
+- [Durable chat pipeline architecture](../../docs/architecture/MEAI/durable-chat-pipeline.md)
+- [Cross-library integration architecture](../../docs/architecture/MEAI/cross-library-integration.md)
+
 ## Getting Started
 
 > **Deployment note:** Steps 1–3 show a single-process setup (worker and caller in the same host) — the pattern used by all included samples. In production you can split them: the **worker process** needs Steps 1 and 2; a separate **client process** needs only Step 1 (the `ITemporalClient` connection with `DurableAIDataConverter`) and Step 3 (`DurableChatSessionClient.ChatAsync`). `DurableChatSessionClient` requires only an `ITemporalClient` — it does not require a hosted worker.

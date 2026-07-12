@@ -434,7 +434,7 @@ When the Temporal event history for a session grows large (Temporal's per-workfl
 | `TaskQueue` | `string?` | _(required)_ | Temporal task queue. Set automatically by `AddDurableAI` from the worker builder. |
 | `ActivityTimeout` | `TimeSpan` | 5 minutes | Start-to-close timeout for LLM call activities. |
 | `HeartbeatTimeout` | `TimeSpan` | 2 minutes | Heartbeat timeout for LLM call activities. |
-| `RetryPolicy` | `RetryPolicy?` | `null` (Temporal defaults) | Retry policy for activities. When null, Temporal's default unlimited retry applies. |
+| `RetryPolicy` | `RetryPolicy?` | `null` (bounded default) | Retry policy for LLM-call activities. When null, the library applies `MaximumAttempts = 5` at session start. |
 | `SessionTimeToLive` | `TimeSpan` | 14 days | Inactivity period after which the session workflow exits. |
 | `ApprovalTimeout` | `TimeSpan` | 7 days | Maximum time to wait for a human to respond to a HITL tool approval request. |
 | `WorkflowIdPrefix` | `string` | `"chat-"` | Prefix prepended to `conversationId` when constructing the Temporal workflow ID. |
@@ -445,6 +445,17 @@ When the Temporal event history for a session grows large (Temporal's per-workfl
 | `MaxToolCallsPerTurn` | `int` | `20` | **Model 3 only.** Maximum LLM↔tool iterations per turn before the workflow synthesizes an "iteration limit exceeded" assistant message. Does not throw — see [Pattern 3 Loop Semantics](#pattern-3-loop-semantics) and [tool-functions.md](tool-functions.md#maxtoolcallsperturn-exhaustion). |
 | `MaximumConsecutiveErrorsPerRequest` | `int` | `3` | **Model 3 only.** Number of consecutive failed tool steps tolerated before a non-retryable `ApplicationFailureException` surfaces. Set to `0` for immediate propagation (MAF-style behavior). See [Pattern 3 Loop Semantics](#pattern-3-loop-semantics). |
 | `IncludeDetailedErrors` | `bool` | `false` | **Model 3 only.** When `true`, synthesized tool-error `FunctionResultContent` includes exception type and message; when `false`, a generic `"Error: Tool invocation failed."` is used. |
+
+### LLM-call failure classification
+
+The bounded default prevents an LLM activity from retrying forever. In addition, deterministic
+HTTP failures (`400`, `401`, `403`, `404`, and `422`) fail fast rather than consuming all retry
+attempts; other errors remain retryable so transient provider outages can recover. Set an explicit
+`RetryPolicy` when your provider or workload needs a different attempt limit or backoff.
+
+On the `netstandard2.1` asset, a raw `HttpRequestException` does not expose its status code, so
+that provider-agnostic path remains retryable and is bounded by the five-attempt default. OpenAI
+and Azure OpenAI failures continue to classify by their `ClientResultException.Status` value.
 
 > **`HistoryReducer` is silently non-functional in production durable workflows.**
 >

@@ -282,12 +282,13 @@ var agent = chatClient.AsAIAgent(
 
 **Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. See [LLM-Call Interception](./llm-call-interception.md) for the full guide and [`docs/design-decisions.md`](../../design-decisions.md) for why granular tool dispatch is deferred.
 
-### Do opt in to search attributes when you need them
+### Do pre-register search attributes, or explicitly opt out
 
-Search attribute upserts are disabled by default. Set `EnableSearchAttributes = true` in `TemporalAgentsOptions` to enable them:
+Search attribute upserts are enabled by default. Register the three attributes before starting a
+production worker, or set `EnableSearchAttributes = false` to opt out:
 
 ```csharp
-opts.EnableSearchAttributes = true;
+opts.EnableSearchAttributes = false; // opt out when the attributes are unavailable
 ```
 
 When enabled, register the three attributes on production clusters before starting the worker:
@@ -298,7 +299,7 @@ temporal operator search-attribute create --name SessionCreatedAt --type Datetim
 temporal operator search-attribute create --name TurnCount --type Int
 ```
 
-With `temporal server start-dev` these are auto-created when present, but production clusters require explicit registration. If you enable `EnableSearchAttributes` without pre-registering the attributes, the workflow fails with an opaque "unexpected workflow task failure".
+With `temporal server start-dev` these are auto-created when present, but production clusters require explicit registration. If you leave the default enabled without pre-registering the attributes, the workflow fails with an opaque "unexpected workflow task failure".
 
 ---
 
@@ -326,7 +327,7 @@ var env = await TestEnvironmentHelper.StartLocalAsync();
 
 `AgentWorkflow` calls `UpsertTypedSearchAttributes` only when `EnableSearchAttributes = true`. If search attributes are enabled in your test fixture, the three custom attributes (`AgentName`, `SessionCreatedAt`, `TurnCount`) must be pre-registered when the embedded server starts — otherwise the workflow fails with an opaque "unexpected workflow task failure". `TestEnvironmentHelper.StartLocalAsync()` passes the required `--search-attribute` CLI args to `WorkflowEnvironment.StartLocalAsync()` automatically.
 
-If `EnableSearchAttributes` is left at its default (`false`), bare `WorkflowEnvironment.StartLocalAsync()` works fine for Agents integration tests too. It is always appropriate for `TemporalCommunity.Extensions.AI` integration tests, which use `DurableChatWorkflow` and never require custom search attributes:
+Because `EnableSearchAttributes` defaults to `true`, use `TestEnvironmentHelper` for standard Agents integration tests. Bare `WorkflowEnvironment.StartLocalAsync()` is sufficient only when the test explicitly disables search attributes. It is always appropriate for `TemporalCommunity.Extensions.AI` integration tests, which use `DurableChatWorkflow` and never require custom search attributes:
 
 ```csharp
 // TemporalCommunity.Extensions.AI integration tests only — no custom search attributes needed

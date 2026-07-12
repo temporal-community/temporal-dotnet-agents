@@ -879,7 +879,7 @@ services
         opts.ApprovalTimeout    = TimeSpan.FromDays(7);      // default (HITL)
         opts.SessionTimeToLive  = TimeSpan.FromDays(14);     // default
         opts.WorkflowIdPrefix   = "chat-";                   // default
-        opts.RetryPolicy        = null;                      // null = Temporal default (unlimited retries)
+        opts.RetryPolicy        = null;                      // null = library bounded default (MaximumAttempts = 5)
     });
 ```
 

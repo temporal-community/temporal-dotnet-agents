@@ -30,7 +30,7 @@ Key benefits over in-memory agent frameworks:
 - Streaming responses via `IAgentResponseHandler`
 - Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`)
 - `WorkingSetContextProvider` — `AIContextProvider` subclass that extracts recently-referenced file paths and injects a working-set note before each LLM call
-- OpenTelemetry distributed tracing (two-layer span hierarchy; search attributes opt-in via `EnableSearchAttributes`)
+- OpenTelemetry distributed tracing (two-layer span hierarchy; search attributes enabled by default via `EnableSearchAttributes`)
 - Plugin composition — `.AddWorkerPlugin()` / `.AddClientPlugin()` available via the `TemporalCommunity.Extensions.AI` dependency (same worker builder, chains after `.AddTemporalAgents()`)
 
 ## How It Works
@@ -112,9 +112,9 @@ builder.Services
             a.Instructions = "You are a helpful assistant.";
             a.TimeToLive = TimeSpan.FromHours(24);
         });
-        // Optional: requires AgentName, SessionCreatedAt, and TurnCount attributes
-        // to be registered on the Temporal server.
-        opts.EnableSearchAttributes = false;
+        // Optional opt-out for clusters where the three custom search attributes
+        // have not been registered yet.
+        // opts.EnableSearchAttributes = false;
     });
 
 using var host = builder.Build();
@@ -153,14 +153,14 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `EnableSearchAttributes` | `bool` | `false` | Opt in to upsert `AgentName`, `SessionCreatedAt`, `TurnCount` on each workflow run |
+| `EnableSearchAttributes` | `bool` | `true` | Upsert `AgentName`, `SessionCreatedAt`, `TurnCount` on each workflow run |
 | `DefaultMaxEntryCount` | `int` | `1000` | Cap on `DurableSessionEntry` records (request + response pairs) before triggering continue-as-new |
 | `DefaultHistoryReducer` | `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>?` | `null` | Custom strategy for trimming history at continue-as-new boundaries. Operates on entries, preserving per-turn `Usage` and `CorrelationId` |
 | `DefaultRetryPolicy` | `RetryPolicy?` | `null` | Override the default retry policy for agent activities |
 | `DefaultActivityTimeout` | `TimeSpan` | `5 min` | Default start-to-close timeout for agent activities |
 | `DefaultApprovalTimeout` | `TimeSpan` | `7 days` | How long a HITL gate waits before auto-rejecting |
 
-`EnableSearchAttributes` defaults to `false`. Enabling it requires the three search attributes to be pre-registered on the Temporal server. With `temporal server start-dev` this happens automatically; on production clusters run the CLI commands in the [Observability guide](../../docs/how-to/MAF/observability.md#search-attributes).
+`EnableSearchAttributes` defaults to `true`. The three search attributes must be pre-registered on the Temporal server. With `temporal server start-dev` this happens automatically; on production clusters run the CLI commands in the [Observability guide](../../docs/how-to/MAF/observability.md#search-attributes). Set the option to `false` to opt out.
 
 ## Samples
 

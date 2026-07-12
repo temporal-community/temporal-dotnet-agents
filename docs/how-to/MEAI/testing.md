@@ -295,4 +295,4 @@ just test-integration-ai
 just test
 ```
 
-Both test suites use an embedded Temporal server — no separate `temporal server start-dev` process is needed for either. The AI integration tests use `WorkflowEnvironment.StartLocalAsync()` directly; the Agents integration tests use `TestEnvironmentHelper.StartLocalAsync()` when `EnableSearchAttributes = true`, a thin wrapper that pre-registers the `AgentName`, `SessionCreatedAt`, and `TurnCount` search attributes. When search attributes are disabled (the default), bare `WorkflowEnvironment.StartLocalAsync()` is sufficient for Agents tests too.
+Both test suites use an embedded Temporal server — no separate `temporal server start-dev` process is needed for either. The AI integration tests use `WorkflowEnvironment.StartLocalAsync()` directly; the Agents integration tests use `TestEnvironmentHelper.StartLocalAsync()`, a thin wrapper that pre-registers the `AgentName`, `SessionCreatedAt`, and `TurnCount` search attributes enabled by default. Bare `WorkflowEnvironment.StartLocalAsync()` is sufficient for Agents tests only when they explicitly set `EnableSearchAttributes = false`.

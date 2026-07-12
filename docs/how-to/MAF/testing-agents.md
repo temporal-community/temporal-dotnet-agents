@@ -241,12 +241,12 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         // Use TestEnvironmentHelper instead of bare WorkflowEnvironment.StartLocalAsync()
-        // when EnableSearchAttributes = true. TestEnvironmentHelper pre-registers the
+        // because EnableSearchAttributes defaults to true. TestEnvironmentHelper pre-registers the
         // three custom search attributes (AgentName, SessionCreatedAt, TurnCount) that
         // AgentWorkflow upserts when search attributes are enabled. Without them, the
         // workflow fails at runtime with an opaque "unexpected workflow task failure".
-        // If EnableSearchAttributes is false (the default), bare
-        // WorkflowEnvironment.StartLocalAsync() is sufficient.
+        // Bare WorkflowEnvironment.StartLocalAsync() is sufficient only when the test
+        // explicitly sets EnableSearchAttributes = false.
         Environment = await TestEnvironmentHelper.StartLocalAsync();
 
         _host = BuildHost();
@@ -485,7 +485,7 @@ just test-coverage
 > ```bash
 > temporal server start-dev --namespace default
 > ```
-> Alternatively, `TestEnvironmentHelper.StartLocalAsync()` in the test fixture starts an in-process server automatically — no manual setup needed for the standard integration test suite. Use `TestEnvironmentHelper` (not bare `WorkflowEnvironment.StartLocalAsync()`) for Agents integration tests **only when `EnableSearchAttributes = true`** — it pre-registers the `AgentName`, `SessionCreatedAt`, and `TurnCount` custom search attributes that `AgentWorkflow` requires when search attributes are enabled. If your tests leave `EnableSearchAttributes` at its default (`false`), bare `WorkflowEnvironment.StartLocalAsync()` is sufficient.
+> Alternatively, `TestEnvironmentHelper.StartLocalAsync()` in the test fixture starts an in-process server automatically — no manual setup needed for the standard integration test suite. Use `TestEnvironmentHelper` (not bare `WorkflowEnvironment.StartLocalAsync()`) for standard Agents integration tests — it pre-registers the `AgentName`, `SessionCreatedAt`, and `TurnCount` custom search attributes that `AgentWorkflow` upserts by default. Bare `WorkflowEnvironment.StartLocalAsync()` is sufficient only when your test explicitly sets `EnableSearchAttributes = false`.
 
 ---
 

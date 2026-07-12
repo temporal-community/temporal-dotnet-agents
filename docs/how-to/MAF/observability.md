@@ -26,7 +26,7 @@ TemporalAgents emits two layers of distributed tracing spans:
 
 These two layers compose naturally: agent spans nest inside (or wrap) Temporal SDK spans, giving you a single trace that spans the full lifecycle of a request — from the external caller through the workflow down to the LLM inference.
 
-Additionally, when `EnableSearchAttributes = true` in `TemporalAgentsOptions`, `AgentWorkflow` upserts **search attributes** on each workflow run, enabling operational queries in the Temporal Web UI and via the `ListWorkflowsAsync` API.
+By default, `AgentWorkflow` upserts **search attributes** on each workflow run, enabling operational queries in the Temporal Web UI and via the `ListWorkflowsAsync` API. Set `EnableSearchAttributes = false` to opt out.
 
 ---
 
@@ -192,7 +192,7 @@ The two `TemporalAgentTelemetry` spans bookend the trace — `agent.client.send`
 
 ## Search Attributes
 
-Search attribute upserts are **opt-in**. Set `EnableSearchAttributes = true` in your `TemporalAgentsOptions` to enable them:
+Search attribute upserts are enabled by default. Set `EnableSearchAttributes = false` only when your cluster cannot register the required custom attributes:
 
 ```csharp
 builder.Services
@@ -200,7 +200,7 @@ builder.Services
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("Agent", a => a.ChatClient = sp => sp.GetRequiredService<IChatClient>());
-        opts.EnableSearchAttributes = true;
+        // opts.EnableSearchAttributes = false; // explicit opt-out
     });
 ```
 

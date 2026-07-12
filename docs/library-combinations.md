@@ -13,7 +13,7 @@ This project ships two libraries — `TemporalCommunity.Extensions.AI` and `Temp
 | **Registration** | `AddDurableAI()` | `AddTemporalAgents()` |
 | **NuGet package** | `TemporalCommunity.Extensions.AI` | `TemporalCommunity.Extensions.Agents` |
 | **Named agents** | No | Yes |
-| **Temporal UI search attributes** | No | Yes — `AgentName`, `SessionCreatedAt`, `TurnCount` (opt-in via `EnableSearchAttributes`) |
+| **Temporal UI search attributes** | No | Yes — `AgentName`, `SessionCreatedAt`, `TurnCount` (enabled by default) |
 | **StateBag / AIContextProvider** | No | Yes |
 | **HITL** | Yes | Yes |
 | **Embeddings** | Yes | Yes — inject `IEmbeddingGenerator` into tool classes via DI |
@@ -75,7 +75,7 @@ Conversations are identified by an opaque string ID. There are no named agents, 
 
 **The designed happy path for `TemporalCommunity.Extensions.Agents`.**
 
-`AgentActivities` wraps an `AIAgent` (from `Microsoft.Agents.AI`) with a full session — structured history, `AgentSessionStateBag`, `AIContextProvider` runs, and agent-semantic OTel spans. Each agent gets its own `AgentWorkflow` instance, identified by name and a session key. Enabling `EnableSearchAttributes = true` adds `AgentName`, `SessionCreatedAt`, and `TurnCount` search attributes that make the Temporal Web UI genuinely useful.
+`AgentActivities` wraps an `AIAgent` (from `Microsoft.Agents.AI`) with a full session — structured history, `AgentSessionStateBag`, `AIContextProvider` runs, and agent-semantic OTel spans. Each agent gets its own `AgentWorkflow` instance, identified by name and a session key. By default, `EnableSearchAttributes` adds `AgentName`, `SessionCreatedAt`, and `TurnCount` search attributes that make the Temporal Web UI genuinely useful.
 
 `TemporalCommunity.Extensions.Agents` depends on `TemporalCommunity.Extensions.AI` — installing the Agents NuGet package pulls in the AI package automatically.
 
@@ -129,7 +129,7 @@ public class ResearchWorkflow
 On top of everything in Combination 1:
 
 - **Named agents** — each `AIAgent` is registered under a name; the Temporal workflow ID encodes the agent name and session key (`ta-weatheragent-{key}`).
-- **Temporal UI search attributes** — when `EnableSearchAttributes = true`, `AgentWorkflow` upserts `AgentName`, `SessionCreatedAt`, and `TurnCount` on every run, enabling queries like `AgentName = "BillingAgent" AND TurnCount > 10` in the Web UI.
+- **Temporal UI search attributes** — `AgentWorkflow` upserts `AgentName`, `SessionCreatedAt`, and `TurnCount` on every run by default, enabling queries like `AgentName = "BillingAgent" AND TurnCount > 10` in the Web UI.
 - **StateBag / `AIContextProvider`** — `AgentSessionStateBag` state is serialized and carried across turns, restarts, and `ContinueAsNew` transitions.
 - **`TemporalAgentContext.Current`** inside tools — direct access to the current session and HITL helpers without building a workflow handle manually.
 - **Structured output** — `RunAsync<T>` deserializes the agent's response into a typed object, with retry-on-failure.
@@ -139,7 +139,7 @@ On top of everything in Combination 1:
 ### Limitations
 
 - Requires `Microsoft.Agents.AI`.
-- Search attribute upserts are opt-in: set `EnableSearchAttributes = true` in `TemporalAgentsOptions` to enable them. When enabled, `AgentName`, `SessionCreatedAt`, and `TurnCount` must be pre-registered before the worker starts. With `temporal server start-dev` this is automatic; on a production cluster it requires a one-time CLI command. Integration tests that enable search attributes should use `TestEnvironmentHelper.StartLocalAsync()` to handle pre-registration.
+- Search attribute upserts are enabled by default. `AgentName`, `SessionCreatedAt`, and `TurnCount` must be pre-registered before the worker starts. With `temporal server start-dev` this is automatic; on a production cluster it requires a one-time CLI command. Set `EnableSearchAttributes = false` to opt out. Standard Agents integration tests should use `TestEnvironmentHelper.StartLocalAsync()` to handle pre-registration.
 - Two proxy types exist for the same agent: `TemporalAIAgentProxy` for external callers and `TemporalAIAgent` (via `GetTemporalAgent()`) for workflow code. Using the wrong one in the wrong context raises an exception.
 - Custom `[Workflow]` classes must follow Temporal determinism rules (`Workflow.UtcNow`, `Workflow.NewGuid()`, no `ActivitySource.StartActivity()` inside workflow code).
 
@@ -188,5 +188,6 @@ In short:
 - [Tool Functions](how-to/MEAI/tool-functions.md) — Model 1 vs Model 2 tool execution
 - [Human-in-the-Loop Patterns (MEAI)](how-to/MEAI/hitl-patterns.md)
 - [Human-in-the-Loop Patterns (MAF)](how-to/MAF/hitl-patterns.md)
+- [Cross-Library Integration Architecture](architecture/MEAI/cross-library-integration.md)
 - [Durable Chat Pipeline Architecture](architecture/MEAI/durable-chat-pipeline.md)
 - [Durability and Determinism](architecture/MAF/durability-and-determinism.md)
