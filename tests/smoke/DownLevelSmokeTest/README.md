@@ -28,12 +28,10 @@ PASS, non-zero = FAIL.
    ```bash
    just pack           # writes artifacts/packages/*.nupkg
    ```
-2. **`PackedVersion`** in `DownLevelSmokeTest.csproj` must match the packed
-   version (MinVer derives it from git; check the `just pack` output line
-   "Creating NuGet packages with version: X.Y.Z-preview.N"). Override without
-   editing the file:
+2. **Pass the package version explicitly** (MinVer derives it from git; check the
+   `just pack` output line "Creating NuGet packages with version: X.Y.Z-preview.N"):
    ```bash
-   -p:PackedVersion=X.Y.Z-preview.N
+   PACKED_VERSION=X.Y.Z-preview.N dotnet run -c Debug
    ```
 
 ---
@@ -47,7 +45,7 @@ our packages and `lib/netcoreapp3.1` from `Temporalio`.
 
 ```bash
 cd tests/smoke/DownLevelSmokeTest
-dotnet run -c Debug          # requires the Microsoft.NETCore.App 3.1 runtime
+PACKED_VERSION=X.Y.Z-preview.N dotnet run -c Debug  # requires Microsoft.NETCore.App 3.1
 ```
 
 **This cannot run on the current dev box.** See "Runtime availability" below —
@@ -85,9 +83,10 @@ Attempting `dotnet bin/Debug/netcoreapp3.1/DownLevelSmokeTest.dll` fails with
 '3.1.0' (arm64)`. .NET Core 3.1 is EOL (Dec 2022) and has **no arm64 macOS
 build**, so genuine 3.1 cannot be provisioned natively on this machine.
 
-**Verdict: the genuine-3.1 runtime gate has NOT yet been proven.** The `net8.0`
-proxy (Option B) PASSED — the ns2.1 assembly runs the durable chat + tool path
-end-to-end — which is strong evidence but not the full 3.1 gate.
+**Verdict: the genuine .NET Core 3.1 gate passed in the Docker container**
+(`mcr.microsoft.com/dotnet/sdk:3.1`) on arm64 macOS. It loaded both packaged
+`netstandard2.1` assets and completed the durable chat/tool and durable-agent paths.
+The `net8.0` proxy remains a fast local check; the container is the authoritative gate.
 
 ---
 

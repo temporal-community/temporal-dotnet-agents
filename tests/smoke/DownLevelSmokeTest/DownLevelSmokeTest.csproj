@@ -39,12 +39,16 @@
     <!-- Newer package-provided source generators cannot load in the C# 8 compiler;
          the smoke app does not use them, and the runtime gate is still fail-closed. -->
     <NoWarn>$(NoWarn);CS8032</NoWarn>
-    <!-- Version of the packed packages under test. Bump when re-packing, pass
-         -p:PackedVersion=X.Y.Z-preview.N on current SDKs, or set PACKED_VERSION
-         for the .NET Core 3.1 container gate (whose dotnet run lacks -p support). -->
+    <!-- Version of the packed packages under test. Pass -p:PackedVersion=X.Y.Z-preview.N
+         on current SDKs, or set PACKED_VERSION for the .NET Core 3.1 container gate
+         (whose dotnet run lacks -p support). -->
     <PackedVersion Condition="'$(PackedVersion)' == '' and '$(PACKED_VERSION)' != ''">$(PACKED_VERSION)</PackedVersion>
-    <PackedVersion Condition="'$(PackedVersion)' == ''">0.8.1-preview.20</PackedVersion>
   </PropertyGroup>
+
+  <Target Name="RequirePackedVersion" BeforeTargets="CollectPackageReferences">
+    <Error Condition="'$(PackedVersion)' == ''"
+           Text="Set PackedVersion or PACKED_VERSION to the version of the packed packages under test." />
+  </Target>
 
   <ItemGroup>
     <!-- The libraries under test, consumed from the packed .nupkg (ns2.1 asset). -->
