@@ -45,6 +45,23 @@ namespace TemporalCommunity.Extensions.Agents.HistoryStore;
 [Experimental("TA002")]
 public static class CompactionAwareErasureHelper
 {
+#if NET10_0_OR_GREATER
+    /// <summary>
+    /// Performs a compaction-aware erasure cascade against the store.
+    /// </summary>
+    /// <remarks>
+    /// Retained for binary compatibility with callers compiled against versions that exposed
+    /// <see cref="IReadOnlySet{T}"/>. New callers should use the <see cref="IEnumerable{T}"/>
+    /// overload, which is available on both shipped target frameworks.
+    /// </remarks>
+    public static Task<EraseResult> EraseSessionDataAsync(
+        IAgentHistoryStore store,
+        string sessionId,
+        IReadOnlySet<string> erasedMessageIds,
+        CancellationToken cancellationToken = default) =>
+        EraseSessionDataAsync(store, sessionId, (IEnumerable<string>)erasedMessageIds, cancellationToken);
+#endif
+
     /// <summary>
     /// Performs a compaction-aware erasure cascade against the store.
     /// </summary>

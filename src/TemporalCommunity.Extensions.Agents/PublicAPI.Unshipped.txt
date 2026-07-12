@@ -1,0 +1,411 @@
+const TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.Key = "sliding-window" -> string!
+const TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.DefaultSystemPrompt = "You are a summarizer. Produce a concise, factually accurate rollup of the conversation below so a downstream assistant can continue the dialogue with the gist preserved. Do NOT invent facts. Preserve specific names, numbers, decisions, and unresolved questions. Keep the summary under 250 words." -> string!
+const TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.Key = "summarization" -> string!
+const TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.Key = "truncation" -> string!
+const TemporalCommunity.Extensions.Agents.Skills.SkillsContextProvider.StateBagKey = "temporal.skills_index" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.PluginName = "TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.ActivitySourceName = "TemporalCommunity.Extensions.Agents" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentClientSendSpanName = "agent.client.send" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentCorrelationIdAttribute = "temporal.agent.correlation_id" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentNameAttribute = "gen_ai.agent.name" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentScheduleCreateSpanName = "temporal.agent.schedule.create" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentScheduleDelayedSpanName = "temporal.agent.schedule.delayed" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentScheduleOneTimeSpanName = "temporal.agent.schedule.one_time" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentSessionIdAttribute = "gen_ai.conversation.id" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentToolCallIdAttribute = "agent.tool.call_id" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentToolInvokeSpanName = "agent.tool.invoke" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentToolNameAttribute = "agent.tool.name" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.AgentTurnSpanName = "agent.turn" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.InputTokensAttribute = "gen_ai.usage.input_tokens" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.OutputTokensAttribute = "gen_ai.usage.output_tokens" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.ScheduleDelayAttribute = "schedule.delay" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.ScheduleIdAttribute = "schedule.id" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.ScheduleJobIdAttribute = "schedule.job_id" -> string!
+const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.TotalTokensAttribute = "gen_ai.usage.total_tokens" -> string!
+const TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.StateBagKey = "temporal.working_set" -> string!
+override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession.GetService(System.Type! serviceType, object? serviceKey = null) -> object?
+override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession.ToString() -> string!
+override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.Equals(object? obj) -> bool
+override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.GetHashCode() -> int
+override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionIdJsonConverter.Read(ref System.Text.Json.Utf8JsonReader reader, System.Type! typeToConvert, System.Text.Json.JsonSerializerOptions! options) -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
+override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionIdJsonConverter.Write(System.Text.Json.Utf8JsonWriter! writer, TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId value, System.Text.Json.JsonSerializerOptions! options) -> void
+override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.ToString() -> string!
+override TemporalCommunity.Extensions.Agents.Skills.FileSkillsSource.GetSkillsAsync(Microsoft.Agents.AI.AgentSkillsSourceContext! context, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IList<Microsoft.Agents.AI.AgentSkill!>!>!
+override TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.Clone() -> Microsoft.Agents.AI.AgentRunOptions!
+override TemporalCommunity.Extensions.Agents.TemporalAIAgent.Name.get -> string?
+override TemporalCommunity.Extensions.Agents.Testing.NoOpAgent.Description.get -> string?
+override TemporalCommunity.Extensions.Agents.Testing.NoOpAgent.Name.get -> string?
+static TemporalCommunity.Extensions.Agents.AIAgentExtensions.AsTemporalAgentProxy(this Microsoft.Agents.AI.AIAgent! agent, System.IServiceProvider! services) -> Microsoft.Agents.AI.AIAgent!
+static TemporalCommunity.Extensions.Agents.AIAgentExtensions.RunFireAndForgetAsync(this Microsoft.Agents.AI.AIAgent! agent, string! message, Microsoft.Agents.AI.AgentSession? session = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Agents.AI.AgentResponse!>!
+static TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeHelpers.TryMatchScope(string! toolName, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! arguments, Microsoft.Agents.AI.AgentSessionStateBag? bag, string! storeKey, out TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord? match) -> bool
+static TemporalCommunity.Extensions.Agents.Compaction.CompactionTargetFilter.CollectAlreadyCompactedIds(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.HashSet<string!>!
+static TemporalCommunity.Extensions.Agents.HistoryStore.CompactionAwareErasureHelper.EraseSessionDataAsync(TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore! store, string! sessionId, System.Collections.Generic.IEnumerable<string!>! erasedMessageIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult!>!
+static TemporalCommunity.Extensions.Agents.HistoryStore.CompactionAwareErasureHelper.EraseSessionDataAsync(TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore! store, string! sessionId, System.Collections.Generic.IReadOnlySet<string!>! erasedMessageIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult!>!
+static TemporalCommunity.Extensions.Agents.ServiceCollectionExtensions.AddTemporalAgentProxies(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<TemporalCommunity.Extensions.Agents.TemporalAgentsOptions!>! configure, string! taskQueue, string? targetHost = null, string! namespace = "default") -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
+static TemporalCommunity.Extensions.Agents.ServiceCollectionExtensions.GetTemporalAgentProxy(this System.IServiceProvider! services, string! name) -> Microsoft.Agents.AI.AIAgent!
+static TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.Current.get -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext!
+static TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.implicit operator string!(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId) -> string!
+static TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.operator !=(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId left, TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId right) -> bool
+static TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.operator ==(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId left, TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId right) -> bool
+static TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.Parse(string! workflowId) -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
+static TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.WithDeterministicKey(string! agentName, System.Guid key) -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
+static TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.WithRandomKey(string! agentName) -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
+static TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.FromRunRequest(TemporalCommunity.Extensions.Agents.Scheduling.RunRequest! request, System.DateTimeOffset timestamp) -> TemporalCommunity.Extensions.Agents.State.AgentSessionRequest!
+static TemporalCommunity.Extensions.Agents.State.AgentSessionResponse.FromAgentResponse(string! correlationId, Microsoft.Agents.AI.AgentResponse! response, System.DateTimeOffset timestamp) -> TemporalCommunity.Extensions.Agents.State.AgentSessionResponse!
+static TemporalCommunity.Extensions.Agents.StructuredOutputExtensions.RunAgentAsync<T>(this TemporalCommunity.Extensions.Agents.ITemporalAgentClient! client, TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, TemporalCommunity.Extensions.Agents.Scheduling.RunRequest! request, TemporalCommunity.Extensions.Agents.StructuredOutputOptions? options = null, string? correlationId = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static TemporalCommunity.Extensions.Agents.StructuredOutputExtensions.RunAsync<T>(this Microsoft.Agents.AI.AIAgent! agent, System.Collections.Generic.IList<Microsoft.Extensions.AI.ChatMessage!>! messages, Microsoft.Agents.AI.AgentSession! session, TemporalCommunity.Extensions.Agents.StructuredOutputOptions? options = null, string? correlationId = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static TemporalCommunity.Extensions.Agents.StructuredOutputExtensions.RunAsync<T>(this TemporalCommunity.Extensions.Agents.TemporalAIAgent! agent, System.Collections.Generic.IList<Microsoft.Extensions.AI.ChatMessage!>! messages, Microsoft.Agents.AI.AgentSession? session = null, TemporalCommunity.Extensions.Agents.StructuredOutputOptions? options = null, string? correlationId = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static TemporalCommunity.Extensions.Agents.TemporalAgentDataConverter.Instance.get -> Temporalio.Converters.DataConverter!
+static TemporalCommunity.Extensions.Agents.TemporalAgentJsonUtilities.DefaultOptions.get -> System.Text.Json.JsonSerializerOptions!
+static TemporalCommunity.Extensions.Agents.TemporalWorkerBuilderExtensions.AddTemporalAgents(this Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder! builder, System.Action<TemporalCommunity.Extensions.Agents.TemporalAgentsOptions!>! configure) -> Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder!
+static TemporalCommunity.Extensions.Agents.TemporalWorkerBuilderExtensions.AddWorkerPlugin(this Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder! builder, TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin! plugin) -> Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder!
+static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync(System.Collections.Generic.IEnumerable<(TemporalCommunity.Extensions.Agents.TemporalAIAgent! Agent, System.Collections.Generic.IList<Microsoft.Extensions.AI.ChatMessage!>! Messages, Microsoft.Agents.AI.AgentSession! Session)>! requests, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Microsoft.Agents.AI.AgentResponse!>!>!
+static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions.GetTemporalAgent(string! agentName, Temporalio.Workflows.ActivityOptions? activityOptions = null) -> TemporalCommunity.Extensions.Agents.TemporalAIAgent!
+static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions.NewAgentSessionId(string! agentName) -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
+static TemporalCommunity.Extensions.Agents.Testing.NoOpAgent.Instance.get -> TemporalCommunity.Extensions.Agents.Testing.NoOpAgent!
+TemporalCommunity.Extensions.Agents.AgentNotRegisteredException
+TemporalCommunity.Extensions.Agents.AgentNotRegisteredException.AgentName.get -> string!
+TemporalCommunity.Extensions.Agents.AgentNotRegisteredException.AgentNotRegisteredException(string! agentName) -> void
+TemporalCommunity.Extensions.Agents.AgentNotRegisteredException.AgentNotRegisteredException(string! agentName, System.Exception? innerException) -> void
+TemporalCommunity.Extensions.Agents.AIAgentExtensions
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeHelpers
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.ApprovalScopeRecord() -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.GrantedAt.get -> System.DateTimeOffset
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.GrantedAt.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.OriginatingRequestId.get -> string!
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.OriginatingRequestId.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.Pattern.get -> TemporalCommunity.Extensions.AI.Approvals.ApprovalScopePattern?
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.Pattern.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.ToolName.get -> string!
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.ToolName.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.AlwaysScopesStoreKey.get -> string!
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.AlwaysScopesStoreKey.set -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.ApplyAlwaysScopesAtSessionStart.get -> bool
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.ApplyAlwaysScopesAtSessionStart.set -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts.get -> int
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts.set -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.ApprovalScopeActivityTimeout.get -> System.TimeSpan
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.ApprovalScopeActivityTimeout.set -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.ApprovalScopesOptions() -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.ApprovalScopeStore.get -> System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore!>?
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.ApprovalScopeStore.set -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.MaxAlwaysScopeCacheBytes.get -> int
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.MaxAlwaysScopeCacheBytes.set -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.MaxAlwaysScopeCacheRecords.get -> int
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.MaxAlwaysScopeCacheRecords.set -> void
+TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore
+TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore.AppendAsync(string! agentName, string! storeKey, TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord! record, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore.LoadAsync(string! agentName, string! storeKey, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord!>!>!
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.AgentName.get -> string!
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.AgentName.init -> void
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.ChatClient.get -> Microsoft.Extensions.AI.IChatClient!
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.ChatClient.init -> void
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.MarkerCorrelationId.get -> string!
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.MarkerCorrelationId.init -> void
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.RawEntries.get -> System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.RawEntries.init -> void
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.SessionId.get -> string!
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.SessionId.init -> void
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.TargetMessageIds.get -> System.Collections.Generic.IReadOnlyList<string!>!
+TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.TargetMessageIds.init -> void
+TemporalCommunity.Extensions.Agents.Compaction.CompactionResult
+TemporalCommunity.Extensions.Agents.Compaction.CompactionResult.Marker.get -> TemporalCommunity.Extensions.AI.Session.CompactionMarkerEntry!
+TemporalCommunity.Extensions.Agents.Compaction.CompactionResult.Marker.init -> void
+TemporalCommunity.Extensions.Agents.Compaction.CompactionTargetFilter
+TemporalCommunity.Extensions.Agents.Compaction.ICompactionStrategy
+TemporalCommunity.Extensions.Agents.Compaction.ICompactionStrategy.CompactAsync(TemporalCommunity.Extensions.Agents.Compaction.CompactionContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.Compaction.CompactionResult!>!
+TemporalCommunity.Extensions.Agents.Compaction.ICompactionStrategy.EvaluateTrigger(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.IReadOnlyList<string!>?
+TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy
+TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.CompactAsync(TemporalCommunity.Extensions.Agents.Compaction.CompactionContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.Compaction.CompactionResult!>!
+TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.EvaluateTrigger(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.IReadOnlyList<string!>?
+TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.SlidingWindowCompactionStrategy() -> void
+TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.SlidingWindowCompactionStrategy(int windowSize) -> void
+TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.WindowSize.get -> int
+TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy
+TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.CompactAsync(TemporalCommunity.Extensions.Agents.Compaction.CompactionContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.Compaction.CompactionResult!>!
+TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.EvaluateTrigger(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.IReadOnlyList<string!>?
+TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.KeepRecentCount.get -> int
+TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.SummarizationCompactionStrategy() -> void
+TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.SummarizationCompactionStrategy(int triggerEntryCount, int keepRecentCount, string! systemPrompt) -> void
+TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.SystemPrompt.get -> string!
+TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.TriggerEntryCount.get -> int
+TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy
+TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.CompactAsync(TemporalCommunity.Extensions.Agents.Compaction.CompactionContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.Compaction.CompactionResult!>!
+TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.EvaluateTrigger(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.IReadOnlyList<string!>?
+TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.KeepRecentCount.get -> int
+TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.TriggerEntryCount.get -> int
+TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.TruncationCompactionStrategy() -> void
+TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.TruncationCompactionStrategy(int triggerEntryCount, int keepRecentCount) -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ActivityTimeout.get -> System.TimeSpan?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ActivityTimeout.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddContextProvider(Microsoft.Agents.AI.AIContextProvider! provider, System.Collections.Generic.IEnumerable<TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec!>? durableTools = null) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddContextProvider(System.Func<System.IServiceProvider!, Microsoft.Agents.AI.AIContextProvider!>! factory) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddTool(Microsoft.Extensions.AI.AIFunction! tool, System.Action<TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!>? configure = null) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddTool(string! name, System.Func<System.IServiceProvider!, Microsoft.Extensions.AI.AIFunction!>! factory, System.Action<TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!>? configure = null) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddToolInterceptor(System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.AI.Tools.IDurableToolInterceptor<TemporalCommunity.Extensions.Agents.Tools.AgentToolContext!>!>! factory) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddTools(params Microsoft.Extensions.AI.AIFunction![]! tools) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ApprovalTimeout.get -> System.TimeSpan?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ApprovalTimeout.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ChatClient.get -> System.Func<System.IServiceProvider!, Microsoft.Extensions.AI.IChatClient!>?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ChatClient.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ChatOptions.get -> Microsoft.Extensions.AI.ChatOptions?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ChatOptions.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.CompactionStrategyKey.get -> string?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.CompactionStrategyKey.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ConfigureAgentPipeline.get -> System.Action<Microsoft.Agents.AI.AIAgentBuilder!>?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ConfigureAgentPipeline.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Description.get -> string?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Description.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HeartbeatTimeout.get -> System.TimeSpan?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HeartbeatTimeout.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducer.get -> System.Func<System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!, System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!>?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducer.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducerKey.get -> string?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducerKey.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryStore.get -> System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore!>?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryStore.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Instructions.get -> string?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Instructions.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.MaxEntryCount.get -> int?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.MaxEntryCount.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.MaxToolCallsPerTurn.get -> int
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.MaxToolCallsPerTurn.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Name.get -> string!
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.RetryPolicy.get -> Temporalio.Common.RetryPolicy?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.RetryPolicy.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.TimeToLive.get -> System.TimeSpan?
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.TimeToLive.set -> void
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.UseApprovalScopes(System.Action<TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions!>? configure = null) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.UseSkills(System.Action<TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder!>! configure) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
+TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec
+TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec.Configure.get -> System.Action<TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!>?
+TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec.Configure.init -> void
+TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec.DurableToolRegistrationSpec(Microsoft.Extensions.AI.AIFunction! Tool, System.Action<TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!>? Configure = null) -> void
+TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec.Tool.get -> Microsoft.Extensions.AI.AIFunction!
+TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec.Tool.init -> void
+TemporalCommunity.Extensions.Agents.HistoryStore.CompactionAwareErasureHelper
+TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult
+TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersAffected.get -> int
+TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersAffected.init -> void
+TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersRegenerated.get -> int
+TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersRegenerated.init -> void
+TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersTombstoned.get -> int
+TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersTombstoned.init -> void
+TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.RemainingMessageCount.get -> int
+TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.RemainingMessageCount.init -> void
+TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata
+TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.CorrelationIds.get -> System.Collections.Generic.IReadOnlyList<(string! CorrelationId, bool IsCompactionMarker)>!
+TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.CorrelationIds.init -> void
+TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.Count.get -> int
+TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.Count.init -> void
+TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.HistoryMetadata(int Count, System.Collections.Generic.IReadOnlyList<(string! CorrelationId, bool IsCompactionMarker)>! CorrelationIds) -> void
+TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore
+TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore.AppendAsync(string! sessionId, System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! entries, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore.GetMetadataAsync(string! sessionId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata!>
+TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore.LoadAsync(string! sessionId, bool applyCompaction, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!>!
+TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore.ReplaceAsync(string! sessionId, System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! reducedEntries, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.CancelPendingApprovalAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, string? reason = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.GetAgentScheduleHandle(string! scheduleId) -> Temporalio.Client.Schedules.ScheduleHandle!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.GetPendingApprovalAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest?>!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.RunAgentDelayedAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, TemporalCommunity.Extensions.Agents.Scheduling.RunRequest! request, System.TimeSpan delay, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.RunAgentFireAndForgetAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, TemporalCommunity.Extensions.Agents.Scheduling.RunRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.ScheduleAgentAsync(string! agentName, string! scheduleId, TemporalCommunity.Extensions.Agents.Scheduling.RunRequest! request, Temporalio.Client.Schedules.ScheduleSpec! spec, Temporalio.Client.Schedules.SchedulePolicy? policy = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Temporalio.Client.Schedules.ScheduleHandle!>!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.SendAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, TemporalCommunity.Extensions.Agents.Scheduling.RunRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Agents.AI.AgentResponse!>!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.ShutdownAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.SubmitApprovalAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision! decision, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.AgentName.get -> string!
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.AgentName.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.Request.get -> TemporalCommunity.Extensions.Agents.Scheduling.RunRequest!
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.Request.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.RetryPolicy.get -> Temporalio.Common.RetryPolicy?
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.RetryPolicy.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.RunAt.get -> System.DateTimeOffset
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.RunAt.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.RunId.get -> string!
+TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.RunId.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.CorrelationId.get -> string?
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.CorrelationId.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.EnableToolCalls.get -> bool
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.EnableToolCalls.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.EnableToolNames.get -> System.Collections.Generic.IList<string!>?
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.EnableToolNames.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.Messages.get -> System.Collections.Generic.IList<Microsoft.Extensions.AI.ChatMessage!>!
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.Messages.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.OrchestrationId.get -> string?
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.OrchestrationId.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.ResponseFormat.get -> Microsoft.Extensions.AI.ChatResponseFormat?
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.ResponseFormat.init -> void
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.RunRequest(string! message, Microsoft.Extensions.AI.ChatRole? role = null, Microsoft.Extensions.AI.ChatResponseFormat? responseFormat = null, bool enableToolCalls = true, System.Collections.Generic.IList<string!>? enableToolNames = null) -> void
+TemporalCommunity.Extensions.Agents.Scheduling.RunRequest.RunRequest(System.Collections.Generic.IList<Microsoft.Extensions.AI.ChatMessage!>! messages, Microsoft.Extensions.AI.ChatResponseFormat? responseFormat = null, bool enableToolCalls = true, System.Collections.Generic.IList<string!>? enableToolNames = null) -> void
+TemporalCommunity.Extensions.Agents.Scheduling.ScheduleActivities
+TemporalCommunity.Extensions.Agents.Scheduling.ScheduleActivities.ScheduleActivities(Temporalio.Client.ITemporalClient! client, string! taskQueue, TemporalCommunity.Extensions.Agents.TemporalAgentsOptions! options) -> void
+TemporalCommunity.Extensions.Agents.Scheduling.ScheduleActivities.ScheduleOneTimeAgentRunAsync(TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun! run) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.ServiceCollectionExtensions
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.CurrentSession.get -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession!
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.GetService(System.Type! serviceType, object? serviceKey = null) -> object?
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.GetService<TService>(object? serviceKey = null) -> TService?
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.GetWorkflowDescriptionAsync(string! workflowId) -> System.Threading.Tasks.Task<Temporalio.Client.WorkflowExecutionDescription?>!
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.RequestApprovalAsync(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision!>!
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.SignalWorkflowAsync<TWorkflow>(string! workflowId, System.Linq.Expressions.Expression<System.Func<TWorkflow, System.Threading.Tasks.Task!>!>! signalCall) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.StartWorkflowAsync<TWorkflow>(System.Linq.Expressions.Expression<System.Func<TWorkflow, System.Threading.Tasks.Task!>!>! workflowRunCall, Temporalio.Client.WorkflowOptions! options) -> System.Threading.Tasks.Task<string!>!
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession.SessionId.get -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession.TemporalAgentSession(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId) -> void
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.AgentName.get -> string!
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.Equals(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId other) -> bool
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.Key.get -> string!
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionId() -> void
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionId(string! agentName, string! key) -> void
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionIdJsonConverter
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionIdJsonConverter.TemporalAgentSessionIdJsonConverter() -> void
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.WorkflowId.get -> string!
+TemporalCommunity.Extensions.Agents.Skills.FileSkillsSource
+TemporalCommunity.Extensions.Agents.Skills.FileSkillsSource.FileSkillsSource(string! directory, int maxDepth = 2, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder
+TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder.AddSkill(Microsoft.Agents.AI.AgentSkill! skill) -> TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder!
+TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder.AddSkills(System.Collections.Generic.IEnumerable<Microsoft.Agents.AI.AgentSkill!>! skills) -> TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder!
+TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder.AddSkillsFromDirectory(string! path, Microsoft.Agents.AI.AgentFileSkillScriptRunner? runner = null, System.Action<Microsoft.Agents.AI.AgentFileSkillsSourceOptions!>? configure = null) -> TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder!
+TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder.AddSkillsSource(Microsoft.Agents.AI.AgentSkillsSource! source) -> TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder!
+TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder.EnableScriptExecution() -> TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder!
+TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder.SkillsBuilder() -> void
+TemporalCommunity.Extensions.Agents.Skills.SkillsContextProvider
+TemporalCommunity.Extensions.Agents.State.AgentDescriptor
+TemporalCommunity.Extensions.Agents.State.AgentDescriptor.AgentDescriptor(string! Name, string! Description) -> void
+TemporalCommunity.Extensions.Agents.State.AgentDescriptor.Description.get -> string!
+TemporalCommunity.Extensions.Agents.State.AgentDescriptor.Description.init -> void
+TemporalCommunity.Extensions.Agents.State.AgentDescriptor.Name.get -> string!
+TemporalCommunity.Extensions.Agents.State.AgentDescriptor.Name.init -> void
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.AgentSessionRequest() -> void
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.OrchestrationId.get -> string?
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.OrchestrationId.init -> void
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.ResponseSchema.get -> System.Text.Json.JsonElement?
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.ResponseSchema.init -> void
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.ResponseType.get -> string?
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.ResponseType.init -> void
+TemporalCommunity.Extensions.Agents.State.AgentSessionResponse
+TemporalCommunity.Extensions.Agents.State.AgentSessionResponse.AgentSessionResponse() -> void
+TemporalCommunity.Extensions.Agents.State.AgentSessionResponse.ToResponse() -> Microsoft.Agents.AI.AgentResponse!
+TemporalCommunity.Extensions.Agents.StructuredOutputExtensions
+TemporalCommunity.Extensions.Agents.StructuredOutputOptions
+TemporalCommunity.Extensions.Agents.StructuredOutputOptions.IncludeErrorContext.get -> bool
+TemporalCommunity.Extensions.Agents.StructuredOutputOptions.IncludeErrorContext.set -> void
+TemporalCommunity.Extensions.Agents.StructuredOutputOptions.JsonSerializerOptions.get -> System.Text.Json.JsonSerializerOptions?
+TemporalCommunity.Extensions.Agents.StructuredOutputOptions.JsonSerializerOptions.set -> void
+TemporalCommunity.Extensions.Agents.StructuredOutputOptions.MaxRetries.get -> int
+TemporalCommunity.Extensions.Agents.StructuredOutputOptions.MaxRetries.set -> void
+TemporalCommunity.Extensions.Agents.StructuredOutputOptions.StructuredOutputOptions() -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentDataConverter
+TemporalCommunity.Extensions.Agents.TemporalAgentJsonUtilities
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.CorrelationId.get -> string?
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.CorrelationId.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.EnableToolCalls.get -> bool
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.EnableToolCalls.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.EnableToolNames.get -> System.Collections.Generic.IList<string!>?
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.EnableToolNames.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.IsFireAndForget.get -> bool
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.IsFireAndForget.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.TemporalAgentRunOptions() -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.AddAgentProxy(string! name, System.TimeSpan? timeToLive = null) -> TemporalCommunity.Extensions.Agents.TemporalAgentsOptions!
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.AddDurableAgent(string! name, System.Action<TemporalCommunity.Extensions.Agents.DurableAgentBuilder!>! configure) -> TemporalCommunity.Extensions.Agents.TemporalAgentsOptions!
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.AddScheduledAgentRun(string! agentName, string! scheduleId, TemporalCommunity.Extensions.Agents.Scheduling.RunRequest! request, Temporalio.Client.Schedules.ScheduleSpec! spec, Temporalio.Client.Schedules.SchedulePolicy? policy = null) -> TemporalCommunity.Extensions.Agents.TemporalAgentsOptions!
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.ApprovalScopeStore.get -> System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore!>?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.ApprovalScopeStore.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultActivityTimeout.get -> System.TimeSpan
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultActivityTimeout.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultApprovalTimeout.get -> System.TimeSpan
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultApprovalTimeout.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultCompactionStrategy.get -> string?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultCompactionStrategy.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultConfigureAgentPipeline.get -> System.Action<Microsoft.Agents.AI.AIAgentBuilder!>?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultConfigureAgentPipeline.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHeartbeatTimeout.get -> System.TimeSpan
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHeartbeatTimeout.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHistoryReducer.get -> System.Func<System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!, System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!>?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHistoryReducer.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHistoryReducerKey.get -> string?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHistoryReducerKey.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultMaxEntryCount.get -> int
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultMaxEntryCount.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultRetryPolicy.get -> Temporalio.Common.RetryPolicy?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultRetryPolicy.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultTimeToLive.get -> System.TimeSpan?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultTimeToLive.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultToolInterceptor.get -> System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.AI.Tools.IDurableToolInterceptor<TemporalCommunity.Extensions.Agents.Tools.AgentToolContext!>!>?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultToolInterceptor.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.EnableSearchAttributes.get -> bool
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.EnableSearchAttributes.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.GetAgentDescription(string! agentName) -> string?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.GetAgentDescriptors() -> System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.Agents.State.AgentDescriptor!>!
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.GetRegisteredAgentNames() -> System.Collections.Generic.IReadOnlyList<string!>!
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.HistoryStore.get -> System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore!>?
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.HistoryStore.set -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.IsAgentRegistered(string! name) -> bool
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.ConfigureReplayer(Temporalio.Worker.WorkflowReplayerOptions! options) -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.ConfigureWorker(Temporalio.Worker.TemporalWorkerOptions! options) -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.Name.get -> string!
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.ReplayWorkflowsAsync(Temporalio.Worker.WorkflowReplayer! replayer, System.Func<Temporalio.Worker.WorkflowReplayer!, System.Collections.Generic.IAsyncEnumerable<Temporalio.Worker.WorkflowReplayResult!>!>! continuation, System.Threading.CancellationToken cancellationToken) -> System.Collections.Generic.IAsyncEnumerable<Temporalio.Worker.WorkflowReplayResult!>!
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.ReplayWorkflowsAsync(Temporalio.Worker.WorkflowReplayer! replayer, System.Func<Temporalio.Worker.WorkflowReplayer!, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<Temporalio.Worker.WorkflowReplayResult!>!>!>! continuation, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<Temporalio.Worker.WorkflowReplayResult!>!>!
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.RunWorkerAsync<TResult>(Temporalio.Worker.TemporalWorker! worker, System.Func<Temporalio.Worker.TemporalWorker!, System.Threading.CancellationToken, System.Threading.Tasks.Task<TResult>!>! continuation, System.Threading.CancellationToken stoppingToken) -> System.Threading.Tasks.Task<TResult>!
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.TemporalAgentsPlugin() -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.TemporalAgentsPlugin(System.Action<TemporalCommunity.Extensions.Agents.TemporalAgentsOptions!>! configure) -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.TemporalAgentsPlugin(TemporalCommunity.Extensions.Agents.TemporalAgentsOptions! options) -> void
+TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry
+TemporalCommunity.Extensions.Agents.TemporalAIAgent
+TemporalCommunity.Extensions.Agents.TemporalWorkerBuilderExtensions
+TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions
+TemporalCommunity.Extensions.Agents.Testing.NoOpAgent
+TemporalCommunity.Extensions.Agents.Testing.NoOpAgent.NoOpAgent() -> void
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext.AgentName.get -> string!
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext.AgentName.init -> void
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext.AgentToolContext() -> void
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext.RequiresApproval.get -> bool
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext.RequiresApproval.init -> void
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext.ScopeAware.get -> bool
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext.ScopeAware.init -> void
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext.StateBag.get -> Microsoft.Agents.AI.AgentSessionStateBag?
+TemporalCommunity.Extensions.Agents.Tools.AgentToolContext.StateBag.init -> void
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.DurableToolOptions() -> void
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.HeartbeatTimeout.get -> System.TimeSpan?
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.HeartbeatTimeout.set -> void
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.InterceptorTimeout.get -> System.TimeSpan?
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.InterceptorTimeout.set -> void
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.NoRetry() -> TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.RequireApproval() -> TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.RequireApprovalFlag.get -> bool
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.RetryPolicy.get -> Temporalio.Common.RetryPolicy?
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.RetryPolicy.set -> void
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.ScopeAware() -> TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.ScopeAwareFlag.get -> bool
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.SkipInterceptor() -> TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.SkipInterceptorFlag.get -> bool
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.StartToCloseTimeout.get -> System.TimeSpan?
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.StartToCloseTimeout.set -> void
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.WithInterceptorTimeout(System.TimeSpan timeout) -> TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.WithMaxAttempts(int maxAttempts) -> TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!
+TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.WithTimeout(System.TimeSpan timeout) -> TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!
+TemporalCommunity.Extensions.Agents.Tools.IAgentToolInterceptor
+TemporalCommunity.Extensions.Agents.Tools.IDurableToolSource
+TemporalCommunity.Extensions.Agents.Tools.IDurableToolSource.GetDurableTools() -> System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec!>!
+TemporalCommunity.Extensions.Agents.Workflows.IAgentResponseHandler
+TemporalCommunity.Extensions.Agents.Workflows.IAgentResponseHandler.OnStreamingResponseUpdateAsync(System.Collections.Generic.IAsyncEnumerable<Microsoft.Agents.AI.AgentResponseUpdate!>! messageStream, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
+TemporalCommunity.Extensions.Agents.WorkingSetContextProvider
+TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.MaxPaths.get -> int
+TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.MaxPaths.set -> void
+TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.SilentMode.get -> bool
+TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.SilentMode.set -> void
+TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.WorkingSetContextProvider() -> void

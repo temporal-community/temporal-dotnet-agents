@@ -23,7 +23,7 @@
          TreatWarningsAsErrors is on; suppress globally so the build stays green.
          Remove individual codes here to incrementally enforce doc quality.
          TA002: intentional — dogfoods the project's own experimental API. -->
-    <NoWarn>$(NoWarn);RS0016;RS0017;RS0026;CA1848;CA1873;CA2007;CA1062;CA1822;CA1725;CA1859;CA2263;CA1305;TA002;CS1591;CS1573;CS1574;CS1580;CS1734;CS0419</NoWarn>
+    <NoWarn>$(NoWarn);RS0026;CA1848;CA1873;CA2007;CA1062;CA1822;CA1725;CA1859;CA2263;CA1305;TA002;CS1591;CS1573;CS1574;CS1580;CS1734;CS0419</NoWarn>
 
     <Authors>Cecil Phillip</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
