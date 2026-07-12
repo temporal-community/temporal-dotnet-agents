@@ -128,6 +128,10 @@ builder.Services
 
 The `RegisterDefaultWorkflow = false` setting tells `AddDurableAI()` to skip registering `DurableChatWorkflow` and `DurableChatSessionClient` since your custom workflow handles session management instead. All other supporting infrastructure (options, DataConverter, activities, embeddings) is still registered.
 
+`RunTurnAsync` passes your `ExecuteTurnAsync` implementation the configured `RetryPolicy`, or the
+library's bounded default (five attempts) when none is configured. For a non-idempotent custom
+activity, replace it with a stricter policy such as `new RetryPolicy { MaximumAttempts = 1 }`.
+
 ```csharp
 // Start the workflow
 var handle = await temporalClient.StartWorkflowAsync(

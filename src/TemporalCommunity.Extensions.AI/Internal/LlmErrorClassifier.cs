@@ -26,8 +26,9 @@ namespace TemporalCommunity.Extensions.AI.Internal;
 /// <b>Default is retryable.</b> Anything not positively identified as a non-retryable status is
 /// treated as retryable so genuine transients and provider outages still get durable retry. This is
 /// the security-reviewed posture: do not fail-fast on unknown errors. The bounded default
-/// <c>RetryPolicy { MaximumAttempts = 5 }</c> (applied at session start) is the backstop that keeps
-/// even "retryable-but-permanently-broken" errors from looping forever.
+/// <c>RetryPolicy { MaximumAttempts = 5 }</c> (applied to durable model activities when no policy
+/// is configured) is the backstop that keeps even "retryable-but-permanently-broken" errors from
+/// looping forever.
 /// </para>
 /// </remarks>
 internal static class LlmErrorClassifier

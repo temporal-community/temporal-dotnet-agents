@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -190,11 +189,8 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
     {
-        // Signal to the reader that this override intentionally reconstructs activity options.
-        // If DurableChatWorkflowBase.RunTurnAsync starts populating activityOptions.RetryPolicy
-        // or other fields that AgentWorkflow also sets, this assert will fire in debug builds.
-        Debug.Assert(activityOptions.RetryPolicy is null,
-            "Base class now sets RetryPolicy on activityOptions — revisit AgentWorkflow.ExecuteTurnAsync.");
+        // This path builds its step options from the agent's frozen workflow input so per-agent
+        // settings are applied consistently across every step in the durable agent loop.
         _ = activityOptions;
         var agentRequestEntry = (AgentSessionRequest)requestEntry;
         var runRequest = ToRunRequest(agentRequestEntry);

@@ -19,6 +19,11 @@ workflows before deploying.
 
 ### Changed (BREAKING)
 
+- **Bounded retry defaults now apply to every durable model activity.** Custom-workflow chat
+  middleware and embedding generation now use the same five-attempt, two-second-maximum-backoff
+  default as managed chat sessions when `RetryPolicy` is unset. Deterministic provider HTTP
+  failures (`400`, `401`, `403`, `404`, `422`) now fail immediately for embeddings as well.
+
 - **Target framework support and API compatibility.** Both published libraries now ship
   `net10.0` and `netstandard2.1` assets. The down-level asset supports .NET Core 3.1+ and
   modern .NET, but does not support .NET Framework. On that asset, half-precision

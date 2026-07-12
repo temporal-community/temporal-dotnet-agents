@@ -107,16 +107,15 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// </param>
     /// <remarks>
     /// <para>
-    /// <strong>Retry policy footgun.</strong> The <paramref name="activityOptions"/> argument
-    /// passed by <see cref="RunTurnAsync"/> has <see cref="ActivityOptions.RetryPolicy"/> set to
-    /// <see langword="null"/>. When <see langword="null"/>, the Temporal server applies its
-    /// default retry policy: <c>InitialInterval=1s, BackoffCoefficient=2.0, MaximumInterval=100s,
-    /// MaximumAttempts=0</c> (unlimited retries, bounded only by <c>StartToCloseTimeout</c>).
+    /// <strong>Retry policy.</strong> The <paramref name="activityOptions"/> argument passed by
+    /// <see cref="RunTurnAsync"/> uses the workflow input's configured retry policy, or the
+    /// library's bounded default of five attempts when none was configured. This prevents an
+    /// unknown permanent activity failure from retrying indefinitely.
     /// </para>
     /// <para>
     /// Implementers dispatching <em>non-idempotent</em> activities (mutating state, calling
     /// external APIs without idempotency keys, sending notifications) are responsible for
-    /// hardening this — copy <paramref name="activityOptions"/> with an explicit
+    /// hardening this — copy <paramref name="activityOptions"/> with an explicit stricter
     /// <see cref="ActivityOptions.RetryPolicy"/> (e.g. <c>new RetryPolicy { MaximumAttempts = 1 }</c>)
     /// before passing it to <c>Workflow.ExecuteActivityAsync</c>. See <see cref="RunTurnAsync"/>
     /// for full context and the relevant Temporal docs link.
@@ -408,24 +407,15 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// </returns>
     /// <remarks>
     /// <para>
-    /// <strong>Retry policy footgun for subclassers.</strong> The <see cref="ActivityOptions"/>
-    /// constructed inside this method and handed to <see cref="ExecuteTurnAsync"/> sets only
-    /// <see cref="ActivityOptions.StartToCloseTimeout"/>, <see cref="ActivityOptions.HeartbeatTimeout"/>,
-    /// and <see cref="ActivityOptions.Summary"/>. It deliberately leaves
-    /// <see cref="ActivityOptions.RetryPolicy"/> as <see langword="null"/>.
+    /// <strong>Retry policy for subclassers.</strong> The <see cref="ActivityOptions"/>
+    /// constructed inside this method and handed to <see cref="ExecuteTurnAsync"/> uses the
+    /// workflow input's configured retry policy. When none is configured, the library applies a
+    /// bounded five-attempt default.
     /// </para>
     /// <para>
-    /// When <see cref="ActivityOptions.RetryPolicy"/> is <see langword="null"/>, the .NET SDK
-    /// transmits no policy and the Temporal server applies its <em>default</em>:
-    /// <c>InitialInterval=1s, BackoffCoefficient=2.0, MaximumInterval=100s, MaximumAttempts=0</c>.
-    /// <c>MaximumAttempts=0</c> means <strong>unlimited retries</strong> with exponential backoff
-    /// capped at 100&#160;seconds between attempts, bounded only by
-    /// <see cref="ActivityOptions.StartToCloseTimeout"/>.
-    /// </para>
-    /// <para>
-    /// This default is safe for idempotent LLM calls (the canonical use case for
+    /// This default is appropriate for idempotent LLM calls (the canonical use case for
     /// <see cref="DurableChatWorkflowBase{TOutput}"/>): retrying an inference request just
-    /// re-asks the model. It is <strong>not safe</strong> for subclassers whose
+    /// re-asks the model. It is <strong>not sufficient</strong> for subclassers whose
     /// <see cref="ExecuteTurnAsync"/> dispatches non-idempotent activities — mutating state,
     /// calling external APIs without idempotency keys, sending notifications, etc. In those
     /// cases retries can duplicate side effects.
@@ -433,7 +423,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// <para>
     /// Subclassers with non-idempotent activities must override <see cref="ExecuteTurnAsync"/>
     /// and construct a hardened <see cref="ActivityOptions"/> with an explicit
-    /// <see cref="ActivityOptions.RetryPolicy"/> (e.g.
+    /// <see cref="ActivityOptions.RetryPolicy"/> (for example,
     /// <c>new RetryPolicy { MaximumAttempts = 1 }</c>) before invoking the activity.
     /// See <see href="https://docs.temporal.io/encyclopedia/retry-policies"/> for the full
     /// server-default behavior reference.
@@ -467,11 +457,11 @@ public abstract class DurableChatWorkflowBase<TOutput>
 
             _turnCount++;
 
-            // RetryPolicy intentionally left null; subclasses with non-idempotent activities must override ExecuteTurnAsync and harden.
             var activityOptions = new ActivityOptions
             {
                 StartToCloseTimeout = RequiredInput.ActivityTimeout,
                 HeartbeatTimeout = RequiredInput.HeartbeatTimeout,
+                RetryPolicy = Internal.DefaultRetryPolicy.Resolve(RequiredInput.RetryPolicy),
                 Summary = DurableChatClient.BuildActivitySummary(chatOptions),
             };
 

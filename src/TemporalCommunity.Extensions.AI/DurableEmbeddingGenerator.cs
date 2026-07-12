@@ -46,17 +46,7 @@ public sealed class DurableEmbeddingGenerator(
             Options = options,
         };
 
-        var activityOptions = new ActivityOptions
-        {
-            StartToCloseTimeout = _durableOptions.ActivityTimeout,
-            HeartbeatTimeout = _durableOptions.HeartbeatTimeout,
-            Summary = BuildActivitySummary(options),
-        };
-
-        if (_durableOptions.RetryPolicy is not null)
-        {
-            activityOptions.RetryPolicy = _durableOptions.RetryPolicy;
-        }
+        var activityOptions = CreateActivityOptions(options);
 
         // Do NOT use .ConfigureAwait(false) here: this runs inside a Temporal workflow.
         // ConfigureAwait(false) bypasses the Temporal workflow scheduler's SynchronizationContext,
@@ -69,6 +59,19 @@ public sealed class DurableEmbeddingGenerator(
 
         return output.Embeddings;
     }
+
+    /// <summary>
+    /// Creates the Temporal activity options used for a durable embedding request.
+    /// </summary>
+    internal ActivityOptions CreateActivityOptions(EmbeddingGenerationOptions? options) =>
+        new()
+        {
+            StartToCloseTimeout = _durableOptions.ActivityTimeout,
+            HeartbeatTimeout = _durableOptions.HeartbeatTimeout,
+            // A null policy would otherwise delegate to Temporal's unlimited server default.
+            RetryPolicy = Internal.DefaultRetryPolicy.Resolve(_durableOptions.RetryPolicy),
+            Summary = BuildActivitySummary(options),
+        };
 
     /// <summary>
     /// Builds the activity summary value (visible in the Temporal Web UI activity list).

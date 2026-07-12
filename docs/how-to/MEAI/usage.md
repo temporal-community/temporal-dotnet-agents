@@ -448,7 +448,7 @@ When the Temporal event history for a session grows large (Temporal's per-workfl
 
 ### LLM-call failure classification
 
-The bounded default prevents an LLM activity from retrying forever. In addition, deterministic
+The bounded default prevents durable chat and embedding activities from retrying forever. In addition, deterministic
 HTTP failures (`400`, `401`, `403`, `404`, and `422`) fail fast rather than consuming all retry
 attempts; other errors remain retryable so transient provider outages can recover. Set an explicit
 `RetryPolicy` when your provider or workload needs a different attempt limit or backoff.

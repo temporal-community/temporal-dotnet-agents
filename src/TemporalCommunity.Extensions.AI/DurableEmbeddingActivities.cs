@@ -45,10 +45,30 @@ internal sealed class DurableEmbeddingActivities(
         _logger.LogEmbeddingActivityStarted(input.Values.Count);
 
         ctx.Heartbeat();   // reset heartbeat timer before blocking on the embedding call
-        var embeddings = await generator.GenerateAsync(
-            input.Values,
-            input.Options,
-            ct).ConfigureAwait(false);
+        GeneratedEmbeddings<Embedding<float>> embeddings;
+        try
+        {
+            embeddings = await generator.GenerateAsync(
+                input.Values,
+                input.Options,
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Activity/workflow cancellation — never reclassify.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogEmbeddingActivityFailed(ex);
+
+            if (Internal.LlmFailurePolicy.CreateNonRetryableFailure(ex) is { } nonRetryableFailure)
+            {
+                throw nonRetryableFailure;
+            }
+
+            throw;
+        }
 
         _logger.LogEmbeddingActivityCompleted();
 

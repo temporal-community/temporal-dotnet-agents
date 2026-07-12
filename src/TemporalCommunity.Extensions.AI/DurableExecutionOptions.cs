@@ -31,10 +31,11 @@ public sealed class DurableExecutionOptions
     /// <summary>
     /// Gets or sets the Temporal retry policy for LLM-call (and related) activities. When
     /// <see langword="null"/> (the default), a bounded backstop of
-    /// <c>new RetryPolicy { MaximumAttempts = 5 }</c> is applied at session start rather than the
-    /// Temporal server default (<c>MaximumAttempts = 0</c>, i.e. unlimited retries). This prevents
-    /// an unrecoverable LLM error from retrying forever and hanging the workflow. Set an explicit
-    /// policy to override the bounded default.
+    /// <c>new RetryPolicy { MaximumAttempts = 5 }</c> is applied whenever the library dispatches
+    /// a durable model activity rather than the Temporal server default
+    /// (<c>MaximumAttempts = 0</c>, i.e. unlimited retries). This prevents an unrecoverable LLM
+    /// error from retrying forever and hanging the workflow. Set an explicit policy to override
+    /// the bounded default.
     /// </summary>
     public RetryPolicy? RetryPolicy { get; set; }
 

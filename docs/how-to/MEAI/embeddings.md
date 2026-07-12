@@ -54,7 +54,11 @@ All options come from `DurableExecutionOptions` set during `UseDurableExecution(
 |--------|---------|-------------|
 | `ActivityTimeout` | From `DurableExecutionOptions` | Start-to-close timeout for the embedding activity |
 | `HeartbeatTimeout` | From `DurableExecutionOptions` | Heartbeat timeout; set to detect stalled embedding calls |
-| `RetryPolicy` | SDK default (unlimited retries, exponential backoff) | Override to limit retries on transient provider errors |
+| `RetryPolicy` | Bounded default (5 attempts; 2-second maximum backoff) | Override to limit or tune retries on transient provider errors |
+
+When the embedding provider returns a deterministic HTTP failure (`400`, `401`, `403`, `404`, or
+`422`), the activity fails immediately rather than retrying. Other errors use the configured policy
+or the bounded default above, so an unknown permanent failure cannot retry forever.
 
 ```csharp
 // Worker

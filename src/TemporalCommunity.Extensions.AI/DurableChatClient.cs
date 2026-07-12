@@ -142,19 +142,17 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         };
     }
 
-    private ActivityOptions CreateActivityOptions(ChatOptions? chatOptions = null)
+    internal ActivityOptions CreateActivityOptions(ChatOptions? chatOptions = null)
     {
         var activityOptions = new ActivityOptions
         {
             StartToCloseTimeout = chatOptions.GetActivityTimeout() ?? _durableOptions.ActivityTimeout,
             HeartbeatTimeout = chatOptions.GetHeartbeatTimeout() ?? _durableOptions.HeartbeatTimeout,
+            // A null policy would otherwise delegate to Temporal's unlimited server default.
+            // Keep custom-workflow middleware consistent with managed chat sessions.
+            RetryPolicy = Internal.DefaultRetryPolicy.Resolve(_durableOptions.RetryPolicy),
             Summary = BuildActivitySummary(chatOptions),
         };
-
-        if (_durableOptions.RetryPolicy is not null)
-        {
-            activityOptions.RetryPolicy = _durableOptions.RetryPolicy;
-        }
 
         // Per-request retry override via AdditionalProperties.
         var maxRetry = chatOptions.GetMaxRetryAttempts();

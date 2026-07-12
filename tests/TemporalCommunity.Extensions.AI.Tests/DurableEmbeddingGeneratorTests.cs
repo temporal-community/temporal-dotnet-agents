@@ -50,6 +50,40 @@ public class DurableEmbeddingGeneratorTests
     }
 
     [Fact]
+    public void CreateActivityOptions_NullPolicy_UsesBoundedDefault()
+    {
+        var innerGenerator = A.Fake<IEmbeddingGenerator<string, Embedding<float>>>();
+        var generator = new DurableEmbeddingGenerator(
+            innerGenerator,
+            new DurableExecutionOptions { TaskQueue = "test" });
+
+        var activityOptions = generator.CreateActivityOptions(options: null);
+
+        Assert.NotNull(activityOptions.RetryPolicy);
+        Assert.Equal(
+            global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumAttempts,
+            activityOptions.RetryPolicy.MaximumAttempts);
+        Assert.Equal(
+            TimeSpan.FromSeconds(
+                global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumIntervalSeconds),
+            activityOptions.RetryPolicy.MaximumInterval);
+    }
+
+    [Fact]
+    public void CreateActivityOptions_ExplicitPolicy_IsPreserved()
+    {
+        var innerGenerator = A.Fake<IEmbeddingGenerator<string, Embedding<float>>>();
+        var retryPolicy = new Temporalio.Common.RetryPolicy { MaximumAttempts = 3 };
+        var generator = new DurableEmbeddingGenerator(
+            innerGenerator,
+            new DurableExecutionOptions { TaskQueue = "test", RetryPolicy = retryPolicy });
+
+        var activityOptions = generator.CreateActivityOptions(options: null);
+
+        Assert.Same(retryPolicy, activityOptions.RetryPolicy);
+    }
+
+    [Fact]
     public void UseDurableExecution_ThrowsOnNullBuilder()
     {
         Assert.Throws<ArgumentNullException>(

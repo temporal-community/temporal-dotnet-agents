@@ -71,6 +71,38 @@ public class DurableChatClientTests
     }
 
     [Fact]
+    public void CreateActivityOptions_NullPolicy_UsesBoundedDefault()
+    {
+        var innerClient = A.Fake<IChatClient>();
+        var client = new DurableChatClient(innerClient, new DurableExecutionOptions { TaskQueue = "test" });
+
+        var activityOptions = client.CreateActivityOptions();
+
+        Assert.NotNull(activityOptions.RetryPolicy);
+        Assert.Equal(
+            global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumAttempts,
+            activityOptions.RetryPolicy.MaximumAttempts);
+        Assert.Equal(
+            TimeSpan.FromSeconds(
+                global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumIntervalSeconds),
+            activityOptions.RetryPolicy.MaximumInterval);
+    }
+
+    [Fact]
+    public void CreateActivityOptions_ExplicitPolicy_IsPreserved()
+    {
+        var innerClient = A.Fake<IChatClient>();
+        var retryPolicy = new Temporalio.Common.RetryPolicy { MaximumAttempts = 3 };
+        var client = new DurableChatClient(
+            innerClient,
+            new DurableExecutionOptions { TaskQueue = "test", RetryPolicy = retryPolicy });
+
+        var activityOptions = client.CreateActivityOptions();
+
+        Assert.Same(retryPolicy, activityOptions.RetryPolicy);
+    }
+
+    [Fact]
     public async Task GetResponseAsync_StripsTemporalKeysBeforeForwardingToInner()
     {
         ChatOptions? capturedOptions = null;

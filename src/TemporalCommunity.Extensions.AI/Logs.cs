@@ -103,4 +103,8 @@ internal static partial class Logs
     [LoggerMessage(EventId = 17, Level = LogLevel.Debug,
         Message = "Durable embedding activity completed")]
     public static partial void LogEmbeddingActivityCompleted(this ILogger logger);
+
+    [LoggerMessage(EventId = 18, Level = LogLevel.Error,
+        Message = "Durable embedding activity failed")]
+    public static partial void LogEmbeddingActivityFailed(this ILogger logger, Exception ex);
 }

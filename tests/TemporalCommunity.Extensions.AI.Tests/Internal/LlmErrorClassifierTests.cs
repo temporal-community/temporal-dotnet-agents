@@ -1,5 +1,6 @@
 using System.Net;
 using TemporalCommunity.Extensions.AI.Internal;
+using Temporalio.Exceptions;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests.Internal;
@@ -124,6 +125,28 @@ public class LlmErrorClassifierTests
         var mid = new InvalidOperationException("mid", leaf);
         var top = new AggregateException(new Exception("top"), mid);
         Assert.True(LlmErrorClassifier.IsNonRetryable(top));
+    }
+
+    [Fact]
+    public void CreateNonRetryableFailure_DeterministicStatus_ReturnsTypedTemporalFailure()
+    {
+        var providerError = new HttpRequestException(
+            "unauthorized", inner: null, statusCode: HttpStatusCode.Unauthorized);
+
+        var failure = LlmFailurePolicy.CreateNonRetryableFailure(providerError);
+
+        var typedFailure = Assert.IsType<ApplicationFailureException>(failure);
+        Assert.Equal(DurableChatActivities.LlmNonRetryableErrorType, typedFailure.ErrorType);
+        Assert.Same(providerError, typedFailure.InnerException);
+    }
+
+    [Fact]
+    public void CreateNonRetryableFailure_TransientStatus_ReturnsNull()
+    {
+        var providerError = new HttpRequestException(
+            "throttled", inner: null, statusCode: HttpStatusCode.TooManyRequests);
+
+        Assert.Null(LlmFailurePolicy.CreateNonRetryableFailure(providerError));
     }
 
 }

@@ -28,7 +28,7 @@ internal sealed class DurableChatActivities(
     /// Workflow loops match on this so an LLM step failing fast advances the consecutive-error
     /// counter instead of being mistaken for a transient fault.
     /// </summary>
-    internal const string LlmNonRetryableErrorType = "LlmNonRetryable";
+    internal const string LlmNonRetryableErrorType = Internal.LlmFailurePolicy.NonRetryableErrorType;
 
     /// <summary>
     /// Per-instance cache of <see cref="IChatClient"/> references that already passed the
@@ -282,13 +282,9 @@ internal sealed class DurableChatActivities(
             // forever and hang the workflow. Rethrow it as a non-retryable ApplicationFailure so
             // Temporal stops immediately; retryable/transient errors propagate unchanged so the
             // activity's RetryPolicy governs them. ErrorType lets workflow callers recognize it.
-            if (Internal.LlmErrorClassifier.IsNonRetryable(ex))
+            if (Internal.LlmFailurePolicy.CreateNonRetryableFailure(ex) is { } nonRetryableFailure)
             {
-                throw new ApplicationFailureException(
-                    $"Non-retryable LLM error: {ex.Message}",
-                    ex,
-                    errorType: LlmNonRetryableErrorType,
-                    nonRetryable: true);
+                throw nonRetryableFailure;
             }
 
             throw;
