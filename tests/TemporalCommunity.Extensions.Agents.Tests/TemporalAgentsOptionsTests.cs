@@ -59,10 +59,10 @@ public class TemporalAgentsOptionsTests
     }
 
     [Fact]
-    public void EnableSearchAttributes_DefaultsFalse()
+    public void EnableSearchAttributes_DefaultsTrue()
     {
         var options = new TemporalAgentsOptions();
-        Assert.False(options.EnableSearchAttributes);
+        Assert.True(options.EnableSearchAttributes);
     }
 
     [Fact]

@@ -83,13 +83,13 @@ public sealed class TemporalAgentsOptions
     public RetryPolicy? DefaultRetryPolicy { get; set; }
 
     /// <summary>
-    /// Default <c>false</c>. When enabled, upserts AgentName / SessionCreatedAt / TurnCount
-    /// search attributes on the workflow, enabling operational queries in the Temporal Web UI.
+    /// Default <c>true</c>. Upserts AgentName / SessionCreatedAt / TurnCount search
+    /// attributes on the workflow, enabling operational queries in the Temporal Web UI.
     /// Requires server-side pre-registration of the attribute keys — automatic with
     /// <c>temporal server start-dev</c>; on production clusters use the Temporal CLI to
-    /// register them once before starting the worker.
+    /// register them once before starting the worker. Set to <c>false</c> to disable.
     /// </summary>
-    public bool EnableSearchAttributes { get; set; }
+    public bool EnableSearchAttributes { get; set; } = true;
 
     /// <summary>
     /// Gets or sets the worker-level default <see cref="IAgentHistoryStore"/> factory. When a
