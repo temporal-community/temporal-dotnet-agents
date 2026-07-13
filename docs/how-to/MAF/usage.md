@@ -1143,8 +1143,8 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 > are registered automatically. On production clusters, register them once using the Temporal CLI:
 >
 > ```bash
-> temporal operator search-attribute create --name AgentName --type Text
-> temporal operator search-attribute create --name SessionCreatedAt --type DateTime
+> temporal operator search-attribute create --name AgentName --type Keyword
+> temporal operator search-attribute create --name SessionCreatedAt --type Datetime
 > temporal operator search-attribute create --name TurnCount --type Int
 > ```
 >

@@ -214,7 +214,16 @@ When enabled, `AgentWorkflow` upserts three [custom search attributes](https://d
 
 ### Registration for Production Clusters
 
-With `temporal server start-dev`, search attributes are created automatically. For production clusters, register them via the CLI:
+For a local dev server, pass the attributes at startup:
+
+```bash
+temporal server start-dev \
+  --search-attribute AgentName=Keyword \
+  --search-attribute SessionCreatedAt=Datetime \
+  --search-attribute TurnCount=Int
+```
+
+For production clusters, register them once via the CLI:
 
 ```bash
 temporal operator search-attribute create --name AgentName --type Keyword

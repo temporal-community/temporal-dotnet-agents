@@ -154,8 +154,10 @@ What v0.3 simplifies away:
   by definition.
 - **No `PerToolActivityOptions["..."]` dictionary** — per-tool retry policy is
   bound to the `AIFunction` reference at registration via `opts => opts.NoRetry()`.
-- **No "must not call `UseFunctionInvocation()`"** caveat — the library
-  composes the chat pipeline internally with `UseProvidedChatClientAsIs = true`.
+- **No inline function-invocation middleware** — register a bare `IChatClient`.
+  `UseProvidedChatClientAsIs = true` prevents MAF from adding its own middleware, but a
+  caller-installed `UseFunctionInvocation()` loop is incompatible with the workflow-owned
+  `InvokeAgentTool` activities and is rejected.
 
 ### `DurableToolOptions` fluent sugar
 

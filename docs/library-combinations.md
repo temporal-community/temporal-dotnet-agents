@@ -137,7 +137,7 @@ On top of everything in Combination 1:
 ### Limitations
 
 - Requires `Microsoft.Agents.AI`.
-- Search attribute upserts are enabled by default. `AgentName`, `SessionCreatedAt`, and `TurnCount` must be pre-registered before the worker starts. With `temporal server start-dev` this is automatic; on a production cluster it requires a one-time CLI command. Set `EnableSearchAttributes = false` to opt out. Standard Agents integration tests should use `TestEnvironmentHelper.StartLocalAsync()` to handle pre-registration.
+- Search attribute upserts are enabled by default. `AgentName`, `SessionCreatedAt`, and `TurnCount` must be pre-registered before the worker starts. Start a local dev server with `--search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`; production clusters require the equivalent one-time CLI commands. Set `EnableSearchAttributes = false` to opt out. Standard Agents integration tests should use `TestEnvironmentHelper.StartLocalAsync()` to handle pre-registration.
 - Two proxy types exist for the same agent: `TemporalAIAgentProxy` for external callers and `TemporalAIAgent` (via `GetTemporalAgent()`) for workflow code. Using the wrong one in the wrong context raises an exception.
 - Custom `[Workflow]` classes must follow Temporal determinism rules (`Workflow.UtcNow`, `Workflow.NewGuid()`, no `ActivitySource.StartActivity()` inside workflow code).
 

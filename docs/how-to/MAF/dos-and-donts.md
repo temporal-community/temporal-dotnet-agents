@@ -265,22 +265,21 @@ builder.AddSource(
 
 **Why:** Each source emits a different layer of the trace hierarchy. Missing one creates gaps in your distributed traces. See [Observability](./observability.md) for the full setup.
 
-### Do reach for `ChatClientFactory` interception when you need per-LLM-call visibility
+### Do decorate the registered `IChatClient` when you need per-LLM-call visibility
 
-The `agent.turn` span captures one whole turn (LLM call plus all tool rounds). If you need to see each individual LLM request/response — token counts per round, finish reason per round, the exact tool-call payloads — wrap the inner `IChatClient` via the `clientFactory` parameter of `AsAIAgent(...)`:
+The `agent.turn` span captures one whole turn (LLM call plus all tool rounds). If you need to see each individual LLM request/response — token counts per round, finish reason per round, the exact tool-call payloads — decorate the registered `IChatClient` before the durable agent resolves it:
 
 ```csharp
-var agent = chatClient.AsAIAgent(
-    name: "Assistant",
-    instructions: "...",
-    tools: [...],
-    clientFactory: client => client.AsBuilder()
-        .Use(inner => new LoggingChatClient(inner, logger))
-        .UseFunctionInvocation()
-        .Build());
+builder.Services.AddSingleton<IChatClient>(
+    new LoggingChatClient(innerChatClient, logger));
+
+opts.AddDurableAgent("Assistant", agent =>
+{
+    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+});
 ```
 
-**Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. See [LLM-Call Interception](./llm-call-interception.md) for the full guide and [`docs/design-decisions.md`](../../design-decisions.md) for why granular tool dispatch is deferred.
+**Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. Do not add `UseFunctionInvocation()`; the workflow owns durable tool dispatch. See [LLM-Call Interception](./llm-call-interception.md) for the full guide.
 
 ### Do pre-register search attributes, or explicitly opt out
 
