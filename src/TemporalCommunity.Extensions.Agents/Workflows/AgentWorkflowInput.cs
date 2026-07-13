@@ -16,8 +16,8 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// <see cref="CarriedStateBag"/>, etc.) live on this subclass.
 /// </summary>
 /// <remarks>
-/// Worker-side resolved settings (<see cref="MaxToolCallsPerTurn"/>,
-/// <see cref="UseExternalStoreMode"/>, <see cref="DurableAgentToolActivityOptions"/>) are stored
+/// Worker-side resolved settings (<see cref="MaxToolCallsPerTurn"/> and
+/// <see cref="DurableAgentToolActivityOptions"/>) are stored
 /// in <see cref="ResolvedWorkerConfig"/> as of the maf-gap Step 3c.1 migration. The legacy
 /// flat-field names remain as forwarding computed properties so consumers don't need updating;
 /// only construction sites assign to <see cref="ResolvedWorkerConfig"/> directly.
@@ -70,15 +70,6 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
     /// </remarks>
     [JsonIgnore]
     public new int MaxToolCallsPerTurn => ResolvedWorkerConfig?.MaxToolCallsPerTurn ?? 20;
-
-    /// <summary>
-    /// When <see langword="true"/>, the agent has an <see cref="HistoryStore.IAgentHistoryStore"/>
-    /// configured (per-agent or worker-level). Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.UseExternalStoreMode"/>;
-    /// defaults to <see langword="false"/> when the config has not yet been resolved.
-    /// </summary>
-    [JsonIgnore]
-    public bool UseExternalStoreMode => ResolvedWorkerConfig?.UseExternalStoreMode ?? false;
 
     /// <summary>
     /// Pre-computed per-tool <see cref="ActivityOptions"/> indexed by tool name (case-insensitive).

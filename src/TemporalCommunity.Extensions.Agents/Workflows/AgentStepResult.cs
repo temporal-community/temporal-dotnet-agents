@@ -49,28 +49,6 @@ internal sealed class AgentStepResult
     public UsageDetails? Usage { get; init; }
 
     /// <summary>
-    /// <see langword="true"/> when the activity-side trigger evaluator decided that compaction
-    /// should fire at the end of this step. The workflow consumes this flag and dispatches
-    /// the configured strategy (Step 6d). Defaults to <see langword="false"/> — no trigger.
-    /// </summary>
-    /// <remarks>
-    /// Q2 = B per the design log: trigger evaluation runs in the activity (where we have
-    /// access to the chat client + the freshly-completed step state) rather than in the
-    /// workflow (which is restricted to deterministic computation only).
-    /// </remarks>
-    public bool CompactionNeeded { get; init; }
-
-    /// <summary>
-    /// When <see cref="CompactionNeeded"/> is <see langword="true"/>, names the source-entry
-    /// <see cref="DurableSessionEntry.CorrelationId"/>s the trigger evaluator selected for
-    /// compaction. Handed verbatim to <see cref="Compaction.CompactionContext.TargetMessageIds"/>
-    /// when the workflow dispatches the strategy. <see langword="null"/> when no compaction
-    /// trigger fired.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public IReadOnlyList<string>? CompactionTargetMessageIds { get; init; }
-
-    /// <summary>
     /// Optional response identifier produced by the LLM provider for this step. Maps to OTel
     /// GenAI semantic convention <c>gen_ai.response.id</c>. Used for correlating Temporal-side
     /// activity execution with upstream provider observability (request logs, billing detail).
@@ -88,24 +66,15 @@ internal sealed class AgentStepResult
     /// <see langword="true"/>; <see langword="null"/> on non-resolution steps.
     /// </summary>
     /// <remarks>
-    /// Replaces the prior <c>ResolvedUseExternalStoreMode</c> / <c>ResolvedToolActivityOptions</c> /
+    /// Replaces the prior <c>ResolvedToolActivityOptions</c> /
     /// <c>ResolvedMaxToolCallsPerTurn</c> trio (Step 3c.1 migration). The legacy field names are
     /// preserved as forwarding computed properties below so consumers don't need updating; new
-    /// fields added in Steps 4 + 6 (<c>DefaultChatClientFactoryKey</c>,
-    /// <c>CompactionStrategyKey</c>) flow through the same record without further schema thrashing.
+    /// fields flow through the same record without further schema thrashing.
     /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ProxyResolvedWorkerConfig? ResolvedWorkerConfig { get; init; }
 
     // ── Forwarding properties — preserve consumer call sites across the Step 3c.1 migration ──
-
-    /// <summary>
-    /// Resolved worker-side external-store mode flag. Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.UseExternalStoreMode"/>;
-    /// <see langword="null"/> on non-resolution steps.
-    /// </summary>
-    [JsonIgnore]
-    public bool? ResolvedUseExternalStoreMode => ResolvedWorkerConfig?.UseExternalStoreMode;
 
     /// <summary>
     /// Resolved per-tool <see cref="ActivityOptions"/> dictionary. Forwards to

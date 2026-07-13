@@ -1,7 +1,3 @@
-const TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.Key = "sliding-window" -> string!
-const TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.DefaultSystemPrompt = "You are a summarizer. Produce a concise, factually accurate rollup of the conversation below so a downstream assistant can continue the dialogue with the gist preserved. Do NOT invent facts. Preserve specific names, numbers, decisions, and unresolved questions. Keep the summary under 250 words." -> string!
-const TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.Key = "summarization" -> string!
-const TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.Key = "truncation" -> string!
 const TemporalCommunity.Extensions.Agents.Skills.SkillsContextProvider.StateBagKey = "temporal.skills_index" -> string!
 const TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.PluginName = "TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin" -> string!
 const TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry.ActivitySourceName = "TemporalCommunity.Extensions.Agents" -> string!
@@ -38,9 +34,6 @@ override TemporalCommunity.Extensions.Agents.Testing.NoOpAgent.Name.get -> strin
 static TemporalCommunity.Extensions.Agents.AIAgentExtensions.AsTemporalAgentProxy(this Microsoft.Agents.AI.AIAgent! agent, System.IServiceProvider! services) -> Microsoft.Agents.AI.AIAgent!
 static TemporalCommunity.Extensions.Agents.AIAgentExtensions.RunFireAndForgetAsync(this Microsoft.Agents.AI.AIAgent! agent, string! message, Microsoft.Agents.AI.AgentSession? session = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Agents.AI.AgentResponse!>!
 static TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeHelpers.TryMatchScope(string! toolName, System.Collections.Generic.IReadOnlyDictionary<string!, object?>! arguments, Microsoft.Agents.AI.AgentSessionStateBag? bag, string! storeKey, out TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord? match) -> bool
-static TemporalCommunity.Extensions.Agents.Compaction.CompactionTargetFilter.CollectAlreadyCompactedIds(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.HashSet<string!>!
-static TemporalCommunity.Extensions.Agents.HistoryStore.CompactionAwareErasureHelper.EraseSessionDataAsync(TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore! store, string! sessionId, System.Collections.Generic.IEnumerable<string!>! erasedMessageIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult!>!
-static TemporalCommunity.Extensions.Agents.HistoryStore.CompactionAwareErasureHelper.EraseSessionDataAsync(TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore! store, string! sessionId, System.Collections.Generic.IReadOnlySet<string!>! erasedMessageIds, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult!>!
 static TemporalCommunity.Extensions.Agents.ServiceCollectionExtensions.AddTemporalAgentProxies(this Microsoft.Extensions.DependencyInjection.IServiceCollection! services, System.Action<TemporalCommunity.Extensions.Agents.TemporalAgentsOptions!>! configure, string! taskQueue, string? targetHost = null, string! namespace = "default") -> Microsoft.Extensions.DependencyInjection.IServiceCollection!
 static TemporalCommunity.Extensions.Agents.ServiceCollectionExtensions.GetTemporalAgentProxy(this System.IServiceProvider! services, string! name) -> Microsoft.Agents.AI.AIAgent!
 static TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.Current.get -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext!
@@ -98,47 +91,6 @@ TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.MaxAlwaysSco
 TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore
 TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore.AppendAsync(string! agentName, string! storeKey, TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord! record, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore.LoadAsync(string! agentName, string! storeKey, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord!>!>!
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.AgentName.get -> string!
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.AgentName.init -> void
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.ChatClient.get -> Microsoft.Extensions.AI.IChatClient!
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.ChatClient.init -> void
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.MarkerCorrelationId.get -> string!
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.MarkerCorrelationId.init -> void
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.RawEntries.get -> System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.RawEntries.init -> void
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.SessionId.get -> string!
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.SessionId.init -> void
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.TargetMessageIds.get -> System.Collections.Generic.IReadOnlyList<string!>!
-TemporalCommunity.Extensions.Agents.Compaction.CompactionContext.TargetMessageIds.init -> void
-TemporalCommunity.Extensions.Agents.Compaction.CompactionResult
-TemporalCommunity.Extensions.Agents.Compaction.CompactionResult.Marker.get -> TemporalCommunity.Extensions.AI.Session.CompactionMarkerEntry!
-TemporalCommunity.Extensions.Agents.Compaction.CompactionResult.Marker.init -> void
-TemporalCommunity.Extensions.Agents.Compaction.CompactionTargetFilter
-TemporalCommunity.Extensions.Agents.Compaction.ICompactionStrategy
-TemporalCommunity.Extensions.Agents.Compaction.ICompactionStrategy.CompactAsync(TemporalCommunity.Extensions.Agents.Compaction.CompactionContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.Compaction.CompactionResult!>!
-TemporalCommunity.Extensions.Agents.Compaction.ICompactionStrategy.EvaluateTrigger(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.IReadOnlyList<string!>?
-TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy
-TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.CompactAsync(TemporalCommunity.Extensions.Agents.Compaction.CompactionContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.Compaction.CompactionResult!>!
-TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.EvaluateTrigger(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.IReadOnlyList<string!>?
-TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.SlidingWindowCompactionStrategy() -> void
-TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.SlidingWindowCompactionStrategy(int windowSize) -> void
-TemporalCommunity.Extensions.Agents.Compaction.SlidingWindowCompactionStrategy.WindowSize.get -> int
-TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy
-TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.CompactAsync(TemporalCommunity.Extensions.Agents.Compaction.CompactionContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.Compaction.CompactionResult!>!
-TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.EvaluateTrigger(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.IReadOnlyList<string!>?
-TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.KeepRecentCount.get -> int
-TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.SummarizationCompactionStrategy() -> void
-TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.SummarizationCompactionStrategy(int triggerEntryCount, int keepRecentCount, string! systemPrompt) -> void
-TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.SystemPrompt.get -> string!
-TemporalCommunity.Extensions.Agents.Compaction.SummarizationCompactionStrategy.TriggerEntryCount.get -> int
-TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy
-TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.CompactAsync(TemporalCommunity.Extensions.Agents.Compaction.CompactionContext! context, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.Agents.Compaction.CompactionResult!>!
-TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.EvaluateTrigger(System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! history) -> System.Collections.Generic.IReadOnlyList<string!>?
-TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.KeepRecentCount.get -> int
-TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.TriggerEntryCount.get -> int
-TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.TruncationCompactionStrategy() -> void
-TemporalCommunity.Extensions.Agents.Compaction.TruncationCompactionStrategy.TruncationCompactionStrategy(int triggerEntryCount, int keepRecentCount) -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ActivityTimeout.get -> System.TimeSpan?
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ActivityTimeout.set -> void
@@ -154,8 +106,6 @@ TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ChatClient.get -> System
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ChatClient.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ChatOptions.get -> Microsoft.Extensions.AI.ChatOptions?
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ChatOptions.set -> void
-TemporalCommunity.Extensions.Agents.DurableAgentBuilder.CompactionStrategyKey.get -> string?
-TemporalCommunity.Extensions.Agents.DurableAgentBuilder.CompactionStrategyKey.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ConfigureAgentPipeline.get -> System.Action<Microsoft.Agents.AI.AIAgentBuilder!>?
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ConfigureAgentPipeline.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Description.get -> string?
@@ -166,8 +116,6 @@ TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducer.get -> Sy
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducer.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducerKey.get -> string?
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducerKey.set -> void
-TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryStore.get -> System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore!>?
-TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryStore.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Instructions.get -> string?
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Instructions.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.MaxEntryCount.get -> int?
@@ -187,27 +135,6 @@ TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec.Configure.init -
 TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec.DurableToolRegistrationSpec(Microsoft.Extensions.AI.AIFunction! Tool, System.Action<TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!>? Configure = null) -> void
 TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec.Tool.get -> Microsoft.Extensions.AI.AIFunction!
 TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec.Tool.init -> void
-TemporalCommunity.Extensions.Agents.HistoryStore.CompactionAwareErasureHelper
-TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult
-TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersAffected.get -> int
-TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersAffected.init -> void
-TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersRegenerated.get -> int
-TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersRegenerated.init -> void
-TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersTombstoned.get -> int
-TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.MarkersTombstoned.init -> void
-TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.RemainingMessageCount.get -> int
-TemporalCommunity.Extensions.Agents.HistoryStore.EraseResult.RemainingMessageCount.init -> void
-TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata
-TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.CorrelationIds.get -> System.Collections.Generic.IReadOnlyList<(string! CorrelationId, bool IsCompactionMarker)>!
-TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.CorrelationIds.init -> void
-TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.Count.get -> int
-TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.Count.init -> void
-TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata.HistoryMetadata(int Count, System.Collections.Generic.IReadOnlyList<(string! CorrelationId, bool IsCompactionMarker)>! CorrelationIds) -> void
-TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore
-TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore.AppendAsync(string! sessionId, System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! entries, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
-TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore.GetMetadataAsync(string! sessionId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<TemporalCommunity.Extensions.Agents.HistoryStore.HistoryMetadata!>
-TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore.LoadAsync(string! sessionId, bool applyCompaction, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!>!
-TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore.ReplaceAsync(string! sessionId, System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>! reducedEntries, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 TemporalCommunity.Extensions.Agents.ITemporalAgentClient
 TemporalCommunity.Extensions.Agents.ITemporalAgentClient.CancelPendingApprovalAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, string? reason = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 TemporalCommunity.Extensions.Agents.ITemporalAgentClient.GetAgentScheduleHandle(string! scheduleId) -> Temporalio.Client.Schedules.ScheduleHandle!
@@ -326,8 +253,6 @@ TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultActivityTimeout
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultActivityTimeout.set -> void
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultApprovalTimeout.get -> System.TimeSpan
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultApprovalTimeout.set -> void
-TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultCompactionStrategy.get -> string?
-TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultCompactionStrategy.set -> void
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultConfigureAgentPipeline.get -> System.Action<Microsoft.Agents.AI.AIAgentBuilder!>?
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultConfigureAgentPipeline.set -> void
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHeartbeatTimeout.get -> System.TimeSpan
@@ -349,8 +274,6 @@ TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.EnableSearchAttributes
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.GetAgentDescription(string! agentName) -> string?
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.GetAgentDescriptors() -> System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.Agents.State.AgentDescriptor!>!
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.GetRegisteredAgentNames() -> System.Collections.Generic.IReadOnlyList<string!>!
-TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.HistoryStore.get -> System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.Agents.HistoryStore.IAgentHistoryStore!>?
-TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.HistoryStore.set -> void
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.IsAgentRegistered(string! name) -> bool
 TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin
 TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.ConfigureReplayer(Temporalio.Worker.WorkflowReplayerOptions! options) -> void

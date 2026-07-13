@@ -2,7 +2,6 @@ using Microsoft.Extensions.AI;
 using Temporalio.Common;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;
-using TemporalCommunity.Extensions.Agents.Tests.HistoryStore;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Xunit;
 
@@ -250,65 +249,6 @@ public class DurableAgentSettingsInheritanceTests
         var input = Build(options);
 
         Assert.Equal(20, input.MaxToolCallsPerTurn);
-    }
-
-    // ── HistoryStore (per-agent vs worker-level) ────────────────────────────────
-
-    [Fact]
-    public void WhenAgentHasHistoryStoreOverride_PrefersAgentStore()
-    {
-        var workerStore = new FakeAgentHistoryStore();
-        var agentStore = new FakeAgentHistoryStore();
-
-        var options = OptionsWithDurableAgent(
-            configureAgent: a => a.HistoryStore = _ => agentStore,
-            configureOptions: o => o.HistoryStore = _ => workerStore);
-
-        var input = Build(options);
-
-        // The composite UseExternalStore flag flows to the workflow side; the actual factory
-        // resolution happens activity-side via ResolveDurableAgent. Here we verify the input
-        // signals that external history is in play.
-        Assert.True(input.UseExternalStoreMode);
-    }
-
-    [Fact]
-    public void WhenAgentHistoryStoreNull_UsesWorkerHistoryStore()
-    {
-        var workerStore = new FakeAgentHistoryStore();
-
-        var options = OptionsWithDurableAgent(
-            configureOptions: o => o.HistoryStore = _ => workerStore);
-
-        var input = Build(options);
-
-        Assert.True(input.UseExternalStoreMode);
-    }
-
-    [Fact]
-    public void WhenBothNull_NoExternalHistory()
-    {
-        var options = OptionsWithDurableAgent();
-
-        var input = Build(options);
-
-        Assert.False(input.UseExternalStoreMode);
-    }
-
-    [Fact]
-    public void WhenWorkerHasHistoryStore_AllAgentsWithoutOverrideInherit()
-    {
-        var workerStore = new FakeAgentHistoryStore();
-
-        var options = new TemporalAgentsOptions { HistoryStore = _ => workerStore };
-        options.AddDurableAgent("AgentA", agent => agent.ChatClient = _ => NewChatClient());
-        options.AddDurableAgent("AgentB", agent => agent.ChatClient = _ => NewChatClient());
-
-        var inputA = Build(options, "AgentA");
-        var inputB = Build(options, "AgentB");
-
-        Assert.True(inputA.UseExternalStoreMode);
-        Assert.True(inputB.UseExternalStoreMode);
     }
 
     // ── Composite — tool dictionary survives inheritance ────────────────────────

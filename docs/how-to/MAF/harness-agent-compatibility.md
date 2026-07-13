@@ -47,12 +47,8 @@ If you obtained an `IChatClient` adapter from a `HarnessAgent` through reflectio
 
 ## What to use instead
 
-The individual MAF context providers that `HarnessAgent` bundles are standard `AIContextProvider` subclasses. They work today via `AddContextProvider`:
+Do not treat individual Harness providers as automatic escape hatches. Most of them expose tools dynamically or depend on Harness-owned orchestration, so they are not supported unchanged. A provider is compatible only when it meets the [bounded durable `ChatClientAgent` contract](../../architecture/MAF/bounded-durable-agent-compatibility.md); static tools need explicit durable declarations through `IDurableToolSource` or `AddContextProvider(provider, durableTools)`.
 
-- **`TodoProvider`** — per-session todo list with `todos_add`, `todos_complete`, and related tools
-- **`AgentModeProvider`** — plan/execute mode switching with `mode_set` and `mode_get` tools
-- **`FileMemoryProvider`** — file-based memory that survives session compaction
-
-See [`individual-context-providers.md`](./individual-context-providers.md) for registration examples and caveats.
+See [`individual-context-providers.md`](./individual-context-providers.md) for the supported provider pattern and exclusions.
 
 For the full agent registration API, see [`usage.md`](./usage.md).

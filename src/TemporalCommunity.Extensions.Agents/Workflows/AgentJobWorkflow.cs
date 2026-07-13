@@ -15,14 +15,6 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// <para>
 /// Workflow ID convention: <c>ta-{agentName}-scheduled-{scheduleId}</c>.
 /// </para>
-/// <para>
-/// <b>External history store is not supported for scheduled or deferred runs.</b>
-/// Even when the agent is configured with an <c>IAgentHistoryStore</c>, turns executed
-/// by this workflow are <em>not</em> written to the store. The workflow does not dispatch
-/// <c>AppendAgentTurn</c> activities, so the external store sees no record of these runs.
-/// Use <see cref="AgentWorkflow"/> (via <c>TemporalAIAgentProxy</c> or
-/// <c>DefaultTemporalAgentClient</c>) for workloads that require durable history storage.
-/// </para>
 /// </remarks>
 [Workflow("TemporalCommunity.Extensions.Agents.AgentJobWorkflow")]
 internal sealed class AgentJobWorkflow
@@ -68,7 +60,6 @@ internal sealed class AgentJobWorkflow
                 AccumulatedMessages = accumulated,
                 SerializedStateBag = null,
                 SessionId = null,
-                IsFirstStep = iteration == 0,
             };
 
             var stepResult = await Workflow.ExecuteActivityAsync(

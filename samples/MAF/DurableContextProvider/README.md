@@ -12,12 +12,10 @@ Demonstrates registering durable tools alongside a context provider using two ap
 
 ## Why durable dispatch matters for tools
 
-Without `IDurableToolSource` or explicit `DurableToolRegistrationSpec` entries, a context
-provider's tools execute in-process inside the `RunDurableAgentStep` activity — MAF's
-`FunctionInvokingChatClient` handles them inline. If the worker crashes mid-tool, the tool
-re-runs from scratch when the activity retries (double-execution risk for write operations).
-The tool call also produces no individual entry in the Temporal event history, so it is
-invisible in the Web UI.
+Without `IDurableToolSource` or explicit `DurableToolRegistrationSpec` entries, tools returned by
+a context provider are ignored by the durable-agent loop and a runtime warning identifies the
+provider. They are not silently executed inline. Register them through one of the two approaches
+above before relying on them.
 
 With durable dispatch, each tool call becomes its own `InvokeAgentTool` activity: it appears
 in the workflow history, has its own retry/timeout policy, and completed tool calls are never

@@ -43,11 +43,6 @@ public sealed class TemporalAIAgent : AIAgent
     // stepResult.UpdatedStateBag, mirroring AgentWorkflow's _currentStateBag (AgentWorkflow.cs
     // :345 in / :381 out). Without this, sub-agent context providers lose state every step.
     private JsonElement? _currentStateBag;
-    // Resolved from the worker registration on the first RunDurableAgentStep call.
-    // When true, cross-turn conversation history is owned by the external IAgentHistoryStore
-    // rather than being carried in-workflow. Each turn's request messages are still passed
-    // to the step activity; prior turns are loaded by the activity from the store.
-    private bool _useExternalStore;
     // Cached after the first successful worker-settings resolution step so subsequent turns
     // skip the resolution handshake and use the resolved value rather than the hard-coded default.
     private bool _settingsResolved;
@@ -156,29 +151,11 @@ public sealed class TemporalAIAgent : AIAgent
         // Drive the durable-agent dispatch loop for sub-agents inside an orchestrating workflow.
         // Mirrors the AgentWorkflow main loop but without continue-as-new / search attributes /
         // history reduction (the orchestrating workflow owns those concerns).
-        //
-        // When _useExternalStore is true (resolved from the worker registration on the first
-        // RunDurableAgentStep call), cross-turn history is owned by the external store.
-        // The step activity on IsFirstStep=true loads that history itself; we only pass
-        // the current request's messages so they aren't duplicated in the LLM context.
-        // When _useExternalStore is false, we flatten all _history into AccumulatedMessages
-        // as before (in-workflow state is the authoritative history).
         var accumulated = new List<ChatMessage>();
-        if (_useExternalStore)
+        foreach (var entry in _history)
         {
-            // Only include the current request's messages. The activity loads prior turns
-            // from the external store and prepends them before sending to the LLM.
-            var currentEntry = _history[^1];
-            foreach (var m in currentEntry.Messages)
+            foreach (var m in entry.Messages)
                 accumulated.Add(m);
-        }
-        else
-        {
-            foreach (var entry in _history)
-            {
-                foreach (var m in entry.Messages)
-                    accumulated.Add(m);
-            }
         }
 
         var allTurnMessages = new List<ChatMessage>();
@@ -194,7 +171,6 @@ public sealed class TemporalAIAgent : AIAgent
                 AccumulatedMessages = accumulated,
                 SerializedStateBag = _currentStateBag,
                 SessionId = sessionId,
-                IsFirstStep = iteration == 0,
                 NeedsWorkerSettingsResolution = !_settingsResolved && iteration == 0,
             };
 
@@ -215,14 +191,6 @@ public sealed class TemporalAIAgent : AIAgent
                 _settingsResolved = true;
                 _resolvedMaxToolCallsPerTurn = stepResult.ResolvedWorkerConfig.MaxToolCallsPerTurn;
                 maxIterations = _resolvedMaxToolCallsPerTurn;
-            }
-
-            // Capture the resolved external-store flag from the first step so that
-            // subsequent turns build AccumulatedMessages correctly (only current-turn
-            // messages when the store owns cross-turn history).
-            if (iteration == 0 && stepResult.ResolvedUseExternalStoreMode.HasValue)
-            {
-                _useExternalStore = stepResult.ResolvedUseExternalStoreMode.Value;
             }
 
             // Capture worker-side config from the first resolution step.
@@ -279,22 +247,6 @@ public sealed class TemporalAIAgent : AIAgent
 
                 _history.Add(AgentSessionResponse.FromAgentResponse(
                     request.CorrelationId!, response, Workflow.UtcNow));
-
-                // Persist this turn to the external history store when configured.
-                // The session-based AgentWorkflow path does this via UseExternalStoreMode;
-                // TemporalAIAgent must dispatch the same AppendAgentTurn activity.
-                if (_useExternalStore && sessionId.HasValue)
-                {
-                    await Workflow.ExecuteActivityAsync(
-                        (AgentActivities a) => a.AppendAgentTurnAsync(new AppendAgentTurnInput
-                        {
-                            AgentName = _agentName,
-                            SessionId = sessionId.Value.WorkflowId,
-                            Request = request,
-                            TurnResponse = response,
-                        }),
-                        _activityOptions).ConfigureAwait(true);
-                }
 
                 return response;
             }
@@ -454,20 +406,6 @@ public sealed class TemporalAIAgent : AIAgent
         };
         _history.Add(AgentSessionResponse.FromAgentResponse(
             request.CorrelationId!, iterCapResponse, Workflow.UtcNow));
-
-        // Also persist iteration-cap turns to the external store.
-        if (_useExternalStore && sessionId.HasValue)
-        {
-            await Workflow.ExecuteActivityAsync(
-                (AgentActivities a) => a.AppendAgentTurnAsync(new AppendAgentTurnInput
-                {
-                    AgentName = _agentName,
-                    SessionId = sessionId.Value.WorkflowId,
-                    Request = request,
-                    TurnResponse = iterCapResponse,
-                }),
-                _activityOptions).ConfigureAwait(true);
-        }
 
         return iterCapResponse;
     }

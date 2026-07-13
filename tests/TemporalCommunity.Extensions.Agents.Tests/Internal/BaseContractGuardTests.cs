@@ -92,9 +92,9 @@ public class BaseContractGuardTests
     {
         // The detection API the consumers use returns bool (presence), confirming consumers are
         // indifferent to which instance the dual-traversal returns.
-        var containsAgent = typeof(TemporalCommunity.Extensions.AI.Internal.AgentChainWalker)
+        var containsAgent = typeof(AgentChainWalker)
             .GetMethod(
-                nameof(TemporalCommunity.Extensions.AI.Internal.AgentChainWalker.Contains),
+                nameof(AgentChainWalker.Contains),
                 [typeof(AIAgent)]);
 
         Assert.NotNull(containsAgent);

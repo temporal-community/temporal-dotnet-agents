@@ -2,7 +2,6 @@ using Microsoft.Agents.AI;
 using Temporalio.Client.Schedules;
 using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.Approvals;
-using TemporalCommunity.Extensions.Agents.HistoryStore;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.Agents.Tools;
@@ -92,12 +91,6 @@ public sealed class TemporalAgentsOptions
     public bool EnableSearchAttributes { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the worker-level default <see cref="IAgentHistoryStore"/> factory. When a
-    /// per-agent <c>HistoryStore</c> is unset on the builder, the agent inherits this value.
-    /// </summary>
-    public Func<IServiceProvider, IAgentHistoryStore>? HistoryStore { get; set; }
-
-    /// <summary>
     /// Gets or sets the worker-level default maximum number of <see cref="DurableSessionEntry"/>
     /// instances retained before triggering continue-as-new. Agents inherit this value when
     /// <see cref="DurableAgentBuilder.MaxEntryCount"/> is unset. Defaults to 1000. Continue-as-new
@@ -149,26 +142,6 @@ public sealed class TemporalAgentsOptions
     public string? DefaultHistoryReducerKey { get; set; }
 
     /// <summary>
-    /// Gets or sets the worker-level default compaction-strategy key. When an agent does
-    /// not set <see cref="DurableAgentBuilder.CompactionStrategyKey"/>, it inherits this
-    /// value. <see langword="null"/> at both levels disables compaction.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Step 6a — API surface. Built-in keys pre-registered in Step 6c:
-    /// <c>"truncation"</c>, <c>"sliding-window"</c>, <c>"summarization"</c>. Custom strategies
-    /// can be registered via
-    /// <c>services.AddKeyedSingleton&lt;ICompactionStrategy&gt;("my-key", impl)</c>.
-    /// </para>
-    /// <para>
-    /// Marked <c>[Experimental("TA002")]</c> at the property level — consumer assignments
-    /// surface the diagnostic until compaction ships out of preview.
-    /// </para>
-    /// </remarks>
-    [System.Diagnostics.CodeAnalysis.Experimental("TA002")]
-    public string? DefaultCompactionStrategy { get; set; }
-
-    /// <summary>
     /// Gets or sets the worker-level default <see cref="IApprovalScopeStore"/> factory for
     /// always-scope persistence. When a per-agent <see cref="ApprovalScopesOptions.ApprovalScopeStore"/>
     /// is unset, the agent inherits this value when <c>UseApprovalScopes()</c> is configured.
@@ -192,8 +165,8 @@ public sealed class TemporalAgentsOptions
     /// The H1 rule applies: per-agent registration always wins over this worker default.
     /// </summary>
     /// <remarks>
-    /// The factory is invoked once at first activity dispatch and the resolved instance is
-    /// cached for the lifetime of the worker process.
+    /// The factory is invoked from the activity's scoped service provider for every activity
+    /// attempt.
     /// </remarks>
     public Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? DefaultToolInterceptor { get; set; }
 
@@ -243,9 +216,9 @@ public sealed class TemporalAgentsOptions
 
     /// <summary>
     /// Registers a durable agent and returns this options instance for chaining. The configure
-    /// delegate populates a <see cref="DurableAgentBuilder"/> whose <c>ChatClient</c>, tools, and
-    /// context providers are evaluated lazily at first activity dispatch (cached for the lifetime
-    /// of the worker process).
+    /// delegate populates a <see cref="DurableAgentBuilder"/>. Tool factories are evaluated when
+    /// the worker builds its immutable agent blueprint; chat-client and context-provider factories
+    /// are evaluated from the scoped provider for each activity attempt.
     /// </summary>
     /// <param name="name">
     /// Case-insensitive agent name. Must be unique within this options instance.

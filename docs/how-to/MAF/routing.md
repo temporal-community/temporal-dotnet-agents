@@ -357,9 +357,9 @@ The rule is simple: **if the code runs inside a workflow execution context, do n
 ## References
 
 - `samples/MAF/WorkflowRouting/` — both patterns (`CustomerServiceWorkflow.cs`, `DynamicRoutingWorkflow.cs`, `RoutingActivities.cs`)
-- [`durability-and-determinism.md`](../architecture/MAF/durability-and-determinism.md) — why workflow code must be deterministic
-- [`agent-sessions-and-workflow-loop.md`](../architecture/MAF/agent-sessions-and-workflow-loop.md) — how agent calls become durable activities
-- [`session-statebag-and-context-providers.md`](../architecture/MAF/session-statebag-and-context-providers.md) — StateBag and AIContextProvider integration
+- [`durability-and-determinism.md`](../../architecture/MAF/durability-and-determinism.md) — why workflow code must be deterministic
+- [`agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md) — how agent calls become durable activities
+- [`session-statebag-and-context-providers.md`](../../architecture/MAF/session-statebag-and-context-providers.md) — StateBag and AIContextProvider integration
 - `src/TemporalCommunity.Extensions.Agents/TemporalAgentsOptions.cs` — agent registry API (`GetRegisteredAgentNames`, `IsAgentRegistered`)
 
 ---

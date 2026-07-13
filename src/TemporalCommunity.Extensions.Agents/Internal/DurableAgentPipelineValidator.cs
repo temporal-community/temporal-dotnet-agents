@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Options;
 using TemporalCommunity.Extensions.AI.Exceptions;
-using TemporalCommunity.Extensions.AI.Internal;
 using TemporalCommunity.Extensions.Agents.Testing;
 using Temporalio.Extensions.Hosting;
 

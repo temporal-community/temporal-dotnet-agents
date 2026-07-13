@@ -30,9 +30,9 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// </item>
 /// </list>
 /// <para>
-/// Two nullable slots (<see cref="DefaultChatClientFactoryKey"/> and
-/// <see cref="CompactionStrategyKey"/>) are reserved as forward-compatibility placeholders for
-/// upcoming Steps 4 and 6 of the MAF gap-analysis plan. They are intentionally NOT
+/// The nullable <see cref="DefaultChatClientFactoryKey"/> slot is reserved as a
+/// forward-compatibility placeholder for a future configurable per-call chat-client factory
+/// key. It is intentionally NOT
 /// <c>required</c> so existing call sites can construct the record without supplying them.
 /// </para>
 /// </remarks>
@@ -43,13 +43,6 @@ internal sealed record ProxyResolvedWorkerConfig
     /// worker's <c>DurableAgentRegistration.MaxToolCallsPerTurn</c>, default 20).
     /// </summary>
     public required int MaxToolCallsPerTurn { get; init; }
-
-    /// <summary>
-    /// <see langword="true"/> when the agent has an <c>IAgentHistoryStore</c> configured
-    /// (per-agent or worker-level). The workflow strips message payloads from history entries
-    /// and the activity loads/appends conversation history via the store.
-    /// </summary>
-    public required bool UseExternalStoreMode { get; init; }
 
     /// <summary>
     /// Pre-computed per-tool <see cref="ActivityOptions"/> indexed by tool name
@@ -66,14 +59,6 @@ internal sealed record ProxyResolvedWorkerConfig
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DefaultChatClientFactoryKey { get; init; }
-
-    /// <summary>
-    /// Reserved for Step 6 of the MAF gap-analysis plan (compaction strategy selector).
-    /// Nullable and NOT <c>required</c> so call sites do not need to supply a value until
-    /// Step 6 lands.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? CompactionStrategyKey { get; init; }
 
     /// <summary>
     /// Pre-computed <see cref="ActivityOptions"/> for <c>RunToolInterceptor</c> dispatches that
@@ -129,7 +114,7 @@ internal sealed record ProxyResolvedWorkerConfig
     /// When <see langword="true"/>, the agent has an <see cref="Approvals.IApprovalScopeStore"/>
     /// configured (per-agent or worker-level) AND <see cref="UseApprovalScopes"/> is true.
     /// The workflow dispatches <c>AppendAlwaysScopeAsync</c> and <c>LoadAlwaysScopesAsync</c>
-    /// activities. Independent from <see cref="UseExternalStoreMode"/> (conversation history store).
+    /// activities. This is independent of the workflow's in-event-history conversation state.
     /// </summary>
     public bool UseApprovalScopeStoreMode { get; init; }
 

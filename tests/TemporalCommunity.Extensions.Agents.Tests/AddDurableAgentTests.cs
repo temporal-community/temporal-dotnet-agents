@@ -216,7 +216,6 @@ public class AddDurableAgentTests
         Assert.Equal(250, input.MaxEntryCount);
         Assert.True(input.EnableSearchAttributes);
         Assert.Null(input.DurableAgentToolActivityOptions);
-        Assert.False(input.UseExternalStoreMode);
     }
 
     [Fact]

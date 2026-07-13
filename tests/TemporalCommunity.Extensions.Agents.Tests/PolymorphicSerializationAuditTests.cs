@@ -179,7 +179,6 @@ public class PolymorphicSerializationAuditTests
             AgentName = "test-agent",
             Request = new RunRequest("hi") { CorrelationId = "c1", ResponseFormat = ChatResponseFormat.Json },
             AccumulatedMessages = new List<ChatMessage> { new(ChatRole.User, "hi") },
-            IsFirstStep = true,
         };
 
         var roundTripped = RoundTrip(input);
@@ -204,7 +203,6 @@ public class PolymorphicSerializationAuditTests
                 new(ChatRole.Tool,
                     [new FunctionResultContent(callId: "call-xyz", result: "42")]),
             },
-            IsFirstStep = false,
         };
 
         var roundTripped = RoundTrip(input);
@@ -344,53 +342,6 @@ public class PolymorphicSerializationAuditTests
 
         Assert.NotNull(roundTripped.Result);
         Assert.Equal("call-1", roundTripped.CallId);
-    }
-
-    // ─── AppendAgentTurnInput (MAF AgentResponse over the wire) ─────────────────────────
-
-    /// <summary>
-    /// <see cref="AppendAgentTurnInput.TurnResponse"/> is <see cref="AgentResponse"/> from
-    /// <c>Microsoft.Agents.AI</c>. The type is NOT registered in <see cref="AgentSessionJsonContext"/>
-    /// (only <see cref="AppendAgentTurnInput"/> is). The audit verifies whether the polymorphic
-    /// chat-content surface inside <c>AgentResponse.Messages</c> survives a wrapper round-trip —
-    /// this activity is dispatched from <c>AgentWorkflow</c> when an external history store is
-    /// configured (<c>AppendAgentTurnAsync</c>).
-    /// </summary>
-    [Fact]
-    public void Audit_AppendAgentTurnInput_TurnResponse_Messages_RoundTrip()
-    {
-        var input = new AppendAgentTurnInput
-        {
-            AgentName = "a",
-            SessionId = "s1",
-            Request = new RunRequest("go") { CorrelationId = "c-append" },
-            TurnResponse = new AgentResponse
-            {
-                Messages = new List<ChatMessage>
-                {
-                    new(ChatRole.Assistant,
-                        [new FunctionCallContent(callId: "fc-1", name: "t",
-                            arguments: new Dictionary<string, object?> { ["q"] = 1 })]),
-                    new(ChatRole.Tool, [new FunctionResultContent(callId: "fc-1", result: "ok")]),
-                    new(ChatRole.Assistant, "done"),
-                },
-                Usage = new UsageDetails { InputTokenCount = 11, OutputTokenCount = 22 },
-                ResponseId = "resp-9",
-            },
-        };
-
-        var roundTripped = RoundTrip(input);
-
-        Assert.NotNull(roundTripped.TurnResponse);
-        Assert.Equal(3, roundTripped.TurnResponse!.Messages.Count);
-        var fc = Assert.IsType<FunctionCallContent>(roundTripped.TurnResponse.Messages[0].Contents[0]);
-        Assert.Equal("fc-1", fc.CallId);
-        Assert.Equal("t", fc.Name);
-        var fr = Assert.IsType<FunctionResultContent>(roundTripped.TurnResponse.Messages[1].Contents[0]);
-        Assert.Equal("fc-1", fr.CallId);
-        Assert.NotNull(roundTripped.TurnResponse.Usage);
-        Assert.Equal(11, roundTripped.TurnResponse.Usage!.InputTokenCount);
-        Assert.Equal("resp-9", roundTripped.TurnResponse.ResponseId);
     }
 
     // ─── Compaction wire types (Experimental TA002) ─────────────────────────────────────

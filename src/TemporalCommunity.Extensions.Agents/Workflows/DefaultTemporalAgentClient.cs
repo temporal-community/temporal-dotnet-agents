@@ -334,8 +334,6 @@ internal sealed class DefaultTemporalAgentClient(
             perAgentHeartbeatTimeout,
             perAgentRetryPolicy);
 
-        var hasExternalStore = registration.HistoryStore is not null || options.HistoryStore is not null;
-
         // Feature L: pre-compute interceptor config (interceptor presence + skip/require-approval lists).
         // requiresApprovalTools is populated unconditionally — RequireApproval() is an absolute
         // floor that must be enforced even when no tool interceptor is registered (BLOCK-2 fix).
@@ -493,7 +491,6 @@ internal sealed class DefaultTemporalAgentClient(
             ResolvedWorkerConfig = new ProxyResolvedWorkerConfig
             {
                 MaxToolCallsPerTurn = registration.MaxToolCallsPerTurn,
-                UseExternalStoreMode = hasExternalStore,
                 ToolActivityOptions = toolActivityOptions,
                 InterceptorActivityOptions = interceptorActivityOpts,
                 InterceptorToolActivityOptions = perToolInterceptorOpts,
@@ -645,8 +642,8 @@ internal sealed class DefaultTemporalAgentClient(
     /// <see cref="TemporalAgentsOptions.AddDurableAgent"/>). The proxy client constructs the
     /// input locally to start the workflow on the server; the actual workflow execution and
     /// per-tool dispatch happen in the worker process which owns the
-    /// <see cref="DurableAgentRegistration"/>. Per-tool activity options and external-store mode
-    /// are intentionally left null/false here — those are resolved by the worker on its side.
+    /// <see cref="DurableAgentRegistration"/>. Per-tool activity options are intentionally left
+    /// unresolved here and are supplied by the worker on its side.
     /// </summary>
     private static AgentWorkflowInput BuildProxyOnlyAgentWorkflowInput(
         string agentName,
@@ -672,7 +669,7 @@ internal sealed class DefaultTemporalAgentClient(
             HistoryReducerKey = options.DefaultHistoryReducerKey,
             EnableSearchAttributes = options.EnableSearchAttributes,
             // Proxy-only construction: leave ResolvedWorkerConfig null. The worker resolves
-            // settings (per-tool activity options, external-store mode, max iterations) from its
+            // settings (per-tool activity options and max iterations) from its
             // own DurableAgentRegistration on the first step via the NeedsWorkerSettingsResolution
             // handshake.
             ResolvedWorkerConfig = null,

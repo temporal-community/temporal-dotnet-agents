@@ -2,7 +2,6 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.Approvals;
-using TemporalCommunity.Extensions.Agents.HistoryStore;
 using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
@@ -22,7 +21,6 @@ internal sealed record DurableAgentRegistration(
     ChatOptions? ChatOptions,
     IReadOnlyList<DurableToolRegistration> Tools,
     IReadOnlyList<Func<IServiceProvider, AIContextProvider>> ContextProviderFactories,
-    Func<IServiceProvider, IAgentHistoryStore>? HistoryStore,
     TimeSpan? TimeToLive,
     TimeSpan? ApprovalTimeout,
     TimeSpan? ActivityTimeout,
@@ -33,7 +31,6 @@ internal sealed record DurableAgentRegistration(
     Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer,
     string? HistoryReducerKey,
     Action<AIAgentBuilder>? ConfigureAgentPipeline,
-    string? CompactionStrategyKey,
     Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? ToolInterceptorFactory = null,
     bool UseApprovalScopes = false,
     ApprovalScopesOptions? ApprovalScopesOptions = null,

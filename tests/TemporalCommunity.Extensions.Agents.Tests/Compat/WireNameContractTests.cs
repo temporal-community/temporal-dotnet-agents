@@ -77,11 +77,8 @@ public class WireNameContractTests
         "TemporalCommunity.Extensions.AI.GenerateEmbedding",
 
         // Agents library activities
-        "TemporalCommunity.Extensions.Agents.ReduceHistoryInStore",
         "TemporalCommunity.Extensions.Agents.ReduceHistoryByKey",
-        "TemporalCommunity.Extensions.Agents.AppendAgentTurn",
         "TemporalCommunity.Extensions.Agents.RunDurableAgentStep",
-        "TemporalCommunity.Extensions.Agents.CompactHistory",
         "TemporalCommunity.Extensions.Agents.RunToolInterceptor",
         "TemporalCommunity.Extensions.Agents.LoadAlwaysScopes",
         "TemporalCommunity.Extensions.Agents.AppendAlwaysScope",

@@ -7,11 +7,6 @@ namespace TemporalCommunity.Extensions.Agents.Approvals;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This store is separate from <see cref="IAgentHistoryStore"/>, which stores ordered
-/// conversation entries keyed by session ID. <see cref="IApprovalScopeStore"/> is a per-agent
-/// key/value store for cross-session approval scopes.
-/// </para>
-/// <para>
 /// Methods on this interface are called from Temporal activities. Transient failures are handled
 /// automatically by Temporal's activity retry policy — implementations do not need to add their
 /// own retry logic.

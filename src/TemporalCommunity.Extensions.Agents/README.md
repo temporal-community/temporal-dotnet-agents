@@ -44,9 +44,9 @@ AgentWorkflow (long-lived workflow)
     │
     │  ExecuteActivityAsync
     ▼
-AgentActivities.ExecuteAgentAsync
+AgentActivities.RunDurableAgentStepAsync
     │
-    └─► Real AIAgent (e.g., ChatClientAgent backed by Azure OpenAI)
+    └─► Model step and durable tool activities (e.g., ChatClientAgent backed by Azure OpenAI)
 ```
 
 Each agent session maps to a long-lived Temporal **workflow** (`AgentWorkflow`). When an external caller sends a
@@ -175,9 +175,7 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 | [WorkflowRouting](../../samples/MAF/WorkflowRouting) | Durable routing inside a Temporal workflow — static and dynamic patterns |
 | [AmbientAgent](../../samples/MAF/AmbientAgent) | Ambient agent pattern |
 | [ConfigurableAgent](../../samples/MAF/ConfigurableAgent) | Per-agent configuration and read-only tools |
-| [ExternalHistoryStore](../../samples/MAF/ExternalHistoryStore) | `IAgentHistoryStore` + `AIContextProvider` + history reduction |
 | [PerToolActivities](../../samples/MAF/PerToolActivities) | Per-tool Temporal activities with write-tool no-retry |
-| [Compaction](../../samples/MAF/Compaction) | In-session compaction with `"summarization"` strategy + GDPR erasure |
 | [ContextProviders](../../samples/MAF/ContextProviders) | `TodoProvider` and `AgentModeProvider` via `AddContextProvider` |
 | [DurableContextProvider](../../samples/MAF/DurableContextProvider) | Context-provided tools dispatched through durable activities |
 | [MixedActivities](../../samples/MAF/MixedActivities) | Regular and AI activities in one workflow |
@@ -226,6 +224,7 @@ The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined
 - [Durability & Determinism](../../docs/architecture/MAF/durability-and-determinism.md) — how replay preserves completed agent calls
 - [Agent Sessions & Workflow Loop](../../docs/architecture/MAF/agent-sessions-and-workflow-loop.md) — session lifecycle, message flow, crash recovery
 - [Session StateBag & Context Providers](../../docs/architecture/MAF/session-statebag-and-context-providers.md) — AIContextProvider integration and StateBag persistence
+- [Bounded Durable `ChatClientAgent` Compatibility](../../docs/architecture/MAF/bounded-durable-agent-compatibility.md) — supported agent/provider inputs and exclusions
 - [Pub/Sub & Event-Driven Patterns](../../docs/architecture/MAF/pub-sub-and-event-driven.md) — Temporal equivalents of pub/sub fan-out
 - [Agent-to-Agent Communication](../../docs/architecture/MAF/agent-to-agent-communication.md) — sub-agent calls, parallel fan-out, and cross-workflow signaling
 

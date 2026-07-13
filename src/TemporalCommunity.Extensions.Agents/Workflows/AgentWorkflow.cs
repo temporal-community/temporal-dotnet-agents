@@ -76,51 +76,8 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
 
         Workflow.Logger.LogWorkflowStarted(input.AgentName, Workflow.Info.WorkflowId, input.TimeToLive);
 
-        // Detect "external history mode" from the resolved agent input — when ANY history
-        // store is configured (worker default or per-agent override), the workflow strips
-        // message payloads from history entries before adding them, and the activity is
-        // responsible for loading/appending via IAgentHistoryStore.
-        // The `useExternalStore` flag below is computed from a workflow-only signal we set
-        // when reducing history for continue-as-new (see CreateContinueAsNewException).
-
-        // External-store mode + HistoryReducer: the base throws ContinueAsNewException after
-        // calling our CreateContinueAsNewException hook (which is synchronous, so it cannot
-        // dispatch activities). Intercept the throw here to fire the ReduceHistoryInStoreAsync
-        // activity before re-throwing, so the next workflow run sees a bounded store.
-        try
-        {
-            await base.RunAsync(input).ConfigureAwait(true);
-        }
-        catch (ContinueAsNewException can) when (UseExternalStoreMode)
-        {
-            var reduceInput = new ReduceHistoryInStoreInput
-            {
-                AgentName = input.AgentName,
-                SessionId = Workflow.Info.WorkflowId,
-                MaxEntryCount = input.MaxEntryCount,
-            };
-            await Workflow.ExecuteActivityAsync(
-                (AgentActivities a) => a.ReduceHistoryInStoreAsync(reduceInput),
-                new ActivityOptions
-                {
-                    StartToCloseTimeout = input.ActivityTimeout,
-                    HeartbeatTimeout = input.HeartbeatTimeout,
-                    Summary = AgentActivities.BuildActivitySummary(input.AgentName),
-                    RetryPolicy = input.RetryPolicy,
-                }).ConfigureAwait(true);
-            _ = can;
-            throw;
-        }
+        await base.RunAsync(input).ConfigureAwait(true);
     }
-
-    /// <summary>
-    /// Indicates whether this workflow is operating in external-history mode. The workflow side
-    /// reads this from the resolved cached state on first dispatch. Until then it cannot be known
-    /// (the activity composes the cache lazily); we therefore compute it from the activity's
-    /// echoed value via the workflow input. The agent client populates this via
-    /// <see cref="AgentWorkflowInput.UseExternalStoreMode"/> when starting the workflow.
-    /// </summary>
-    private bool UseExternalStoreMode => _input?.UseExternalStoreMode == true;
 
     /// <summary>
     /// Validates that a <see cref="RunAgentAsync"/> request is well-formed before it enters history.
@@ -204,8 +161,6 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     {
         ArgumentNullException.ThrowIfNull(_input);
 
-        var useExternalStore = _input.UseExternalStoreMode;
-
         // `with` copies all properties from _input and overrides the fields that differ
         // for the new run: the base class CAN fields (carried from the base input parameter)
         // plus the StateBag snapshot. RetryPolicy and ResolvedWorkerConfig carry forward
@@ -215,7 +170,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             CarriedStateBag = _currentStateBag,
             // Base class CAN fields — sourced from the base DurableChatWorkflowInput arg.
             TimeToLive = input.TimeToLive,
-            CarriedHistory = useExternalStore ? null : input.CarriedHistory,
+            CarriedHistory = input.CarriedHistory,
             ApprovalTimeout = input.ApprovalTimeout,
             EnableSearchAttributes = input.EnableSearchAttributes,
             MaxEntryCount = input.MaxEntryCount,
@@ -259,37 +214,6 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             Workflow.UpsertTypedSearchAttributes(
                 AgentNameSearchAttribute.ValueSet(_input.AgentName));
         }
-    }
-
-    /// <inheritdoc/>
-    protected override bool ShouldStripMessagesFromHistoryEntry() => UseExternalStoreMode;
-
-    /// <inheritdoc/>
-    protected override DurableSessionEntry StripMessagesFromEntry(DurableSessionEntry entry)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-        return entry switch
-        {
-            AgentSessionRequest agentReq => new AgentSessionRequest
-            {
-                CorrelationId = agentReq.CorrelationId,
-                CreatedAt = agentReq.CreatedAt,
-                Messages = [],
-                OrchestrationId = agentReq.OrchestrationId,
-                ResponseType = agentReq.ResponseType,
-                ResponseSchema = agentReq.ResponseSchema,
-                AdditionalProperties = agentReq.AdditionalProperties,
-            },
-            AgentSessionResponse agentResp => new AgentSessionResponse
-            {
-                CorrelationId = agentResp.CorrelationId,
-                CreatedAt = agentResp.CreatedAt,
-                Messages = [],
-                Usage = agentResp.Usage,
-                AdditionalProperties = agentResp.AdditionalProperties,
-            },
-            _ => base.StripMessagesFromEntry(entry),
-        };
     }
 
     // ── Internals ───────────────────────────────────────────────────────────
@@ -342,13 +266,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     {
         Workflow.Logger.LogDurableAgentTurnStarted(_input!.AgentName, Workflow.Info.WorkflowId);
 
-        // External history mode: workflow does not retain message payloads in History entries
-        // (ShouldStripMessagesFromHistoryEntry returns true). Seed the LLM with just the current
-        // request's messages; the activity will load prior session history from the store on
-        // the first step (IsFirstStep = true).
-        var accumulated = UseExternalStoreMode
-            ? new List<ChatMessage>(runRequest.Messages)
-            : FlattenHistoryMessages();
+        var accumulated = FlattenHistoryMessages();
 
         var allTurnMessages = new List<ChatMessage>();
         UsageDetails? totalUsage = null;
@@ -360,7 +278,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         {
             // Proxy-started sessions have WorkerSettingsResolved=false.
             // On the first step of the first turn, ask the activity to resolve worker-side
-            // settings (external-store mode, per-tool activity options) and return them.
+            // settings (per-tool activity options) and return them.
             var needsResolution = iteration == 0 && !_input!.WorkerSettingsResolved;
 
             // F1 optimization: pass the full bag on the first step of each turn (force=true),
@@ -374,7 +292,6 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 AccumulatedMessages = accumulated,
                 SerializedStateBag = bagForStep,
                 SessionId = null,
-                IsFirstStep = iteration == 0,
                 NeedsWorkerSettingsResolution = needsResolution,
             };
 
@@ -384,7 +301,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
 
             // Apply resolved worker-side settings once and carry forward via CAN. The
             // entire resolved bundle travels as ProxyResolvedWorkerConfig —
-            // the flat MaxToolCallsPerTurn / UseExternalStoreMode / DurableAgentToolActivityOptions
+            // the flat MaxToolCallsPerTurn / DurableAgentToolActivityOptions
             // fields are now forwarding computed properties on AgentWorkflowInput.
             if (needsResolution && stepResult.ResolvedWorkerConfig is not null)
             {
@@ -483,54 +400,6 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                     Usage = totalUsage,
                     CreatedAt = Workflow.UtcNow,
                 };
-
-                // Fix 2 (P1-3): append the full turn to the external store. This captures all
-                // messages accumulated during the turn (tool-call messages, tool-result messages,
-                // and the final assistant message) rather than just the final assistant message.
-                if (UseExternalStoreMode)
-                {
-                    await Workflow.ExecuteActivityAsync(
-                        (AgentActivities a) => a.AppendAgentTurnAsync(new AppendAgentTurnInput
-                        {
-                            AgentName = _input!.AgentName,
-                            SessionId = Workflow.Info.WorkflowId,
-                            Request = runRequest,
-                            TurnResponse = finalResponse,
-                        }),
-                        new ActivityOptions
-                        {
-                            StartToCloseTimeout = _input!.ActivityTimeout,
-                            HeartbeatTimeout = _input!.HeartbeatTimeout,
-                            Summary = AgentActivities.BuildActivitySummary(_input!.AgentName),
-                            RetryPolicy = _input!.RetryPolicy,
-                        }).ConfigureAwait(true);
-
-                    // Step 6d: if the activity-side trigger evaluator flagged compaction,
-                    // dispatch CompactHistory now — after the current turn has been appended
-                    // to the store. Marker correlation ID is workflow-minted (deterministic
-                    // under replay) so retries reproduce the same marker rather than
-                    // double-writing.
-                    if (stepResult.CompactionNeeded &&
-                        stepResult.CompactionTargetMessageIds is { Count: > 0 } targets)
-                    {
-                        var markerId = $"marker-{Workflow.NewGuid():N}";
-                        await Workflow.ExecuteActivityAsync(
-                            (AgentActivities a) => a.CompactHistoryAsync(new CompactHistoryInput
-                            {
-                                AgentName = _input!.AgentName,
-                                SessionId = Workflow.Info.WorkflowId,
-                                TargetMessageIds = targets,
-                                MarkerCorrelationId = markerId,
-                            }),
-                            new ActivityOptions
-                            {
-                                StartToCloseTimeout = _input!.ActivityTimeout,
-                                HeartbeatTimeout = _input!.HeartbeatTimeout,
-                                Summary = AgentActivities.BuildActivitySummary(_input!.AgentName),
-                                RetryPolicy = _input!.RetryPolicy,
-                            }).ConfigureAwait(true);
-                    }
-                }
 
                 return finalResponse;
             }
@@ -863,27 +732,6 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             CreatedAt = Workflow.UtcNow,
         };
 
-        // Fix 2 (P1-3): also append max-iteration turns. Previously isFinal was never true
-        // when the cap was hit, so nothing was written to the external store.
-        if (UseExternalStoreMode)
-        {
-            await Workflow.ExecuteActivityAsync(
-                (AgentActivities a) => a.AppendAgentTurnAsync(new AppendAgentTurnInput
-                {
-                    AgentName = _input!.AgentName,
-                    SessionId = Workflow.Info.WorkflowId,
-                    Request = runRequest,
-                    TurnResponse = abortedResponse,
-                }),
-                new ActivityOptions
-                {
-                    StartToCloseTimeout = _input!.ActivityTimeout,
-                    HeartbeatTimeout = _input!.HeartbeatTimeout,
-                    Summary = AgentActivities.BuildActivitySummary(_input!.AgentName),
-                    RetryPolicy = _input!.RetryPolicy,
-                }).ConfigureAwait(true);
-        }
-
         return abortedResponse;
     }
 
@@ -984,19 +832,12 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     /// which always forces because a user tool may read any workflow-written key, and the
     /// approved/PauseForApproval path, which forces after writing a scope record).
     /// </item>
-    /// <item>
-    /// <b>Non-reading consumers</b> — do NOT read the bag (they load from external stores instead),
-    /// so the non-forced hash gate is correct for them: <c>LoadAlwaysScopes</c>,
-    /// <c>AppendAlwaysScope</c>, and <c>CompactHistory</c>. These do not call this method at all,
-    /// but the same reasoning would apply if they did.
-    /// </item>
     /// </list>
     /// </summary>
     /// <param name="force">
     /// Pass <see langword="true"/> whenever the consuming activity reads workflow-thread StateBag
     /// state, to guarantee it receives the full bag even if the hash matches (see the two-tier
-    /// contract above). Also passed on the first step of each turn (<c>iteration == 0</c>) so the
-    /// external-history load path can trust <c>IsFirstStep=true</c> implies a fresh bag snapshot.
+    /// contract above).
     /// </param>
     private JsonElement? GetStateBagForDispatch(bool force = false)
     {

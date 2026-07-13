@@ -6,7 +6,6 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.Approvals;
-using TemporalCommunity.Extensions.Agents.HistoryStore;
 using TemporalCommunity.Extensions.Agents.Skills;
 using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.AI.Approvals;
@@ -17,7 +16,7 @@ namespace TemporalCommunity.Extensions.Agents;
 
 /// <summary>
 /// Internal carrier for a tool registered on a <see cref="DurableAgentBuilder"/>. The factory is
-/// invoked at first activity dispatch (the same lifecycle as <see cref="DurableAgentBuilder.ChatClient"/>);
+/// invoked while the immutable agent blueprint is first built from the worker's root provider;
 /// the resolved <see cref="AIFunction"/> is cached for the lifetime of the worker.
 /// </summary>
 internal sealed record DurableToolRegistration(
@@ -42,14 +41,15 @@ internal sealed record DurableToolRegistration(
 /// property setters directly is also fully supported.
 /// </para>
 /// <para>
-/// <b>Factory composition lifecycle.</b> Factories registered via <see cref="ChatClient"/>,
-/// <see cref="AddTool(AIFunction, Action{DurableToolOptions}?)"/>,
-/// <see cref="AddContextProvider(Func{IServiceProvider, AIContextProvider})"/>, and
-/// <see cref="HistoryStore"/> are invoked once at first activity dispatch using the worker's root
-/// <see cref="IServiceProvider"/>. The resolved values are cached for the lifetime of the worker
-/// process. Anything resolved through these factories should therefore be a singleton (or carry its
-/// own internal scoping); services registered with <c>AddScoped</c> will silently behave as
-/// singletons under this composition path.
+/// <b>Factory composition lifecycle.</b> Tool factories registered through
+/// <see cref="AddTool(string, Func{IServiceProvider, AIFunction}, Action{DurableToolOptions}?)"/>
+/// run once while the immutable worker blueprint is built and must resolve only worker-lifetime-safe
+/// services. In contrast, <see cref="ChatClient"/>,
+/// <see cref="AddContextProvider(Func{IServiceProvider, AIContextProvider})"/>,
+/// tool-interceptor factories are invoked from a fresh
+/// <see cref="IServiceScope"/> for every activity attempt. They may resolve scoped services;
+/// they must not retain per-session state in process fields because an activity can retry, move to
+/// another worker, or run concurrently with another session.
 /// </para>
 /// </remarks>
 public sealed class DurableAgentBuilder
@@ -99,8 +99,7 @@ public sealed class DurableAgentBuilder
 
     /// <summary>
     /// Gets or sets the factory used to obtain the agent's <see cref="IChatClient"/>. The factory is
-    /// invoked once at first activity dispatch and the result is cached for the lifetime of the
-    /// worker process.
+    /// invoked from the activity's scoped service provider for every LLM-step activity attempt.
     /// </summary>
     /// <remarks>
     /// Required at composition time. Registration with a <see langword="null"/> chat client throws
@@ -224,47 +223,6 @@ public sealed class DurableAgentBuilder
     /// </para>
     /// </remarks>
     public Action<AIAgentBuilder>? ConfigureAgentPipeline { get; set; }
-
-    /// <summary>
-    /// Gets or sets a per-agent <see cref="IAgentHistoryStore"/> factory. When <see langword="null"/>,
-    /// inherits the worker-level <c>TemporalAgentsOptions.HistoryStore</c> (which itself may be
-    /// <see langword="null"/>, meaning no external history is used). The factory is invoked once at
-    /// first activity dispatch.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>There is no per-agent opt-out mechanism.</b> External-history-store mode is activated
-    /// when any history store factory is present — either a non-null factory on this property OR
-    /// a non-null factory on <see cref="TemporalAgentsOptions.HistoryStore"/>. Setting this
-    /// property to a factory that returns <see langword="null"/> does not disable the store; it
-    /// causes the activity to throw at runtime when it attempts to append turns. If you need
-    /// one agent on a worker to bypass an externally configured store, deploy that agent on a
-    /// separate worker registration that does not set <see cref="TemporalAgentsOptions.HistoryStore"/>.
-    /// </para>
-    /// </remarks>
-    public Func<IServiceProvider, IAgentHistoryStore>? HistoryStore { get; set; }
-
-    /// <summary>
-    /// Gets or sets the keyed-DI name of the <see cref="Compaction.ICompactionStrategy"/> to
-    /// apply when in-session compaction triggers. <see langword="null"/> inherits the
-    /// worker-level <see cref="TemporalAgentsOptions.DefaultCompactionStrategy"/>; both
-    /// <see langword="null"/> disables compaction for the agent.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Step 6a — API surface. The activity-side trigger evaluator (Step 6b) decides when
-    /// compaction fires; the workflow dispatches the configured strategy as a separate
-    /// <c>CompactHistory</c> activity (Step 6d). Built-in keys pre-registered in Step 6c:
-    /// <c>"truncation"</c>, <c>"sliding-window"</c>, <c>"summarization"</c>.
-    /// </para>
-    /// <para>
-    /// Marked <c>[Experimental("TA002")]</c> at the API-surface level (consumer code that
-    /// sets this property triggers the diagnostic) — the wire shape becomes stable when
-    /// compaction ships in a non-preview release.
-    /// </para>
-    /// </remarks>
-    [Experimental("TA002")]
-    public string? CompactionStrategyKey { get; set; }
 
     /// <summary>
     /// Registers a concrete <see cref="AIFunction"/> as a tool for this agent. The tool's
@@ -437,9 +395,8 @@ public sealed class DurableAgentBuilder
     }
 
     /// <summary>
-    /// Registers an <see cref="AIContextProvider"/> via a factory. The factory is invoked once at
-    /// first activity dispatch (the same lifecycle as <see cref="ChatClient"/>) and the resolved
-    /// instance is cached for the worker's lifetime.
+    /// Registers an <see cref="AIContextProvider"/> via a factory. The factory is invoked from the
+    /// activity's scoped service provider for every LLM-step activity attempt.
     /// </summary>
     /// <param name="factory">Factory that produces the <see cref="AIContextProvider"/>.</param>
     /// <returns>This builder, for fluent chaining.</returns>
@@ -449,9 +406,9 @@ public sealed class DurableAgentBuilder
     /// In durable agents, the provider's <c>InvokingAsync</c> and <c>InvokedAsync</c> hooks fire
     /// once per LLM call (per <c>RunAgentStep</c> activity), not once per turn. Make these hooks
     /// idempotent and cheap, or cache results via <c>StateBag</c> to skip redundant work within a
-    /// turn. The provider instance is constructed once per agent per worker process and shared
-    /// across all sessions on that worker — treat fields as effectively read-only after
-    /// construction; per-session state must live in the <c>StateBag</c>.
+    /// turn. A provider may be constructed again for an activity retry or on another worker;
+    /// per-session state must live in the <c>StateBag</c>, and external effects must tolerate
+    /// activity retry.
     /// </para>
     /// <para>
     /// <b>Tool definitions returned in <c>AIContext.Tools</c> by context providers are ignored</b>
@@ -624,9 +581,9 @@ public sealed class DurableAgentBuilder
     }
 
     /// <summary>
-    /// Registers a per-agent interceptor factory. The factory is invoked once at first activity
-    /// dispatch and the resolved instance is cached for the worker's lifetime. Per-agent interceptor
-    /// wins over <see cref="TemporalAgentsOptions.DefaultToolInterceptor"/> (H1 rule).
+    /// Registers a per-agent interceptor factory. The factory is invoked from the activity's scoped
+    /// service provider for every activity attempt. Per-agent interceptor wins over
+    /// <see cref="TemporalAgentsOptions.DefaultToolInterceptor"/> (H1 rule).
     /// </summary>
     /// <remarks>
     /// Accepts any factory whose return type is assignable to
@@ -810,7 +767,6 @@ public sealed class DurableAgentBuilder
             ChatOptions: ChatOptions,
             Tools: _tools.ToArray(),
             ContextProviderFactories: _contextProviders.ToArray(),
-            HistoryStore: HistoryStore,
             TimeToLive: TimeToLive,
             ApprovalTimeout: ApprovalTimeout,
             ActivityTimeout: ActivityTimeout,
@@ -821,7 +777,6 @@ public sealed class DurableAgentBuilder
             HistoryReducer: HistoryReducer,
             HistoryReducerKey: HistoryReducerKey,
             ConfigureAgentPipeline: ConfigureAgentPipeline,
-            CompactionStrategyKey: CompactionStrategyKey,
             ToolInterceptorFactory: _toolInterceptorFactory,
             UseApprovalScopes: _useApprovalScopes,
             ApprovalScopesOptions: _approvalScopesOptions,

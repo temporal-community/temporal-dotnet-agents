@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents.Approvals;
-using TemporalCommunity.Extensions.Agents.HistoryStore;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Session;

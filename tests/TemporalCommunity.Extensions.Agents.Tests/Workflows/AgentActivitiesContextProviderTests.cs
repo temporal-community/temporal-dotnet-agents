@@ -30,7 +30,9 @@ public class AgentActivitiesContextProviderTests
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     private static (AgentActivities activities, CapturingLoggerFactory loggerFactory)
-        BuildHarness(Action<TemporalAgentsOptions> configure)
+        BuildHarness(
+            Action<TemporalAgentsOptions> configure,
+            Action<IServiceCollection>? configureServices = null)
     {
         var options = (TemporalAgentsOptions)Activator.CreateInstance(
             typeof(TemporalAgentsOptions), nonPublic: true)!;
@@ -38,6 +40,7 @@ public class AgentActivitiesContextProviderTests
 
         var services = new ServiceCollection();
         services.AddSingleton(options);
+        configureServices?.Invoke(services);
         var sp = services.BuildServiceProvider();
 
         var loggerFactory = new CapturingLoggerFactory();
@@ -204,6 +207,73 @@ public class AgentActivitiesContextProviderTests
         Assert.Empty(logFactory.Errors);
     }
 
+    /// <summary>
+    /// Provider factories resolve from a new activity scope for each LLM-step attempt. This keeps
+    /// a scoped dependency from becoming a captive worker singleton or leaking across sessions.
+    /// </summary>
+    [Fact]
+    public async Task RunDurableAgentStep_ContextProviderFactory_UsesFreshActivityScope()
+    {
+        var observedScopeIds = new List<Guid>();
+        var (activities, _) = BuildHarness(
+            opts =>
+            {
+                opts.AddDurableAgent("ScopedProviderAgent", agent =>
+                {
+                    agent.ChatClient = _ => new SimpleStreamingChatClient();
+                    agent.AddContextProvider(sp => new ScopeRecordingProvider(
+                        sp.GetRequiredService<ScopedMarker>(),
+                        observedScopeIds));
+                });
+            },
+            services => services.AddScoped<ScopedMarker>());
+
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+        await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("ScopedProviderAgent", "first")));
+        await env.RunAsync(() => activities.RunDurableAgentStepAsync(MakeInput("ScopedProviderAgent", "second")));
+
+        Assert.Equal(2, observedScopeIds.Count);
+        Assert.NotEqual(observedScopeIds[0], observedScopeIds[1]);
+    }
+
+    /// <summary>
+    /// A provider's session state is returned from the LLM-step activity and restored before the
+    /// next step, rather than being retained in the provider's process-local fields.
+    /// </summary>
+    [Fact]
+    public async Task RunDurableAgentStep_ContextProviderStateBag_IsWrittenBackAndRestored()
+    {
+        var provider = new StateBagProvider();
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("StateBagProviderAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.AddContextProvider(provider);
+            });
+        });
+
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+        var first = await env.RunAsync(() =>
+            activities.RunDurableAgentStepAsync(MakeInput("StateBagProviderAgent", "first")));
+
+        Assert.NotNull(first.UpdatedStateBag);
+        Assert.Equal([0], provider.ObservedCounts);
+
+        var secondInput = new AgentStepInput
+        {
+            AgentName = "StateBagProviderAgent",
+            Request = new RunRequest("second"),
+            AccumulatedMessages = [new ChatMessage(ChatRole.User, "second")],
+            SessionId = TemporalAgentSessionId.WithRandomKey("StateBagProviderAgent"),
+            SerializedStateBag = first.UpdatedStateBag,
+        };
+        var second = await env.RunAsync(() => activities.RunDurableAgentStepAsync(secondInput));
+
+        Assert.NotNull(second.UpdatedStateBag);
+        Assert.Equal([0, 1], provider.ObservedCounts);
+    }
+
     // ── Test helpers ────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -355,5 +425,42 @@ public class AgentActivitiesContextProviderTests
                 Tools = [(AITool)_tool],
             });
         }
+    }
+
+    private sealed class ScopedMarker
+    {
+        internal Guid Id { get; } = Guid.NewGuid();
+    }
+
+    private sealed class ScopeRecordingProvider(ScopedMarker marker, List<Guid> observedScopeIds) : AIContextProvider
+    {
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context,
+            CancellationToken cancellationToken = default)
+        {
+            observedScopeIds.Add(marker.Id);
+            return ValueTask.FromResult(new AIContext());
+        }
+    }
+
+    private sealed class StateBagProvider : AIContextProvider
+    {
+        internal const string CountKey = "test.provider_count";
+
+        internal List<int> ObservedCounts { get; } = [];
+
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context,
+            CancellationToken cancellationToken = default)
+        {
+            var session = context.Session ?? throw new InvalidOperationException("A durable provider requires a session.");
+            _ = session.StateBag.TryGetValue(CountKey, out ProviderState? state);
+            int count = state?.Count ?? 0;
+            ObservedCounts.Add(count);
+            session.StateBag.SetValue(CountKey, new ProviderState(count + 1));
+            return ValueTask.FromResult(new AIContext());
+        }
+
+        private sealed record ProviderState(int Count);
     }
 }

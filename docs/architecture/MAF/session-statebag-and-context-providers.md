@@ -9,7 +9,7 @@ This document explains how these three collaborating concepts fit together, why 
 | Class | Layer | Responsibility |
 |---|---|---|
 | `TemporalAgentSession` | TemporalAgents | Temporal-specific `AgentSession`; carries `SessionId` and `StateBag`; created fresh per activity |
-| `AgentSessionStateBag` | Microsoft Agent Framework | Thread-safe key-value store; holds per-session state for singleton providers |
+| `AgentSessionStateBag` | Microsoft Agent Framework | Thread-safe key-value store; holds per-session state across activity attempts and workers |
 | `AIContextProvider` | Microsoft Agent Framework | Pluggable component that enriches (or stores) context before/after each LLM call |
 
 They are not a chain — they are **three roles** inside a single execution pipeline. The `TemporalAgentSession` *contains* the `StateBag`; the `AIContextProvider` *reads from and writes to* that `StateBag`.
@@ -18,20 +18,20 @@ They are not a chain — they are **three roles** inside a single execution pipe
 
 ## Why the StateBag Exists
 
-`AIContextProvider` implementations (like `Mem0Provider`) are registered as **singletons**. One instance is shared across every active session in the process. This means a provider cannot store per-session data in its own fields — doing so would mix up state across users.
+Provider identity depends on how it is registered: an instance overload can deliberately reuse an instance, while a factory is invoked from a fresh activity scope for every LLM-step activity attempt. Neither lifetime is a session-lifetime guarantee: an activity can retry, run on a different worker, or overlap another session. A provider must not store per-session data in its own fields.
 
 The `AgentSessionStateBag` is the solution: each `AgentSession` owns its own bag, and each provider uses a unique string key to store its slice of data there.
 
 ```
-process memory
-├── Mem0Provider (singleton, shared)
+activity process
+├── Mem0Provider (possibly shared; never session-owned)
 ├── AgentSession for user-A
 │     └── StateBag { "Mem0Provider": { UserId:"A", AgentId:"bot" } }
 └── AgentSession for user-B
       └── StateBag { "Mem0Provider": { UserId:"B", AgentId:"bot" } }
 ```
 
-The provider's singleton instance reads the right state by keying into the session's bag — it never holds session-specific data itself.
+The provider reads the right state by keying into the session's bag — it never holds session-specific data itself.
 
 ---
 
@@ -74,7 +74,12 @@ The three fields on the `AIContext` returned by `InvokingAsync` are handled diff
 >
 > **`AIContext.Messages`** — applied. The final aggregated `Messages` list becomes the conversation context passed to the LLM. Same chaining semantics as `Instructions`.
 >
-> **`AIContext.Tools`** — ignored. Provider-contributed tools are explicitly dropped. A single `LogWarning` fires per turn when any provider in the chain returns a non-empty tool set. The warning message names the first provider type and tool count. This behaviour exists because tools registered via `AddContextProvider` have no Temporal activity backing — they cannot be individually timed out, retried, or tracked in event history. Register tools via `agent.AddTool()` to get per-tool durable dispatch.
+> **`AIContext.Tools`** — not used directly. A provider that merely returns tools from
+> `InvokingAsync` is ignored and logged once per turn because those tools have no durable
+> registration. To supply provider-owned durable tools, either implement `IDurableToolSource` on
+> the provider or pass `DurableToolRegistrationSpec` values to
+> `AddContextProvider(provider, durableTools)`. The builder registers those functions through
+> the same per-tool activity path as `agent.AddTool()`.
 
 ---
 
@@ -93,7 +98,13 @@ The `StateBag` is **not a memory store** — it is a persistent address book tha
 
 ---
 
-## Mem0Provider: A Concrete Walkthrough
+## External-memory providers need a dedicated durable adapter
+
+`Mem0Provider`, `ChatHistoryMemoryProvider`, and similar providers perform external reads and writes from their lifecycle hooks. Those hooks run in retryable LLM-step activities, and this library does not provide an atomic idempotent provider-history contract. They are therefore **not supported as direct durable registrations**.
+
+The historical `Mem0Provider` walkthrough below explains StateBag mechanics only. Do not copy its registration snippet into a durable agent until a dedicated durable adapter defines its retry and idempotency behavior.
+
+### Historical Mem0Provider StateBag Walkthrough
 
 `Mem0Provider` is a `MessageAIContextProvider` (which extends `AIContextProvider`) that backs long-term memory with the Mem0 API.
 
@@ -201,7 +212,6 @@ var stepInput = new AgentStepInput
     Request             = runRequest,
     AccumulatedMessages = accumulated,
     SerializedStateBag  = _currentStateBag,   // ← restored in next activity
-    IsFirstStep         = (iteration == 0),
 };
 ```
 
@@ -258,7 +268,7 @@ Workflow stores          Workflow stores
 
 ### Step 1 — Register the agent with an AIContextProvider
 
-In v0.3, `AIContextProvider` instances are registered on the `DurableAgentBuilder` via `AddContextProvider`. The library composes the chat pipeline internally with `UseAIContextProvider(...)` so the provider's lifecycle hooks fire on each LLM call.
+In v0.3, `AIContextProvider` instances are registered on the `DurableAgentBuilder` via `AddContextProvider`. `AgentActivities.RunDurableAgentStepAsync` invokes them explicitly around each LLM call and serializes the resulting `StateBag`; the library does not hand provider lifecycle ownership to `ChatClientAgent`.
 
 ```csharp
 builder.Services.AddSingleton<HttpClient>(_ =>
@@ -300,9 +310,8 @@ builder.Services
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
             agent.TimeToLive   = TimeSpan.FromHours(4);
 
-            // Provider factory runs once at first activity dispatch.
-            // The resolved instance is cached for the worker's lifetime and shared
-            // across sessions; per-session state goes through the AgentSessionStateBag.
+            // The factory runs from the scoped provider for each LLM-step activity attempt.
+            // Per-session state always goes through AgentSessionStateBag, not provider fields.
             agent.AddContextProvider(sp => sp.GetRequiredService<Mem0Provider>());
         });
     });

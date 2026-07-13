@@ -25,14 +25,6 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <see cref="StateBagKey"/> so downstream providers and tools can read it.
 /// </para>
 /// <para>
-/// <b>External-store sessions limitation.</b> When <c>UseExternalStoreMode</c> is active,
-/// the workflow strips message payloads from in-workflow history entries and only passes the
-/// current-turn messages to the step activity. In that case the computed working-set only
-/// reflects the current turn, not the full session history. This is a known limitation of
-/// the initial implementation; a future iteration can load from
-/// <c>IAgentHistoryStore</c> to close the gap.
-/// </para>
-/// <para>
 /// <b>Determinism.</b> This provider is a pure function over the message list supplied by
 /// the framework — no I/O, no randomness. Output is deterministic for the same input,
 /// which means it is safe to call per LLM step without replay concerns.

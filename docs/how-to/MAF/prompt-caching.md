@@ -54,7 +54,6 @@ var stepInput = new AgentStepInput
     Request = runRequest,
     AccumulatedMessages = accumulated,        // re-sent every step
     SerializedStateBag = _currentStateBag,
-    IsFirstStep = (iteration == 0),
 };
 ```
 
@@ -296,19 +295,6 @@ opts.DefaultHistoryReducer = entries =>
 
 `HistoryReducer` is called with the full history immediately before continue-as-new. The returned subset becomes the initial history for the new run. A `null` reducer (the default) retains all entries up to `MaxEntryCount`, dropping the oldest. The reducer must be synchronous and deterministic — it runs in workflow context.
 
-#### `HistoryReducer` × `UseCompaction` precedence
-
-`UseCompaction` (Step 5+6, in-session compaction) and `HistoryReducer` (continue-as-new-time reduction) compose; they target different boundaries.
-
-| Layer | When | Operates on | Purpose |
-|---|---|---|---|
-| `UseCompaction` | After every final-step turn that crosses the trigger threshold | Audit canonical view (`applyCompaction: false`) | Bound in-session inference cost; produces `CompactionMarkerEntry` |
-| `HistoryReducer` | At continue-as-new only | Projected view (`applyCompaction: true`) | Bound workflow event-history size at the CAN boundary |
-
-Per the Q5α design rule, when both are configured the reducer operates on the **post-compact projection** — so it reduces the view the LLM has been seeing rather than the raw entries. The `ReduceHistoryInStore` activity loads with `applyCompaction: true` automatically; no caller action needed.
-
-See [`compaction.md`](./compaction.md) for the full compaction story.
-
 ### 5. Use ResponseFormat to Get Structured Output
 
 Structured output (JSON) is typically more token-efficient than natural language:
@@ -335,7 +321,7 @@ var options = new TemporalAgentRunOptions
 
 ## External Memory with AIContextProvider
 
-For a detailed explanation of how `AIContextProvider` and `AgentSessionStateBag` work, see [Session StateBag & Context Providers](../architecture/MAF/session-statebag-and-context-providers.md).
+For a detailed explanation of how `AIContextProvider` and `AgentSessionStateBag` work, see [Session StateBag & Context Providers](../../architecture/MAF/session-statebag-and-context-providers.md).
 
 The key insight for token optimization: providers run inside `AgentActivities.RunDurableAgentStepAsync` (the activity, not the workflow), so they can make external I/O calls safely. The provider decides what context to inject — it could be a few relevant memories from a vector database rather than the entire conversation history.
 
@@ -368,7 +354,7 @@ Continue-as-New:
 - `src/TemporalCommunity.Extensions.Agents/Workflows/AgentWorkflow.cs` — history storage and continue-as-new
 - `src/TemporalCommunity.Extensions.Agents/Workflows/AgentActivities.cs` — history rebuild and token logging
 - `src/TemporalCommunity.Extensions.Agents/State/` — serialization types for conversation history
-- [Session StateBag & Context Providers](../architecture/MAF/session-statebag-and-context-providers.md) — AIContextProvider deep dive
+- [Session StateBag & Context Providers](../../architecture/MAF/session-statebag-and-context-providers.md) — AIContextProvider deep dive
 - [Observability](./observability.md) — token usage monitoring via OTel spans
 - [Usage Guide](./usage.md) — structured output and tool filtering
 

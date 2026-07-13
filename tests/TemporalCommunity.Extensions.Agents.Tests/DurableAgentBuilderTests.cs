@@ -46,7 +46,6 @@ public class DurableAgentBuilderTests
         Assert.Null(builder.RetryPolicy);
         Assert.Null(builder.MaxEntryCount);
         Assert.Null(builder.HistoryReducer);
-        Assert.Null(builder.HistoryStore);
         Assert.Equal(20, builder.MaxToolCallsPerTurn);
         Assert.Empty(builder.ToolRegistrations);
         Assert.Empty(builder.ContextProviderFactories);
@@ -271,7 +270,6 @@ public class DurableAgentBuilderTests
         Assert.Equal("t1", reg.Tools[0].Name);
         Assert.Single(reg.ContextProviderFactories);
         Assert.Same(provider, reg.ContextProviderFactories[0](null!));
-        Assert.Null(reg.HistoryStore);
     }
 
     [Fact]
@@ -291,7 +289,6 @@ public class DurableAgentBuilderTests
         Assert.Null(reg.RetryPolicy);
         Assert.Null(reg.MaxEntryCount);
         Assert.Null(reg.HistoryReducer);
-        Assert.Null(reg.HistoryStore);
         Assert.Equal(20, reg.MaxToolCallsPerTurn);
         Assert.Empty(reg.Tools);
         Assert.Empty(reg.ContextProviderFactories);

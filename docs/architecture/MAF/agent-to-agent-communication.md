@@ -426,7 +426,7 @@ public async Task<string> RunAsync(string question)
 - `samples/MAF/EvaluatorOptimizer/EvaluatorOptimizerWorkflow.cs` — iterative agent communication
 - `samples/MAF/AmbientAgent/` — Pattern 3 example (cross-workflow signaling)
 - [Durability & Determinism](./durability-and-determinism.md) — why activity results are cached on replay
-- [Routing Patterns](../how-to/MAF/routing.md) — LLM-powered and workflow-based routing
+- [Routing Patterns](../../how-to/MAF/routing.md) — LLM-powered and workflow-based routing
 
 ---
 

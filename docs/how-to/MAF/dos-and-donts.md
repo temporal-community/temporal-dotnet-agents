@@ -157,7 +157,7 @@ opts.AddDurableAgent("MyAgent", agent =>
 });
 ```
 
-Every slot on the builder (`ChatClient`, `AddTool(name, factory)`, `AddContextProvider(factory)`, `HistoryStore`) accepts a `Func<IServiceProvider, T>` evaluated lazily at first activity dispatch. There is no need to call `BuildServiceProvider()` from inside the configure delegate.
+The `ChatClient`, `AddTool(name, factory)`, and `AddContextProvider(factory)` builder slots accept a `Func<IServiceProvider, T>` evaluated lazily at activity dispatch. There is no need to call `BuildServiceProvider()` from inside the configure delegate.
 
 ---
 
@@ -458,7 +458,7 @@ opts.AddScheduledAgentRun("Agent", "my-schedule", request, updatedSpec);
 
 ## References
 
-- [Durability & Determinism](../architecture/MAF/durability-and-determinism.md) — replay guarantees and failure scenarios
+- [Durability & Determinism](../../architecture/MAF/durability-and-determinism.md) — replay guarantees and failure scenarios
 - [Routing Patterns](./routing.md) — safe vs. unsafe registry access contexts
 - [Observability](./observability.md) — OTel setup and span hierarchy
 - [LLM-Call Interception](./llm-call-interception.md) — per-LLM-call decorators via `ChatClientFactory`

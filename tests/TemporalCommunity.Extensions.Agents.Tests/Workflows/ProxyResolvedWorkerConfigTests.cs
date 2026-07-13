@@ -12,35 +12,27 @@ public class ProxyResolvedWorkerConfigTests
         var config = new ProxyResolvedWorkerConfig
         {
             MaxToolCallsPerTurn = 12,
-            UseExternalStoreMode = true,
             ToolActivityOptions = new Dictionary<string, ActivityOptions>(),
         };
 
         Assert.Equal(12, config.MaxToolCallsPerTurn);
-        Assert.True(config.UseExternalStoreMode);
         Assert.Empty(config.ToolActivityOptions);
         Assert.Null(config.DefaultChatClientFactoryKey);
-        Assert.Null(config.CompactionStrategyKey);
     }
 
     [Fact]
     public void Construct_WithPlaceholderFields_PreservesValues()
     {
-        // The placeholder fields are reserved for Steps 4 and 6 of the maf-gap plan.
-        // They are nullable / non-required by design so the record can be constructed
-        // from existing Fix-4 resolution paths before those steps land. This test pins
-        // the contract so the placeholders don't accidentally become required.
+        // The placeholder field is nullable / non-required by design so the record can be
+        // constructed from existing resolution paths before that future capability lands.
         var config = new ProxyResolvedWorkerConfig
         {
             MaxToolCallsPerTurn = 20,
-            UseExternalStoreMode = false,
             ToolActivityOptions = new Dictionary<string, ActivityOptions>(),
             DefaultChatClientFactoryKey = "tenant-aware",
-            CompactionStrategyKey = "summarization",
         };
 
         Assert.Equal("tenant-aware", config.DefaultChatClientFactoryKey);
-        Assert.Equal("summarization", config.CompactionStrategyKey);
     }
 
     [Fact]
@@ -50,13 +42,11 @@ public class ProxyResolvedWorkerConfigTests
         var a = new ProxyResolvedWorkerConfig
         {
             MaxToolCallsPerTurn = 5,
-            UseExternalStoreMode = true,
             ToolActivityOptions = dict,
         };
         var b = new ProxyResolvedWorkerConfig
         {
             MaxToolCallsPerTurn = 5,
-            UseExternalStoreMode = true,
             ToolActivityOptions = dict,
         };
 

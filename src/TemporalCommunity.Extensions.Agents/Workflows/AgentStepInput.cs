@@ -43,16 +43,8 @@ internal sealed class AgentStepInput
     public TemporalAgentSessionId? SessionId { get; init; }
 
     /// <summary>
-    /// When <see langword="true"/>, this is the first step of a new turn. Durable agents with a
-    /// configured <see cref="HistoryStore.IAgentHistoryStore"/> use this to load prior history
-    /// from the store at the start of the turn (subsequent steps within the same turn already
-    /// see the loaded history through <see cref="AccumulatedMessages"/>).
-    /// </summary>
-    public bool IsFirstStep { get; init; }
-
-    /// <summary>
     /// When <see langword="true"/>, the activity resolves and returns worker-side durable-agent
-    /// settings (<c>UseExternalStoreMode</c>, per-tool <see cref="ActivityOptions"/> dictionary,
+    /// settings (per-tool <see cref="ActivityOptions"/> dictionary and
     /// <see cref="AgentStepResult.ResolvedMaxToolCallsPerTurn"/>) so the workflow can patch its
     /// input on the first turn of a proxy-started session or sub-agent orchestration.
     /// Only set on the first step of the first turn when <see cref="AgentWorkflowInput.WorkerSettingsResolved"/>

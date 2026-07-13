@@ -1,12 +1,9 @@
-#pragma warning disable TA002 // built-in compaction strategies are experimental but registered by name here
-
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Temporalio.Client;
-using TemporalCommunity.Extensions.Agents.Compaction;
 using TemporalCommunity.Extensions.Agents.Internal;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Workflows;
@@ -117,18 +114,6 @@ internal static class TemporalAgentsRegistrar
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             TemporalAgentWorkerClientConfigurator>());
-
-        // Step 6c — pre-register the three built-in compaction strategies under their
-        // canonical keys. TryAddKeyedSingleton makes user-supplied strategies registered
-        // under the same key win (idempotent re-registration). The default-constructor
-        // thresholds suit common conversational workloads; users wanting different
-        // thresholds register their own keyed instance.
-        services.TryAddKeyedSingleton<ICompactionStrategy, TruncationCompactionStrategy>(
-            TruncationCompactionStrategy.Key);
-        services.TryAddKeyedSingleton<ICompactionStrategy, SlidingWindowCompactionStrategy>(
-            SlidingWindowCompactionStrategy.Key);
-        services.TryAddKeyedSingleton<ICompactionStrategy, SummarizationCompactionStrategy>(
-            SummarizationCompactionStrategy.Key);
 
         // Startup C-check: validates user-supplied ConfigureAgentPipeline callbacks against the
         // function-invocation conflict before any workflow can dispatch an activity. Skipped when

@@ -198,7 +198,6 @@ public void AgentStepInput_WithStateBag_RoundTrips()
         Request             = request,
         AccumulatedMessages = messages,
         SerializedStateBag  = bag.Serialize(),
-        IsFirstStep         = true,
     };
 
     var json = JsonSerializer.Serialize(input);
@@ -493,8 +492,8 @@ just test-coverage
 
 - `tests/TemporalCommunity.Extensions.Agents.Tests/` — 214 unit tests
 - `tests/TemporalCommunity.Extensions.Agents.IntegrationTests/` — 51 integration tests
-- [Durability & Determinism](../architecture/MAF/durability-and-determinism.md) — why activity results are cached on replay
-- [Agent Sessions & Workflow Loop](../architecture/MAF/agent-sessions-and-workflow-loop.md) — session lifecycle under test
+- [Durability & Determinism](../../architecture/MAF/durability-and-determinism.md) — why activity results are cached on replay
+- [Agent Sessions & Workflow Loop](../../architecture/MAF/agent-sessions-and-workflow-loop.md) — session lifecycle under test
 
 ---
 

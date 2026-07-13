@@ -444,7 +444,7 @@ public class PiiScrubbingInterceptor(IPiiVault vault) : IAgentToolInterceptor
 }
 ```
 
-The tool receives the token instead of the raw SSN. `ModifiedArguments` affects only the `ActivityScheduled(InvokeAgentTool)` event. The LLM's original arguments appear in two earlier events: `ActivityCompleted(RunDurableAgentStep)` (the LLM step result) and `ActivityScheduled(RunToolInterceptor)` (the interceptor's input). For complete Temporal history PII isolation, use the `IAgentHistoryStore` external-store path.
+The tool receives the token instead of the raw SSN. `ModifiedArguments` affects only the `ActivityScheduled(InvokeAgentTool)` event. The LLM's original arguments appear in two earlier events: `ActivityCompleted(RunDurableAgentStep)` (the LLM step result) and `ActivityScheduled(RunToolInterceptor)` (the interceptor's input). This library does not provide a path that removes those event-history payloads; apply your Temporal data-protection controls where that is required.
 
 ---
 

@@ -66,13 +66,11 @@ builder.Services
 | `AddTool(AIFunction tool, Action<DurableToolOptions>? configure = null)` | Registers a concrete `AIFunction`. Per-tool retry / timeout via `configure`. |
 | `AddTool(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure = null)` | DI-resolving tool factory. |
 | `AddTools(params AIFunction[] tools)` | Bulk registration of concrete tools. |
-| `AddContextProvider(AIContextProvider provider)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the chat pipeline. `Invoking/InvokedAsync` fire once per LLM call. |
+| `AddContextProvider(AIContextProvider provider, IEnumerable<DurableToolRegistrationSpec>? durableTools = null)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the chat pipeline. `Invoking/InvokedAsync` fire once per LLM call. Concrete providers can also contribute durable tools through specs or `IDurableToolSource`. |
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
 | `RetryPolicy` | Retry policy for the agent's `RunAgentStep` activity (the LLM call). Per-tool retry is configured separately via `DurableToolOptions`. |
 | `MaxEntryCount`, `HistoryReducer` | Per-agent continue-as-new bounds and reducer. Inherit worker defaults when unset. |
 | `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
-| `HistoryStore` | Per-agent `IAgentHistoryStore` factory. `null` inherits `opts.HistoryStore`; if both are `null`, history is carried in workflow state. |
-| `CompactionStrategyKey` | Keyed-DI name of the `ICompactionStrategy` to use for in-session compaction. `null` inherits `opts.DefaultCompactionStrategy`; both `null` disables compaction. Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"`. Requires an external history store. `[Experimental("TA002")]`. See [`compaction.md`](./compaction.md). |
 | `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
 
 ### `DurableToolOptions` reference
@@ -100,9 +98,7 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.RetryPolicy` | `opts.DefaultRetryPolicy` |
 | `agent.MaxEntryCount` | `opts.DefaultMaxEntryCount` |
 | `agent.HistoryReducer` | `opts.DefaultHistoryReducer` |
-| `agent.HistoryStore` | `opts.HistoryStore` |
 | `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
-| `agent.CompactionStrategyKey` | `opts.DefaultCompactionStrategy` |
 | `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
 
 The retry-policy hierarchy adds one more layer specifically for tools. From most to least specific:
@@ -115,13 +111,14 @@ There is **no per-agent "default for all my tools" cascade beyond `agent.RetryPo
 
 ### Lifecycle and composition
 
-The chat client, tool factories, context providers, and history-store factory all run lazily on first activity dispatch and are cached for the lifetime of the worker process. Concurrent first-dispatches for the same agent compose at most once.
+Tool factories run once when the worker first builds its immutable agent blueprint and their `AIFunction` values are cached for that worker. The chat-client, context-provider, and interceptor factories run from a fresh DI scope for every activity attempt. Do not use provider fields as session storage: an attempt can retry, run on another worker, or overlap another session; use `AgentSession.StateBag` instead.
 
 The library composes the chat pipeline internally and passes `UseProvidedChatClientAsIs = true` to MAF so that `FunctionInvokingChatClient` is **not** auto-injected — the workflow owns the tool-dispatch loop. Register a bare `IChatClient` in DI (do not call `.UseFunctionInvocation()`).
 
 `AIContextProvider.InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per `RunDurableAgentStep` activity). A turn that takes 3 LLM-step iterations to converge will see 3 invocation pairs. Make these hooks idempotent and cheap, or cache results via `StateBag` to skip redundant work within a turn.
 
 For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).
+For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md).
 
 ---
 
@@ -154,9 +151,8 @@ The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined
 17. [Scheduling](#scheduling)
 18. [MCP Tool Integration](#mcp-tool-integration)
 19. [External Memory with AIContextProvider](#external-memory-with-aicontextprovider)
-20. [External History Store](#external-history-store)
-21. [Per-Tool Activity Configuration](#per-tool-activity-configuration)
-22. [OpenTelemetry Integration](#opentelemetry-integration)
+20. [Per-Tool Activity Configuration](#per-tool-activity-configuration)
+21. [OpenTelemetry Integration](#opentelemetry-integration)
 
 ---
 
@@ -816,8 +812,6 @@ inside the job using `TemporalAgentContext`.
 | `ScheduleActivities.ScheduleOneTimeAgentRunAsync` | Inside a workflow | One-time                |
 | `ITemporalAgentClient.RunAgentDelayedAsync`       | External caller   | One-time (full session) |
 
-> **External history store not supported for scheduled runs.** If `opts.HistoryStore` is configured on your worker, that store is **not** used by `AgentJobWorkflow` — the workflow behind `AddScheduledAgentRun`, `ScheduleAgentAsync`, and `ScheduleOneTimeAgentRunAsync`. Scheduled runs always start fresh with no history load or append. See the [When NOT to Use It](./external-history-store.md#when-not-to-use-it) section of the external-history-store guide.
-
 ### Recurring Schedules
 
 #### Config-time registration
@@ -1020,43 +1014,11 @@ builder.Services
     });
 ```
 
-`AddContextProvider` has two overloads — `AddContextProvider(AIContextProvider)` for concrete instances and `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` for DI factories. The factory runs once at first activity dispatch; the resolved instance is cached for the lifetime of the worker process and shared across all sessions on that worker. Treat provider fields as effectively read-only after construction; per-session state goes through MAF's `StateBag`.
+`AddContextProvider` has two overloads — `AddContextProvider(AIContextProvider)` for a concrete instance and `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` for a DI factory. A factory is called from the scoped provider for every LLM-step activity attempt; the instance overload intentionally reuses the supplied instance. Neither is session storage. Keep per-session state in MAF's `StateBag`, make external effects retry-safe, and declare any provider-owned tools statically with `IDurableToolSource` or the `durableTools` overload.
 
 In durable mode, `InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per `RunDurableAgentStep` activity), not once per turn — make these hooks idempotent and cheap, or cache results via `StateBag` to skip redundant work within a turn.
 
-For a deep dive into how StateBag persistence works, see [Session StateBag & Context Providers](../architecture/MAF/session-statebag-and-context-providers.md).
-
----
-
-## External History Store
-
-For regulated workloads (HIPAA, PCI) or long-running sessions where Temporal event size becomes a concern, configure an `IAgentHistoryStore` factory to keep conversation history in a backend you control instead of in Temporal's event log.
-
-| Slot | Type | Default | What it controls |
-|---|---|---|---|
-| `opts.HistoryStore` | `Func<IServiceProvider, IAgentHistoryStore>?` | `null` | Worker-level default factory. When non-null, every durable agent on this worker that doesn't override uses this store. |
-| `agent.HistoryStore` | `Func<IServiceProvider, IAgentHistoryStore>?` | `null` | Per-agent override. Wins over `opts.HistoryStore` for this one agent. |
-
-Presence of a non-null factory is the opt-in — there is no boolean flag. Setting `agent.HistoryStore = sp => null` is not a valid opt-out — `UseExternalStoreMode` is determined by whether the delegate itself is non-null, not by the value it returns. A null-returning factory activates external-store mode with no store, which causes a `NullReferenceException` on the first turn.
-
-```csharp
-builder.Services.AddSingleton<MyCosmosHistoryStore>();
-builder.Services.AddChatClient(chatClient);
-
-builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
-    .AddTemporalAgents(opts =>
-    {
-        opts.HistoryStore = sp => sp.GetRequiredService<MyCosmosHistoryStore>();
-
-        opts.AddDurableAgent("MyAgent", agent =>
-        {
-            agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-        });
-    });
-```
-
-When opted in, conversation messages no longer appear in `ActivityScheduled` event payloads, and `GetHistoryAsync()` returns metadata-only entries (callers should query the store directly for full content). For the full how-to including per-agent override patterns, the relationship to `AIContextProvider` / `ChatHistoryProvider`, migration behavior, and a reference store implementation, see [External History Store](./external-history-store.md).
+For a deep dive into how StateBag persistence works, see [Session StateBag & Context Providers](../../architecture/MAF/session-statebag-and-context-providers.md).
 
 ---
 
