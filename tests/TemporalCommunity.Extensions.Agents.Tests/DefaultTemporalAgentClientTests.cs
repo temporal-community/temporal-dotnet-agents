@@ -1,4 +1,5 @@
 using FakeItEasy;
+using System.Linq.Expressions;
 using Temporalio.Client;
 using Temporalio.Client.Schedules;
 using TemporalCommunity.Extensions.Agents.Scheduling;
@@ -43,6 +44,32 @@ public class DefaultTemporalAgentClientTests
 
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
             client.RunAgentFireAndForgetAsync(sessionId, null!));
+    }
+
+    [Fact]
+    public async Task RunAgentFireAndForgetAsync_UsesSignalWithStart()
+    {
+        WorkflowOptions? capturedOptions = null;
+        A.CallTo(() => _fakeClient.StartWorkflowAsync(
+                A<Expression<Func<AgentWorkflow, Task>>>._,
+                A<WorkflowOptions>._))
+            .Invokes((Expression<Func<AgentWorkflow, Task>> _, WorkflowOptions options) => capturedOptions = options)
+            .Returns(Task.FromResult<WorkflowHandle<AgentWorkflow>>(null!));
+        var client = CreateClient();
+        var sessionId = TemporalAgentSessionId.WithRandomKey("Agent");
+        var request = new RunRequest("hello");
+
+        await client.RunAgentFireAndForgetAsync(sessionId, request);
+
+        Assert.NotNull(capturedOptions);
+        Assert.Equal("RunFireAndForget", capturedOptions!.StartSignal);
+        Assert.Single(capturedOptions.StartSignalArgs!);
+        Assert.Same(request, capturedOptions.StartSignalArgs!.Single());
+        A.CallTo(() => _fakeClient.GetWorkflowHandle<AgentWorkflow>(
+                A<string>._,
+                A<string?>._,
+                A<string?>._))
+            .MustNotHaveHappened();
     }
 
     // ─── SubmitApprovalAsync ─────────────────────────────────────────────────

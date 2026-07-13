@@ -181,6 +181,53 @@ public class ScheduledJobTests : IClassFixture<ScheduledJobEnvironmentFixture>
         await host.StopAsync();
     }
 
+    [Fact]
+    public async Task AgentJobWorkflow_PauseForApproval_BlocksToolInsteadOfParking()
+    {
+        var recorder = new RecordingTool { Name = "destructive_tool" };
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", recorder.Name, new Dictionary<string, object?> { ["input"] = "data" })],
+            "Blocked tool handled.");
+        var taskQueue = $"scheduled-job-approval-{Guid.NewGuid():N}";
+
+        using var host = BuildWorkerHost(scripted, taskQueue, builder =>
+        {
+            builder.UseApprovalScopes();
+            builder.AddTool(recorder.Build(), options => options.RequireApproval().ScopeAware());
+        });
+        await host.StartAsync();
+
+        try
+        {
+            var jobInput = new AgentJobInput
+            {
+                AgentName = "DurableAgent",
+                TaskQueue = taskQueue,
+                Request = new RunRequest("Attempt the destructive operation."),
+                ActivityTimeout = TimeSpan.FromSeconds(30),
+                HeartbeatTimeout = TimeSpan.FromSeconds(10),
+                InterceptorActivityOptions = new ActivityOptions
+                {
+                    StartToCloseTimeout = TimeSpan.FromSeconds(30),
+                    HeartbeatTimeout = TimeSpan.FromSeconds(10),
+                },
+                ScopeAwareTools = [recorder.Name],
+                ScopeAwareApprovalTools = [recorder.Name],
+            };
+
+            var handle = await _env.Client.StartWorkflowAsync(
+                (AgentJobWorkflow wf) => wf.RunAsync(jobInput),
+                new WorkflowOptions($"ta-job-approval-{Guid.NewGuid():N}", taskQueue));
+            await handle.GetResultAsync();
+
+            Assert.Equal(0, recorder.CallCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     // ── Helpers ────────────────────────────────────────────────────────────────
 
     private IHost BuildWorkerHost(
@@ -207,6 +254,7 @@ public class ScheduledJobTests : IClassFixture<ScheduledJobEnvironmentFixture>
 
         return builder.Build();
     }
+
 }
 
 /// <summary>

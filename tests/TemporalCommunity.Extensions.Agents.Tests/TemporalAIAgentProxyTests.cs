@@ -229,6 +229,59 @@ public class TemporalAIAgentProxyTests
         Assert.False(string.IsNullOrEmpty(capturedRequest!.CorrelationId));
     }
 
+    [Fact]
+    public async Task RunAsync_WithSessionOwnedByAnotherAgent_ThrowsAndDoesNotDispatch()
+    {
+        var fakeClient = A.Fake<ITemporalAgentClient>();
+        var proxy = new TemporalAIAgentProxy("AgentA", fakeClient);
+        var otherProxy = new TemporalAIAgentProxy("AgentB", fakeClient);
+        var otherSession = (TemporalAgentSession)await otherProxy.CreateSessionAsync();
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+            proxy.RunAsync("Hello", otherSession));
+
+        Assert.Equal("session", exception.ParamName);
+        Assert.Contains("belongs to agent 'AgentB'", exception.Message, StringComparison.Ordinal);
+        A.CallTo(() => fakeClient.SendAsync(
+                A<TemporalAgentSessionId>._,
+                A<RunRequest>._,
+                A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task RunDelayedAsync_WithSessionOwnedByAnotherAgent_ThrowsAndDoesNotDispatch()
+    {
+        var fakeClient = A.Fake<ITemporalAgentClient>();
+        var proxy = new TemporalAIAgentProxy("AgentA", fakeClient);
+        var otherProxy = new TemporalAIAgentProxy("AgentB", fakeClient);
+        var otherSession = (TemporalAgentSession)await otherProxy.CreateSessionAsync();
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
+            proxy.RunDelayedAsync([new ChatMessage(ChatRole.User, "Hello")], otherSession, TimeSpan.FromMinutes(1)));
+
+        Assert.Equal("session", exception.ParamName);
+        A.CallTo(() => fakeClient.RunAgentDelayedAsync(
+                A<TemporalAgentSessionId>._,
+                A<RunRequest>._,
+                A<TimeSpan>._,
+                A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task RunStreamingAsync_ThrowsNotSupportedException()
+    {
+        var proxy = CreateProxy("TestAgent");
+
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (var _ in proxy.RunStreamingAsync("Hello"))
+            {
+            }
+        });
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────
 
     private static TemporalAIAgentProxy CreateProxy(string name)

@@ -87,15 +87,13 @@ internal sealed class DefaultTemporalAgentClient(
         _logger.LogClientFireAndForget(sessionId.AgentName, sessionId.WorkflowId);
 
         workflowOptions.Rpc = new RpcOptions { CancellationToken = cancellationToken };
+        // Signal-with-start atomically creates (or reuses) the workflow and queues the request.
+        // A separate SignalAsync after StartWorkflowAsync leaves a client-crash window where a
+        // newly started workflow has no request.
+        workflowOptions.SignalWithStart((AgentWorkflow wf) => wf.RunAgentFireAndForgetAsync(request));
         await client.StartWorkflowAsync(
             (AgentWorkflow wf) => wf.RunAsync(BuildAgentWorkflowInput(sessionId.AgentName)),
             workflowOptions).ConfigureAwait(false);
-
-        var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
-        await handle.SignalAsync<AgentWorkflow>(
-            wf => wf.RunAgentFireAndForgetAsync(request),
-            new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
-            .ConfigureAwait(false);
     }
 
     /// <inheritdoc/>

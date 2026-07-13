@@ -100,6 +100,50 @@ public class SubAgentStateBagThreadingTests
         }
     }
 
+    [Fact]
+    public async Task SubAgent_ScopeAwareApproval_BlocksToolInsteadOfParking()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var recorder = new RecordingTool { Name = "destructive_tool" };
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", recorder.Name, new Dictionary<string, object?> { ["input"] = "data" })],
+            "Blocked tool handled.");
+        var taskQueue = $"subagent-approval-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddWorkflow<ApprovalBlockingSubAgentWorkflow>()
+            .AddTemporalAgents(opts =>
+            {
+                opts.AddDurableAgent("SubAgent", agent =>
+                {
+                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+                    agent.UseApprovalScopes();
+                    agent.AddTool(recorder.Build(), options => options.RequireApproval().ScopeAware());
+                });
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var handle = await env.Client.StartWorkflowAsync(
+                (ApprovalBlockingSubAgentWorkflow wf) => wf.RunAsync(),
+                new WorkflowOptions($"subagent-approval-{Guid.NewGuid():N}", taskQueue));
+            await handle.GetResultAsync();
+
+            Assert.Equal(0, recorder.CallCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     [Workflow("SubAgentStateBagThreading.Orchestration")]
     internal class OrchestrationWorkflow
     {
@@ -111,6 +155,19 @@ public class SubAgentStateBagThreadingTests
             var response = await agent.RunAsync(
                 [new ChatMessage(ChatRole.User, userMsg)], session).ConfigureAwait(true);
             return response.Messages.Count > 0 ? response.Messages[^1].Text ?? "" : "";
+        }
+    }
+
+    [Workflow("SubAgentStateBagThreading.ApprovalBlocking")]
+    internal class ApprovalBlockingSubAgentWorkflow
+    {
+        [WorkflowRun]
+        public async Task RunAsync()
+        {
+            var agent = GetTemporalAgent("SubAgent");
+            var session = await agent.CreateSessionAsync().ConfigureAwait(true);
+            await agent.RunAsync([new ChatMessage(ChatRole.User, "Attempt the destructive operation.")], session)
+                .ConfigureAwait(true);
         }
     }
 

@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -410,17 +409,12 @@ public sealed class TemporalAIAgent : AIAgent
         return iterCapResponse;
     }
 
-    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+    protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
         IEnumerable<ChatMessage> messages,
         AgentSession? session = null,
         AgentRunOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
-        // Streaming is not supported; return the full response as a single update.
-        var response = await RunCoreAsync(messages, session, options, cancellationToken);
-        foreach (var update in response.ToAgentResponseUpdates())
-        {
-            yield return update;
-        }
+        throw new NotSupportedException("Streaming is not supported for Temporal workflow agents.");
     }
 }

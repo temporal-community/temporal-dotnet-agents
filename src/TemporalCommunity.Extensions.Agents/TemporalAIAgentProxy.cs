@@ -77,6 +77,8 @@ internal class TemporalAIAgentProxy(
                 paramName: nameof(session));
         }
 
+        ValidateSessionOwnership(temporalSession, nameof(session));
+
         IList<string>? enableToolNames = null;
         bool enableToolCalls = true;
         bool isFireAndForget = false;
@@ -144,6 +146,7 @@ internal class TemporalAIAgentProxy(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
+        ValidateSessionOwnership(session, nameof(session));
 
         var request = new RunRequest([.. messages])
         {
@@ -153,5 +156,16 @@ internal class TemporalAIAgentProxy(
 
         _logger.LogProxyDispatchingDelayedRequest(sessionId.AgentName, sessionId.WorkflowId, delay);
         return _agentClient.RunAgentDelayedAsync(sessionId, request, delay, cancellationToken);
+    }
+
+    private void ValidateSessionOwnership(TemporalAgentSession session, string parameterName)
+    {
+        if (!string.Equals(session.SessionId.AgentName, this.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"The provided session belongs to agent '{session.SessionId.AgentName}', not agent '{this.Name}'. " +
+                "Create the session from the same agent proxy that will use it.",
+                parameterName);
+        }
     }
 }

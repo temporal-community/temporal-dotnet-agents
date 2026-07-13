@@ -324,8 +324,6 @@ TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions.WithTimeout(System.
 TemporalCommunity.Extensions.Agents.Tools.IAgentToolInterceptor
 TemporalCommunity.Extensions.Agents.Tools.IDurableToolSource
 TemporalCommunity.Extensions.Agents.Tools.IDurableToolSource.GetDurableTools() -> System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.Agents.DurableToolRegistrationSpec!>!
-TemporalCommunity.Extensions.Agents.Workflows.IAgentResponseHandler
-TemporalCommunity.Extensions.Agents.Workflows.IAgentResponseHandler.OnStreamingResponseUpdateAsync(System.Collections.Generic.IAsyncEnumerable<Microsoft.Agents.AI.AgentResponseUpdate!>! messageStream, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.ValueTask
 TemporalCommunity.Extensions.Agents.WorkingSetContextProvider
 TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.MaxPaths.get -> int
 TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.MaxPaths.set -> void
