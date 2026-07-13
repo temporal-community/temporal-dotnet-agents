@@ -27,7 +27,7 @@ Key benefits over in-memory agent frameworks:
 - Recurring and one-time scheduled agent runs
 - MCP tool integration via async agent factory
 - External memory with `AIContextProvider` and `AgentSessionStateBag` persistence
-- Streaming responses via `IAgentResponseHandler`
+- Completed request/response only; `RunStreamingAsync` is not supported
 - Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`)
 - `WorkingSetContextProvider` — `AIContextProvider` subclass that extracts recently-referenced file paths and injects a working-set note before each LLM call
 - OpenTelemetry distributed tracing (two-layer span hierarchy; search attributes enabled by default via `EnableSearchAttributes`)

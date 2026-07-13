@@ -19,6 +19,12 @@ workflows before deploying.
 
 ### Changed (BREAKING)
 
+- **Removed unsupported MAF response streaming.** `TemporalAIAgent` and
+  `TemporalAIAgentProxy` now uniformly reject `RunStreamingAsync`; the unused
+  `IAgentResponseHandler` surface and synthetic completed-response stream were removed. The
+  durable model-step activity still uses provider updates internally to produce one completed
+  response.
+
 - **Removed the MAF external-history and compaction surfaces.** `IAgentHistoryStore`, the
   MAF `ICompactionStrategy` types, their activities, samples, and guides were removed before
   the first release. Durable MAF sessions now keep conversation history in workflow state and

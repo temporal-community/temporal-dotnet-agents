@@ -406,7 +406,10 @@ opts.DefaultToolInterceptor = sp => new RiskyToolInterceptor();
 > `GetPendingApprovalAsync`, `DurableApprovalRequest`, and `DurableApprovalDecision` are all unchanged;
 > only the interceptor outcome type name changed (it now lives in `TemporalCommunity.Extensions.AI.Tools`).
 
-> **Note:** `PauseForApproval` is only supported on `AgentWorkflow`-backed agents (sessions and sub-agents inside workflows). On `AgentJobWorkflow` (`AddScheduledAgentRun`, `ScheduleAgentAsync`) the decision degrades to `Block` with a warning logged, because scheduled jobs have no persistent session to resume.
+> **Note:** `PauseForApproval` is supported only by session-backed `AgentWorkflow` executions
+> reached through `TemporalAIAgentProxy`. `TemporalAIAgent` sub-agents and `AgentJobWorkflow`
+> executions have no approval mixin; the decision degrades to `Block` with a warning. Sub-agents
+> preserve provider StateBag state, but do not support StateBag-backed approval scopes.
 
 ### Unblocking a Parked Workflow
 

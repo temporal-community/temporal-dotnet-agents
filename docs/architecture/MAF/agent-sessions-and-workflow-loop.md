@@ -708,7 +708,7 @@ new ActivityOptions
 
 **What happens on timeout**: Temporal marks the activity as failed. The workflow's `ExecuteActivityAsync` call throws a `TimeoutException`. Since there is no retry policy configured by default, the activity is **not** automatically retried — the workflow itself fails.
 
-**When to increase**: If your LLM calls are slow (large context, complex tool chains), or if you use streaming with `IAgentResponseHandler` and the full response takes a long time.
+**When to increase**: If your LLM calls are slow (large context or complex tool chains).
 
 **When to decrease**: If you want faster failure detection for stuck LLM calls.
 
@@ -736,13 +736,10 @@ new ActivityOptions
 
 **How heartbeats are sent**:
 
-Heartbeats are sent on **every streaming chunk regardless of whether an `IAgentResponseHandler` is registered**. The two branches differ only in whether the handler's callback is invoked, not in whether heartbeating occurs:
-
-- **Without `IAgentResponseHandler`**: Each chunk is collected into a list and a heartbeat is fired unconditionally:
+The model-step activity consumes provider updates and sends a heartbeat for every update while it
+builds the completed response:
 
 ```csharp
-// Heartbeat on each streamed chunk even when no handler is registered,
-// so that long-running LLM calls don't hit the heartbeat timeout.
 List<AgentResponseUpdate> collectedUpdates = [];
 await foreach (var update in responseStream.WithCancellation(ct))
 {
@@ -752,24 +749,9 @@ await foreach (var update in responseStream.WithCancellation(ct))
 response = collectedUpdates.ToAgentResponse();
 ```
 
-- **With `IAgentResponseHandler`**: Every streaming chunk also triggers a heartbeat, and the chunk is additionally forwarded to the handler:
+**What happens on heartbeat timeout**: Temporal cancels the activity's `CancellationToken` and marks it as timed out. This is the primary mechanism for detecting a dead worker during long LLM calls. Caller-visible `RunStreamingAsync` is intentionally unsupported.
 
-```csharp
-async IAsyncEnumerable<AgentResponseUpdate> StreamWithHeartbeat()
-{
-    await foreach (var update in responseStream)
-    {
-        updates.Add(update);
-        ctx.Heartbeat(update.Text);    // ← Heartbeat fired on every chunk
-        yield return update;
-    }
-}
-await responseHandler.OnStreamingResponseUpdateAsync(StreamWithHeartbeat(), ct);
-```
-
-**What happens on heartbeat timeout**: Temporal cancels the activity's `CancellationToken` and marks it as timed out. This is the primary mechanism for detecting a dead worker during long LLM calls.
-
-**Key insight**: `HeartbeatTimeout` is always active for agent activities because heartbeats are sent unconditionally on each streaming chunk. Registering an `IAgentResponseHandler` adds real-time streaming delivery to an external consumer — it does not change whether heartbeats are sent.
+**Key insight**: `HeartbeatTimeout` is active while the model-step activity consumes provider updates. It is not a caller-visible streaming transport.
 
 #### 3. Workflow `TimeToLive` (default: 14 days)
 
@@ -810,7 +792,7 @@ AgentWorkflow → ExecuteActivityAsync → AgentActivities running → [WORKER D
 1. Activity is executing (LLM call in progress)
 2. Worker process crashes (OOM, hardware failure, deployment)
 3. Temporal detects the failure via one of:
-   - **HeartbeatTimeout**: Because heartbeats are sent on every streaming chunk, Temporal notices when the window passes with no heartbeat
+   - **HeartbeatTimeout**: Because heartbeats are sent while the model-step activity consumes provider updates, Temporal notices when the window passes with no heartbeat
    - **Worker disconnect**: Temporal detects the worker's gRPC connection dropped
 4. Temporal marks the activity task as failed
 5. The workflow is now blocked on `ExecuteActivityAsync`, waiting for a result
@@ -869,7 +851,7 @@ If the Temporal server itself restarts:
 
 ### Heartbeat Detail: What Gets Sent
 
-On every streaming chunk, the chunk's text is sent as the heartbeat detail — regardless of whether an `IAgentResponseHandler` is registered:
+On every provider update, the update text is sent as the heartbeat detail:
 
 ```csharp
 ctx.Heartbeat(update.Text);
@@ -899,7 +881,7 @@ This has two benefits:
                     │ (14 days)                                    │
 Activity start ─────┘                                              └── Workflow ends
 
-• HeartbeatTimeout: Dead-worker detection during streaming (active unconditionally — fired on every chunk)
+• HeartbeatTimeout: Dead-worker detection while the model-step activity consumes provider updates
 • StartToCloseTimeout: Hard limit on any single agent turn
 • Workflow TTL: How long the session stays alive between messages
 ```
@@ -908,7 +890,7 @@ Activity start ─────┘                                              �
 
 | Timeout | Default | Scope | Detection | Configurable Via |
 |---------|---------|-------|-----------|------------------|
-| `HeartbeatTimeout` | 2 min | Single activity | Worker death during streaming | `TemporalAgentsOptions.DefaultHeartbeatTimeout` |
+| `HeartbeatTimeout` | 2 min | Single activity | Worker death during model updates | `TemporalAgentsOptions.DefaultHeartbeatTimeout` |
 | `StartToCloseTimeout` | 5 min | Single activity | Stuck/slow LLM call | `TemporalAgentsOptions.DefaultActivityTimeout` |
 | `TimeToLive` | 14 days | Entire workflow | Session inactivity | `TemporalAgentsOptions.DefaultTimeToLive` or per-agent |
 

@@ -132,7 +132,7 @@ On top of everything in Combination 1:
 - **`TemporalAgentContext.Current`** inside tools — direct access to the current session and HITL helpers without building a workflow handle manually.
 - **Structured output** — `RunAsync<T>` deserializes the agent's response into a typed object, with retry-on-failure.
 - **Scheduling** — built-in primitives for recurring and deferred agent runs.
-- **Streaming** — `IAgentResponseHandler` for server-sent events or SignalR push.
+- **Completed responses** — `RunAsync` is supported; `RunStreamingAsync` is intentionally rejected.
 
 ### Limitations
 

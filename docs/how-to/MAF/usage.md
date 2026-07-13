@@ -144,7 +144,7 @@ The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined
 10. [Session TTL](#session-ttl)
 11. [Activity Timeouts](#activity-timeouts)
 12. [Accessing Temporal from Agent Tools](#accessing-temporal-from-agent-tools)
-13. [Streaming Responses](#streaming-responses)
+13. [Streaming Limitation](#streaming-limitation)
 14. [Routing](#routing)
 15. [Parallel Agent Execution](#parallel-agent-execution)
 16. [Human-in-the-Loop (HITL) Approval Gates](#human-in-the-loop-hitl-approval-gates)
@@ -512,6 +512,10 @@ var session = new TemporalAgentSession(sessionId);
 var response = await agentProxy.RunAsync("Hello!", session);
 ```
 
+A session is owned by the agent name encoded in its workflow ID. Pass it only to the proxy that
+created it (or to a proxy for the same agent name); another agent proxy rejects it before any
+Temporal request is sent.
+
 ---
 
 ## Session TTL
@@ -541,10 +545,10 @@ Every agent turn — one call to `RunAsync` — executes inside a Temporal activ
 | Option              | Default   | What it limits                                                                                           |
 |---------------------|-----------|----------------------------------------------------------------------------------------------------------|
 | `ActivityTimeout`   | 5 minutes | Total wall-clock time for one turn, including tool calls and retries                                     |
-| `HeartbeatTimeout`  | 2 minutes | Maximum gap between heartbeats; Temporal retries the activity if exceeded (most relevant when streaming) |
+| `HeartbeatTimeout`  | 2 minutes | Maximum gap between heartbeats emitted while the model-step activity consumes provider updates |
 
 Both are non-nullable `TimeSpan` properties on `TemporalAgentsOptions` with the defaults shown above. Override either
-to tune for slow models, long tool-call chains, or streaming workloads.
+to tune for slow models or long tool-call chains.
 
 ```csharp
 builder.Services
@@ -554,7 +558,7 @@ builder.Services
         // Increase for slow models or long tool-call chains
         opts.DefaultActivityTimeout = TimeSpan.FromMinutes(10);
 
-        // Increase if streaming heartbeats arrive slowly
+        // Increase for long-running model calls
         opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(2);
 
         opts.AddDurableAgent("MyAgent", agent =>
@@ -614,26 +618,12 @@ Console.WriteLine($"Processing request for session: {sessionId.WorkflowId}");
 
 ---
 
-## Streaming Responses
+## Streaming Limitation
 
-Register an `IAgentResponseHandler` to stream agent responses as they are generated (e.g., for server-sent events):
-
-```csharp
-builder.Services.AddSingleton<IAgentResponseHandler, MyStreamingHandler>();
-
-public class MyStreamingHandler : IAgentResponseHandler
-{
-    public async ValueTask OnStreamingResponseUpdateAsync(
-        IAsyncEnumerable<AgentResponseUpdate> stream,
-        CancellationToken ct)
-    {
-        await foreach (var update in stream.WithCancellation(ct))
-        {
-            // Push each chunk to the client (e.g., via SignalR or SSE)
-        }
-    }
-}
-```
+`TemporalAIAgent` and `TemporalAIAgentProxy` do not support `RunStreamingAsync`; both throw
+`NotSupportedException`. The durable model-step activity may consume provider updates internally
+to form one durable response, but it never exposes an at-least-once token stream to callers.
+Use `RunAsync` and deliver the completed response from your application boundary.
 
 ---
 

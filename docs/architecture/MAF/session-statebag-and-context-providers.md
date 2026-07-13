@@ -270,6 +270,14 @@ Workflow stores          Workflow stores
 
 In v0.3, `AIContextProvider` instances are registered on the `DurableAgentBuilder` via `AddContextProvider`. `AgentActivities.RunDurableAgentStepAsync` invokes them explicitly around each LLM call and serializes the resulting `StateBag`; the library does not hand provider lifecycle ownership to `ChatClientAgent`.
 
+### Scope limits
+
+`TemporalAIAgent` carries this provider StateBag across its LLM steps and turns, but it has no
+approval mixin. It cannot persist or consume StateBag-backed approval scopes; an interceptor's
+`PauseForApproval` decision becomes `Block`. `AgentJobWorkflow` has neither a carried StateBag
+nor workflow-parked approval, so it has the same `PauseForApproval` → `Block` behavior. Use a
+session-backed `TemporalAIAgentProxy` when an approval scope must survive a turn.
+
 ```csharp
 builder.Services.AddSingleton<HttpClient>(_ =>
 {
