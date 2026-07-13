@@ -52,6 +52,8 @@ doctor:
         echo "✓ OPENAI_API_BASE_URL: configured"
     elif dotnet user-secrets list --project samples/MEAI/DurableChat 2>/dev/null | grep -q "OPENAI_API_BASE_URL"; then
         echo "✓ OPENAI_API_BASE_URL: configured"
+    elif rg -q '"OPENAI_API_BASE_URL"' samples/MEAI -g 'appsettings.json'; then
+        echo "✓ OPENAI_API_BASE_URL: configured by sample appsettings.json"
     else
         echo "✗ OPENAI_API_BASE_URL not found. Set in samples/MEAI/DurableChat/appsettings.json or user-secrets"
         FAILED=1
@@ -61,16 +63,20 @@ doctor:
     if nc -z localhost 7233 2>/dev/null; then
         echo "✓ Temporal server: reachable on localhost:7233"
     else
-        echo "✗ Temporal server not running. Start with: temporal server start-dev"
+        echo "✗ Temporal server not running. Start with: temporal server start-dev --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int"
         FAILED=1
     fi
 
     echo ""
     echo "Available samples:"
     echo "  MAF:"
-    ls samples/MAF/ | sed 's/^/    /'
+    find samples/MAF -mindepth 2 -type f -name '*.csproj' -exec dirname {} \; \
+        | sed 's#^\(samples/MAF/[^/]*\).*#\1#' | sort -u \
+        | sed 's#samples/MAF/#    #'
     echo "  MEAI:"
-    ls samples/MEAI/ | sed 's/^/    /'
+    find samples/MEAI -mindepth 2 -type f -name '*.csproj' -exec dirname {} \; \
+        | sed 's#^\(samples/MEAI/[^/]*\).*#\1#' | sort -u \
+        | sed 's#samples/MEAI/#    #'
     echo "  Run: dotnet run --project samples/<MAF|MEAI>/<Name>/<Name>.csproj"
 
     exit $FAILED
@@ -562,6 +568,22 @@ _sample-preflight:
 test-samples-meai: build _sample-preflight
     #!/usr/bin/env bash
     set -uo pipefail
+    # Child sample projects have isolated user-secret stores. Reuse the repository's configured
+    # DurableChat key when it was not supplied through the shell, without printing the value.
+    if [ -z "${OPENAI_API_KEY:-}" ]; then
+        export OPENAI_API_KEY="$(dotnet user-secrets list --project samples/MEAI/DurableChat 2>/dev/null | sed -n 's/^OPENAI_API_KEY = //p' | head -n 1)"
+    fi
+    if [ -z "${OPENAI_API_KEY:-}" ]; then
+        echo "ERROR: OPENAI_API_KEY is not available to sample processes."
+        exit 2
+    fi
+    if [ -z "${OPENAI_API_BASE_URL:-}" ]; then
+        export OPENAI_API_BASE_URL="$(sed -n 's/.*\"OPENAI_API_BASE_URL\": \"\([^\"]*\)\".*/\1/p' samples/MEAI/DurableChat/appsettings.json | head -n 1)"
+    fi
+    if [ -z "${OPENAI_API_BASE_URL:-}" ]; then
+        echo "ERROR: OPENAI_API_BASE_URL is not available to sample processes."
+        exit 2
+    fi
     LOGDIR="artifacts/sample-runs/meai-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$LOGDIR"
     echo "Logs: $LOGDIR"
@@ -596,12 +618,28 @@ test-samples-meai: build _sample-preflight
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
 
 # Run all non-interactive MAF samples end-to-end. Per-sample timeouts override
-# the 90s default where needed (Compaction walks 8 turns with summarization;
-# ConfigurableAgent has multi-agent handoff). Skips HumanInTheLoop (interactive)
+# the 90s default where needed (ConfigurableAgent has multi-agent handoff).
+# Skips HumanInTheLoop (interactive)
 # and SplitWorkerClient (two processes — run manually).
 test-samples-maf: build _sample-preflight
     #!/usr/bin/env bash
     set -uo pipefail
+    # Child sample projects have isolated user-secret stores. Reuse the repository's configured
+    # DurableChat key when it was not supplied through the shell, without printing the value.
+    if [ -z "${OPENAI_API_KEY:-}" ]; then
+        export OPENAI_API_KEY="$(dotnet user-secrets list --project samples/MEAI/DurableChat 2>/dev/null | sed -n 's/^OPENAI_API_KEY = //p' | head -n 1)"
+    fi
+    if [ -z "${OPENAI_API_KEY:-}" ]; then
+        echo "ERROR: OPENAI_API_KEY is not available to sample processes."
+        exit 2
+    fi
+    if [ -z "${OPENAI_API_BASE_URL:-}" ]; then
+        export OPENAI_API_BASE_URL="$(sed -n 's/.*\"OPENAI_API_BASE_URL\": \"\([^\"]*\)\".*/\1/p' samples/MEAI/DurableChat/appsettings.json | head -n 1)"
+    fi
+    if [ -z "${OPENAI_API_BASE_URL:-}" ]; then
+        echo "ERROR: OPENAI_API_BASE_URL is not available to sample processes."
+        exit 2
+    fi
     LOGDIR="artifacts/sample-runs/maf-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$LOGDIR"
     echo "Logs: $LOGDIR"
@@ -672,12 +710,9 @@ verify-sample-coverage:
     fi
     declared_maf=$(awk '/^test-samples-maf:/,/^test-samples:/' justfile \
         | grep -oE 'samples/MAF/[A-Za-z]+' | sort -u)
-    actual_maf=$(find samples/MAF -mindepth 1 -maxdepth 1 -type d \
-        -not -name 'bin' -not -name 'obj' \
-        -not -name 'HumanInTheLoop' \
-        -not -name 'SplitWorkerClient' \
-        -not -name 'ApprovalScopes' \
-        | sort -u)
+    actual_maf=$(find samples/MAF -mindepth 2 -type f -name '*.csproj' -exec dirname {} \; \
+        | sed 's#^\(samples/MAF/[^/]*\).*#\1#' \
+        | grep -Ev '/(HumanInTheLoop|SplitWorkerClient|ApprovalScopes)$' | sort -u)
     missing_maf=$(comm -23 <(echo "$actual_maf") <(echo "$declared_maf"))
     if [ -n "$missing_maf" ]; then
         echo "WARN: MAF samples missing from test-samples-maf:"
