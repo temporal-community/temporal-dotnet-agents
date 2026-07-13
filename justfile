@@ -614,9 +614,7 @@ test-samples-maf: build _sample-preflight
         "WorkflowRouting:samples/MAF/WorkflowRouting:120" \
         "AmbientAgent:samples/MAF/AmbientAgent:90" \
         "ConfigurableAgent:samples/MAF/ConfigurableAgent:150" \
-        "ExternalHistoryStore:samples/MAF/ExternalHistoryStore:120" \
         "PerToolActivities:samples/MAF/PerToolActivities:90" \
-        "Compaction:samples/MAF/Compaction:180" \
         "ContextProviders:samples/MAF/ContextProviders:90" \
         "ToolInterceptor:samples/MAF/ToolInterceptor:120" \
         "WorkingSet:samples/MAF/WorkingSet:90" \

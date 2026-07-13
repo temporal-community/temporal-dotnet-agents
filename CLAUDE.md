@@ -51,7 +51,7 @@ Use `Glob` / `ls` to discover specific files. Notable types and their locations 
 - `.WithActivityTimeout(TimeSpan)` / `.WithMaxRetryAttempts(int)` / `.WithHeartbeatTimeout(TimeSpan)` / `.WithChatClientKey(string)`
 - Keys are `public const string` constants on `TemporalChatOptionsExtensions`.
 
-**Durable tools**: `AddDurableTools(workerBuilder, params aiFunctions)` registers tools in `DurableFunctionRegistry` (resolved by name in `DurableFunctionActivities`). Or `aiFunction.AsDurable()` wraps as `DurableAIFunction` — passes through when `Workflow.InWorkflow == false`. A per-tool overload — `AddDurableTools(tool, opts => opts.NoRetry().WithTimeout(...))` — accepts a `DurableChatToolOptions` configuration callback that mirrors MAF's `DurableToolOptions` (`StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` properties + `NoRetry()` / `WithMaxAttempts(int)` / `WithTimeout(TimeSpan)` fluent methods). Footgun: using a custom workflow with `AddDurableTools()` but without `.AsDurable()` on each function throws `DurableToolsNotWrappedException` at runtime — see `docs/how-to/MEAI/tool-functions.md` for Models 1/2/3.
+**Durable tools**: `AddDurableTools(workerBuilder, params aiFunctions)` registers functions for managed durable sessions; each model-requested call becomes an `InvokeFunction` activity. A per-tool overload — `AddDurableTools(tool, opts => opts.NoRetry().WithTimeout(...))` — accepts a `DurableChatToolOptions` configuration callback that mirrors MAF's `DurableToolOptions` (`StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` properties + `NoRetry()` / `WithMaxAttempts(int)` / `WithTimeout(TimeSpan)` fluent methods). `AIFunction.AsDurable()` remains the separate adapter for direct calls from custom workflow code. Managed sessions reject caller-supplied `ChatOptions.Tools` and inline `UseFunctionInvocation()` loops; see `docs/how-to/MEAI/tool-functions.md`.
 
 **HITL**: see `docs/how-to/MEAI/hitl-patterns.md`. Activity timeout on the underlying `[WorkflowUpdate]` must accommodate human review time.
 
@@ -75,7 +75,7 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 
 **`AddDurableAgent` is the only registration path in v0.3.** A single fluent `DurableAgentBuilder` consolidates `ChatClient`, tools (with per-tool retry overrides via `DurableToolOptions`), context providers, per-agent timeouts, and external history. DI access happens via per-slot factories on the builder — no `BuildServiceProvider()` bootstrap, no string-keyed dictionaries. Each LLM call dispatches a separate `RunDurableAgentStep` activity; each tool call dispatches a separately named `InvokeAgentTool` activity (per-agent local registry, distinct from MEAI's flat `InvokeFunction`). The library composes the chat pipeline with `UseProvidedChatClientAsIs = true` so users do NOT call `.UseFunctionInvocation()` on their `IChatClient`.
 
-**Configuration**: see `docs/how-to/MAF/usage.md` for the full `TemporalAgentsOptions` reference. Worker-level defaults are prefixed `Default*` (e.g. `DefaultActivityTimeout`, `DefaultHeartbeatTimeout`, `DefaultApprovalTimeout`, `DefaultMaxEntryCount`, `DefaultRetryPolicy`, `DefaultHistoryReducer`, `DefaultTimeToLive`); per-agent overrides on `DurableAgentBuilder` use the unprefixed names. Inheritance rule: `effective = registration.X ?? options.DefaultX`. The worker-level `HistoryStore` factory keeps the unprefixed name (presence is opt-in).
+**Configuration**: see `docs/how-to/MAF/usage.md` for the full `TemporalAgentsOptions` reference. Worker-level defaults are prefixed `Default*` (e.g. `DefaultActivityTimeout`, `DefaultHeartbeatTimeout`, `DefaultApprovalTimeout`, `DefaultMaxEntryCount`, `DefaultRetryPolicy`, `DefaultHistoryReducer`, `DefaultTimeToLive`); per-agent overrides on `DurableAgentBuilder` use the unprefixed names. Inheritance rule: `effective = registration.X ?? options.DefaultX`.
 
 **Two agent types** (use the right one for context):
 - `TemporalAIAgent` — workflow-context sub-agent. Access via `TemporalWorkflowExtensions.GetTemporalAgent("Name")`.
@@ -117,11 +117,8 @@ When a worker crashes:
 - `RpcException` — `Temporalio.Exceptions` (NOT `Grpc.Core`)
 - `Workflow.CreateContinueAsNewException` — takes `Expression<Func<TWorkflow, Task>>` (no collection expressions inside)
 - `WorkflowIdConflictPolicy.UseExisting` — `Temporalio.Api.Enums.V1`
-- `IAgentHistoryStore` — `TemporalCommunity.Extensions.Agents.HistoryStore` (opt-in via `opts.HistoryStore` or `agent.HistoryStore`); see `docs/how-to/MAF/external-history-store.md`. **`LoadAsync` takes `bool applyCompaction` (no default value)** — `false` = audit canonical, `true` = projected post-compact view. Erasure path uses `false`; inference + reducer paths use `true`.
-- `ICompactionStrategy`, `CompactionContext`, `CompactionResult` — `TemporalCommunity.Extensions.Agents.Compaction` (`[Experimental("TA002")]`). Built-in keys: `"truncation"`, `"sliding-window"`, `"summarization"` pre-registered via `TryAddKeyedSingleton`. See `docs/how-to/MAF/compaction.md`.
 - `CompactionMarkerEntry` — `TemporalCommunity.Extensions.AI.Session` (lives in the AI library so both source-gen contexts see the `"compaction-marker"` discriminator). Polymorphic subtype of `DurableSessionEntry`. `CompactedAt` is a `[JsonIgnore]` alias of `CreatedAt` (no wire duplication).
-- `CompactionAwareErasureHelper` — `TemporalCommunity.Extensions.Agents.HistoryStore`. Static `EraseSessionDataAsync(store, sessionId, erasedIds)` — only correct GDPR-erasure path when compaction markers may exist.
-- `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException`, `DurableToolsNotWrappedException` — `TemporalCommunity.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the others are stable.
+- `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException` — `TemporalCommunity.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the others are stable.
 - `DurableChatStepResult` — `TemporalCommunity.Extensions.AI` (internal sealed) — Pattern 3 activity return type from `GetChatStepAsync`; carries `IsFinal`, `AssistantMessage`, optional `ToolCalls` and `Usage`.
 - `DurableChatToolOptions` — `TemporalCommunity.Extensions.AI` (public sealed) — per-tool options builder for Pattern 3; mirrors MAF's `DurableToolOptions` verbatim.
 - `IDurableToolInterceptor<in TContext>` — `TemporalCommunity.Extensions.AI.Tools` — cross-library interceptor interface. `BeforeToolCallAsync(TContext, CancellationToken) → Task<DurableToolDecision>`. `in` variance: `IDurableToolInterceptor<DurableToolContext>` is assignable to `IDurableToolInterceptor<AgentToolContext>`.
@@ -255,9 +252,7 @@ dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
 dotnet run --project samples/MAF/{BasicAgent,WorkflowOrchestration,EvaluatorOptimizer,MultiAgentRouting,WorkflowRouting,HumanInTheLoop,AmbientAgent,ConfigurableAgent}/...csproj
 
 # Feature-specific demos
-dotnet run --project samples/MAF/ExternalHistoryStore/ExternalHistoryStore.csproj   # IAgentHistoryStore + AIContextProvider + reduction strategy
 dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj         # per-tool Temporal activities with write-tool no-retry
-dotnet run --project samples/MAF/Compaction/Compaction.csproj                       # UseCompaction("summarization") + GDPR erasure cascade demo
 dotnet run --project samples/MAF/ContextProviders/ContextProviders.csproj           # TodoProvider + AgentModeProvider via AddContextProvider
 dotnet run --project samples/MAF/Skills/Skills.csproj                               # UseSkills: file-based + inline skills with progressive-disclosure load_skill
 
@@ -308,7 +303,6 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **History & Token Optimization**: `docs/how-to/MAF/prompt-caching.md`
 - **Durable Agents (per-tool activities)**: `docs/how-to/MAF/durable-agents.md`
 - **Tool Interceptor**: `docs/how-to/MAF/tool-interceptor.md`
-- **In-Session Compaction**: `docs/how-to/MAF/compaction.md`
 - **Do's and Don'ts**: `docs/how-to/MAF/dos-and-donts.md`
 - **Durability Guarantees**: `docs/architecture/MAF/durability-and-determinism.md`
 - **Sessions and Workflow Loop**: `docs/architecture/MAF/agent-sessions-and-workflow-loop.md`

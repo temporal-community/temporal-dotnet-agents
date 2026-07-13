@@ -7,13 +7,15 @@ Temporal .NET SDK integrations for building durable AI applications. Two package
 | [`TemporalCommunity.Extensions.AI`](src/TemporalCommunity.Extensions.AI/README.md) | Make any `IChatClient` durable — no Agent Framework required |
 | [`TemporalCommunity.Extensions.Agents`](src/TemporalCommunity.Extensions.Agents/README.md) | Durable agent sessions built on Microsoft Agent Framework |
 
-Both packages give AI workloads **durability by default** — conversation history, LLM calls, and tool invocations are persisted in Temporal's event history and replayed deterministically after crashes or restarts.
+Both packages make their supported session and activity boundaries durable. Conversation history and
+LLM calls are persisted in Temporal history; registered durable tool invocations are separate
+activities and replay safely after crashes or restarts.
 
 ## Overview
 
 ### `TemporalCommunity.Extensions.AI`
 
-A lightweight middleware layer for [Microsoft.Extensions.AI (MEAI)](https://learn.microsoft.com/en-us/dotnet/ai/ai-extensions). Wraps any `IChatClient` with Temporal durability via a `DelegatingChatClient` middleware. No agent framework, no heavy abstractions — just MEAI pipelines made crash-resilient.
+A lightweight integration for [Microsoft.Extensions.AI (MEAI)](https://learn.microsoft.com/en-us/dotnet/ai/ai-extensions). It provides direct `IChatClient` middleware for custom workflows and `DurableChatSessionClient` for managed multi-turn sessions. Managed sessions own their model/tool loop and use `AddDurableTools` for durable function dispatch. No Agent Framework dependency is required.
 
 **Start here if:** you are already using MEAI's `IChatClient` directly and want Temporal durability without adopting the full Agent Framework.
 
@@ -72,7 +74,7 @@ down-level limitations.
 | [DurableChat](samples/MEAI/DurableChat) | `Extensions.AI` | Multi-turn durable chat with `DurableChatSessionClient` and tool functions |
 | [DurableTools](samples/MEAI/DurableTools) | `Extensions.AI` | Per-tool activity dispatch with `AsDurable()` and `AddDurableTools` |
 | [OpenTelemetry](samples/MEAI/OpenTelemetry) | `Extensions.AI` | OTel tracing — span hierarchy, ActivitySource names, and token attributes |
-| [HumanInTheLoop](samples/MEAI/HumanInTheLoop) | `Extensions.AI` | HITL approval gates via `RequestApprovalAsync` and `SubmitApprovalAsync` |
+| [HumanInTheLoop](samples/MEAI/HumanInTheLoop) | `Extensions.AI` | Workflow-owned approval gates with `RequireApproval()` and retry-safe `ResolveApprovalAsync` |
 | [DurableEmbeddings](samples/MEAI/DurableEmbeddings) | `Extensions.AI` | `IEmbeddingGenerator` wrapped for durable per-chunk activity dispatch |
 | [ToolInterceptor](samples/MEAI/ToolInterceptor) | `Extensions.AI` | Intercept, pause, skip, or block tool calls |
 | [CustomWorkflow](samples/MEAI/CustomWorkflow) | `Extensions.AI` | Extend the durable chat workflow with a domain-typed result |
@@ -90,9 +92,7 @@ down-level limitations.
 | [WorkflowRouting](samples/MAF/WorkflowRouting) | `Extensions.Agents` | Static and dynamic durable routing patterns |
 | [AmbientAgent](samples/MAF/AmbientAgent) | `Extensions.Agents` | Signal-driven ambient monitoring agent |
 | [ConfigurableAgent](samples/MAF/ConfigurableAgent) | `Extensions.Agents` | Per-agent settings and read-only tools |
-| [ExternalHistoryStore](samples/MAF/ExternalHistoryStore) | `Extensions.Agents` | External history, context, and reduction |
 | [PerToolActivities](samples/MAF/PerToolActivities) | `Extensions.Agents` | Per-tool activity options and no-retry write tools |
-| [Compaction](samples/MAF/Compaction) | `Extensions.Agents` | History compaction and GDPR erasure |
 | [ContextProviders](samples/MAF/ContextProviders) | `Extensions.Agents` | Custom `AIContextProvider` implementations |
 | [DurableContextProvider](samples/MAF/DurableContextProvider) | `Extensions.Agents` | Context-provided tools dispatched durably |
 | [MixedActivities](samples/MAF/MixedActivities) | `Extensions.Agents` | Regular and AI activities in one workflow |

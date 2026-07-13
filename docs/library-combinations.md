@@ -31,10 +31,7 @@ This project ships two libraries — `TemporalCommunity.Extensions.AI` and `Temp
 
 ```csharp
 // Worker + client in the same host (common pattern)
-builder.Services
-    .AddChatClient(innerClient)
-    .UseFunctionInvocation()
-    .Build();
+builder.Services.AddChatClient(innerClient);
 
 builder.Services
     .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
@@ -42,7 +39,8 @@ builder.Services
     {
         opts.ActivityTimeout   = TimeSpan.FromMinutes(5);
         opts.SessionTimeToLive = TimeSpan.FromHours(24);
-    });
+    })
+    .AddDurableTools(weatherTool);
 ```
 
 ### Usage
@@ -59,7 +57,7 @@ var response = await sessionClient.SendAsync(
 
 - Crash recovery for every LLM call — if the worker restarts mid-activity, Temporal retries and returns the result from history on replay.
 - Full conversation history stored in workflow state, surviving restarts and `ContinueAsNew` transitions.
-- Tool call durability via `AsDurable()` / `AddDurableTools()` — each tool invocation becomes its own activity with its own retry policy.
+- Managed tool-call durability via `AddDurableTools()` — each tool invocation becomes its own activity with its own retry policy.
 - Durable embedding generation via `DurableEmbeddingGenerator`.
 - HITL approval gates via `DurableApprovalRequest` / `DurableApprovalDecision`.
 - `DurableAIDataConverter` auto-wired when using the managed registration overloads (`AddTemporalClient` + `AddDurableAI`, or the 3-arg `AddHostedTemporalWorker` overload). Manual `TemporalClient.ConnectAsync` callers must set `DataConverter = DurableAIDataConverter.Instance` explicitly.
@@ -155,7 +153,10 @@ If you use `Microsoft.Agents.AI`, use Combination 2 (`AddTemporalAgents()`).
 
 ## Adopting Extensions.AI Incrementally
 
-Some projects build the correct Combination 1 pattern independently — a `[WorkflowUpdate]`-based request/response loop, `WaitConditionAsync` for turn gating, `IChatClient` + `UseFunctionInvocation()` for tools — before encountering these libraries. These projects fit Combination 1 and can adopt `TemporalCommunity.Extensions.AI` selectively rather than wholesale.
+Some projects build a `[WorkflowUpdate]`-based request/response loop with `WaitConditionAsync`
+before encountering these libraries. They can adopt `TemporalCommunity.Extensions.AI` selectively
+rather than wholesale. For managed tools, move the functions to `AddDurableTools()` rather than
+an inline `UseFunctionInvocation()` loop.
 
 Incremental adoption paths:
 

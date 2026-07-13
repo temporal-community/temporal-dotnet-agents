@@ -19,6 +19,11 @@ workflows before deploying.
 
 ### Changed (BREAKING)
 
+- **Removed the MAF external-history and compaction surfaces.** `IAgentHistoryStore`, the
+  MAF `ICompactionStrategy` types, their activities, samples, and guides were removed before
+  the first release. Durable MAF sessions now keep conversation history in workflow state and
+  use the existing deterministic `HistoryReducer` at continue-as-new boundaries.
+
 - **Bounded retry defaults now apply to every durable model activity.** Custom-workflow chat
   middleware and embedding generation now use the same five-attempt, two-second-maximum-backoff
   default as managed chat sessions when `RetryPolicy` is unset. Deterministic provider HTTP
@@ -161,10 +166,9 @@ not replay-compatible. The historical rationale for the API consolidation is in
   `InvokeFunction` activity. Tool resolution scopes per-agent, so two agents on the same worker
   can register tools with the same name without collision.
 
-- **External `IAgentHistoryStore` opt-in via `opts.HistoryStore = sp => ...`** (worker-level)
-  or `agent.HistoryStore = sp => ...` (per-agent). When configured, the workflow strips message
-  payloads from in-workflow history entries and the activity loads/appends from the store. See
-  [`docs/how-to/MAF/external-history-store.md`](./docs/how-to/MAF/external-history-store.md).
+- **External `IAgentHistoryStore` opt-in** was introduced in this historical preview entry.
+  That preview surface was removed before the first release; see the Unreleased breaking-change
+  note above.
 
 - **`DurableChatWorkflowBase<TOutput>` virtual hooks** for subclass extension:
   `InitializeTurnCount(carriedHistory)`, `UpsertCustomSearchAttributes()`, and a
@@ -307,7 +311,7 @@ runs before deploying.
   `UsageDetails`, enabling queries like "show me the token usage for turn N"
   directly against workflow state — no external telemetry pipeline required.
 
-- **Optional `correlationId` parameter on `DurableChatSessionClient.ChatAsync`.**
+- **Optional `correlationId` parameter on `DurableChatSessionClient.SendAsync`.**
   Callers can supply their own correlation ID for cross-system log/trace
   threading. When omitted, the workflow auto-generates one via
   `Workflow.NewGuid()`. The same value is stamped on the request and response
@@ -371,7 +375,7 @@ runs before deploying.
   **Migration:** drain in-flight workflows before upgrading; no dual-reader
   compatibility shim is provided.
 
-- **`DurableChatSessionClient.ChatAsync` return type.** Changed from
+- **`DurableChatSessionClient.SendAsync` return type.** Changed from
   `Task<ChatResponse>` to `Task<DurableSessionResponse>`. The new return type
   carries the per-turn metadata (`Usage`, `CorrelationId`, `CreatedAt`)
   directly. Use `response.Text` (now a property on `DurableSessionResponse`)
