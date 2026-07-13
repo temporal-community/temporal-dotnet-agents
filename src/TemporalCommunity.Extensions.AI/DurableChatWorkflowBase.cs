@@ -241,6 +241,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
     protected virtual async Task RunAsync(DurableChatWorkflowInput input)
     {
         Input = input;
+        _approvalMixin.RestoreResolvedApprovals(input.ApprovalResolutionHistory);
 
         // Restore history carried forward from a previous run (continue-as-new).
         if (input.CarriedHistory is { Count: > 0 })
@@ -329,6 +330,7 @@ public abstract class DurableChatWorkflowBase<TOutput>
                 ActivityTimeout = input.ActivityTimeout,
                 HeartbeatTimeout = input.HeartbeatTimeout,
                 ApprovalTimeout = input.ApprovalTimeout,
+                ApprovalResolutionHistory = _approvalMixin.GetResolvedApprovals(),
                 EnableSearchAttributes = input.EnableSearchAttributes,
                 MaxEntryCount = input.MaxEntryCount,
                 HistoryReducer = input.HistoryReducer,
@@ -521,8 +523,9 @@ public abstract class DurableChatWorkflowBase<TOutput>
         _approvalMixin.ValidateRequestApproval(request);
 
     /// <summary>
-    /// Blocks the workflow until a human submits a decision via <see cref="SubmitApprovalAsync"/>.
-    /// Returns the decision as a <see cref="DurableApprovalDecision"/>.
+    /// Legacy cross-library update that blocks until a human submits a decision. Managed MEAI
+    /// session clients use <see cref="ResolveApprovalAsync"/> instead, which returns a
+    /// retry-safe status.
     /// </summary>
     [WorkflowUpdate("RequestApproval")]
     public Task<DurableApprovalDecision> RequestApprovalAsync(DurableApprovalRequest request) =>
@@ -537,21 +540,49 @@ public abstract class DurableChatWorkflowBase<TOutput>
                 Workflow.Info.WorkflowId, d.RequestId, d.Approved));
 
     /// <summary>
-    /// Validates a submitted approval decision.
+    /// Validates the legacy submitted approval decision used by the MAF bridge.
     /// </summary>
     [WorkflowUpdateValidator(nameof(SubmitApprovalAsync))]
     public void ValidateSubmitApproval(DurableApprovalDecision decision) =>
         _approvalMixin.ValidateSubmitApproval(decision);
 
     /// <summary>
-    /// Submits the human decision for the pending approval request.
-    /// Unblocks <see cref="RequestApprovalAsync"/>.
+    /// Legacy cross-library submission path. It unblocks <see cref="RequestApprovalAsync"/>
+    /// but does not provide retry-safe result semantics; use <see cref="ResolveApprovalAsync"/>
+    /// for managed MEAI sessions.
     /// </summary>
     [WorkflowUpdate("SubmitApproval")]
     public Task SubmitApprovalAsync(DurableApprovalDecision decision)
     {
         _approvalMixin.SubmitApproval(decision);
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Resolves a pending approval request and returns a retry-safe result.
+    /// </summary>
+    [WorkflowUpdate("ResolveApproval")]
+    public async Task<DurableApprovalResolutionResult> ResolveApprovalAsync(DurableApprovalDecision decision)
+    {
+        // Temporal may admit the first update to a continued-as-new run before the workflow
+        // run method has initialized Input. Wait for that deterministic initialization point
+        // rather than returning a false NotPending result for a valid reviewer retry.
+        if (Input is null)
+        {
+            await Workflow.WaitConditionAsync(() => Input is not null).ConfigureAwait(true);
+        }
+
+        // A continue-as-new input is the durable authority for prior resolutions. Rehydrate
+        // defensively if a replay-created workflow instance has no in-memory archive yet.
+        // Do not overwrite a non-empty cache: it may contain resolutions accepted since this
+        // run began and therefore not present in the start input.
+        if (_approvalMixin.GetResolvedApprovals().Count == 0
+            && Input?.ApprovalResolutionHistory is { Count: > 0 } carriedResolutions)
+        {
+            _approvalMixin.RestoreResolvedApprovals(carriedResolutions);
+        }
+
+        return _approvalMixin.ResolveApproval(decision);
     }
 
     /// <summary>
@@ -570,8 +601,9 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// well as inside <c>ValidateRequestApproval</c>).
     /// </summary>
     /// <remarks>
-    /// Must only be called from workflow-thread code. The approval unblocks when
-    /// <see cref="SubmitApprovalAsync"/> is called with a matching <c>RequestId</c>.
+    /// Must only be called from workflow-thread code. The approval unblocks when a matching
+    /// decision arrives through <see cref="ResolveApprovalAsync"/> or the legacy
+    /// <see cref="SubmitApprovalAsync"/> bridge.
     /// </remarks>
     protected Task<DurableApprovalDecision> RequestApprovalFromTurnLoopAsync(
         DurableApprovalRequest request,

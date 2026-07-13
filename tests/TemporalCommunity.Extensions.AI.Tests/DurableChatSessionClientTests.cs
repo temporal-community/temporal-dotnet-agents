@@ -1,5 +1,7 @@
 using FakeItEasy;
+using Microsoft.Extensions.AI;
 using Temporalio.Client;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -82,5 +84,24 @@ public class DurableChatSessionClientTests
         var id2 = sessionClient.GetWorkflowId("abc");
 
         Assert.Equal(id1, id2);
+    }
+
+    [Fact]
+    public async Task SendAsync_CallerSuppliedTools_ThrowsBeforeWorkflowDispatch()
+    {
+        var client = A.Fake<ITemporalClient>();
+        var sessionClient = new DurableChatSessionClient(
+            client,
+            new DurableExecutionOptions { TaskQueue = "test" });
+        var options = new ChatOptions
+        {
+            Tools = [AIFunctionFactory.Create(() => "result", "tool", "test tool")],
+        };
+
+        var exception = await Assert.ThrowsAsync<DurableConfigurationException>(
+            () => sessionClient.SendAsync("conversation", [new ChatMessage(ChatRole.User, "hello")], options));
+
+        Assert.Contains("AddDurableTools", exception.Message, StringComparison.Ordinal);
+        A.CallTo(client).Where(call => call.Method.Name.Contains("UpdateWithStart", StringComparison.Ordinal)).MustNotHaveHappened();
     }
 }

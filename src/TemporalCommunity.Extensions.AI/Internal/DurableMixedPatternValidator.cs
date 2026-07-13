@@ -9,41 +9,31 @@ using Temporalio.Extensions.Hosting;
 namespace TemporalCommunity.Extensions.AI.Internal;
 
 /// <summary>
-/// Startup-time A-check that detects the silent mixed-pattern conflict in MEAI: when the
-/// <see cref="DurableFunctionRegistry"/> is non-empty (populated by <c>AddDurableTools()</c>
-/// for Pattern 3 OR by <c>.AsDurable()</c> wrapping for Pattern 2) AND the unkeyed
-/// <see cref="IChatClient"/> chain contains <see cref="FunctionInvokingChatClient"/>
-/// (Pattern 1's in-process loop). Runs as
+/// Startup-time validation for a durable session: when the
+/// <see cref="DurableFunctionRegistry"/> is non-empty and the unkeyed
+/// <see cref="IChatClient"/> chain contains <see cref="FunctionInvokingChatClient"/>, runs as
 /// <c>IPostConfigureOptions&lt;TemporalWorkerServiceOptions&gt;</c> — the same lifecycle hook
-/// used by the data-converter wiring + Step 3b's agent-pipeline validator.
+/// used by the data-converter wiring and the agent-pipeline validator.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Why this check exists.</b> The two MEAI patterns are mutually exclusive:
+/// <b>Why this check exists.</b> The managed session owns function invocation:
 /// </para>
 /// <list type="number">
 ///   <item>
 ///     <description>
-///       <b>Pattern 1:</b> <c>.UseFunctionInvocation()</c> + plain
-///       <see cref="AIFunction"/> tools — MEAI's <c>FunctionInvokingChatClient</c> handles
-///       the function-call loop in-process inside the chat activity. Default
-///       <c>DurableChatWorkflow</c> supports this.
+///       <c>AddDurableTools()</c> supplies the model schemas and worker implementations.
 ///     </description>
 ///   </item>
 ///   <item>
 ///     <description>
-///       <b>Pattern 2:</b> <c>.AsDurable()</c>-wrapped tools + custom workflow that
-///       explicitly dispatches each tool as a Temporal activity. The
-///       <see cref="IChatClient"/> MUST NOT include <c>.UseFunctionInvocation()</c>, or its
-///       in-process loop short-circuits the durable dispatch path.
+///       <c>DurableChatWorkflow</c> dispatches every returned tool call as a Temporal activity.
 ///     </description>
 ///   </item>
 /// </list>
 /// <para>
-/// When both are present, tool calls execute in-process inside the chat activity (because
-/// <c>FunctionInvokingChatClient</c> intercepts them before <c>.AsDurable()</c>'s dispatch can
-/// fire). Durability is silently violated. The A-check catches this combination at worker
-/// startup so misconfigurations fail at boot rather than at first conversation.
+/// Inline middleware would intercept tool calls before the workflow can schedule those activities.
+/// This check makes that configuration fail at startup rather than silently changing behavior.
 /// </para>
 /// <para>
 /// <b>Trigger condition:</b> <c>DurableFunctionRegistry.Count &gt; 0</c> AND the user's
@@ -84,8 +74,7 @@ internal sealed class DurableMixedPatternValidator
         var registry = _serviceProvider.GetService<DurableFunctionRegistry>();
         if (registry is null || registry.Count == 0)
         {
-            // No durable tools registered → no conflict possible. Pattern 1 (idiomatic
-            // .UseFunctionInvocation() without .AsDurable()) remains valid.
+            // No durable tools registered, so the managed-loop conflict is absent.
             return;
         }
 
@@ -121,8 +110,7 @@ internal sealed class DurableMixedPatternValidator
 
         if (AgentChainWalker.Contains<FunctionInvokingChatClient>(chatClient))
         {
-            // Mixed-pattern conflict — Pattern 1 + Pattern 2 simultaneously. Throw the
-            // canonical exception with its built-in remediation message.
+            // Inline middleware conflicts with the workflow-owned tool loop.
             throw new DurableMixedPatternException();
         }
     }

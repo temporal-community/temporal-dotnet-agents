@@ -38,11 +38,10 @@ namespace TemporalCommunity.Extensions.AI;
 /// <para>
 /// <b>Composition with other Temporal middleware.</b> The decorator runs INSIDE the durable-chat
 /// activity, after <see cref="IChatClient"/> resolution and before
-/// <c>GetStreamingResponseAsync</c>. The decorated chain is what the enforcement walk
-/// (Step 3b / 3c.3 — <c>FunctionInvocationDelegatingAgent</c> rejection) inspects, so
-/// decorators MUST NOT insert <see cref="Microsoft.Extensions.AI.FunctionInvokingChatClient"/>
-/// into the chain. (Per-call enforcement is deferred to Step 4d's wiring; for now the contract
-/// is documented.)
+/// <c>GetStreamingResponseAsync</c>. The decorated chain is validated on first use, so decorators
+/// MUST NOT insert <see cref="Microsoft.Extensions.AI.FunctionInvokingChatClient"/> when the
+/// managed session has durable tools registered. That middleware would bypass the workflow-owned
+/// tool activity loop.
 /// </para>
 /// </remarks>
 public interface IChatClientDecorator

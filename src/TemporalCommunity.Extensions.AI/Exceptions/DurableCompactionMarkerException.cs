@@ -10,9 +10,8 @@ namespace TemporalCommunity.Extensions.AI.Exceptions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Step 5 of the maf-feature-gap-analysis (Cypher mitigation #3 — projection validation on
-/// load surfaces tombstones loudly rather than silently producing a misleading reduced view).
-/// Distinct from <see cref="DurableReplayCompatibilityException"/>: that one fires on
+/// Projection validation on load surfaces tombstones loudly rather than silently producing a
+/// misleading reduced view. Distinct from <see cref="DurableReplayCompatibilityException"/>: that one fires on
 /// <c>$type</c> discriminator misses (mixed-fleet skew); this one fires when the marker
 /// itself is structurally inconsistent with the store contents around it.
 /// </para>

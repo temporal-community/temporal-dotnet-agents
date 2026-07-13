@@ -174,31 +174,16 @@ public class BaseContractGuardTests
     }
 
     // -----------------------------------------------------------------------------------------
-    // S-F-5 — AITool polymorphism watch.
+    // S-F-5 — caller-owned tool definitions are prohibited on durable inputs.
     // -----------------------------------------------------------------------------------------
 
     /// <summary>
-    /// Round-trips a <see cref="ChatOptions"/> whose <see cref="ChatOptions.Tools"/> list is
-    /// populated, through the production durable options
-    /// (<see cref="DurableAIJsonUtilities.DefaultOptions"/>, which installs
-    /// <c>ChatOptionsToolsJsonConverter</c> and its <c>$toolNames</c> sidecar). Asserts the
-    /// current name-only behavior holds: tool names survive, with no double-encode.
+    /// A durable input must not carry <see cref="ChatOptions.Tools"/>. Tool delegates are
+    /// registered on the worker and rehydrated from the durable registry at activity time.
+    /// This assertion prevents an accidental return to serializing caller-owned tool delegates.
     /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Why this is the canary for MEAI adding AITool polymorphism.</b>
-    /// <c>ChatOptionsToolsJsonConverter</c> exists precisely because <see cref="AITool"/> has NO
-    /// <c>[JsonPolymorphic]</c>/<c>[JsonDerivedType]</c> in the base library — verified in the MEAI
-    /// source at <c>Microsoft.Extensions.AI.Abstractions/Tools/AITool.cs</c> (the type is declared
-    /// <c>public abstract class AITool</c> with no polymorphism attributes). If a future MEAI bump
-    /// ADDS polymorphism to AITool, the base serializer would start emitting a <c>$type</c>-tagged
-    /// Tools array, and our sidecar converter would then double-encode (sidecar + base array). The
-    /// assertions below — exactly one tool, name preserved, no per-tool <c>$type</c> leakage —
-    /// would break, surfacing that bump at CI time instead of in a customer's history.
-    /// </para>
-    /// </remarks>
     [Fact]
-    public void Meai_ChatOptionsTools_RoundTrip_NoDoubleEncode()
+    public void Meai_ChatOptionsTools_AreNotSerialized()
     {
         var options = new ChatOptions
         {
@@ -208,21 +193,8 @@ public class BaseContractGuardTests
 
         var json = JsonSerializer.Serialize(options, DurableAIJsonUtilities.DefaultOptions);
 
-        // The production wire format carries tool NAMES in a $toolNames sidecar, not a
-        // polymorphic per-tool $type array. If MEAI adds AITool polymorphism, the base
-        // serializer would emit the Tools array itself and this expectation would change.
-        Assert.Contains("$toolNames", json);
-        Assert.Contains("lookup_order", json);
-
-        var roundTripped = JsonSerializer.Deserialize<ChatOptions>(
-            json, DurableAIJsonUtilities.DefaultOptions);
-
-        Assert.NotNull(roundTripped);
-        Assert.NotNull(roundTripped!.Tools);
-        // Exactly one tool — a double-encode (sidecar + base polymorphic array) would change
-        // the count or materialize duplicate/typed entries.
-        Assert.Single(roundTripped.Tools!);
-        Assert.Equal("lookup_order", roundTripped.Tools![0].Name);
+        Assert.DoesNotContain("lookup_order", json);
+        Assert.DoesNotContain("$toolNames", json);
     }
 
     // -----------------------------------------------------------------------------------------

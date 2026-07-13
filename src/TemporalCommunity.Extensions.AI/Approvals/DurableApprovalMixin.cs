@@ -20,8 +20,32 @@ namespace TemporalCommunity.Extensions.AI.Approvals;
 /// </remarks>
 internal sealed class DurableApprovalMixin
 {
+    private const int MaxRetainedResolutions = 32;
     private DurableApprovalRequest? _pendingApproval;
     private DurableApprovalDecision? _approvalDecision;
+    private readonly List<DurableApprovalDecision> _resolvedApprovals = [];
+
+    /// <summary>
+    /// Restores the bounded resolution history carried into a new workflow run.
+    /// </summary>
+    public void RestoreResolvedApprovals(IReadOnlyList<DurableApprovalDecision>? decisions)
+    {
+        _resolvedApprovals.Clear();
+        if (decisions is null)
+        {
+            return;
+        }
+
+        foreach (var decision in decisions.TakeLast(MaxRetainedResolutions))
+        {
+            _resolvedApprovals.Add(decision);
+        }
+    }
+
+    /// <summary>
+    /// Returns the bounded resolution history for continue-as-new input.
+    /// </summary>
+    public IReadOnlyList<DurableApprovalDecision> GetResolvedApprovals() => _resolvedApprovals;
 
     // ── Validators ──────────────────────────────────────────────────────────
 
@@ -93,6 +117,19 @@ internal sealed class DurableApprovalMixin
             throw new InvalidOperationException(
                 "An approval request is already pending. Submit or timeout the current request before sending another.");
 
+        // The caller supplies the request content; the workflow is the authority for its
+        // deadline. Copy rather than mutate so a request object reused by a caller cannot
+        // introduce a stale or inconsistent expiration timestamp.
+        request = new DurableApprovalRequest
+        {
+            RequestId = request.RequestId,
+            FunctionName = request.FunctionName,
+            CallId = request.CallId,
+            Description = request.Description,
+            ReviewData = request.ReviewData,
+            ExpiresAt = Workflow.UtcNow + approvalTimeout,
+        };
+
         _pendingApproval = request;
         _approvalDecision = null;
 
@@ -112,6 +149,7 @@ internal sealed class DurableApprovalMixin
             };
 
             onResolved?.Invoke(timedOutDecision);   // callback first
+            RememberResolution(timedOutDecision);
             _pendingApproval = null;                // then clear state
             _approvalDecision = null;
             return timedOutDecision;
@@ -120,6 +158,7 @@ internal sealed class DurableApprovalMixin
         var decision = _approvalDecision!;
 
         onResolved?.Invoke(decision);   // callback first
+        RememberResolution(decision);
         _pendingApproval = null;        // then clear state
         _approvalDecision = null;
         return decision;
@@ -134,7 +173,81 @@ internal sealed class DurableApprovalMixin
     }
 
     /// <summary>
+    /// Resolves the current approval request with retry-safe result semantics.
+    /// </summary>
+    public DurableApprovalResolutionResult ResolveApproval(DurableApprovalDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+
+        var retained = _resolvedApprovals.LastOrDefault(
+            existing => string.Equals(existing.RequestId, decision.RequestId, StringComparison.Ordinal));
+
+        if (_pendingApproval is null)
+        {
+            if (retained is null)
+            {
+                return Result(DurableApprovalResolutionStatus.NotPending, decision.RequestId);
+            }
+
+            return Result(
+                IsEquivalent(retained, decision)
+                    ? DurableApprovalResolutionStatus.AlreadyResolved
+                    : DurableApprovalResolutionStatus.Conflict,
+                decision.RequestId);
+        }
+
+        if (!string.Equals(_pendingApproval.RequestId, decision.RequestId, StringComparison.Ordinal))
+        {
+            if (retained is not null)
+            {
+                return Result(
+                    IsEquivalent(retained, decision)
+                        ? DurableApprovalResolutionStatus.AlreadyResolved
+                        : DurableApprovalResolutionStatus.Conflict,
+                    decision.RequestId);
+            }
+
+            return Result(DurableApprovalResolutionStatus.RequestMismatch, decision.RequestId);
+        }
+
+        if (_approvalDecision is not null)
+        {
+            return Result(
+                IsEquivalent(_approvalDecision, decision)
+                    ? DurableApprovalResolutionStatus.AlreadyResolved
+                    : DurableApprovalResolutionStatus.Conflict,
+                decision.RequestId);
+        }
+
+        _approvalDecision = decision;
+        return Result(DurableApprovalResolutionStatus.Accepted, decision.RequestId);
+    }
+
+    /// <summary>
     /// Returns the currently pending approval request, or <see langword="null"/> if none.
     /// </summary>
     public DurableApprovalRequest? GetPendingApproval() => _pendingApproval;
+
+    private void RememberResolution(DurableApprovalDecision decision)
+    {
+        _resolvedApprovals.RemoveAll(existing =>
+            string.Equals(existing.RequestId, decision.RequestId, StringComparison.Ordinal));
+        _resolvedApprovals.Add(decision);
+        if (_resolvedApprovals.Count > MaxRetainedResolutions)
+        {
+            _resolvedApprovals.RemoveRange(0, _resolvedApprovals.Count - MaxRetainedResolutions);
+        }
+    }
+
+    private static bool IsEquivalent(DurableApprovalDecision left, DurableApprovalDecision right) =>
+        left.Approved == right.Approved &&
+        string.Equals(left.Reason, right.Reason, StringComparison.Ordinal);
+
+    private static DurableApprovalResolutionResult Result(
+        DurableApprovalResolutionStatus status,
+        string requestId) => new()
+        {
+            RequestId = requestId,
+            Status = status,
+        };
 }

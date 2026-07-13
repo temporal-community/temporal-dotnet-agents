@@ -18,14 +18,11 @@ public static class DurableAIServiceCollectionExtensions
     /// <remarks>
     /// <para>
     /// Before calling this method, register an <see cref="IChatClient"/> in the service collection.
-    /// The idiomatic MEAI pattern uses <c>AddChatClient</c>, which returns a
-    /// <see cref="Microsoft.Extensions.AI.ChatClientBuilder"/> for chaining middleware:
+    /// Register the chat client without inline function-invocation middleware:
     /// </para>
     /// <code>
     /// builder.Services
-    ///     .AddChatClient(innerClient)
-    ///     .UseFunctionInvocation()
-    ///     .Build();
+    ///     .AddChatClient(innerClient);
     /// </code>
     /// <para>
     /// <see cref="DurableChatActivities"/> constructor-injects the <b>unkeyed</b> <see cref="IChatClient"/>.
@@ -61,7 +58,7 @@ public static class DurableAIServiceCollectionExtensions
     /// Registers one or more <see cref="AIFunction"/> tools for durable execution.
     /// Each tool can be resolved by name inside <see cref="DurableFunctionActivities"/>
     /// when invoked via <see cref="DurableAIFunctionExtensions.AsDurable"/> inside a workflow,
-    /// or dispatched automatically by <see cref="DurableChatWorkflow"/> under Pattern 3.
+    /// or dispatched automatically by <see cref="DurableChatWorkflow"/> in a managed session.
     /// </summary>
     /// <param name="builder">The worker options builder returned by <see cref="AddDurableAI"/>.</param>
     /// <param name="tools">The tools to register. Each receives a default
@@ -86,7 +83,7 @@ public static class DurableAIServiceCollectionExtensions
     /// <summary>
     /// Registers a single <see cref="AIFunction"/> tool for durable execution with optional
     /// per-tool retry / timeout overrides applied when the tool is dispatched as a Temporal
-    /// activity under Pattern 3.
+    /// activity in a managed session.
     /// </summary>
     /// <param name="builder">The worker options builder returned by <see cref="AddDurableAI"/>.</param>
     /// <param name="tool">The tool to register.</param>
@@ -102,7 +99,7 @@ public static class DurableAIServiceCollectionExtensions
     /// <see cref="DurableChatToolOptions"/> when <paramref name="configure"/> is
     /// <see langword="null"/>, otherwise the configured instance. This guarantees the
     /// <see cref="DurableChatSessionClient"/> sees every registered tool when it resolves
-    /// Pattern 3 activation at session start.
+    /// managed-session tool dispatch at session start.
     ///
     /// <para>
     /// Write-style tools (send email, persist a record, charge a card) should call
@@ -176,7 +173,7 @@ internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>
 /// — every registered tool gets an entry, even if the caller passed
 /// <see langword="null"/> for <c>configure</c>. The <see cref="DurableChatSessionClient"/>
 /// consumes this registry to build the per-tool <c>ActivityOptions</c> dictionary that
-/// drives Pattern 3 dispatch.
+/// drives managed tool dispatch.
 /// </summary>
 // The same CS8644 caveat as DurableFunctionRegistry above — Dictionary<TKey, TValue> already
 // implements IReadOnlyDictionary<TKey, TValue>; re-declaring it would trigger the nullability

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.AI.Approvals;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Session;
 using Temporalio.Workflows;
 
@@ -28,6 +29,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
     private readonly Lazy<IReadOnlyDictionary<string, ActivityOptions>?> _interceptorToolActivityOptionsCache;
     private readonly Lazy<IReadOnlyList<string>?> _interceptorSkippedToolsCache;
     private readonly Lazy<IReadOnlyList<string>?> _requiresApprovalToolsCache;
+    private readonly Lazy<IReadOnlyDictionary<string, TimeSpan>?> _toolApprovalTimeoutsCache;
 
     /// <summary>
     /// Initializes a new <see cref="DurableChatSessionClient"/>.
@@ -44,9 +46,8 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
     }
 
     /// <summary>
-    /// Internal constructor used by DI to inject the durable-tool registries needed for
-    /// Pattern 3 activation. External callers use the public 3-arg constructor; the
-    /// session client they get back will be Pattern 1 only (no registries injected).
+    /// Internal constructor used by DI to inject the durable-tool registries. The managed
+    /// session loop obtains both tool schemas and activity options from these registries.
     /// </summary>
     internal DurableChatSessionClient(
         ITemporalClient client,
@@ -76,6 +77,9 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
             LazyThreadSafetyMode.ExecutionAndPublication);
         _requiresApprovalToolsCache = new Lazy<IReadOnlyList<string>?>(
             BuildRequiresApprovalTools,
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        _toolApprovalTimeoutsCache = new Lazy<IReadOnlyDictionary<string, TimeSpan>?>(
+            BuildToolApprovalTimeouts,
             LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
@@ -119,6 +123,13 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
         ArgumentNullException.ThrowIfNull(messages);
 
+        if (options?.Tools is { Count: > 0 })
+        {
+            throw new DurableConfigurationException(
+                "ChatOptions.Tools cannot be used for a durable chat session. " +
+                "Register tools with AddDurableTools so Temporal can schedule each invocation as an activity.");
+        }
+
         var workflowId = GetWorkflowId(conversationId);
 
         using var span = DurableChatTelemetry.ActivitySource.StartActivity(
@@ -131,8 +142,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         _logger.LogClientSendingChat(workflowId);
 
         // Eagerly resolve per-tool ActivityOptions for every registered tool at session
-        // start. The resulting dict (or null when no tools are registered) is the
-        // activation marker for Pattern 3 — it freezes into workflow history and survives
+        // start. The resulting dictionary freezes into workflow history and survives
         // continue-as-new transitions deterministically.
         var toolActivityOptions = _toolActivityOptionsCache.Value;
 
@@ -143,6 +153,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         var interceptorToolActivityOptions = _interceptorToolActivityOptionsCache.Value;
         var interceptorSkippedTools = _interceptorSkippedToolsCache.Value;
         var requiresApprovalTools = _requiresApprovalToolsCache.Value;
+        var toolApprovalTimeouts = _toolApprovalTimeoutsCache.Value;
 
         // Start the workflow if it doesn't exist, or reuse the existing one.
         // OriginalCreatedAt is intentionally omitted here — the workflow sets it to
@@ -172,6 +183,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
                 InterceptorToolActivityOptions = interceptorToolActivityOptions,
                 InterceptorSkippedTools = interceptorSkippedTools,
                 RequiresApprovalTools = requiresApprovalTools,
+                ToolApprovalTimeouts = toolApprovalTimeouts,
             }),
             new WorkflowOptions(workflowId, _options.TaskQueue!)
             {
@@ -247,10 +259,9 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
     }
 
     /// <summary>
-    /// Submits a human decision for a pending tool approval request.
-    /// Unblocks the workflow's <c>RequestApprovalAsync</c> update.
+    /// Resolves a human decision for a pending tool approval request.
     /// </summary>
-    public async Task SubmitApprovalAsync(
+    public async Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
         string conversationId,
         DurableApprovalDecision decision,
         CancellationToken cancellationToken = default)
@@ -259,8 +270,8 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         ArgumentNullException.ThrowIfNull(decision);
 
         var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
-        await handle.ExecuteUpdateAsync(
-            wf => wf.SubmitApprovalAsync(decision),
+        return await handle.ExecuteUpdateAsync<DurableChatWorkflow, DurableApprovalResolutionResult>(
+            wf => wf.ResolveApprovalAsync(decision),
             new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
     }
 
@@ -292,9 +303,8 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
 
     /// <summary>
     /// Builds the per-tool <see cref="ActivityOptions"/> dictionary that the workflow uses
-    /// to dispatch each tool call when Pattern 3 is active. Returns <see langword="null"/>
-    /// when no durable tools are registered — that's the workflow's signal to stay on the
-    /// Pattern 1 single-activity path.
+    /// to dispatch each tool call. Returns <see langword="null"/> when no durable tools are
+    /// registered; the workflow still runs its model-step activity but supplies no tool schemas.
     /// </summary>
     /// <remarks>
     /// Iterates every entry in the function registry (NOT just tools with explicit option
@@ -427,6 +437,31 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
             if (kvp.Value.RequireApprovalFlag)
             {
                 (result ??= new List<string>()).Add(kvp.Key);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Builds the per-tool approval timeout snapshot. Entries exist only for explicit
+    /// overrides; the workflow uses its session-wide timeout for every other tool.
+    /// </summary>
+    private IReadOnlyDictionary<string, TimeSpan>? BuildToolApprovalTimeouts()
+    {
+        if (_toolOptionsRegistry is null)
+        {
+            return null;
+        }
+
+        Dictionary<string, TimeSpan>? result = null;
+
+        foreach (var kvp in _toolOptionsRegistry)
+        {
+            if (kvp.Value.ApprovalTimeout is { } timeout)
+            {
+                result ??= new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase);
+                result[kvp.Key] = timeout;
             }
         }
 

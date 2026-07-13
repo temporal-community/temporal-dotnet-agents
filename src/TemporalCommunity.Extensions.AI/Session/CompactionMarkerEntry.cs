@@ -11,12 +11,9 @@ namespace TemporalCommunity.Extensions.AI.Session;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Step 5 of the maf-feature-gap-analysis: <b>compaction marker</b>. The marker is an entry
-/// in the durable history that replaces a contiguous run of source entries. When
-/// <see cref="HistoryStore.IAgentHistoryStore.LoadAsync"/> is called with
-/// <c>applyCompaction: true</c>, store implementations project the marker by collapsing the
-/// referenced source IDs and prepending the rollup summary; with <c>applyCompaction: false</c>,
-/// the raw entries are returned untouched (audit canonical).
+/// The marker is an entry in durable history that represents a contiguous run of source entries.
+/// Consumers that support compaction may use its source IDs and rollup message to project a
+/// compacted view; consumers that do not support compaction preserve the entry as serialized.
 /// </para>
 /// <para>
 /// <b>Wire-format constant.</b> The discriminator <c>"compaction-marker"</c> is embedded in
@@ -32,8 +29,7 @@ namespace TemporalCommunity.Extensions.AI.Session;
 ///   <item>
 ///     <description>
 ///       <see cref="CompactedMessageIds"/> — the source-entry correlation IDs the marker
-///       replaces. Used by <c>CompactionAwareErasureHelper</c> to compute intersections when
-///       a GDPR delete fires.
+///       replaces. Consumers can use these IDs to determine which entries the marker covers.
 ///     </description>
 ///   </item>
 ///   <item>

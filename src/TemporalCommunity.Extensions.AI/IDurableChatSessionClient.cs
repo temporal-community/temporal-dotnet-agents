@@ -66,12 +66,12 @@ public interface IDurableChatSessionClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Submits a human decision for a pending tool approval request, unblocking the workflow.
+    /// Resolves a human decision for a pending tool approval request.
     /// </summary>
     /// <param name="conversationId">The conversation identifier.</param>
     /// <param name="decision">The human's approval or rejection decision.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    Task SubmitApprovalAsync(
+    Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
         string conversationId,
         DurableApprovalDecision decision,
         CancellationToken cancellationToken = default);

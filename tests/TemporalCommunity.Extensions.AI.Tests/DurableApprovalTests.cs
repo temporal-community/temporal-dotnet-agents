@@ -16,12 +16,20 @@ public class DurableApprovalTests
             FunctionName = "delete_records",
             CallId = "call-42",
             Description = "Deletes all user records",
+            ReviewData = new Dictionary<string, string>
+            {
+                ["accountId"] = "acct-42",
+                ["policy"] = "deletion-review",
+            },
+            ExpiresAt = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero),
         };
 
         Assert.Equal("req-1", request.RequestId);
         Assert.Equal("delete_records", request.FunctionName);
         Assert.Equal("call-42", request.CallId);
         Assert.Equal("Deletes all user records", request.Description);
+        Assert.Equal("acct-42", request.ReviewData!["accountId"]);
+        Assert.Equal(new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero), request.ExpiresAt);
     }
 
     [Fact]
@@ -61,6 +69,8 @@ public class DurableApprovalTests
             FunctionName = "deploy",
             CallId = "call-7",
             Description = "Deploy to production",
+            ReviewData = new Dictionary<string, string> { ["environment"] = "production" },
+            ExpiresAt = new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero),
         };
 
         var json = JsonSerializer.Serialize(request, AIJsonUtilities.DefaultOptions);
@@ -71,6 +81,8 @@ public class DurableApprovalTests
         Assert.Equal("deploy", deserialized.FunctionName);
         Assert.Equal("call-7", deserialized.CallId);
         Assert.Equal("Deploy to production", deserialized.Description);
+        Assert.Equal("production", deserialized.ReviewData!["environment"]);
+        Assert.Equal(new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero), deserialized.ExpiresAt);
     }
 
     [Fact]

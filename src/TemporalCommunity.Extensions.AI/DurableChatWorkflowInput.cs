@@ -31,11 +31,11 @@ public record class DurableChatWorkflowInput
     public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// Retry policy applied to dispatched activities (LLM calls and the Pattern 3 tool-dispatch
+    /// Retry policy applied to dispatched activities (LLM calls and the durable tool-dispatch
     /// fallback). Resolved at session start from <c>DurableExecutionOptions.RetryPolicy</c>.
     /// </summary>
     /// <remarks>
-    /// When a Pattern 3 tool has no per-tool entry in <see cref="ToolActivityOptions"/>
+    /// When a durable tool has no per-tool entry in <see cref="ToolActivityOptions"/>
     /// (defensive fallback in <c>DurableChatWorkflow.ResolveToolActivityOptions</c>), this value
     /// is applied so the tool activity does not fall back to Temporal's default policy
     /// (unlimited retries). A non-idempotent unregistered tool would otherwise retry forever.
@@ -49,6 +49,11 @@ public record class DurableChatWorkflowInput
     /// Defaults to 7 days.
     /// </summary>
     public TimeSpan ApprovalTimeout { get; init; } = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// Bounded approval decisions retained for idempotent reviewer retries across continue-as-new.
+    /// </summary>
+    public IReadOnlyList<Approvals.DurableApprovalDecision>? ApprovalResolutionHistory { get; init; }
 
     /// <summary>
     /// When <see langword="true"/>, the workflow upserts <c>TurnCount</c> and
@@ -112,11 +117,9 @@ public record class DurableChatWorkflowInput
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Non-null with at least one entry indicates Pattern 3 (durable tool dispatch loop) is
-    /// active for this workflow. Null or empty indicates Pattern 1 (inline tool execution
-    /// inside the single chat activity). The activation decision is frozen into workflow
-    /// history at session start so replay is deterministic regardless of which worker
-    /// process picks it up. Carried forward verbatim through continue-as-new transitions.
+    /// Entries are frozen into workflow history at session start so tool activity behavior is
+    /// replay-deterministic regardless of which worker processes a given turn. They are carried
+    /// forward verbatim through continue-as-new transitions.
     /// </para>
     /// <para>
     /// <b>Mid-session drift:</b> per-tool options are frozen at session start. A new
@@ -131,7 +134,7 @@ public record class DurableChatWorkflowInput
     /// <summary>
     /// Shared <see cref="ActivityOptions"/> used when dispatching a <c>RunToolInterceptor</c>
     /// activity. Non-null only when a <c>DefaultToolInterceptor</c> was registered at session
-    /// start. Acts as the Pattern 3 interceptor activation marker — null means no interceptor
+    /// start. A null value means no interceptor
     /// activities are dispatched.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -164,7 +167,20 @@ public record class DurableChatWorkflowInput
     public IReadOnlyList<string>? RequiresApprovalTools { get; init; }
 
     /// <summary>
-    /// Maximum number of LLM iterations the Pattern 3 dispatch loop will execute before
+    /// Per-tool approval timeout overrides, captured at session start. A timeout applies
+    /// whenever that tool enters an approval wait, whether the wait was required by the
+    /// tool registration or by an interceptor decision.
+    /// </summary>
+    /// <remarks>
+    /// Entries are carried forward through continue-as-new so an in-flight session is not
+    /// changed by later worker configuration updates. Tools without an entry use
+    /// <see cref="ApprovalTimeout"/>.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, TimeSpan>? ToolApprovalTimeouts { get; init; }
+
+    /// <summary>
+    /// Maximum number of LLM iterations the durable tool loop will execute before
     /// synthesizing an "iterations exceeded" sentinel response and aborting the turn.
     /// Defaults to 20. Mirrors MAF's <c>DurableAgentBuilder.MaxToolCallsPerTurn</c>.
     /// </summary>

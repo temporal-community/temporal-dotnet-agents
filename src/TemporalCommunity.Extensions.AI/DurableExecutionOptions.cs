@@ -179,19 +179,19 @@ public sealed class DurableExecutionOptions
     public bool RegisterDefaultWorkflow { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the maximum number of LLM iterations the Pattern 3 dispatch loop will
+    /// Gets or sets the maximum number of LLM iterations the durable tool loop will
     /// execute before synthesizing an "iterations exceeded" sentinel response and aborting
     /// the turn. Defaults to <c>20</c>.
     /// </summary>
     /// <remarks>
-    /// Only relevant when Pattern 3 is active (durable tools registered via
+    /// Relevant when durable tools are registered via
     /// <see cref="DurableAIServiceCollectionExtensions.AddDurableTools(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction[])"/>).
     /// </remarks>
     public int MaxToolCallsPerTurn { get; set; } = 20;
 
     /// <summary>
     /// Gets or sets the maximum number of consecutive iterations in which one or more tools
-    /// may fail before the Pattern 3 dispatch loop surfaces a non-retryable
+    /// may fail before the durable tool loop surfaces a non-retryable
     /// <c>ApplicationFailureException</c>. Defaults to <c>3</c>. Set to <c>0</c> for
     /// immediate propagation (MAF-style behavior where the first tool failure aborts the turn).
     /// </summary>
@@ -226,7 +226,7 @@ public sealed class DurableExecutionOptions
     /// <summary>
     /// Gets or sets a factory that creates a worker-level
     /// <see cref="IDurableToolInterceptor{TContext}"/> for intercepting tool calls before
-    /// dispatch in the Pattern 3 loop. When <see langword="null"/> (default), no
+    /// dispatch in the durable tool loop. When <see langword="null"/> (default), no
     /// interceptor activity is dispatched and tools are invoked directly.
     /// </summary>
     /// <remarks>

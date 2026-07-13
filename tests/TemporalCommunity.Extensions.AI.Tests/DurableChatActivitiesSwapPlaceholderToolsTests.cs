@@ -9,30 +9,23 @@ using Xunit;
 namespace TemporalCommunity.Extensions.AI.Tests;
 
 /// <summary>
-/// Pins the S-X-7 contract: when <c>SwapPlaceholderTools</c> cannot resolve a
-/// <see cref="ToolNamePlaceholder"/> name in the <see cref="DurableFunctionRegistry"/>
-/// it must fail fast with a non-retryable <see cref="ApplicationFailureException"/> whose
-/// <see cref="ApplicationFailureException.ErrorType"/> is
-/// <c>nameof(DurablePlaceholderToolNotRegisteredException)</c> and whose message names the
-/// missing tool — rather than warn-and-drop (which would silently ship the LLM request
-/// without the tool it was told to use). Non-retryable is deliberate: retrying a
-/// configuration error would loop forever. Supersedes the earlier SMITH-1 warn-and-drop behavior.
+/// Caller-supplied <see cref="ChatOptions.Tools"/> cannot cross a durable activity boundary.
+/// Durable sessions construct model-facing schemas exclusively from the registered tool registry.
 /// </summary>
-public class DurableChatActivitiesSwapPlaceholderToolsTests
+public class DurableChatActivitiesCallerToolsTests
 {
     /// <summary>
-    /// The unknown tool name used to produce a drop-without-warning scenario before the fix.
+    /// The unknown tool name confirms validation does not depend on registry membership.
     /// </summary>
     private const string UnknownToolName = "ghost-tool";
 
     /// <summary>
-    /// A tool that IS in the registry — used to confirm the registry is wired correctly
-    /// and that only the missing name triggers the warning.
+    /// A tool that is in the registry still cannot be supplied by a caller through ChatOptions.
     /// </summary>
     private const string KnownToolName = "real-tool";
 
     [Fact]
-    public async Task SwapPlaceholderTools_UnknownName_ThrowsWithToolName()
+    public async Task GetChatStepAsync_CallerSuppliedUnknownTool_ThrowsConfigurationFailure()
     {
         // Arrange
         var logEntries = new List<LogEntry>();
@@ -58,15 +51,14 @@ public class DurableChatActivitiesSwapPlaceholderToolsTests
 
         var activities = new DurableChatActivities(provider, loggerFactory);
 
-        // Build input with a ToolNamePlaceholder for the unknown tool name.
-        // ChatOptions.Tools contains two entries: one that IS in the registry (known)
-        // and one that is NOT (ghost-tool). The missing one must fail fast.
+        // Caller tool definitions are rejected regardless of whether individual names happen
+        // to exist in the durable registry.
         var options = new ChatOptions
         {
             Tools =
             [
-                new ToolNamePlaceholder(KnownToolName),
-                new ToolNamePlaceholder(UnknownToolName),
+                AIFunctionFactory.Create(() => "real-result", KnownToolName),
+                AIFunctionFactory.Create(() => "ghost-result", UnknownToolName),
             ],
         };
 
@@ -78,21 +70,19 @@ public class DurableChatActivitiesSwapPlaceholderToolsTests
             TurnNumber = 1,
         };
 
-        // Act + Assert — an unresolved placeholder must fail fast with a non-retryable
-        // ApplicationFailureException naming the missing tool, not silently drop it (S-X-7).
-        // GetChatStepAsync calls SwapPlaceholderTools on the Pattern 3 path.
+        // Act + Assert — configuration errors are non-retryable.
         var ex = await Assert.ThrowsAsync<ApplicationFailureException>(
             () => activities.GetChatStepAsync(input));
 
-        Assert.True(ex.NonRetryable, "Placeholder-not-registered must be non-retryable.");
-        Assert.Equal(nameof(DurablePlaceholderToolNotRegisteredException), ex.ErrorType);
-        Assert.Contains(UnknownToolName, ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.True(ex.NonRetryable);
+        Assert.Equal(nameof(DurableConfigurationException), ex.ErrorType);
+        Assert.Contains("ChatOptions.Tools", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SwapPlaceholderTools_KnownName_DoesNotEmitWarning()
+    public async Task GetChatStepAsync_CallerSuppliedRegisteredTool_ThrowsConfigurationFailure()
     {
-        // Arrange — only the known tool is in the options; no warning should fire.
+        // Arrange — a registered tool is also rejected when supplied through ChatOptions.
         var logEntries = new List<LogEntry>();
         var loggerFactory = new CapturingLoggerFactory(logEntries);
 
@@ -115,7 +105,7 @@ public class DurableChatActivitiesSwapPlaceholderToolsTests
 
         var options = new ChatOptions
         {
-            Tools = [new ToolNamePlaceholder(KnownToolName)],
+            Tools = [AIFunctionFactory.Create(() => "real-result", KnownToolName)],
         };
 
         var input = new DurableChatInput
@@ -126,16 +116,11 @@ public class DurableChatActivitiesSwapPlaceholderToolsTests
             TurnNumber = 1,
         };
 
-        // Act
-        await activities.GetChatStepAsync(input);
+        var ex = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => activities.GetChatStepAsync(input));
 
-        // Assert — no warning for a name that IS in the registry
-        var toolDropWarnings = logEntries
-            .Where(e => e.Level == LogLevel.Warning &&
-                        e.Message.Contains(KnownToolName, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-
-        Assert.Empty(toolDropWarnings);
+        Assert.True(ex.NonRetryable);
+        Assert.Equal(nameof(DurableConfigurationException), ex.ErrorType);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

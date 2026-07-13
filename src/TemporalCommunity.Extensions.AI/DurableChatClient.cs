@@ -128,6 +128,13 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
 
     private DurableChatInput CreateInput(IEnumerable<ChatMessage> messages, ChatOptions? options)
     {
+        if (options?.Tools is { Count: > 0 })
+        {
+            throw new Exceptions.DurableConfigurationException(
+                "ChatOptions.Tools cannot be used from a durable workflow call. " +
+                "Use DurableChatSessionClient with tools registered through AddDurableTools.");
+        }
+
         // TurnNumber is omitted (defaults to 0) in the middleware path: DurableChatClient is a
         // DI singleton shared across all workflow instances, so a per-instance counter would
         // aggregate across unrelated sessions and be meaningless. In the managed session path
@@ -192,7 +199,7 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         //
         // ALLOW (copied — serializable and materially steer the model):
         //   Temperature, MaxOutputTokens, TopP, TopK, StopSequences, FrequencyPenalty,
-        //   PresencePenalty, Seed, ModelId, ResponseFormat, Tools, ToolMode,
+        //   PresencePenalty, Seed, ModelId, ResponseFormat, ToolMode,
         //   AdditionalProperties (Temporal keys stripped), ConversationId,
         //   Instructions, Reasoning, AllowMultipleToolCalls, AllowBackgroundResponses.
         //
@@ -288,8 +295,7 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
     /// <summary>
     /// Returns <see langword="true"/> when the key is a Temporal-internal marker that must be
     /// stripped before passing options through to the inner <see cref="IChatClient"/>. Centralized
-    /// here so adding new keys (e.g., <c>WithChatClientFactoryKey</c> /
-    /// <c>WithChatClientTag</c> in Step 4) only requires one update site.
+    /// here so adding new keys only requires one update site.
     /// </summary>
     private static bool IsTemporalKey(string key) =>
         key is TemporalChatOptionsExtensions.ActivityTimeoutKey

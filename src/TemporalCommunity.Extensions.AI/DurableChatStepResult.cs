@@ -4,7 +4,7 @@ using Microsoft.Extensions.AI;
 namespace TemporalCommunity.Extensions.AI;
 
 /// <summary>
-/// Result of a single Pattern 3 LLM step. Returned by the
+/// Result of a single durable model step. Returned by the
 /// <c>TemporalCommunity.Extensions.AI.GetChatStep</c> activity and consumed by
 /// <see cref="DurableChatWorkflow"/> to drive the durable tool-dispatch loop.
 /// </summary>

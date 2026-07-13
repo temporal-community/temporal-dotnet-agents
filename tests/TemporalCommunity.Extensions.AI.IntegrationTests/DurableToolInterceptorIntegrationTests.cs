@@ -256,7 +256,7 @@ public class DurableToolInterceptorIntegrationTests
         Assert.Equal("send_email", pending!.FunctionName);
 
         // Approve.
-        await sessionClient.SubmitApprovalAsync(conversationId, new DurableApprovalDecision
+        await sessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
             Approved = true,
@@ -266,6 +266,201 @@ public class DurableToolInterceptorIntegrationTests
         var response = await chatTask.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.NotNull(response);
         Assert.Equal(1, harness.GetInvocationCount("send_email"));
+
+        await host.StopAsync();
+    }
+
+    /// <summary>
+    /// A tool-specific approval timeout overrides the session-wide seven-day default and
+    /// auto-denies the invocation without dispatching the tool.
+    /// </summary>
+    [Fact]
+    public async Task RequireApproval_PerToolTimeout_AutoDeniesWithoutToolDispatch()
+    {
+        await using var env = await WorkflowEnvironment.StartLocalAsync();
+
+        var harness = new ScriptedToolHarness();
+        var tool = harness.BuildAlwaysSucceeds("delete_records", "Deletes records.", _ => "deleted");
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", "delete_records")],
+            "The deletion was not approved.");
+
+        var taskQueue = $"interceptor-approval-timeout-{Guid.NewGuid():N}";
+        using var host = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
+            builder.AddDurableTools(tool, o =>
+                o.RequireApproval().WithApprovalTimeout(TimeSpan.FromSeconds(1))));
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"approval-timeout-{Guid.NewGuid():N}";
+
+        var chatTask = sessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "delete the records")]);
+
+        var response = await chatTask.WaitAsync(TimeSpan.FromSeconds(15));
+
+        Assert.NotNull(response);
+        Assert.Equal(0, harness.GetInvocationCount("delete_records"));
+        Assert.Contains("not approved", response.Text, StringComparison.OrdinalIgnoreCase);
+
+        await host.StopAsync();
+    }
+
+    /// <summary>
+    /// An interceptor may attach explicit reviewer-safe metadata. Raw model-supplied
+    /// function arguments do not appear on the request unless the interceptor chooses to
+    /// include a reduced value itself.
+    /// </summary>
+    [Fact]
+    public async Task InterceptorApproval_ExposesExplicitReviewData_NotRawFunctionArguments()
+    {
+        await using var env = await WorkflowEnvironment.StartLocalAsync();
+
+        var harness = new ScriptedToolHarness();
+        var tool = harness.BuildAlwaysSucceeds("transfer_funds", "Transfers funds.", _ => "transferred");
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent(
+                "call-1",
+                "transfer_funds",
+                new Dictionary<string, object?> { ["accountNumber"] = "secret-account-123" })],
+            "Transfer complete.");
+        var interceptor = new DelegateInterceptor((_, _) => Task.FromResult(
+            DurableToolDecision.PauseForApproval(
+                "Transfer funds to the reviewed recipient.",
+                new Dictionary<string, string>
+                {
+                    ["recipient"] = "payroll",
+                    ["policy"] = "finance-review",
+                })));
+
+        var taskQueue = $"interceptor-review-data-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, scripted, builder =>
+            builder.AddDurableTools(tool), interceptor);
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"review-data-{Guid.NewGuid():N}";
+        var chatTask = sessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "pay the payroll")]);
+
+        DurableApprovalRequest? pending = null;
+        for (var i = 0; i < 30 && pending is null; i++)
+        {
+            await Task.Delay(200);
+            pending = await sessionClient.GetPendingApprovalAsync(conversationId);
+        }
+
+        Assert.NotNull(pending);
+        Assert.Equal("payroll", pending!.ReviewData!["recipient"]);
+        Assert.Equal("finance-review", pending.ReviewData["policy"]);
+        Assert.DoesNotContain("accountNumber", pending.ReviewData.Keys, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secret-account-123", pending.ReviewData.Values);
+        Assert.NotNull(pending.ExpiresAt);
+
+        await sessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
+        {
+            RequestId = pending.RequestId,
+            Approved = true,
+        });
+
+        await chatTask.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(1, harness.GetInvocationCount("transfer_funds"));
+
+        await host.StopAsync();
+    }
+
+    /// <summary>
+    /// A completed decision remains idempotently recognizable after the workflow starts a
+    /// new run. This protects a reviewer retry whose first update response was lost.
+    /// </summary>
+    [Fact]
+    public async Task ApprovalResolution_RetryAfterContinueAsNew_ReturnsAlreadyResolved()
+    {
+        await using var env = await WorkflowEnvironment.StartLocalAsync();
+
+        var harness = new ScriptedToolHarness();
+        var tool = harness.BuildAlwaysSucceeds("send_email", "Sends email.", _ => "sent");
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", "send_email")],
+            "Email sent.");
+
+        var taskQueue = $"interceptor-approval-can-{Guid.NewGuid():N}";
+        using var host = BuildHostNoInterceptor(
+            env.Client,
+            taskQueue,
+            scripted,
+            builder => builder.AddDurableTools(tool, o => o.RequireApproval()),
+            options => options.MaxEntryCount = 2);
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"approval-can-{Guid.NewGuid():N}";
+        var workflowId = sessionClient.GetWorkflowId(conversationId);
+        var handle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        var chatTask = sessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "send the email")]);
+
+        DurableApprovalRequest? pending = null;
+        for (var i = 0; i < 30 && pending is null; i++)
+        {
+            await Task.Delay(200);
+            pending = await sessionClient.GetPendingApprovalAsync(conversationId);
+        }
+
+        Assert.NotNull(pending);
+        var firstRunId = (await handle.DescribeAsync()).RunId;
+        var decision = new DurableApprovalDecision
+        {
+            RequestId = pending!.RequestId,
+            Approved = true,
+            Reason = "approved for CAN retention test",
+        };
+
+        Assert.Equal(
+            DurableApprovalResolutionStatus.Accepted,
+            (await sessionClient.ResolveApprovalAsync(conversationId, decision)).Status);
+        await chatTask.WaitAsync(TimeSpan.FromSeconds(30));
+
+        string? continuedRunId = null;
+        for (var i = 0; i < 30 && continuedRunId is null; i++)
+        {
+            var currentRunId = (await handle.DescribeAsync()).RunId;
+            if (!string.Equals(firstRunId, currentRunId, StringComparison.Ordinal))
+            {
+                continuedRunId = currentRunId;
+                break;
+            }
+
+            await Task.Delay(200);
+        }
+
+        Assert.NotNull(continuedRunId);
+        var continuedHandle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+            workflowId, runId: continuedRunId);
+        DurableChatWorkflowInput? continuedInput = null;
+        await foreach (var historyEvent in continuedHandle.FetchHistoryEventsAsync())
+        {
+            if (historyEvent.WorkflowExecutionStartedEventAttributes?.Input?.Payloads_.Count > 0)
+            {
+                continuedInput = (DurableChatWorkflowInput)DurableAIDataConverter.Instance
+                    .PayloadConverter
+                    .ToValue(
+                        historyEvent.WorkflowExecutionStartedEventAttributes.Input.Payloads_[0],
+                        typeof(DurableChatWorkflowInput))!;
+                break;
+            }
+        }
+
+        Assert.NotNull(continuedInput);
+        Assert.Contains(
+            continuedInput!.ApprovalResolutionHistory!,
+            retained => retained.RequestId == decision.RequestId && retained.Approved);
+        var retry = await continuedHandle.ExecuteUpdateAsync<DurableChatWorkflow, DurableApprovalResolutionResult>(
+            workflow => workflow.ResolveApprovalAsync(decision));
+        Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, retry.Status);
 
         await host.StopAsync();
     }
@@ -367,7 +562,8 @@ public class DurableToolInterceptorIntegrationTests
         ITemporalClient client,
         string taskQueue,
         IChatClient chatClient,
-        Action<ITemporalWorkerServiceOptionsBuilder> registerTools)
+        Action<ITemporalWorkerServiceOptionsBuilder> registerTools,
+        Action<DurableExecutionOptions>? configureOptions = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(client);
@@ -384,6 +580,7 @@ public class DurableToolInterceptorIntegrationTests
                 opts.ActivityTimeout = TimeSpan.FromSeconds(60);
                 opts.HeartbeatTimeout = TimeSpan.FromSeconds(15);
                 opts.SessionTimeToLive = TimeSpan.FromMinutes(5);
+                configureOptions?.Invoke(opts);
                 // No DefaultToolInterceptor — RequireApproval must work independently.
             });
 

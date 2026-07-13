@@ -6,7 +6,8 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 /// Tests for the Phase 2 interceptor additions to <see cref="DurableChatToolOptions"/>:
 /// <see cref="DurableChatToolOptions.SkipInterceptor"/>,
 /// <see cref="DurableChatToolOptions.WithInterceptorTimeout"/>,
-/// and <see cref="DurableChatToolOptions.RequireApproval"/>.
+/// <see cref="DurableChatToolOptions.RequireApproval"/>, and
+/// <see cref="DurableChatToolOptions.WithApprovalTimeout"/>.
 /// Mirrors <c>DurableToolOptionsInterceptorTests</c> in the Agents project for symmetry.
 /// </summary>
 public class DurableChatToolOptionsInterceptorTests
@@ -111,5 +112,30 @@ public class DurableChatToolOptionsInterceptorTests
 
         Assert.True(opts.SkipInterceptorFlag);
         Assert.True(opts.RequireApprovalFlag);
+    }
+
+    [Fact]
+    public void ApprovalTimeout_DefaultIsNull()
+    {
+        var opts = new DurableChatToolOptions();
+        Assert.Null(opts.ApprovalTimeout);
+    }
+
+    [Fact]
+    public void WithApprovalTimeout_SetsTimeoutAndReturnsSameInstance()
+    {
+        var opts = new DurableChatToolOptions();
+        Assert.Same(opts, opts.WithApprovalTimeout(TimeSpan.FromMinutes(5)));
+        Assert.Equal(TimeSpan.FromMinutes(5), opts.ApprovalTimeout);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void WithApprovalTimeout_NonPositive_Throws(int seconds)
+    {
+        var opts = new DurableChatToolOptions();
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            opts.WithApprovalTimeout(TimeSpan.FromSeconds(seconds)));
     }
 }

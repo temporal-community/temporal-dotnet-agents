@@ -11,8 +11,7 @@ namespace TemporalCommunity.Extensions.AI.Exceptions;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Per the Step 4 design (artifacts/maf-feature-gap-analysis.md → Per-Call
-/// <c>ChatClientFactory</c>), registered <c>IChatClientDecorator</c> instances live under
+/// Registered <c>IChatClientDecorator</c> instances live under
 /// keyed DI singletons. A per-call factory key with no matching DI registration is
 /// a misconfiguration — surfacing it as a typed exception (rather than a vague
 /// <c>KeyNotFoundException</c> from the DI container) gives operators actionable diagnostics.

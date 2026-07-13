@@ -61,12 +61,26 @@ public class DurableApprovalIntegrationTests
                 Reason = "Approved by test",
             };
 
-            await _fixture.SessionClient.SubmitApprovalAsync(conversationId, decision);
+            var resolution = await _fixture.SessionClient.ResolveApprovalAsync(conversationId, decision);
+            Assert.Equal(DurableApprovalResolutionStatus.Accepted, resolution.Status);
 
             // The request task should complete now.
             var result = await requestTask.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.True(result.Approved);
             Assert.Equal(request.RequestId, result.RequestId);
+
+            var retry = await _fixture.SessionClient.ResolveApprovalAsync(conversationId, decision);
+            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, retry.Status);
+
+            var conflict = await _fixture.SessionClient.ResolveApprovalAsync(
+                conversationId,
+                new DurableApprovalDecision
+                {
+                    RequestId = request.RequestId,
+                    Approved = false,
+                    Reason = "Conflicting retry",
+                });
+            Assert.Equal(DurableApprovalResolutionStatus.Conflict, conflict.Status);
         }
         finally
         {
@@ -76,7 +90,7 @@ public class DurableApprovalIntegrationTests
             {
                 try
                 {
-                    await _fixture.SessionClient.SubmitApprovalAsync(
+                        await _fixture.SessionClient.ResolveApprovalAsync(
                         conversationId,
                         new DurableApprovalDecision
                         {
@@ -137,7 +151,7 @@ public class DurableApprovalIntegrationTests
                 Reason = "Too risky",
             };
 
-            await _fixture.SessionClient.SubmitApprovalAsync(conversationId, decision);
+            await _fixture.SessionClient.ResolveApprovalAsync(conversationId, decision);
 
             var result = await requestTask.WaitAsync(TimeSpan.FromSeconds(30));
             Assert.False(result.Approved);
@@ -149,7 +163,7 @@ public class DurableApprovalIntegrationTests
             {
                 try
                 {
-                    await _fixture.SessionClient.SubmitApprovalAsync(
+                        await _fixture.SessionClient.ResolveApprovalAsync(
                         conversationId,
                         new DurableApprovalDecision
                         {

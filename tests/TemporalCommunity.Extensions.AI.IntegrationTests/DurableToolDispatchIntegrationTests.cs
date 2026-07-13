@@ -1,17 +1,3 @@
-// Pattern 3 (durable tool dispatch in DurableChatSessionClient) — the tests below
-// reference library types that ship in Neo's parallel worktree:
-//   * AddDurableTools(AIFunction, Action<DurableChatToolOptions>?) overload
-//   * DurableChatToolOptions (NoRetry / WithTimeout / WithMaxAttempts)
-//   * DurableExecutionOptions.MaxToolCallsPerTurn
-//   * DurableExecutionOptions.MaximumConsecutiveErrorsPerRequest
-//   * DurableExecutionOptions.IncludeDetailedErrors
-//   * DurableToolsNotWrappedException
-//
-// Compilation is gated on the PATTERN3 constant so unit-test CI stays green
-// until Neo's branch merges. Activate locally with:
-//   dotnet build -c Debug -p:DefineConstants=PATTERN3
-// or by adding <DefineConstants>PATTERN3</DefineConstants> to the csproj
-// once the library types land.
 using System.Diagnostics;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,9 +14,8 @@ using Xunit;
 namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 
 /// <summary>
-/// Integration tests for Pattern 3 — durable tool dispatch inside the managed
-/// <see cref="DurableChatSessionClient"/> session loop (no custom workflow,
-/// no <c>UseFunctionInvocation()</c>).
+/// Integration tests for durable tool dispatch inside the managed
+/// <see cref="DurableChatSessionClient"/> session loop.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,9 +26,8 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// Activity type names (string literals) come from the plan's Decisions table
 /// and the existing <see cref="DurableFunctionActivities"/> attribute:
 /// <list type="bullet">
-///   <item><c>TemporalCommunity.Extensions.AI.GetChatStep</c> (new Pattern 3 activity)</item>
+///   <item><c>TemporalCommunity.Extensions.AI.GetChatStep</c> (model step)</item>
 ///   <item><c>TemporalCommunity.Extensions.AI.InvokeFunction</c> (existing, reused)</item>
-///   <item><c>TemporalCommunity.Extensions.AI.GetResponse</c> (Pattern 1 inline)</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -234,20 +218,16 @@ public class DurableToolDispatchIntegrationTests
     }
 
     /// <summary>
-    /// Test 5: regression — when callers use the existing Pattern 1 (
-    /// <c>UseFunctionInvocation()</c>, no <c>AddDurableTools</c>), the behaviour is
-    /// unchanged: a single <c>GetResponse</c> activity, no <c>GetChatStep</c>,
-    /// no <c>InvokeFunction</c>.
+    /// Caller-supplied tool definitions are rejected before a durable workflow is started.
     /// </summary>
     [Fact]
-    public async Task Pattern1Regression_UseFunctionInvocation_StillWorks()
+    public async Task CallerSuppliedTools_AreRejectedBeforeWorkflowDispatch()
     {
         await using var env = await WorkflowEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var weatherTool = harness.BuildAlwaysSucceeds("get_weather", "Weather.", _ => "sunny");
 
-        // Pattern 1 uses FunctionInvokingChatClient to execute tools inline.
         var scripted = ScriptedChatClient.WithToolCallsThenFinal(
             [new FunctionCallContent("call-1", "get_weather")],
             "Final weather report.");
@@ -275,21 +255,13 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"pattern1-{Guid.NewGuid():N}";
 
-        var response = await sessionClient.SendAsync(
-            conversationId,
-            [new ChatMessage(ChatRole.User, "weather?")],
-            new ChatOptions { Tools = [weatherTool] });
+        var error = await Assert.ThrowsAsync<Exceptions.DurableConfigurationException>(() =>
+            sessionClient.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "weather?")],
+                new ChatOptions { Tools = [weatherTool] }));
 
-        Assert.NotNull(response);
-
-        // No Pattern 3 activities should have been dispatched.
-        var workflowId = sessionClient.GetWorkflowId(conversationId);
-        var handle = env.Client.GetWorkflowHandle(workflowId);
-        var counts = await WorkflowHistoryAssertions.CountAllScheduledByTypeAsync(handle);
-        Assert.False(counts.ContainsKey(GetChatStepActivity),
-            "Pattern 1 must not dispatch the Pattern 3 GetChatStep activity.");
-        Assert.False(counts.ContainsKey(InvokeFunctionActivity),
-            "Pattern 1 dispatches tools inline; InvokeFunction must not appear.");
+        Assert.Contains("AddDurableTools", error.Message, StringComparison.Ordinal);
 
         await host.StopAsync();
     }
@@ -799,115 +771,18 @@ public class DurableToolDispatchIntegrationTests
     }
 
     /// <summary>
-    /// Test 11: the silent-failure safety net. Custom workflow invokes
-    /// <c>GetResponseAsync</c> directly (NOT via <c>DurableChatSessionClient</c>),
-    /// scripted LLM returns <see cref="FunctionCallContent"/>, and the chat-client
-    /// chain contains no <c>FunctionInvokingChatClient</c> — meaning nothing would
-    /// actually dispatch the returned tool calls. The runtime check in
-    /// <c>GetResponseAsync</c> must throw <c>DurableToolsNotWrappedException</c>
-    /// to surface the misconfiguration loudly.
+    /// The model receives exactly the functions registered through AddDurableTools.
     /// </summary>
     [Fact]
-    public async Task DurableToolsNotWrappedException_ThrowsOnSilentFailure()
+    public async Task RegisteredTools_AreProvidedToModel()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync(
-            new WorkflowEnvironmentStartLocalOptions
-            {
-                DataConverter = DurableAIDataConverter.Instance,
-            });
-
-        var harness = new ScriptedToolHarness();
-        var weatherTool = harness.BuildAlwaysSucceeds("get_weather", "weather", _ => "n/a");
-
-        // Scripted LLM returns a tool call. With middleware path + no FIC + no dispatcher,
-        // the runtime check must fire.
-        var scripted = new ScriptedChatClient(
-        [
-            new ChatResponse(new ChatMessage(ChatRole.Assistant,
-                [new FunctionCallContent("call-1", "get_weather")])),
-        ]);
-
-        var taskQueue = $"pattern3-silent-{Guid.NewGuid():N}";
-
-        var builder = Host.CreateApplicationBuilder();
-        builder.Services.AddSingleton<ITemporalClient>(env.Client);
-        // No UseFunctionInvocation() — this is the footgun.
-        builder.Services.AddSingleton<IChatClient>(scripted);
-
-        builder.Services
-            .AddHostedTemporalWorker(taskQueue)
-            .AddDurableAI(opts =>
-            {
-                opts.ActivityTimeout = TimeSpan.FromSeconds(30);
-                opts.HeartbeatTimeout = TimeSpan.FromSeconds(10);
-            })
-            .AddDurableTools(weatherTool)
-            // Register a custom workflow that uses DurableChatClient middleware (NOT the
-            // session client path that owns Pattern 3 dispatch).
-            .AddWorkflow<MiddlewareChatWorkflow>();
-
-        using var host = builder.Build();
-        await host.StartAsync();
-
-        var workflowId = $"silent-{Guid.NewGuid():N}";
-        var handle = await env.Client.StartWorkflowAsync(
-            (MiddlewareChatWorkflow wf) => wf.RunAsync(),
-            new WorkflowOptions(workflowId, taskQueue));
-
-        var ex = await Assert.ThrowsAnyAsync<Exception>(async () => await handle.GetResultAsync());
-
-        // Walk the exception chain looking for the expected type name (cross the activity boundary).
-        var found = false;
-        for (var e = (Exception?)ex; e is not null; e = e.InnerException)
-        {
-            if (e.GetType().Name == "DurableToolsNotWrappedException")
-            {
-                found = true;
-                break;
-            }
-            if (e is ApplicationFailureException afe && (afe.ErrorType?.Contains("DurableToolsNotWrapped") ?? false))
-            {
-                found = true;
-                break;
-            }
-        }
-        Assert.True(found, $"Expected DurableToolsNotWrappedException in exception chain; got: {ex}");
-
-        await host.StopAsync();
-    }
-
-    /// <summary>
-    /// Test 12: when the caller passes an explicit subset of tools via
-    /// <see cref="ChatOptions.Tools"/>, the activity must NOT overwrite that with
-    /// the full registry. Verifies the "respect explicit pass" promise of OD-1.
-    ///
-    /// Originally skipped because AITool/AIFunction instances couldn't survive JSON
-    /// serialization across the workflow→activity boundary (they wrap delegates).
-    /// Resolved by <see cref="ChatOptionsToolsJsonConverter"/>, which serializes the
-    /// tool subset as a <c>$toolNames</c> name sidecar and reconstitutes placeholder
-    /// AIFunction instances on the activity side; <c>SwapPlaceholderTools</c> then
-    /// swaps them for real registry entries by name before the LLM call.
-    /// </summary>
-    [Fact]
-    public async Task AutoPopulation_RespectsExplicitChatOptionsTools()
-    {
-        // ChatOptionsToolsJsonConverter only applies through DurableAIDataConverter; the
-        // embedded server's default client uses DataConverter.Default, which has no MEAI
-        // polymorphism wiring and would silently drop Tools on the workflow-update wire.
-        // Production code gets the converter auto-wired via AddTemporalClient / 3-arg
-        // AddHostedTemporalWorker / DurableAIPlugin; tests have to set it explicitly.
-        await using var env = await WorkflowEnvironment.StartLocalAsync(
-            new WorkflowEnvironmentStartLocalOptions
-            {
-                DataConverter = DurableAIDataConverter.Instance,
-            });
+        await using var env = await WorkflowEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var weather = harness.BuildAlwaysSucceeds("weather", "Weather", _ => "sunny");
         var stock = harness.BuildAlwaysSucceeds("stock", "Stock", _ => "100");
 
-        // Scripted client immediately returns a final answer — no tool calls.
-        // We only need to inspect what ChatOptions.Tools looked like at activity entry.
+        // Scripted client immediately returns a final answer. Inspect the schemas passed to it.
         var scripted = new ScriptedChatClient(
         [
             new ChatResponse(new ChatMessage(ChatRole.Assistant, "no tools needed")),
@@ -928,11 +803,9 @@ public class DurableToolDispatchIntegrationTests
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"explicit-{Guid.NewGuid():N}";
 
-        // Pass only the weather tool explicitly.
         var response = await sessionClient.SendAsync(
             conversationId,
-            [new ChatMessage(ChatRole.User, "just weather please")],
-            new ChatOptions { Tools = [weather] });
+            [new ChatMessage(ChatRole.User, "what can you do?")]);
 
         Assert.NotNull(response);
         Assert.Single(scripted.Calls);
@@ -940,8 +813,10 @@ public class DurableToolDispatchIntegrationTests
         var firstCall = scripted.Calls[0];
         Assert.NotNull(firstCall.Options);
         Assert.NotNull(firstCall.Options!.Tools);
-        Assert.Single(firstCall.Options.Tools!);
-        Assert.Equal("weather", firstCall.Options.Tools![0] is AIFunction af ? af.Name : null);
+        Assert.Equal(2, firstCall.Options.Tools!.Count);
+        Assert.Equal(
+            ["stock", "weather"],
+            firstCall.Options.Tools.Select(tool => tool.Name).Order());
 
         await host.StopAsync();
     }
@@ -949,8 +824,8 @@ public class DurableToolDispatchIntegrationTests
     // ── Test-host plumbing ──────────────────────────────────────────────────
 
     /// <summary>
-    /// Wires up the standard Pattern 3 worker host: scripted chat client (no
-    /// <c>UseFunctionInvocation()</c>), <see cref="DurableAIServiceCollectionExtensions.AddDurableAI"/>,
+    /// Wires up the standard durable-tool worker host: scripted chat client,
+    /// <see cref="DurableAIServiceCollectionExtensions.AddDurableAI"/>,
     /// optional per-tool / per-option configuration, and a stub embedding generator
     /// to satisfy <see cref="DurableEmbeddingActivities"/> constructor injection.
     /// </summary>
@@ -964,7 +839,7 @@ public class DurableToolDispatchIntegrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(client);
 
-        // Pattern 3 idiom: register the chat client WITHOUT UseFunctionInvocation().
+        // Durable sessions own function invocation; do not install inline function middleware.
         builder.Services
             .AddChatClient(chatClient)
             .Build();
@@ -1006,38 +881,3 @@ public class DurableToolDispatchIntegrationTests
         public void Dispose() { }
     }
 }
-
-/// <summary>
-/// Custom workflow that drives the <see cref="DurableChatClient"/> middleware path
-/// (Pattern 2 entry point) used by the <c>DurableToolsNotWrappedException</c> test.
-/// </summary>
-[Workflow("MiddlewareChatWorkflow")]
-public sealed class MiddlewareChatWorkflow
-{
-    [WorkflowRun]
-    public async Task<string> RunAsync()
-    {
-        var input = new DurableChatInput
-        {
-            Messages = [new ChatMessage(ChatRole.User, "hello")],
-            ConversationId = Workflow.Info.WorkflowId,
-        };
-
-        var response = await Workflow.ExecuteActivityAsync(
-            (DurableChatActivities a) => a.GetResponseAsync(input),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromSeconds(30),
-                HeartbeatTimeout = TimeSpan.FromSeconds(10),
-                // No RetryPolicy override — the activity throws
-                // DurableToolsNotWrappedException as a non-retryable
-                // ApplicationFailureException, so Temporal's default policy
-                // (unlimited retries) is short-circuited by the nonRetryable flag.
-                // If the library ever loses that nonRetryable: true, this test will
-                // hang as a regression signal.
-            });
-
-        return response.Messages.Count > 0 ? response.Messages[0].Text ?? string.Empty : string.Empty;
-    }
-}
-

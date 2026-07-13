@@ -16,6 +16,9 @@ namespace TemporalCommunity.Extensions.AI;
 /// The <paramref name="workflowId"/> parameter is the raw Temporal workflow ID (not a
 /// conversation ID or session key). Callers can obtain it via the client's own
 /// <c>GetWorkflowId</c> / <c>SessionId.WorkflowId</c> helpers.
+/// For MEAI applications, prefer <see cref="IDurableChatSessionClient.ResolveApprovalAsync"/>,
+/// which returns retry-safe resolution status. <see cref="SubmitApprovalAsync"/> remains the
+/// legacy cross-library bridge while the MAF approval contract is migrated.
 /// </remarks>
 public interface IDurableSessionControl
 {
@@ -31,6 +34,8 @@ public interface IDurableSessionControl
 
     /// <summary>
     /// Submits a human decision for a pending tool approval request, unblocking the workflow.
+    /// This legacy bridge does not report an idempotency status; MEAI callers should use
+    /// <see cref="IDurableChatSessionClient.ResolveApprovalAsync"/> instead.
     /// </summary>
     /// <param name="workflowId">The raw Temporal workflow ID for the session.</param>
     /// <param name="decision">The approval or rejection decision.</param>

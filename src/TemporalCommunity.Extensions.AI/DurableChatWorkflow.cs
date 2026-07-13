@@ -16,24 +16,10 @@ namespace TemporalCommunity.Extensions.AI;
 /// Includes HITL approval support via <c>[WorkflowUpdate]</c> for tool approval gates.
 /// </summary>
 /// <remarks>
-/// Two execution modes coexist on a single turn:
-/// <list type="bullet">
-///   <item>
-///     <b>Pattern 1</b> (inline tools): when
-///     <see cref="DurableChatWorkflowInput.ToolActivityOptions"/> is null/empty, one
-///     <c>GetResponseAsync</c> activity handles the LLM call and any inline tool
-///     invocation (via <c>FunctionInvokingChatClient</c> in the chain).
-///   </item>
-///   <item>
-///     <b>Pattern 3</b> (durable tool dispatch): when <c>ToolActivityOptions</c> is
-///     populated, the workflow drives a fan-out loop —
-///     <c>GetChatStepAsync</c> for the LLM call, then one
-///     <c>InvokeFunctionAsync</c> activity per tool call, then back to the LLM
-///     with the synthesized tool-result message — until the model returns a final
-///     assistant message or <see cref="DurableChatWorkflowInput.MaxToolCallsPerTurn"/>
-///     is exceeded.
-///   </item>
-/// </list>
+/// Each turn uses the workflow-owned model/tool loop: <c>GetChatStepAsync</c> performs one
+/// model call, every returned tool request is dispatched as an <c>InvokeFunctionAsync</c>
+/// activity, and results are fed to the next model call until a final assistant response is
+/// produced or <see cref="DurableChatWorkflowInput.MaxToolCallsPerTurn"/> is exceeded.
 /// </remarks>
 [Workflow("TemporalCommunity.Extensions.AI.DurableChatWorkflow")]
 internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse>
@@ -114,55 +100,10 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         ActivityOptions activityOptions,
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
-    {
-        // Pattern 3 activates when the session client populated per-tool ActivityOptions
-        // at workflow start. The decision is frozen in workflow history, so replay is
-        // deterministic regardless of which worker picks up the activation.
-        var toolOptions = RequiredInput.ToolActivityOptions;
-        if (toolOptions is null || toolOptions.Count == 0)
-        {
-            return ExecuteInlineToolTurnAsync(activityOptions, requestEntry, chatOptions);
-        }
-
-        return ExecuteDurableToolLoopTurnAsync(activityOptions, requestEntry, chatOptions);
-    }
+        => ExecuteDurableToolLoopTurnAsync(activityOptions, requestEntry, chatOptions);
 
     /// <summary>
-    /// Inline-tool dispatch (a.k.a. "Pattern 1"): a single <c>GetResponseAsync</c> activity
-    /// handles the LLM call and any inline tool invocation. Preserved verbatim from the
-    /// original implementation so existing workflows keep their event history shape.
-    /// </summary>
-    private Task<ChatResponse> ExecuteInlineToolTurnAsync(
-        ActivityOptions activityOptions,
-        DurableSessionRequest requestEntry,
-        ChatOptions? chatOptions)
-    {
-        if (!_perTurnMeta.TryGetValue(requestEntry, out var meta))
-            throw new InvalidOperationException(
-                $"Per-turn metadata missing for request {requestEntry.CorrelationId}. This is a bug.");
-
-        // Flatten the entire history (including the just-appended request entry) into
-        // a single message list so the LLM sees the full conversation each turn.
-        var activityMessages = History
-            .SelectMany(e => e.Messages)
-            .ToList();
-
-        var activityInput = new DurableChatInput
-        {
-            Messages = activityMessages,
-            Options = chatOptions,
-            ConversationId = meta.ConversationId ?? Workflow.Info.WorkflowId,
-            TurnNumber = CurrentTurnNumber,
-            ClientKey = meta.ClientKey,
-            CorrelationId = requestEntry.CorrelationId,
-        };
-        return Workflow.ExecuteActivityAsync(
-            (DurableChatActivities a) => a.GetResponseAsync(activityInput),
-            activityOptions);
-    }
-
-    /// <summary>
-    /// Durable tool-dispatch loop (a.k.a. "Pattern 3"). Alternates between
+    /// Durable tool-dispatch loop. Alternates between
     /// <c>GetChatStepAsync</c> (one LLM call, returns raw <see cref="FunctionCallContent"/>)
     /// and one <c>InvokeFunctionAsync</c> activity per tool call (fanned out in parallel via
     /// <see cref="Workflow.WhenAllAsync{TResult}(IEnumerable{Task{TResult}})"/>). Loop exits
@@ -354,12 +295,16 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
                             FunctionName = tc.Name,
                             CallId = tc.CallId,
                             Description = DurableToolDecisionPolicy.GetApprovalDescription(interceptorResult, tc.Name),
+                            // Metadata is deliberately interceptor-authored. Do not expose raw
+                            // model function arguments to a reviewer unless an interceptor has
+                            // first reduced them to explicit, safe review data.
+                            ReviewData = interceptorResult?.Metadata,
                         };
 
                         // Sequential: the mixin enforces one pending approval at a time.
                         var decision = await RequestApprovalFromTurnLoopAsync(
                             approvalRequest,
-                            RequiredInput.ApprovalTimeout,
+                            ResolveApprovalTimeout(tc.Name),
                             onRequested: req => Workflow.Logger.LogInformation(
                                 "[{SessionId}] Approval requested for tool '{ToolName}' (RequestId: {RequestId})",
                                 Workflow.Info.WorkflowId, req.FunctionName, req.RequestId),
@@ -565,13 +510,27 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         };
     }
 
+    /// <summary>
+    /// Resolves the reviewer deadline for a tool approval. Per-tool values are frozen in the
+    /// workflow input at session start; the session-wide timeout is the fallback.
+    /// </summary>
+    private TimeSpan ResolveApprovalTimeout(string toolName)
+    {
+        if (RequiredInput.ToolApprovalTimeouts is not null
+            && RequiredInput.ToolApprovalTimeouts.TryGetValue(toolName, out var timeout))
+        {
+            return timeout;
+        }
+
+        return RequiredInput.ApprovalTimeout;
+    }
+
     protected override ContinueAsNewException CreateContinueAsNewException(
         DurableChatWorkflowInput input)
     {
-        // Carry the Pattern 3 activation marker AND the iteration cap forward so the next
-        // run preserves the activation decision and configured loop behavior. Per-tool
-        // option freezes ensure mid-CAN drift cannot change the activation state of an
-        // already-active session. Interceptor config is also carried forward verbatim.
+        // Carry the per-tool options and iteration cap forward so the next run preserves the
+        // session's configured durable-tool behavior. Interceptor config is also carried
+        // forward verbatim.
         var carried = new DurableChatWorkflowInput
         {
             TimeToLive = input.TimeToLive,
@@ -580,6 +539,9 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             HeartbeatTimeout = input.HeartbeatTimeout,
             RetryPolicy = input.RetryPolicy,
             ApprovalTimeout = input.ApprovalTimeout,
+            // The base workflow has just snapshotted the current mixin state into input.
+            // Prefer that new snapshot over Input, which is the immutable start-of-run value.
+            ApprovalResolutionHistory = input.ApprovalResolutionHistory,
             EnableSearchAttributes = input.EnableSearchAttributes,
             MaxEntryCount = input.MaxEntryCount,
             HistoryReducer = input.HistoryReducer,
@@ -593,6 +555,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             InterceptorToolActivityOptions = Input?.InterceptorToolActivityOptions ?? input.InterceptorToolActivityOptions,
             InterceptorSkippedTools = Input?.InterceptorSkippedTools ?? input.InterceptorSkippedTools,
             RequiresApprovalTools = Input?.RequiresApprovalTools ?? input.RequiresApprovalTools,
+            ToolApprovalTimeouts = Input?.ToolApprovalTimeouts ?? input.ToolApprovalTimeouts,
         };
         return Workflow.CreateContinueAsNewException(
             (DurableChatWorkflow wf) => wf.RunAsync(carried));

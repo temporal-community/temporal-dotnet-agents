@@ -208,8 +208,8 @@ public class PolymorphicSerializationAuditTests
     /// <summary>
     /// <see cref="ChatOptions.StopSequences"/> is <see cref="IList{T}"/> of <see cref="string"/>
     /// (non-polymorphic, but a wrapper-around-list — verify it survives). Not a
-    /// suspect under the bug class, but cheap to verify and catches regressions in the
-    /// <c>ChatOptionsToolsJsonConverter</c> sibling-options flow.
+    /// suspect under the bug class, but cheap to verify as part of the durable
+    /// <see cref="ChatOptions"/> wire-format audit.
     /// </summary>
     [Fact]
     public void Audit_ChatOptions_StopSequences_RoundTrip()

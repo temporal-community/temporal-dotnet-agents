@@ -58,25 +58,19 @@ internal sealed class DurableChatActivities(
 
         SetupSpanTags(span, input.ConversationId, modelId);
 
-        // Swap any ToolNamePlaceholder instances (left over from wire deserialization) with
-        // real AIFunction references resolved from the durable-tool registry. Wire format
-        // carries names only — placeholders here mean the caller supplied an explicit
-        // ChatOptions.Tools subset that needs activity-side rehydration. Pattern 1
-        // (GetResponseAsync) typically relies on FunctionInvokingChatClient inside the
-        // chat-client chain to invoke tools, so the rehydrated entries need to be the real
-        // AIFunctions or FIC has nothing to call.
-        var resolvedOptions = SwapPlaceholderTools(input.Options);
+        EnsureNoCallerSuppliedTools(input.Options);
+        var resolvedOptions = input.Options;
 
         var chatClient = ResolveChatClient(input.ClientKey);
 
-        // Step 4d: B-check backstop for the MEAI mixed-pattern conflict. The startup A-check
+        // Per-invocation backstop for the MEAI mixed-pattern conflict. The startup check
         // (DurableMixedPatternValidator) only walks the unkeyed default IChatClient. This
         // backstop catches keyed-only setups, factory-deferred resolutions, and other paths
         // the A-check cannot reach. Per-client cache so the walk runs at most once per
         // resolved instance.
         EnsureMixedPatternCheck(chatClient);
 
-        // Step 4c: per-call IChatClientDecorator resolution. Per-call WithChatClientFactoryKey
+        // Per-call IChatClientDecorator resolution. Per-call WithChatClientFactoryKey
         // wins; worker-level DefaultChatClientFactoryKey is the fallback. Empty-string per-call
         // value is the documented opt-out (overrides the worker default with "no decoration").
         var factoryKey = resolvedOptions.GetChatClientFactoryKey()
@@ -95,20 +89,12 @@ internal sealed class DurableChatActivities(
 
         _logger.LogChatActivityCompleted(input.ConversationId, input.TurnNumber);
 
-        // Safety net for the silent-failure footgun (Pattern 3 design: OD-6).
-        // If the user registered durable tools but neither (a) FunctionInvokingChatClient
-        // is in the chain to handle them inline, nor (b) the workflow is the Pattern 3
-        // dispatch loop (which routes through GetChatStepAsync, not this activity),
-        // tool calls would be silently dropped. Throw to surface the misconfiguration.
-        EnsureToolDispatchHandlerWired(chatClient, response);
-
         return response;
     }
 
     /// <summary>
-    /// Once-per-client backstop check for the silent A+B mixed-pattern misconfiguration:
-    /// .UseFunctionInvocation() in the IChatClient chain combined with .AsDurable()-wrapped
-    /// tools in the DurableFunctionRegistry. The startup
+    /// Once-per-client backstop for inline function-invocation middleware combined with registered
+    /// durable tools. The startup
     /// <see cref="Internal.DurableMixedPatternValidator"/> handles the unkeyed default; this
     /// is the safety net for keyed and factory-deferred clients.
     /// </summary>
@@ -142,7 +128,7 @@ internal sealed class DurableChatActivities(
     }
 
     /// <summary>
-    /// Executes a single Pattern 3 LLM step. Unlike <see cref="GetResponseAsync"/> this method
+    /// Executes a single durable LLM step. Unlike <see cref="GetResponseAsync"/> this method
     /// never executes tools inline — the durable workflow is responsible for dispatching each
     /// <see cref="FunctionCallContent"/> as its own <c>InvokeFunction</c> activity. The
     /// <see cref="DurableChatStepResult"/> carries the raw assistant message plus extracted
@@ -162,23 +148,31 @@ internal sealed class DurableChatActivities(
 
         SetupSpanTags(span, input.ConversationId, modelId);
 
-        // Auto-populate tools from the registry if the caller didn't supply any (OD-1).
-        // If ChatOptions.Tools is explicitly provided we respect that subset choice — but
-        // any entries that survived the wire are ToolNamePlaceholder instances (the converter
-        // only round-trips names) so we must swap them for the real AIFunction references
-        // before they reach the LLM.
+        // Caller-supplied tools cannot cross the durable boundary. The workflow activity owns
+        // the model-facing schema and builds it from the registered durable-tool registry.
+        EnsureNoCallerSuppliedTools(input.Options);
         var registry = services.GetService<DurableFunctionRegistry>();
-        var effectiveOptions = SwapPlaceholderTools(input.Options);
-        if (registry is { Count: > 0 } && (effectiveOptions?.Tools is null or { Count: 0 }))
+        var effectiveOptions = input.Options?.Clone() ?? new ChatOptions();
+        if (registry is { Count: > 0 })
         {
-            effectiveOptions = effectiveOptions is null
-                ? new ChatOptions()
-                : effectiveOptions.Clone();
-            // AIFunction : AITool — direct spread, no intermediate iterator needed.
             effectiveOptions.Tools = [.. registry.Values];
+        }
+        else
+        {
+            effectiveOptions.Tools = null;
         }
 
         var chatClient = ResolveChatClient(input.ClientKey);
+        EnsureMixedPatternCheck(chatClient);
+
+        var factoryKey = effectiveOptions.GetChatClientFactoryKey()
+            ?? services.GetService<DurableExecutionOptions>()?.DefaultChatClientFactoryKey;
+        if (!string.IsNullOrEmpty(factoryKey))
+        {
+            var decorator = services.GetKeyedService<IChatClientDecorator>(factoryKey)
+                ?? throw new DurableChatClientFactoryNotFoundException(factoryKey);
+            chatClient = decorator.Decorate(chatClient, effectiveOptions);
+        }
 
         var response = await StreamAndCollectAsync(
             chatClient, input.Messages, effectiveOptions, input, span, ctx)
@@ -318,71 +312,21 @@ internal sealed class DurableChatActivities(
         return (assistantMessage, toolCalls, isFinal);
     }
 
-    /// <summary>
-    /// Replaces any <see cref="ToolNamePlaceholder"/> entries left over from wire
-    /// deserialization with the real <see cref="AIFunction"/> instances from
-    /// <see cref="DurableFunctionRegistry"/>. <see cref="ChatOptions.Tools"/> serializes
-    /// as a list of names only (see <see cref="ChatOptionsToolsJsonConverter"/>); placeholders
-    /// reaching the LLM would either throw on invocation (Pattern 1) or be ignored as
-    /// non-callable tools. Returns the input unchanged when there are no placeholders to
-    /// swap, so allocation is paid only on the explicit-subset path.
-    /// </summary>
-    private ChatOptions? SwapPlaceholderTools(ChatOptions? options)
+    private static void EnsureNoCallerSuppliedTools(ChatOptions? options)
     {
-        if (options?.Tools is not { Count: > 0 } tools)
+        if (options?.Tools is not { Count: > 0 })
         {
-            return options;
+            return;
         }
 
-        var hasPlaceholder = false;
-        foreach (var tool in tools)
-        {
-            if (tool is ToolNamePlaceholder)
-            {
-                hasPlaceholder = true;
-                break;
-            }
-        }
-        if (!hasPlaceholder)
-        {
-            return options;
-        }
-
-        var registry = services.GetService<DurableFunctionRegistry>();
-        var resolved = options.Clone();
-        var newTools = new List<AITool>(tools.Count);
-        foreach (var tool in tools)
-        {
-            if (tool is ToolNamePlaceholder placeholder)
-            {
-                if (registry is not null
-                    && registry.TryGetValue(placeholder.Name, out var realTool))
-                {
-                    newTools.Add(realTool);
-                }
-                else
-                {
-                    // Configuration error, not transient: the placeholder name has no
-                    // registration, so the LLM would be told to use a tool it never
-                    // receives. Fail fast and non-retryably rather than silently dropping
-                    // it. ErrorType carries the typed name so workflow callers can match.
-                    throw new ApplicationFailureException(
-                        DurablePlaceholderToolNotRegisteredException.BuildMessage(placeholder.Name),
-                        errorType: nameof(DurablePlaceholderToolNotRegisteredException),
-                        nonRetryable: true);
-                }
-            }
-            else
-            {
-                newTools.Add(tool);
-            }
-        }
-        resolved.Tools = newTools;
-        return resolved;
+        throw new ApplicationFailureException(
+            "ChatOptions.Tools is not supported by durable execution. Register tools with AddDurableTools.",
+            errorType: nameof(DurableConfigurationException),
+            nonRetryable: true);
     }
 
     /// <summary>
-    /// Sets up the shared OTel span tags for both Pattern 1 and Pattern 3 activities.
+    /// Sets up the shared OTel span tags for chat activities.
     /// </summary>
     private static void SetupSpanTags(
         System.Diagnostics.Activity? span,
@@ -406,40 +350,16 @@ internal sealed class DurableChatActivities(
             : services.GetRequiredKeyedService<IChatClient>(clientKey);
 
     /// <summary>
-    /// Throws when the LLM returned <see cref="FunctionCallContent"/> items but no
-    /// <c>FunctionInvokingChatClient</c> is in the chat-client chain to handle them inline,
-    /// AND durable tools are registered (meaning the user expects per-tool dispatch).
-    /// Pattern 3 routes through <see cref="GetChatStepAsync"/> rather than this activity,
-    /// so a tool call landing here with no FIC and a populated registry means the workflow
-    /// is the middleware path (<c>DurableChatClient</c>) — which cannot host a tool-dispatch
-    /// loop by contract.
-    /// </summary>
-    /// <remarks>
-    /// Thrown as a non-retryable <see cref="ApplicationFailureException"/> rather than a
-    /// plain <see cref="DurableToolsNotWrappedException"/> because the underlying error is a
-    /// configuration bug, not a transient failure — retrying the activity will produce the
-    /// same result every time. Without <c>nonRetryable: true</c>, Temporal's default retry
-    /// policy (unlimited attempts with exponential backoff) would burn ~80 retries before
-    /// surfacing the misconfiguration to the workflow caller. <c>ErrorType</c> is set to
-    /// <c>nameof(DurableToolsNotWrappedException)</c> so catch blocks can still match on
-    /// the typed name via <see cref="ApplicationFailureException.ErrorType"/>.
-    /// </remarks>
-    /// <summary>
-    /// Runs the <see cref="IDurableToolInterceptor{TContext}"/> before a Pattern 3 tool is
+    /// Runs the <see cref="IDurableToolInterceptor{TContext}"/> before a durable tool is
     /// dispatched. Resolves the interceptor from DI; if none is registered, logs a warning
     /// and returns <see cref="DurableToolOutcome.Proceed"/> so the tool still runs.
     /// </summary>
     /// <remarks>
-    /// <b>Missing-interceptor security posture (fail-OPEN — intentional asymmetry with MAF).</b>
-    /// When no interceptor is resolved at activity time (e.g. worker restart without
-    /// re-registration), this MEAI path always returns <see cref="DurableToolOutcome.Proceed"/>.
-    /// MEAI has no built-in always-require-approval floor, so there is nothing to fail closed
-    /// to — proceeding keeps the session live. This differs deliberately from the MAF
-    /// <c>AgentActivities.RunToolInterceptorAsync</c> path, which fails CLOSED
-    /// (<c>PauseForApproval</c>) for <c>ScopeAware + RequiresApproval</c> tools because those
-    /// tools were excluded from the unconditional approval list and rely on the interceptor to
-    /// enforce the gate. Callers that need a hard approval floor in MEAI should enforce it in
-    /// their own interceptor rather than relying on the missing-interceptor default.
+    /// When no interceptor is resolved at activity time (for example, after a worker
+    /// configuration error), this activity returns <see cref="DurableToolOutcome.Proceed"/>.
+    /// The workflow independently applies every registration-time <c>RequireApproval()</c>
+    /// floor after it receives this result, so a missing interceptor cannot bypass a tool that
+    /// was configured to require approval.
     /// </remarks>
     [Activity("TemporalCommunity.Extensions.AI.RunToolInterceptor")]
     public async Task<DurableToolInterceptorResult> RunToolInterceptorAsync(
@@ -493,45 +413,5 @@ internal sealed class DurableChatActivities(
         }
 
         return DurableToolInterceptorResult.FromDecision(decision);
-    }
-
-    private void EnsureToolDispatchHandlerWired(IChatClient chatClient, ChatResponse response)
-    {
-        var registry = services.GetService<DurableFunctionRegistry>();
-        if (registry is null || registry.Count == 0)
-        {
-            return;
-        }
-
-        // Did the LLM ask us to invoke a tool?
-        var responseHasToolCalls = false;
-        foreach (var message in response.Messages)
-        {
-            foreach (var content in message.Contents)
-            {
-                if (content is FunctionCallContent)
-                {
-                    responseHasToolCalls = true;
-                    break;
-                }
-            }
-            if (responseHasToolCalls) break;
-        }
-
-        if (!responseHasToolCalls)
-        {
-            return;
-        }
-
-        // Use AgentChainWalker for consistency with EnsureMixedPatternCheck.
-        if (Internal.AgentChainWalker.Contains<FunctionInvokingChatClient>(chatClient))
-        {
-            return;
-        }
-
-        throw new ApplicationFailureException(
-            DurableToolsNotWrappedException.DefaultMessage,
-            errorType: nameof(DurableToolsNotWrappedException),
-            nonRetryable: true);
     }
 }

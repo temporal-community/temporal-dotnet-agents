@@ -26,6 +26,7 @@ namespace TemporalCommunity.Extensions.AI;
 [JsonSerializable(typeof(DurableChatWorkflowInput))]
 [JsonSerializable(typeof(DurableApprovalRequest))]
 [JsonSerializable(typeof(DurableApprovalDecision))]
+[JsonSerializable(typeof(IReadOnlyDictionary<string, string>))]
 [JsonSerializable(typeof(DurableEmbeddingInput))]
 [JsonSerializable(typeof(DurableEmbeddingOutput))]
 [JsonSerializable(typeof(ChatMessage))]
@@ -44,6 +45,7 @@ namespace TemporalCommunity.Extensions.AI;
 [JsonSerializable(typeof(ActivityOptions))]
 [JsonSerializable(typeof(IReadOnlyDictionary<string, ActivityOptions>))]
 [JsonSerializable(typeof(Dictionary<string, ActivityOptions>))]
+[JsonSerializable(typeof(IReadOnlyDictionary<string, TimeSpan>))]
 [JsonSerializable(typeof(DurableToolOutcome))]
 [JsonSerializable(typeof(DurableToolInterceptorInput))]
 [JsonSerializable(typeof(DurableToolInterceptorResult))]
@@ -102,13 +104,6 @@ public static class DurableAIJsonUtilities
 #endif
         options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<byte>>());
         options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<int>>());
-
-        // ChatOptions.Tools is IList<AITool>; AITool is polymorphic with no discriminator
-        // mapping in AIJsonUtilities, so the Tools list silently collapses to null without
-        // this converter. Mirrors the GeneratedEmbeddingsJsonConverter approach — patch
-        // the slot in DurableAIJsonUtilities so the converter only applies inside the
-        // DurableAIDataConverter wire format, not MEAI's defaults.
-        options.Converters.Add(new ChatOptionsToolsJsonConverter());
 
         options.MakeReadOnly();
         return options;

@@ -26,4 +26,20 @@ public sealed class DurableApprovalRequest
     /// Human-readable description of what the tool call will do.
     /// </summary>
     public string? Description { get; init; }
+
+    /// <summary>
+    /// Caller-authored, reviewer-safe context for the approval decision.
+    /// </summary>
+    /// <remarks>
+    /// The durable tool loop never copies raw model-supplied function arguments into this
+    /// property. Populate it only from data intentionally selected for the reviewer, such as
+    /// an account identifier, operation summary, or policy reference.
+    /// </remarks>
+    public IReadOnlyDictionary<string, string>? ReviewData { get; init; }
+
+    /// <summary>
+    /// Workflow-time deadline after which the request is automatically rejected.
+    /// Set by the workflow when the request becomes pending.
+    /// </summary>
+    public DateTimeOffset? ExpiresAt { get; init; }
 }

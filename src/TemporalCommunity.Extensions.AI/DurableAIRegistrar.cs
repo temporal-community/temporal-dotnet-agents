@@ -82,7 +82,7 @@ internal static class DurableAIRegistrar
         if (options.RegisterDefaultWorkflow)
         {
             // Register the session client (concrete + interface alias share the same instance).
-            // Inject both registries so the client can build Pattern 3 ToolActivityOptions at
+            // Inject both registries so the client can build durable-tool ActivityOptions at
             // session start when durable tools are present.
             services.TryAddSingleton<DurableChatSessionClient>(sp =>
                 new DurableChatSessionClient(
@@ -106,7 +106,7 @@ internal static class DurableAIRegistrar
             builder.AddSingletonActivities<DurableEmbeddingActivities>();
         }
 
-        // Pre-register the built-in "tags" IChatClientDecorator (Step 4b of the maf-gap plan).
+        // Pre-register the built-in "tags" IChatClientDecorator.
         // Per Q-ChatClientFactory-shape, this is the "80% case" path — users can call
         // WithChatClientTag(name, value) + WithChatClientFactoryKey("tags") without registering
         // a custom decorator. TryAddKeyedSingleton makes this idempotent across both registration
@@ -125,7 +125,7 @@ internal static class DurableAIRegistrar
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             DurableAIWorkerClientConfigurator>());
 
-        // Step 4d: A-check for the silent MEAI mixed-pattern misconfiguration.
+        // Startup check for the MEAI mixed-pattern misconfiguration.
         // Detects DurableFunctionRegistry.Count > 0 (durable tools registered) +
         // FunctionInvokingChatClient in the IChatClient chain (.UseFunctionInvocation()
         // present). Both together = tool calls execute in-process inside the chat

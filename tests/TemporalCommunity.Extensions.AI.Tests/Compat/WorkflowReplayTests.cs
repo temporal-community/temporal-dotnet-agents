@@ -87,23 +87,6 @@ public class WorkflowReplayTests
     // ── Happy-path replays ──────────────────────────────────────────────────
 
     /// <summary>
-    /// A Pattern-1 history (single user→assistant turn, no tool calls) replays cleanly.
-    /// This is the baseline: validates that <see cref="DurableChatWorkflow"/> registration
-    /// works and that the session TTL timer, update handling, and activity dispatch
-    /// (GetResponse) all match.
-    /// </summary>
-    [Fact]
-    public async Task Pattern1_SimpleTurn_ReplaysWithoutError()
-    {
-        var replayer = BuildReplayer();
-        var history = LoadHistory("pattern-1-simple-turn.json");
-
-        var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
-
-        Assert.Null(result.ReplayFailure);
-    }
-
-    /// <summary>
     /// A Pattern-3 history (one tool call: GetChatStep → InvokeFunction → GetChatStep final)
     /// replays cleanly. This validates the durable tool dispatch loop wire-names:
     /// <c>TemporalCommunity.Extensions.AI.GetChatStep</c> and
@@ -115,23 +98,6 @@ public class WorkflowReplayTests
     {
         var replayer = BuildReplayer();
         var history = LoadHistory("pattern-3-with-tool.json");
-
-        var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
-
-        Assert.Null(result.ReplayFailure);
-    }
-
-    /// <summary>
-    /// A history that crossed a continue-as-new boundary replays cleanly.
-    /// This validates that the workflow's CAN state carries forward correctly
-    /// and the post-CAN run's event history is deterministically replayable
-    /// with the current code.
-    /// </summary>
-    [Fact]
-    public async Task CanTransition_PostCanHistory_ReplaysWithoutError()
-    {
-        var replayer = BuildReplayer();
-        var history = LoadHistory("can-transition.json");
 
         var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
 

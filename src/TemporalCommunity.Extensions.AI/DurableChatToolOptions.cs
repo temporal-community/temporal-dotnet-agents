@@ -5,7 +5,7 @@ namespace TemporalCommunity.Extensions.AI;
 /// <summary>
 /// Per-tool Temporal activity overrides applied when a durable chat session client
 /// dispatches a tool call as a Temporal activity
-/// (<c>TemporalCommunity.Extensions.AI.InvokeFunction</c>) under Pattern 3 (durable tool
+/// (<c>TemporalCommunity.Extensions.AI.InvokeFunction</c>) under the durable tool
 /// dispatch without a custom workflow).
 /// </summary>
 /// <remarks>
@@ -67,6 +67,13 @@ public sealed class DurableChatToolOptions
     /// This is Rule 2 — an absolute configuration-time floor.
     /// </summary>
     public bool RequireApprovalFlag { get; private set; }
+
+    /// <summary>
+    /// Gets or sets the maximum time a reviewer may take to resolve this tool's approval
+    /// request. When <see langword="null"/>, <see cref="DurableExecutionOptions.ApprovalTimeout"/>
+    /// is used.
+    /// </summary>
+    public TimeSpan? ApprovalTimeout { get; set; }
 
     /// <summary>
     /// Disables retries for this tool by setting <see cref="RetryPolicy"/> to a policy
@@ -178,6 +185,28 @@ public sealed class DurableChatToolOptions
     public DurableChatToolOptions RequireApproval()
     {
         RequireApprovalFlag = true;
+        return this;
+    }
+
+    /// <summary>
+    /// Sets the maximum time a reviewer may take to resolve this tool's approval request.
+    /// </summary>
+    /// <param name="timeout">The approval timeout; must be greater than <see cref="TimeSpan.Zero"/>.</param>
+    /// <returns>This instance, for fluent chaining.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="timeout"/> is less than or equal to <see cref="TimeSpan.Zero"/>.
+    /// </exception>
+    public DurableChatToolOptions WithApprovalTimeout(TimeSpan timeout)
+    {
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(timeout),
+                timeout,
+                "Approval timeout must be greater than zero.");
+        }
+
+        ApprovalTimeout = timeout;
         return this;
     }
 }
