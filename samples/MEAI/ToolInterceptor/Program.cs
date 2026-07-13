@@ -53,7 +53,7 @@ const string TaskQueue = "tool-interceptor-meai";
 // ── Setup: FakeFileSystem and tool functions ──────────────────────────────────
 // FakeFileSystem holds the in-memory files. The tool implementations (ReadFile,
 // DeleteFile) are plain methods — registering them via AddDurableTools() below
-// is what makes each call run as a separate Temporal activity under Pattern 3.
+// is what makes each call run as a separate Temporal activity in the managed tool loop.
 var fs = new FakeFileSystem();
 
 var readFileTool = AIFunctionFactory.Create(
@@ -67,9 +67,8 @@ var deleteFileTool = AIFunctionFactory.Create(
     description: "Permanently delete a file by name. This operation cannot be undone.");
 
 // ── Setup: Register IChatClient ───────────────────────────────────────────────
-// We do NOT call .UseFunctionInvocation() — Pattern 3 (AddDurableTools below)
-// handles the tool dispatch loop inside the workflow. Mixing UseFunctionInvocation()
-// with AddDurableTools() is blocked at startup by DurableMixedPatternValidator.
+// We do NOT call .UseFunctionInvocation(): AddDurableTools below supplies the worker
+// registry and the workflow owns the tool-dispatch loop.
 IChatClient openAiChatClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) }
@@ -98,7 +97,7 @@ var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnect
 builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 
 // ── Setup: Register worker + durable AI ──────────────────────────────────────
-// DefaultToolInterceptor wires AuditInterceptor into the Pattern 3 dispatch loop.
+// DefaultToolInterceptor wires AuditInterceptor into the managed tool-dispatch loop.
 // Before each tool activity, RunToolInterceptor fires AuditInterceptor.BeforeToolCallAsync.
 // The returned DurableToolDecision controls whether the tool proceeds, is blocked,
 // skips with a synthetic result, or pauses for human approval.
@@ -121,7 +120,7 @@ var workerBuilder = builder.Services
 // SkipInterceptor() opts this tool out of RunToolInterceptor entirely — the
 // interceptor activity is not dispatched and read_file proceeds directly to
 // InvokeFunction. Appropriate for read-only tools where policy evaluation adds
-// no value. The tool still runs as its own Temporal activity under Pattern 3.
+// no value. The tool still runs as its own Temporal activity.
 workerBuilder.AddDurableTools(readFileTool, opts => opts.SkipInterceptor());
 
 // ── Tool registration: delete_file with RequireApproval() + NoRetry() ────────
@@ -205,7 +204,7 @@ Console.WriteLine("════════════════════�
 //   Gate B — RequireApproval() on DurableChatToolOptions (Rule 2 absolute floor).
 // Both gates agree: a human must approve before delete_file runs.
 //
-// The chat turn blocks inside the workflow waiting for SubmitApprovalAsync.
+// The chat turn blocks inside the workflow waiting for ResolveApprovalAsync.
 // We start it in the background, poll GetPendingApprovalAsync until the request
 // appears, print the enriched description, then auto-approve.
 Console.WriteLine("════════════════════════════════════════════════════════");
@@ -220,7 +219,7 @@ Console.WriteLine($" User : {q3}");
 Console.WriteLine(" [Main] Starting chat (will block waiting for approval)...\n");
 
 // Start the chat in the background — it will block inside the workflow once the
-// interceptor returns PauseForApproval, waiting for SubmitApprovalAsync.
+// interceptor returns PauseForApproval, waiting for ResolveApprovalAsync.
 var chatTask3 = sessionClient.SendAsync(
     convId3,
     [systemMessage, new ChatMessage(ChatRole.User, q3)]);
@@ -260,13 +259,20 @@ if (pending is not null)
     Console.WriteLine($" ║  Function    : {fnName[..Math.Min(34, fnName.Length)],-34}║");
     if (pending.Description is { Length: > 0 })
         Console.WriteLine($" ║  Description : {pending.Description[..Math.Min(34, pending.Description.Length)],-34}║");
+    if (pending.ExpiresAt is { } expiresAt)
+        Console.WriteLine($" ║  Expires at  : {expiresAt:O} ║");
+    if (pending.ReviewData is not null)
+    {
+        foreach (var (key, value) in pending.ReviewData)
+            Console.WriteLine($" ║  {key,-11}: {value,-34}║");
+    }
     Console.WriteLine(" ╚══════════════════════════════════════════════════╝");
     Console.WriteLine();
     Console.WriteLine(" [Reviewer] Auto-approving to demonstrate the full flow...");
 
     // Auto-approve — simulating a human reviewer confirming the operation.
     // In a real application this would be a webhook handler, Slack bot, or UI.
-    await sessionClient.SubmitApprovalAsync(convId3, new DurableApprovalDecision
+    await sessionClient.ResolveApprovalAsync(convId3, new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved  = true,

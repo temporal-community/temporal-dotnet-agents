@@ -27,7 +27,7 @@ An `AuditInterceptor` enforces file-deletion policy before any delete tool activ
 |---|---|---|
 | `Proceed` | `read_file` (or any non-delete tool) | Tool activity runs; `metadata` carries an `"audit"` tag |
 | `Block` | `delete_file` for a protected file (`system.lock`, `kernel.sys`) | Tool activity is NOT invoked; block reason is fed back to the LLM as a tool result |
-| `PauseForApproval` | `delete_file` for any unprotected file | Dispatch loop parks; workflow waits for `SubmitApprovalAsync` |
+| `PauseForApproval` | `delete_file` for any unprotected file | Dispatch loop parks; workflow waits for `ResolveApprovalAsync` |
 | `Skip` | (not shown — see `DurableToolDecision.Skip` for the synthetic-result path) | Tool activity is not invoked; a synthetic result is injected instead |
 
 ### Per-tool opt-outs and floors
@@ -42,9 +42,9 @@ An `AuditInterceptor` enforces file-deletion policy before any delete tool activ
 
 ### Approval poll and submit
 
-Turn 3 (`delete config.json`) starts `ChatAsync` in the background, then polls
+Turn 3 (`delete config.json`) starts `SendAsync` in the background, then polls
 `GetPendingApprovalAsync` every 500 ms until the interceptor's enriched description appears.
-The program auto-approves the request via `SubmitApprovalAsync`, unblocking the workflow so the
+The program auto-approves the request via `ResolveApprovalAsync`, unblocking the workflow so the
 delete activity can proceed.
 
 ### Three-turn conversation
@@ -66,9 +66,9 @@ Program.cs
     ├─ AddDurableTools(readFileTool,   opts => opts.SkipInterceptor())
     ├─ AddDurableTools(deleteFileTool, opts => opts.NoRetry().RequireApproval())
     │
-    └─ DurableChatSessionClient.ChatAsync(...)
+    └─ DurableChatSessionClient.SendAsync(...)
            │
-           └─ DurableChatWorkflow (Pattern 3 dispatch loop)
+           └─ DurableChatWorkflow (managed tool-dispatch loop)
                   │
                   ├─ GetChatStepAsync  ← LLM call activity
                   │

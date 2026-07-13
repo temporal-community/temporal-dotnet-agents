@@ -9,10 +9,11 @@
 `DurableChatWorkflow` with `DurableChatSessionClient` is sufficient when:
 
 - You need multi-turn conversation with history persistence.
-- Your tools run inside `UseFunctionInvocation()` and their side effects are visible through existing APIs (a database, a service call, a log).
+- The standard `DurableChatSessionClient.SendAsync` response and persisted history are sufficient.
 - You do not need per-turn domain data returned synchronously to the caller.
 
-This is the right starting point. Most applications never need a custom workflow.
+This is the right starting point. For managed sessions, register tools with `AddDurableTools`; the
+workflow owns the model/tool loop. Most applications never need a custom workflow.
 
 ---
 
@@ -220,7 +221,7 @@ By extending `DurableChatWorkflowBase<TOutput>` you get the following at no cost
 - **Session loop** — `RunAsync` waits for shutdown or `ContinueAsNewSuggested`, then transitions or returns.
 - **Conversation history** — full `List<DurableSessionEntry>` persisted in workflow state, restored on continue-as-new. Each turn appends a `DurableSessionRequest` followed by a `DurableSessionResponse`.
 - **Turn serialization** — `WaitConditionAsync(() => !_isProcessing)` prevents concurrent turns from corrupting history.
-- **HITL** — `[WorkflowUpdate("RequestApproval")]`, `[WorkflowUpdate("SubmitApproval")]`, and `[WorkflowQuery("GetPendingApproval")]` are wired to `DurableApprovalMixin` automatically.
+- **HITL** — `[WorkflowUpdate("RequestApproval")]`, `[WorkflowUpdate("ResolveApproval")]`, and `[WorkflowQuery("GetPendingApproval")]` are wired to `DurableApprovalMixin` automatically.
 - **Continue-as-new** — history is carried forward when workflow history grows large; search attributes are preserved.
 - **Search attributes** — optional `TurnCount` and `SessionCreatedAt` upserts via `DurableSessionAttributes` when `input.EnableSearchAttributes` is `true`.
 - **`[WorkflowQuery("GetHistory")]`** — returns the current conversation history.

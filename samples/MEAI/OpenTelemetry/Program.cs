@@ -93,7 +93,7 @@ builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 // AddChatClient is the idiomatic MEAI DI pattern — it returns a ChatClientBuilder
 // for chaining middleware, then Build() registers the final IChatClient singleton.
 // DurableChatActivities constructor-injects the unkeyed IChatClient on the worker
-// side; this is the client it calls when executing the GetResponse activity
+// side; this is the client it calls when executing the GetChatStep activity
 // (which produces the leaf `chat {modelId}` span).
 IChatClient openAiChatClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
@@ -101,9 +101,8 @@ IChatClient openAiChatClient = new OpenAIClient(
 ).GetChatClient(model).AsIChatClient();
 
 // This sample registers no tools, so we deliberately do NOT chain
-// .UseFunctionInvocation() — with zero tools, the middleware is a no-op and
-// would mislead readers about the span hierarchy. To see per-tool spans, look
-// at samples/MEAI/DurableTools or samples/MEAI/DurableChat (Pattern 3).
+// .UseFunctionInvocation() — managed durable sessions own function invocation.
+// To see per-tool spans, look at samples/MEAI/DurableTools or samples/MEAI/DurableChat.
 builder.Services.AddChatClient(openAiChatClient);
 
 // ── Setup: Register worker + durable AI via the plugin path ─────────────────
@@ -173,7 +172,7 @@ Console.WriteLine("Done.");
 //
 //   durable_chat.send (conversation.id = <id>)
 //     UpdateWorkflow:Chat
-//       RunActivity:GetResponse
+//       RunActivity:GetChatStep
 //         chat {modelId} (conversation.id, gen_ai.usage.*)
 //
 // The conversation.id attribute is the same on both the send and leaf spans,
@@ -209,7 +208,7 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
     Console.WriteLine(" Check the console exporter output for the span hierarchy:");
     Console.WriteLine("   durable_chat.send");
     Console.WriteLine("     UpdateWorkflow:Chat");
-    Console.WriteLine("       RunActivity:GetResponse");
+    Console.WriteLine("       RunActivity:GetChatStep");
     Console.WriteLine("         chat {modelId}");
     Console.WriteLine();
     Console.WriteLine($" Filter by tag conversation.id = {conversationId}");

@@ -1,5 +1,5 @@
 // DurableChat — demonstrates multi-turn durable chat via DurableChatSessionClient,
-// including durable tool dispatch (Pattern 3) and history retrieval.
+// including durable tool dispatch and history retrieval.
 //
 // Run:  dotnet run --project samples/MEAI/DurableChat/DurableChat.csproj
 
@@ -41,8 +41,8 @@ if (string.IsNullOrEmpty(apiKey))
         "Note: user secrets only load in the Development environment (DOTNET_ENVIRONMENT unset or set to 'Development').");
 
 // ── Setup: Tool functions ────────────────────────────────────────────────────
-// Plain AIFunctions. Pattern 3 (registering them via AddDurableTools below) is
-// what makes each call run as a separate Temporal activity — no special
+// Registering a function through AddDurableTools below makes each call run as a
+// separate Temporal activity — no special
 // wrapping required on the tool itself.
 //
 // Tools run in activity context (not workflow), so `Random.Shared` is allowed.
@@ -52,35 +52,20 @@ static string GetCurrentWeather(string city)
         ? $"It's sunny and 22 °C in {city}."
         : $"It's overcast and 15 °C in {city}.";
 
-// A second registry tool so Demo 4 Scenario 1 can demonstrate "pass an explicit
-// subset" meaningfully — with only one tool in the registry, subset and
-// auto-populate would be indistinguishable.
-static string GetTimeOfDay(string city)
-    => $"It is approximately 14:30 local time in {city}.";
-
 var weatherTool = AIFunctionFactory.Create(
     GetCurrentWeather,
     name: "get_current_weather",
     description: "Returns the current weather conditions for a given city.");
 
-var timeOfDayTool = AIFunctionFactory.Create(
-    GetTimeOfDay,
-    name: "get_time_of_day",
-    description: "Returns the current local time of day for a given city.");
-
 // ── Setup: Register IChatClient ───────────────────────────────────────────────
 // AddChatClient registers the IChatClient as a singleton in DI. It returns a
-// ChatClientBuilder for chaining middleware (`.UseFunctionInvocation()`, etc.),
+// ChatClientBuilder for chaining middleware,
 // but when no middleware is chained, the registration is already complete —
 // `.Build()` would just return the same client and discard the value.
 // DurableChatActivities constructor-injects this on the worker side.
 //
-// NOTE: we deliberately do NOT call .UseFunctionInvocation() here. With tools
-// registered via AddDurableTools() below, Pattern 3 activates: DurableChatSessionClient
-// freezes the per-tool ActivityOptions into the workflow input, and the workflow
-// runs a dispatch loop where each tool call becomes its own Temporal activity.
-// Adding UseFunctionInvocation() while tools are registered via AddDurableTools()
-// is blocked at worker startup by DurableMixedPatternValidator.
+// Durable sessions own the function-call loop. Do not add UseFunctionInvocation()
+// to this pipeline; each registered tool is dispatched by the workflow as an activity.
 IChatClient openAiChatClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) }
@@ -119,7 +104,7 @@ builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 // DI after the host starts.
 //
 // AddDurableTools registers tools in the DurableFunctionRegistry. Because at
-// least one tool is registered, Pattern 3 activates: the workflow dispatches
+// least one tool is registered, the workflow dispatches
 // each tool invocation as a separate InvokeFunction activity, and per-tool
 // retry/timeout can be configured via the DurableChatToolOptions callback.
 builder.Services
@@ -134,9 +119,7 @@ builder.Services
         // for write-style tools alike.
         opts.RetryPolicy = new RetryPolicy { MaximumAttempts = 3 };
 
-        // [Pattern 3] cap the LLM↔tool loop per turn. Only effective when Pattern 3
-        // is active — which it is here, because AddDurableTools(...) below populates
-        // the DurableFunctionRegistry.
+        // Cap the LLM-to-tool loop per turn.
         opts.MaxToolCallsPerTurn = 10;
     })
     // Per-tool retry-policy fallback chain:
@@ -144,8 +127,7 @@ builder.Services
     // Weather lookup is idempotent (read-only), so we accept retries. For write-style
     // tools (send email, charge a card), override with `opts.NoRetry()` to prevent
     // double-execution on transient activity failure.
-    .AddDurableTools(weatherTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30)))
-    .AddDurableTools(timeOfDayTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
+    .AddDurableTools(weatherTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 var host = builder.Build();
@@ -163,7 +145,7 @@ var conversationIds = new List<string>();
 conversationIds.AddRange(await RunMultiTurnDemoAsync(sessionClient));
 conversationIds.AddRange(await RunToolCallDemoAsync(sessionClient));
 conversationIds.AddRange(await RunHistoryQueryDemoAsync(sessionClient));
-conversationIds.AddRange(await DurableToolDemo.RunDurableToolDemoAsync(sessionClient, weatherTool));
+conversationIds.AddRange(await DurableToolDemo.RunDurableToolDemoAsync(sessionClient));
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
 // Each demo starts a Temporal workflow that survives host.StopAsync() — the host
@@ -222,7 +204,7 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Demo 2: Tool call — minimal happy path (no ChatOptions.Tools needed)
+// Demo 2: Tool call — registered durable tools
 //
 // Background: tool registration is split across two concerns.
 //
@@ -230,21 +212,10 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
 //     tool IMPLEMENTATION on the worker so a Temporal activity exists that can
 //     dispatch the function when the LLM requests it.
 //
-//   - `ChatOptions.Tools` advertises the tool SCHEMA (name, description, args)
-//     to the LLM so it knows the tool is available to call.
+//   - The durable runtime supplies the tool SCHEMA to the model from that same
+//     registry. Callers must not set ChatOptions.Tools for a durable session.
 //
-// In Pattern 3, the `GetChatStepAsync` activity auto-populates `Options.Tools`
-// from the DurableFunctionRegistry when the caller didn't supply any. So once
-// you've called AddDurableTools, you do NOT need to repeat the tool in
-// ChatOptions.Tools — the activity fills it in for you. That's what this demo
-// shows: register once, just chat.
-//
-// Demo 4 Scenario 1 is the counterpart for cases where you DO want to control
-// the per-call tool set explicitly (e.g., "this call should only see a subset
-// of my registered tools" — useful when you've registered many tools but want
-// to narrow what the LLM considers for a given user request).
-//
-// Either way, because the tool is registered with AddDurableTools(), the
+// Because the tool is registered with AddDurableTools(), the
 // workflow dispatches it as a separate InvokeFunction activity instead of
 // running it inline. One GetChatStep activity for the LLM call, one
 // InvokeFunction activity for the tool call — visible side-by-side in the
@@ -253,7 +224,7 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
 static async Task<IEnumerable<string>> RunToolCallDemoAsync(DurableChatSessionClient sessionClient)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
-    Console.WriteLine(" Demo 2: Tool Call (auto-populated from registry)");
+    Console.WriteLine(" Demo 2: Tool Call (registered durable tool)");
     Console.WriteLine("════════════════════════════════════════════════════════");
 
     var conversationId = $"tool-call-{Guid.NewGuid():N}";
@@ -262,9 +233,8 @@ static async Task<IEnumerable<string>> RunToolCallDemoAsync(DurableChatSessionCl
     var q = "What is the weather like in Seattle right now?";
     Console.WriteLine($" User : {q}");
 
-    // No ChatOptions passed — the GetChatStepAsync activity auto-populates
-    // Options.Tools from the DurableFunctionRegistry (populated above by
-    // AddDurableTools). See Demo 4 Scenario 1 for the explicit-pass path.
+    // No ChatOptions.Tools: the activity obtains the model schema from the
+    // DurableFunctionRegistry populated by AddDurableTools.
     var response = await sessionClient.SendAsync(
         conversationId,
         [new ChatMessage(ChatRole.User, q)]);

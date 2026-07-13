@@ -66,9 +66,13 @@ public class StubChatSessionClient : IDurableChatSessionClient
         CancellationToken cancellationToken = default)
         => Task.FromResult<DurableApprovalRequest?>(null);
 
-    public Task SubmitApprovalAsync(string conversationId,
+    public Task<DurableApprovalResolutionResult> ResolveApprovalAsync(string conversationId,
         DurableApprovalDecision decision, CancellationToken cancellationToken = default)
-        => Task.CompletedTask;
+        => Task.FromResult(new DurableApprovalResolutionResult
+        {
+            RequestId = decision.RequestId,
+            Status = DurableApprovalResolutionStatus.Accepted,
+        });
 }
 ```
 

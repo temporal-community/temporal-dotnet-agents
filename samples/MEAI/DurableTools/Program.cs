@@ -56,7 +56,7 @@ var weatherTool = AIFunctionFactory.Create(
 // ── Setup: Register worker + durable AI ──────────────────────────────────────
 // AddDurableAI registers DurableFunctionActivities (and supporting infrastructure)
 // on the worker. No IChatClient is needed — this sample only exercises the
-// per-tool durable activity path (Pattern 2), not the chat session path.
+// direct per-tool durable activity path, not the managed chat-session path.
 //
 // RegisterDefaultWorkflow = false suppresses DurableChatWorkflow registration.
 // This sample never creates a DurableChatSessionClient, so registering that

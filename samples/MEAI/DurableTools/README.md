@@ -11,7 +11,6 @@ individually in the Temporal Web UI.
 - `AddDurableTools()` — registers functions in `DurableFunctionRegistry` on the worker
 - `WeatherReportWorkflow` — custom workflow that calls a durable tool directly (not via `DurableChatSessionClient`)
 - Per-tool retry isolation: a failing tool is retried without re-running the LLM call
-- Contrast with `UseFunctionInvocation()`, where the entire LLM + tool loop is one activity
 
 ## Architecture
 
@@ -31,7 +30,7 @@ Program.cs
 
 ## Highlights
 
-- **Two invocation models.** `UseFunctionInvocation()` runs the full LLM + tool loop as one activity (simpler). `AsDurable()` gives each tool its own activity (finer retry granularity). Choose based on whether individual tool retries matter.
+- **Direct custom-workflow tool dispatch.** `AsDurable()` is for a workflow that explicitly invokes a known function. Managed `DurableChatSessionClient` tool calls use `AddDurableTools()` and the workflow-owned model/tool loop instead.
 - **Stub inner function.** The lambda passed to `AIFunctionFactory.Create` inside `WeatherReportWorkflow` is never reached — `Workflow.InWorkflow == true` intercepts the call before the stub executes. The real implementation lives in `Program.cs` and is resolved from the `DurableFunctionRegistry` by name.
 - **Registry lookup by name.** `DurableFunctionActivities` resolves functions from `DurableFunctionRegistry` using the function's `Name` property as the key. The name must match between the workflow-side stub and the `AddDurableTools` registration.
 - **No `DurableChatSessionClient` required.** `AsDurable()` works in any `[Workflow]` class — you are not limited to the stock `DurableChatWorkflow` session model.

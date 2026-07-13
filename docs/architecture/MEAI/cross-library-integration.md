@@ -1,139 +1,48 @@
-# Cross-Library Integration: Extensions.AI and Extensions.Agents
+# Cross-Library Integration
 
-This document describes the structural relationship between `TemporalCommunity.Extensions.AI` and `TemporalCommunity.Extensions.Agents` — specifically what is shared, what is not, and why the boundary is drawn where it is.
-
----
-
-## The Two-Library Structure
-
-`TemporalCommunity.Extensions.AI` is the lower-level primitive. It makes any `IChatClient` (Microsoft.Extensions.AI / MEAI) durable using Temporal workflows. It has no dependency on the Microsoft Agent Framework and carries minimal abstractions: a workflow, a set of activities, a session client, and the HITL types.
-
-`TemporalCommunity.Extensions.Agents` builds on top of `Extensions.AI`. It adds the full Microsoft Agent Framework model — `AIAgent`, `ChatClientAgent`, `AgentSessionStateBag`, multi-agent orchestration, workflow-based routing, and scheduled runs — all backed by its own workflow (`AgentWorkflow`) and activity (`AgentActivities`). It takes a NuGet dependency on `TemporalCommunity.Extensions.AI`, pulling in the shared types described below.
-
----
-
-## Dependency Direction
-
-The dependency is strictly one-way:
+`TemporalCommunity.Extensions.AI` is the lower-level durable `IChatClient` library.
+`TemporalCommunity.Extensions.Agents` depends on it and adds Microsoft Agent Framework support.
+The dependency direction is one-way: installing the AI package does not bring in
+`Microsoft.Agents.AI`.
 
 ```
 TemporalCommunity.Extensions.Agents
-        │
-        │  depends on
-        ▼
-TemporalCommunity.Extensions.AI
+        → TemporalCommunity.Extensions.AI
 ```
 
-`Extensions.AI` has no knowledge of `Extensions.Agents`. This keeps the lower-level library lightweight and usable independently. Adding `TemporalCommunity.Extensions.Agents` to a project automatically pulls in `TemporalCommunity.Extensions.AI` — no separate `<PackageReference>` is needed.
+## Shared contracts
 
----
+The Agents library reuses these AI-library contracts rather than duplicating their wire format or
+workflow mechanics:
 
-## What Crosses the Boundary
+- `DurableChatWorkflowBase<TOutput>` and `DurableChatWorkflowInput` for the common session loop.
+- `DurableSessionEntry`, `DurableSessionRequest`, and `DurableSessionResponse` for persisted
+  conversation history. `AgentSessionRequest` and `AgentSessionResponse` derive from the request
+  and response types.
+- `DurableApprovalRequest`, `DurableApprovalDecision`, and the inherited approval update/query
+  handlers.
+- `DurableAIDataConverter` for MEAI message and content serialization.
+- Shared tool-interceptor result and decision types.
 
-Two types cross the boundary between the libraries: `DurableApprovalRequest` and `DurableApprovalDecision`. Both are defined in `TemporalCommunity.Extensions.AI.Approvals` and used by `TemporalCommunity.Extensions.Agents`.
+The Agents package also uses selected AI internals through its friend-assembly relationship for
+retry and error classification. That is an implementation detail, not a consumer extension point.
 
-```csharp
-// Namespace: TemporalCommunity.Extensions.AI.Approvals
-// Used by both DurableChatWorkflow (Extensions.AI) and AgentWorkflow (Extensions.Agents)
-public sealed record DurableApprovalRequest
-{
-    public required string RequestId { get; init; }
-    public string? FunctionName { get; init; }   // populated by DurableAIFunction; null in MAF flows
-    public string? CallId { get; init; }          // populated by DurableAIFunction; null in MAF flows
-    public string? Description { get; init; }
-}
+## Separate execution models
 
-public sealed record DurableApprovalDecision
-{
-    public string RequestId { get; init; } = string.Empty;
-    public bool Approved { get; init; }
-    public string? Reason { get; init; }
-}
-```
+The packages do not share a model activity:
 
-These types are the **shared wire protocol** for approval flows. An external system — an admin dashboard, a monitoring service, an approval API — that can handle `DurableApprovalRequest` from `DurableChatWorkflow` can handle the same type from `AgentWorkflow` without any modification.
+- A managed AI session has `DurableChatWorkflow` call `GetChatStep`; it owns the model/tool loop
+  and schedules each registered function as `InvokeFunction`.
+- An agent session has `AgentWorkflow` call agent activities. It manages MAF session state,
+  `AIContextProvider` hooks, and agent-specific tool dispatch.
 
----
+Do not combine `AddDurableAI()` with `AddTemporalAgents()` to make one session implementation.
+Choose the library whose public entry point matches the application: `IChatClient` and
+`DurableChatSessionClient` for MEAI, or `AIAgent` and `ITemporalAgentClient` for MAF.
 
-## DurableAIDataConverter Consideration
+## Converter registration
 
-`DurableAIDataConverter.Instance` must be applied to the Temporal client whenever MEAI types flow through workflow history. Because `Extensions.Agents` depends on `Extensions.AI`, both libraries require the same converter.
-
-In the most common registration patterns, the converter is applied automatically:
-
-| Registration pattern | Auto-wired by |
-|---|---|
-| `AddTemporalClient(addr, ns)` + `AddDurableAI()` | `Extensions.AI` — via `IConfigureOptions<TemporalClientConnectOptions>` |
-| `AddHostedTemporalWorker(addr, ns, queue)` + `AddDurableAI()` | `Extensions.AI` — via `IPostConfigureOptions<TemporalWorkerServiceOptions>` |
-| `AddHostedTemporalWorker(addr, ns, queue)` + `AddTemporalAgents()` | `Extensions.Agents` — same mechanism, applied during worker registration |
-| Manual `TemporalClient.ConnectAsync` + `AddSingleton<ITemporalClient>` | Not auto-wired — set `DataConverter = DurableAIDataConverter.Instance` explicitly |
-
-When running both libraries on the same worker, the auto-wiring registrations use `TryAddEnumerable`, so calling both `AddDurableAI()` and `AddTemporalAgents()` does not register the configurators twice.
-
----
-
-## The HITL State Machine
-
-Both `DurableChatWorkflow` and `AgentWorkflow` implement the same approval state machine using the same shared types. The protocol is identical:
-
-```
-Tool / Activity
-    │
-    │  RequestApprovalAsync [WorkflowUpdate]
-    │  sends DurableApprovalRequest
-    ▼
-Workflow (DurableChatWorkflow or AgentWorkflow)
-    │  stores _pendingApproval
-    │  blocks on WaitConditionAsync
-    │
-    ▼
-External System
-    │  polls GetPendingApproval [WorkflowQuery] → DurableApprovalRequest
-    │  calls SubmitApprovalAsync [WorkflowUpdate] with DurableApprovalDecision
-    ▼
-Workflow
-    │  sets _approvalDecision
-    │  WaitConditionAsync unblocks
-    │  returns DurableApprovalDecision to the tool
-    ▼
-Tool / Activity
-    │  proceeds or cancels based on Approved flag
-```
-
-The external system does not need to know which workflow type it is talking to. The same `GetPendingApprovalAsync` / `SubmitApprovalAsync` contract works against both. This means a single approval service can handle requests from either library.
-
----
-
-## What Does Not Cross the Boundary
-
-The following are entirely separate and belong to their respective libraries. Nothing from the Extensions.AI middleware or pipeline is used by Extensions.Agents, and vice versa.
-
-**Extensions.AI only:**
-
-- `DurableChatWorkflow` — the workflow that manages MEAI conversation history
-- `DurableChatActivities` — the activity that executes `IChatClient.GetResponseAsync`
-- `DurableFunctionActivities` — the activity that dispatches durable tool calls by name
-- `DurableEmbeddingActivities` — the activity that executes `IEmbeddingGenerator.GenerateAsync`
-- `DurableChatClient` — `DelegatingChatClient` middleware
-- `DurableEmbeddingGenerator` — `DelegatingEmbeddingGenerator` middleware
-- `DurableChatSessionClient` — external entry point for MEAI sessions
-- Registration APIs: `AddDurableAI()`, `AddDurableTools()`, `UseDurableExecution()`
-
-**Extensions.Agents only:**
-
-- `AgentWorkflow` — the workflow that manages `AIAgent` session history and StateBag
-- `AgentActivities` — the activity that executes the `AIAgent`
-- `TemporalAIAgent` / `TemporalAIAgentProxy` — agent handles for workflow and external contexts
-- `ITemporalAgentClient` / `DefaultTemporalAgentClient` — the update-based client
-- `TemporalAgentContext` — async-local context for tools running inside activities
-- `AgentSessionStateBag` — per-session state bag persisted across turns
-- Registration APIs: `AddTemporalAgents()`, `AddDurableAgent()`
-
-`Extensions.Agents` does not use `DurableChatWorkflow` or any Extensions.AI pipeline component. The two workflow types run independently, each managing its own history and HITL state.
-
----
-
-## Related Documents
-
-- [Human-in-the-Loop Patterns (Extensions.Agents)](../../how-to/MAF/hitl-patterns.md) — approval gates, dashboards, timeout configuration, and testing
-- [Human-in-the-Loop Patterns (Extensions.AI)](../../how-to/MEAI/hitl-patterns.md) — MEAI tool-call approval flow and `DurableAIFunction` context
+When clients are registered through the supported hosting extensions, each library configures the
+AI data converter. When connecting `ITemporalClient` manually, set
+`DataConverter = DurableAIDataConverter.Instance` yourself so persisted MEAI content retains its
+polymorphic type information.

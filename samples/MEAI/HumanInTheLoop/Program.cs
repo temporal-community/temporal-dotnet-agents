@@ -1,5 +1,4 @@
-// HumanInTheLoop — demonstrates a HITL approval gate where a tool suspends the durable
-// chat session via RequestApprovalAsync and resumes only after SubmitApprovalAsync is called.
+// HumanInTheLoop — demonstrates a workflow-owned HITL approval gate for a durable tool.
 //
 // Run:  dotnet run --project samples/MEAI/HumanInTheLoop/HumanInTheLoop.csproj
 
@@ -11,7 +10,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
-using Temporalio.Activities;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
@@ -43,43 +41,46 @@ var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnect
 builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 
 // ── Register IChatClient ──────────────────────────────────────────────────────
-// AddChatClient + UseFunctionInvocation() is the idiomatic MEAI pattern.
-// UseFunctionInvocation() handles the tool-call loop inside the activity:
-//   LLM request → tool call → tool result → LLM request (repeat until done)
-// The tool itself may suspend inside that loop for HITL approval.
+// Managed durable sessions own function invocation, so do not add
+// UseFunctionInvocation() to this client pipeline.
 IChatClient openAiChatClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) }
 ).GetChatClient(model).AsIChatClient();
 
-builder.Services
-    .AddChatClient(openAiChatClient)
-    .UseFunctionInvocation()
-    .Build();
+builder.Services.AddChatClient(openAiChatClient);
+
+// This function is registered with the worker. RequireApproval makes the workflow park
+// before the InvokeFunction activity is scheduled; the tool itself never calls Temporal APIs.
+var deleteTool = AIFunctionFactory.Create(
+    async ([Description("Age threshold in days; records older than this will be deleted")] int olderThanDays) =>
+    {
+        Console.WriteLine($" [Tool] Deleting records older than {olderThanDays} days...");
+        await Task.Delay(TimeSpan.FromMilliseconds(200)); // Simulate I/O.
+        return $"Successfully deleted all records older than {olderThanDays} days.";
+    },
+    name: "delete_records",
+    description: "Permanently deletes records older than the specified number of days. Requires human approval.");
 
 // ── Worker + durable AI ───────────────────────────────────────────────────────
-// ApprovalTimeout must be long enough to cover the full human review window.
-// ActivityTimeout must also be long enough — the activity stays alive while
-// the workflow is blocked waiting for a human response.
+// The approval wait is workflow-owned: no activity stays open while a reviewer decides.
+// ApprovalTimeout must be long enough to cover the full human review window, and
+// SessionTimeToLive must outlast that window.
 const string taskQueue = "hitl-meai-sample";
 
 builder.Services
     .AddHostedTemporalWorker(taskQueue)
     .AddDurableAI(opts =>
     {
-        // These three values must move together:
-        //   SessionTimeToLive >= ActivityTimeout >= ApprovalTimeout
-        //
-        // SessionTimeToLive controls when the workflow exits its main loop. If it fires
-        // before ApprovalTimeout, the pending RequestApproval update coroutine is cancelled
-        // abruptly — the caller receives an update-failure error instead of a clean
-        // DurableApprovalDecision. ActivityTimeout must also outlast the approval window
-        // so the activity hosting the tool-call loop isn't retried mid-wait.
-        opts.ActivityTimeout   = TimeSpan.FromHours(24);
-        opts.HeartbeatTimeout  = TimeSpan.FromMinutes(10);
+        // The workflow wait is durable and does not consume an activity while a human reviews.
+        // SessionTimeToLive must exceed the approval window.
+        opts.ActivityTimeout   = TimeSpan.FromMinutes(5);
+        opts.HeartbeatTimeout  = TimeSpan.FromMinutes(2);
         opts.ApprovalTimeout   = TimeSpan.FromHours(24);
-        opts.SessionTimeToLive = TimeSpan.FromHours(26);  // must exceed ApprovalTimeout
-    });
+        opts.SessionTimeToLive = TimeSpan.FromHours(26);
+    })
+    .AddDurableTools(deleteTool, tool =>
+        tool.NoRetry().RequireApproval().WithApprovalTimeout(TimeSpan.FromHours(24)));
 
 // ── Build and start host ──────────────────────────────────────────────────────
 var host = builder.Build();
@@ -97,7 +98,7 @@ Console.WriteLine();
 var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
 
 // ── Run the HITL demo ─────────────────────────────────────────────────────────
-await RunHitlDemoAsync(sessionClient, temporalClient);
+await RunHitlDemoAsync(sessionClient);
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
@@ -106,14 +107,12 @@ Console.WriteLine("\nDone.");
 // ═════════════════════════════════════════════════════════════════════════════
 // HITL Demo
 //
-// Shows the complete approval gate: the LLM calls delete_records, which sends
-// a RequestApproval update to the workflow and blocks. The main loop polls
-// GetPendingApprovalAsync, discovers the request, and auto-approves it.
+// Shows the complete approval gate: the workflow receives a delete_records request,
+// parks before dispatching the tool activity, and exposes the pending request. The main loop
+// polls GetPendingApprovalAsync, discovers the request, and auto-approves it.
 // SendAsync then returns with the LLM's final response.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunHitlDemoAsync(
-    DurableChatSessionClient sessionClient,
-    ITemporalClient temporalClient)
+static async Task RunHitlDemoAsync(DurableChatSessionClient sessionClient)
 {
     Console.WriteLine("════════════════════════════════════════════════════════════");
     Console.WriteLine(" Demo: Human-in-the-Loop Tool Approval");
@@ -122,106 +121,6 @@ static async Task RunHitlDemoAsync(
     // Each conversationId maps to one DurableChatWorkflow instance.
     var conversationId = $"hitl-demo-{Guid.NewGuid():N}";
     Console.WriteLine($" Conversation ID: {conversationId}\n");
-
-    // ── Build the delete_records tool ─────────────────────────────────────
-    // The tool closes over:
-    //   • conversationId — used to locate the workflow handle
-    //   • sessionClient  — exposes GetPendingApprovalAsync / SubmitApprovalAsync
-    //     as well as the internal workflow ID prefix ("chat-" by default)
-    //   • temporalClient — used to call the RequestApproval workflow update
-    //
-    // Flow inside the tool:
-    //   1. Build a DurableApprovalRequest with a unique RequestId
-    //   2. Call the workflow's RequestApproval [WorkflowUpdate] via the handle
-    //      → workflow stores the request and blocks on WaitConditionAsync
-    //      → this await returns only after SubmitApproval is called externally
-    //   3. Inspect the returned DurableApprovalDecision
-    //   4. If approved: perform the delete and return success
-    //      If rejected: return a cancellation message
-    var deleteTool = AIFunctionFactory.Create(
-        async (
-            [Description("Age threshold in days; records older than this will be deleted")]
-            int olderThanDays) =>
-        {
-            // ── Step 1: Build the approval request ───────────────────────
-            var requestId = Guid.NewGuid().ToString("N");
-            var request   = new DurableApprovalRequest
-            {
-                RequestId    = requestId,
-                FunctionName = "delete_records",
-                Description  = $"Permanently delete all records older than {olderThanDays} days. " +
-                               "This operation cannot be undone.",
-            };
-
-            Console.WriteLine($"\n [Tool] delete_records called (olderThan={olderThanDays} days)");
-            Console.WriteLine(" [Tool] Sending approval request to workflow...");
-
-            // ── Step 2: Send the RequestApproval update ───────────────────
-            // sessionClient.GetWorkflowId() constructs "{WorkflowIdPrefix}{conversationId}",
-            // keeping the prefix in sync with DurableExecutionOptions.WorkflowIdPrefix.
-            // Do NOT hardcode "chat-" — if the prefix is changed in options, this must follow.
-            //
-            // DurableChatWorkflow is internal to the library, so we use the untyped
-            // GetWorkflowHandle overload and call the update by its registered name.
-            //
-            // ExecuteUpdateAsync blocks until the RequestApprovalAsync handler returns,
-            // which only happens after SubmitApprovalAsync is called externally.
-            //
-            // IMPORTANT: The Temporal SDK does NOT automatically heartbeat activities.
-            // Heartbeats only fired during LLM token streaming (in GetResponseAsync). Once
-            // the streaming loop ends and this tool closure begins, the activity goes silent.
-            // Without a background heartbeat, the server will declare the activity failed
-            // after HeartbeatTimeout — retrying the activity and re-issuing this request.
-            // We run a background task that heartbeats every 4 minutes (well under the
-            // 10-minute HeartbeatTimeout) for the duration of the approval wait.
-            var workflowId = sessionClient.GetWorkflowId(conversationId);
-            var handle     = temporalClient.GetWorkflowHandle(workflowId);
-
-            using var hbCts = new CancellationTokenSource();
-            var heartbeatTask = Task.Run(async () =>
-            {
-                while (!hbCts.Token.IsCancellationRequested)
-                {
-                    try { await Task.Delay(TimeSpan.FromMinutes(4), hbCts.Token); }
-                    catch (OperationCanceledException) { break; }
-                    if (!hbCts.Token.IsCancellationRequested)
-                        ActivityExecutionContext.Current.Heartbeat("waiting-for-approval");
-                }
-            }, hbCts.Token);
-
-            DurableApprovalDecision decision;
-            try
-            {
-                decision = await handle.ExecuteUpdateAsync<DurableApprovalDecision>(
-                    "RequestApproval",
-                    new object[] { request });
-            }
-            finally
-            {
-                await hbCts.CancelAsync();
-                await heartbeatTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-            }
-
-            Console.WriteLine($" [Tool] Approval decision received: {(decision.Approved ? "APPROVED" : "REJECTED")}");
-            if (decision.Reason is { Length: > 0 })
-                Console.WriteLine($" [Tool] Reason: {decision.Reason}");
-
-            // ── Step 3: Act on the decision ───────────────────────────────
-            if (!decision.Approved)
-            {
-                var reason = decision.Reason ?? "no reason given";
-                return $"Deletion rejected by reviewer ({reason}). No records were deleted.";
-            }
-
-            // In a real system this would call your database / storage layer.
-            Console.WriteLine($" [Tool] Deleting records older than {olderThanDays} days...");
-            await Task.Delay(TimeSpan.FromMilliseconds(200)); // simulate I/O
-
-            return $"Successfully deleted all records older than {olderThanDays} days.";
-        },
-        name: "delete_records",
-        description: "Permanently deletes records older than the specified number of days. " +
-                     "Requires explicit human approval before any data is removed.");
 
     // ── System prompt explaining the assistant's purpose ──────────────────
     var systemMessage = new ChatMessage(ChatRole.System,
@@ -237,23 +136,16 @@ static async Task RunHitlDemoAsync(
     Console.WriteLine($" User : {userQuestion}\n");
 
     // ── Start the chat turn ───────────────────────────────────────────────
-    // SendAsync sends a Chat [WorkflowUpdate] to DurableChatWorkflow.
-    // Inside the workflow, DurableChatActivities.GetResponseAsync is scheduled.
-    // UseFunctionInvocation() runs the tool-call loop within that activity.
-    // When delete_records calls RequestApprovalAsync on the handle, the activity
-    // stays alive (the Temporal SDK heartbeats it) while the workflow is blocked.
-    var chatOptions = new ChatOptions
-    {
-        Tools = [deleteTool],
-    };
+    // SendAsync sends a Chat [WorkflowUpdate] to DurableChatWorkflow. The workflow uses the
+    // delete_records schema registered with AddDurableTools, parks for approval, then schedules
+    // InvokeFunction only after approval is submitted.
 
     // Start chat in the background — it will block inside the tool waiting for approval.
     // Note: the chat task is NOT awaited here. It runs concurrently so the main thread
     // can poll for the pending approval request and submit a decision.
     var chatTask = sessionClient.SendAsync(
         conversationId,
-        [systemMessage, new ChatMessage(ChatRole.User, userQuestion)],
-        options: chatOptions);
+        [systemMessage, new ChatMessage(ChatRole.User, userQuestion)]);
 
     Console.WriteLine(" [Main] Chat started — polling for pending approval...\n");
 
@@ -307,11 +199,9 @@ static async Task RunHitlDemoAsync(
         //   • Any external decision mechanism
         Console.WriteLine(" [Reviewer] Auto-approving request to demonstrate the full flow...");
 
-        // SubmitApprovalAsync sends the SubmitApproval [WorkflowUpdate].
-        // This sets _approvalDecision in the workflow, which satisfies
-        // the WaitConditionAsync in RequestApprovalAsync, which returns the
-        // decision to the tool, which unblocks the activity, which allows
-        // DurableChatActivities.GetResponseAsync to complete.
+        // ResolveApprovalAsync sends the retry-safe ResolveApproval [WorkflowUpdate].
+        // This satisfies the workflow's durable approval wait. The workflow then schedules
+        // the delete_records activity and resumes the model/tool loop.
         var decision = new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
@@ -319,7 +209,7 @@ static async Task RunHitlDemoAsync(
             Reason    = "Auto-approved by sample reviewer.",
         };
 
-        await sessionClient.SubmitApprovalAsync(conversationId, decision);
+        await sessionClient.ResolveApprovalAsync(conversationId, decision);
         Console.WriteLine(" [Reviewer] Approval submitted — waiting for assistant response...\n");
     }
     else
@@ -328,9 +218,8 @@ static async Task RunHitlDemoAsync(
     }
 
     // ── Await the final response ──────────────────────────────────────────
-    // Now that the approval has been submitted, the workflow unblocks,
-    // the tool returns its result, UseFunctionInvocation() sends it back to
-    // the LLM for a final response, and SendAsync returns.
+    // Now that the approval has been submitted, the workflow runs the tool activity, sends its
+    // result to the next model step, and SendAsync returns the final response.
     var response = await chatTask;
     Console.WriteLine($" Assistant: {response.Text}");
     Console.WriteLine();
