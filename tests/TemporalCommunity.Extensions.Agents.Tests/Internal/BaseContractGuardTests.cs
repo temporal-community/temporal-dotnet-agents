@@ -20,9 +20,7 @@ namespace TemporalCommunity.Extensions.Agents.Tests.Internal;
 /// <para>
 /// <b>Single-source rule.</b> The FICC guard asserts the <i>production constant</i>
 /// (<see cref="AgentInternalConstants.FunctionInvocationDelegatingAgentFullName"/>) resolves to a
-/// real type — it never re-declares the FQN. The skill guard drives the <i>production scan path</i>
-/// (<see cref="FileSkillsSource.GetSkillsAsync"/>) so a ctor-signature change fails here rather
-/// than at a customer's skill scan.
+/// real type — it never re-declares the FQN.
 /// </para>
 /// </remarks>
 public class BaseContractGuardTests
@@ -149,84 +147,4 @@ public class BaseContractGuardTests
             "detection in AgentActivities would no longer encounter it as a chain link.");
     }
 
-    // -----------------------------------------------------------------------------------------
-    // S-F-2b — AgentFileSkill internal 5-arg ctor resolves and constructs through the prod path.
-    // -----------------------------------------------------------------------------------------
-
-    /// <summary>
-    /// Pins the <c>internal</c> 5-arg <see cref="AgentFileSkill"/> constructor that
-    /// <see cref="FileSkillsSource"/> reflects (FileSkillsSource.cs:44-56) and caches as
-    /// <c>s_agentFileSkillCtor</c>.
-    /// </summary>
-    /// <remarks>
-    /// Reflects the ctor with the SAME binding flags and parameter type list as production. A
-    /// signature change in MAF (added/removed/reordered parameter) makes this <see langword="null"/>,
-    /// failing here at CI time instead of throwing the production
-    /// "could not locate the AgentFileSkill constructor" <see cref="InvalidOperationException"/>
-    /// during a customer's skill scan.
-    /// </remarks>
-    [Fact]
-    public void Maf_AgentFileSkill_FiveArgCtor_StillResolves()
-    {
-        var ctor = typeof(AgentFileSkill).GetConstructor(
-            BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance,
-            binder: null,
-            types:
-            [
-                typeof(AgentSkillFrontmatter),
-                typeof(string),
-                typeof(string),
-                typeof(IReadOnlyList<AgentSkillResource>),
-                typeof(IReadOnlyList<AgentSkillScript>),
-            ],
-            modifiers: null);
-
-        Assert.True(
-            ctor is not null,
-            "The internal 5-arg AgentFileSkill ctor (AgentSkillFrontmatter, string, string, " +
-            "IReadOnlyList<AgentSkillResource>, IReadOnlyList<AgentSkillScript>) no longer resolves. " +
-            "MAF changed the constructor signature — FileSkillsSource.CreateFileSkill will throw at " +
-            "scan time. Update FileSkillsSource.s_agentFileSkillCtor and this guard together.");
-    }
-
-    /// <summary>
-    /// Drives a real <c>SKILL.md</c> through the production
-    /// <see cref="FileSkillsSource.GetSkillsAsync"/> scan path and asserts it materializes a
-    /// non-null <see cref="AgentFileSkill"/>.
-    /// </summary>
-    /// <remarks>
-    /// This is the end-to-end half of S-F-2b: even if the ctor signature resolves, the
-    /// <c>CreateFileSkill</c> invocation must actually produce a usable skill. <c>CreateFileSkill</c>
-    /// is <c>private</c>, so we exercise it through the only production entry point. A change to the
-    /// ctor's behavior (e.g. an added required argument that <c>null, null</c> no longer satisfies)
-    /// surfaces here.
-    /// </remarks>
-    [Fact]
-    public async Task Maf_FileSkillsSource_ConstructsRealAgentFileSkill_ThroughProductionPath()
-    {
-        var root = Path.Combine(Path.GetTempPath(), $"bcg-skill-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(root);
-        try
-        {
-            // Minimal valid SKILL.md (matches FileSkillsSourceTests frontmatter format).
-            File.WriteAllText(
-                Path.Combine(root, "SKILL.md"),
-                "---\nname: guard-skill\ndescription: Base-contract guard skill.\n---\n## Body\nDo stuff.");
-
-            var source = new FileSkillsSource(root);
-            var skills = await source.GetSkillsAsync(null!, default);
-
-            var skill = Assert.Single(skills);
-            // The production path reflected and invoked the internal AgentFileSkill ctor.
-            Assert.IsType<AgentFileSkill>(skill);
-            Assert.Equal("guard-skill", skill.Frontmatter.Name);
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-            {
-                Directory.Delete(root, recursive: true);
-            }
-        }
-    }
 }

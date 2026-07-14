@@ -47,11 +47,9 @@ namespace TemporalCommunity.Extensions.Agents.Skills;
 /// <para>
 /// <b>Script stripping.</b> When scripts are disabled (<c>scriptsEnabled = false</c>),
 /// the <c>load_skill</c> tool strips the <c>&lt;scripts&gt;…&lt;/scripts&gt;</c> block
-/// from synthesized skill content (works for <see cref="AgentInlineSkill"/> and
-/// <see cref="AgentClassSkill{TSelf}"/> which use synthesized XML; file-based skills use
-/// raw Markdown where no XML tag exists). File skill authors should omit script
-/// documentation from their SKILL.md files when script execution is disabled, or accept
-/// that the model may see script information it cannot execute.
+/// from synthesized inline and class-based skill content. Native directory-backed sources do not
+/// discover scripts unless the builder has an explicit runner, so their available-script metadata
+/// remains empty when scripts are disabled.
 /// </para>
 /// </remarks>
 public sealed class SkillsContextProvider : AIContextProvider
@@ -140,10 +138,10 @@ public sealed class SkillsContextProvider : AIContextProvider
     /// execution is disabled so the model does not see tools it cannot call.
     /// </summary>
     /// <remarks>
-    /// This helper works for <see cref="AgentInlineSkill"/> and <see cref="AgentClassSkill{TSelf}"/>
-    /// which emit synthesized XML. File-based skills (<c>AgentFileSkill</c>) use raw Markdown — if
-    /// the SKILL.md documents scripts in Markdown prose (not XML tags), this helper is a no-op and
-    /// the model may still see script information.
+/// This helper works for <see cref="AgentInlineSkill"/> and <see cref="AgentClassSkill{TSelf}"/>
+/// which emit synthesized XML. Native directory-backed skills use MAF's available-script metadata
+/// instead, and this library suppresses their script discovery unless a runner is explicitly
+/// configured.
     /// </remarks>
     /// <param name="content">The skill content string to strip.</param>
     /// <returns>

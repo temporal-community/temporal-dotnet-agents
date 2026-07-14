@@ -91,7 +91,7 @@ builder.Services
                 // IDE debugger, or the sample-canary recipe all work the same way).
                 // Note: the directory is named "skill-catalog" (not "skills") to avoid a
                 // case-insensitive filesystem collision with the compiled "Skills" executable
-                // on macOS. Frontmatter name/description values must be unquoted strings.
+                // on macOS.
                 s.AddSkillsFromDirectory(
                     Path.Combine(AppContext.BaseDirectory, "skill-catalog"));
 

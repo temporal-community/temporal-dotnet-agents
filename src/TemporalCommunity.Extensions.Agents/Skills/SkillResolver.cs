@@ -55,7 +55,7 @@ internal sealed class SkillResolver : IDisposable
     /// Optional MAF context passed through to each <see cref="AgentSkillsSource.GetSkillsAsync"/>.
     /// May be <see langword="null"/> when called from tool-closure paths that run outside a
     /// live agent invocation. Sources that require context (e.g. context-aware custom sources)
-    /// should guard against a null value; the built-in <see cref="FileSkillsSource"/> ignores it.
+    /// should guard against a null value; MAF's built-in file source ignores it.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="InvalidOperationException">

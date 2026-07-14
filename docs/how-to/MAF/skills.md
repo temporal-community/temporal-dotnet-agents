@@ -58,7 +58,7 @@ builder.Services
                 "A catalog of skills is available to you. " +
                 "Use load_skill to fetch instructions for a relevant skill before proceeding.";
 
-            // Scan ./skills and all subdirectories up to 2 levels deep.
+            // Use MAF's native file-skill discovery for ./skills.
             agent.UseSkills(s =>
             {
                 s.AddSkillsFromDirectory("./skills");
@@ -106,24 +106,11 @@ Use this skill to help employees submit, track, and correct expense reports.
 | `license` | No | Stored on the skill; not shown in the index. |
 | `compatibility` | No | Stored on the skill; not shown in the index. |
 
-**Values must be unquoted strings.** A line like `name: "expense-report"` includes the quote characters verbatim, which will fail MAF name validation and cause the skill to be silently skipped.
+The directory name must exactly match the frontmatter `name`. For example,
+`./skills/expense-report/SKILL.md` must declare `name: expense-report`.
 
-**The first line of the file must be `---`** — no leading blank lines. A BOM at the start of the file is stripped automatically, but any other whitespace before the opening delimiter causes a parse failure.
-
-**Malformed files are silently skipped** (logged as warnings) unless you construct a `FileSkillsSource` directly and pass a logger:
-
-```csharp
-using TemporalCommunity.Extensions.Agents.Skills;
-
-agent.UseSkills(s =>
-{
-    // Pass a FileSkillsSource directly to get warning logs for malformed files.
-    s.AddSkillsSource(new FileSkillsSource(
-        "./skills",
-        maxDepth: 2,
-        logger: loggerFactory.CreateLogger<FileSkillsSource>()));
-});
-```
+MAF accepts quoted or unquoted frontmatter values. Invalid frontmatter or a name/directory
+mismatch causes that skill directory to be skipped.
 
 ---
 
@@ -132,12 +119,15 @@ agent.UseSkills(s =>
 ```csharp
 agent.UseSkills(s =>
 {
-    // File-based: scans up to 2 levels deep (root + children + grandchildren).
+    // File-based: uses MAF's native SKILL.md discovery.
     s.AddSkillsFromDirectory("./skills");
 
-    // File-based with explicit depth: 0 = root only, 1 = root + children.
-    // AddSkillsFromDirectory does not expose maxDepth — use FileSkillsSource directly.
-    s.AddSkillsSource(new FileSkillsSource("./core-skills", maxDepth: 0));
+    // Native options control resources and scripts inside each skill directory.
+    s.AddSkillsFromDirectory("./core-skills", configure: options =>
+    {
+        options.SearchDepth = 1;
+        options.AllowedResourceExtensions = [".md", ".json"];
+    });
 
     // Inline: single skill defined in code.
     s.AddSkill(new AgentInlineSkill(
@@ -156,17 +146,12 @@ agent.UseSkills(s =>
 });
 ```
 
-### AddSkillsFromDirectory depth semantics
+### Native discovery semantics
 
-`maxDepth` controls how many directory levels the scanner descends:
-
-| `maxDepth` | Directories scanned |
-|---|---|
-| `0` | Root directory only |
-| `1` | Root + immediate subdirectories |
-| `2` (default) | Root + two levels (root, children, grandchildren) |
-
-Skills discovered across all directories are sorted by name (`OrdinalIgnoreCase`) before the catalog is built, so the order of `SKILL.md` files on disk does not affect the order the agent sees.
+MAF searches for skill-root directories up to two levels below the supplied path. Once it finds a
+directory containing `SKILL.md`, that directory is a single skill root; descendants are treated as
+that skill's resources or scripts, not as additional skills. `SearchDepth` controls resource and
+script discovery *within* a skill root (minimum 1), not the skill-root search depth.
 
 ### Duplicate skill names
 
@@ -184,7 +169,11 @@ Calling `UseSkills(...)` registers the following tools automatically. You do not
 | `read_skill_resource` | Returns a named resource from a skill | — | — | — |
 | `run_skill_script` | Runs a named script from a skill | — | Yes (always) | Yes |
 
-**`load_skill`** — read-only with no side effects; the interceptor is skipped for it. Returns the raw `SKILL.md` content for file-based skills, or synthesized XML for inline and class-based skills. When script execution is disabled, any `<scripts>` block is stripped from synthesized XML before returning.
+**`load_skill`** — read-only with no side effects; the interceptor is skipped for it. For file-based
+skills it returns the SKILL.md content plus MAF's available-resource and available-script metadata;
+for inline and class-based skills it returns synthesized XML. When script execution is disabled,
+the `<scripts>` block is stripped from inline and class-based content; directory-backed scripts are
+not discovered without a runner.
 
 **`read_skill_resource`** — can delegate to resource implementations that perform I/O, so the interceptor fires by default. Returns the resource content string; returns a "not found" message for unknown skills or resource names.
 
@@ -289,7 +278,25 @@ When `EnableScriptExecution()` is called:
 - The LLM can call `run_skill_script(skillName, scriptName, argumentsJson)`.
 - Before the tool activity dispatches, the HITL approval flow pauses the workflow and waits for a human to resolve it via `ResolveApprovalAsync`. For the full approval API, see [HITL Patterns](./hitl-patterns.md).
 
-**File-backed scripts are not supported.** `AddSkillsFromDirectory` throws `NotSupportedException` if you pass a `runner` argument. Script execution is available only for inline skills (`AgentInlineSkill`), class-based skills (`AgentClassSkill<TSelf>`), or a custom `AgentSkillsSource`.
+### File-backed scripts
+
+Directory-backed scripts require two explicit opt-ins: supply a runner to
+`AddSkillsFromDirectory` **and** call `EnableScriptExecution()`. The runner-only case throws when
+the builder is finalized; enabling scripts without a directory runner still supports inline and
+class-based skills, but does not discover file scripts.
+
+```csharp
+agent.UseSkills(s =>
+{
+    s.AddSkillsFromDirectory("./skills",
+        scriptRunner: RunInSandbox,
+        configure: options => options.AllowedScriptExtensions = [".py"]);
+    s.EnableScriptExecution();
+});
+```
+
+The resulting `run_skill_script` tool still has `RequireApproval()` and `NoRetry()`, and runs as
+a durable tool activity. Do not configure script extensions without a runner.
 
 ---
 
@@ -307,10 +314,9 @@ Treat file skill directories as effectively immutable for the lifetime of a sess
 
 | Unsupported | Notes |
 |---|---|
-| `AgentFileSkillsSourceOptions` (extension filters, custom depth via the options type) | Use `FileSkillsSource` directly with `maxDepth` for depth control |
-| File-backed script runners (`AddSkillsFromDirectory` with `runner:` argument) | Throws `NotSupportedException` — use inline or class-based skills |
-| `AgentFileSkill.Resources` via the file scanner | `null` is passed to the constructor; no resource delegates are loaded from disk |
-| `AgentFileSkill.Scripts` via the file scanner | `null` is passed to the constructor; scripts in SKILL.md are not executed |
+| Custom skill-root search depth | MAF searches up to two levels; `SearchDepth` affects resources and scripts inside an identified skill root. |
+| File scripts without both opt-ins | Supply a runner and call `EnableScriptExecution()`; otherwise directory-backed scripts are not discovered. |
+| Mutable file catalogs within a session | Treat the skill directory as immutable for the session; see [File-skill drift](#file-skill-drift). |
 
 For skills that need resources or scripts, use `AgentInlineSkill` or a custom `AgentSkillsSource` registered via `AddSkillsSource`.
 
@@ -326,4 +332,4 @@ For skills that need resources or scripts, use `AgentInlineSkill` or a custom `A
 
 ---
 
-_Last updated: 2026-06-03_
+_Last updated: 2026-07-13_

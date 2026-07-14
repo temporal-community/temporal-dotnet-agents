@@ -26,7 +26,6 @@ override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.GetH
 override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionIdJsonConverter.Read(ref System.Text.Json.Utf8JsonReader reader, System.Type! typeToConvert, System.Text.Json.JsonSerializerOptions! options) -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
 override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionIdJsonConverter.Write(System.Text.Json.Utf8JsonWriter! writer, TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId value, System.Text.Json.JsonSerializerOptions! options) -> void
 override TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.ToString() -> string!
-override TemporalCommunity.Extensions.Agents.Skills.FileSkillsSource.GetSkillsAsync(Microsoft.Agents.AI.AgentSkillsSourceContext! context, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IList<Microsoft.Agents.AI.AgentSkill!>!>!
 override TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions.Clone() -> Microsoft.Agents.AI.AgentRunOptions!
 override TemporalCommunity.Extensions.Agents.TemporalAIAgent.Name.get -> string?
 override TemporalCommunity.Extensions.Agents.Testing.NoOpAgent.Description.get -> string?
@@ -223,8 +222,6 @@ TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgent
 TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionIdJsonConverter
 TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.TemporalAgentSessionIdJsonConverter.TemporalAgentSessionIdJsonConverter() -> void
 TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId.WorkflowId.get -> string!
-TemporalCommunity.Extensions.Agents.Skills.FileSkillsSource
-TemporalCommunity.Extensions.Agents.Skills.FileSkillsSource.FileSkillsSource(string! directory, int maxDepth = 2, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
 TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder
 TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder.AddSkill(Microsoft.Agents.AI.AgentSkill! skill) -> TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder!
 TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder.AddSkills(System.Collections.Generic.IEnumerable<Microsoft.Agents.AI.AgentSkill!>! skills) -> TemporalCommunity.Extensions.Agents.Skills.SkillsBuilder!

@@ -1,4 +1,4 @@
-#pragma warning disable MAAI001 // experimental MAF skills surface (AgentSkillsSource/AgentFileSkill); inventoried in Internal/ExperimentalApiSuppressions.cs
+#pragma warning disable MAAI001 // experimental MAF skills surface (AgentSkillsSource/AgentFileSkillsSource); inventoried in Internal/ExperimentalApiSuppressions.cs
 using Microsoft.Agents.AI;
 
 namespace TemporalCommunity.Extensions.Agents.Skills;
@@ -28,20 +28,16 @@ namespace TemporalCommunity.Extensions.Agents.Skills;
 /// <para>
 /// <b>Script execution.</b> Call <see cref="EnableScriptExecution"/> to opt in to
 /// <c>run_skill_script</c> registration with a built-in <c>RequireApproval()</c> gate.
-/// Script execution is disabled by default. File-backed scripts are <b>not</b> supported
-/// by the native SKILL.md scanner — <see cref="AddSkillsFromDirectory"/> throws
-/// <see cref="NotSupportedException"/> when a runner is supplied. Script execution
-/// works only for inline (<see cref="AgentInlineSkill"/>) and class-based
-/// (<see cref="AgentClassSkill{TSelf}"/>) skills, or when a custom
-/// <see cref="AgentSkillsSource"/> is registered via <see cref="AddSkillsSource"/>.
-/// Without <see cref="EnableScriptExecution"/>, <c>run_skill_script</c> is not registered
-/// and the skill index does not mention script invocation.
+/// File-backed scripts additionally require an explicit runner supplied to
+/// <see cref="AddSkillsFromDirectory"/>. Without both opt-ins, directory-backed script
+/// discovery is disabled and the skill index does not mention script invocation.
 /// </para>
 /// </remarks>
 public sealed class SkillsBuilder
 {
     private readonly List<AgentSkill> _skills = [];
     private readonly List<AgentSkillsSource> _sources = [];
+    private bool _hasDirectoryScriptRunner;
 
     /// <summary>
     /// Gets a value indicating whether script execution was opted in to via
@@ -53,44 +49,33 @@ public sealed class SkillsBuilder
     /// Registers a directory to scan for SKILL.md files (file-based skills).
     /// </summary>
     /// <param name="path">
-    /// Path to scan for SKILL.md files. Each subdirectory containing a SKILL.md becomes
-    /// a separate skill. Directories are scanned up to 2 levels deep by default
-    /// (root + children + grandchildren).
+    /// Path to scan for SKILL.md files. MAF discovers skill-root directories up to two
+    /// levels deep by default. A directory that contains a SKILL.md is a skill root; its
+    /// descendants are treated as files belonging to that skill rather than additional skills.
     /// </param>
     /// <param name="runner">
-    /// Not supported by the native SKILL.md scanner. Must be <see langword="null"/>.
-    /// Use inline or class-based skills for script execution.
+    /// Optional file-script runner. When supplied, <see cref="EnableScriptExecution"/> must
+    /// also be called before the builder is finalized.
     /// </param>
     /// <param name="configure">
-    /// Not supported by the native SKILL.md scanner. Must be <see langword="null"/>.
+    /// Configures MAF's native file-skill discovery options. Script extensions require a
+    /// non-null <paramref name="runner"/>.
     /// </param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="path"/> is <see langword="null"/>.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is whitespace.</exception>
-    /// <exception cref="NotSupportedException">
-    /// Thrown when <paramref name="runner"/> or <paramref name="configure"/> is non-<see langword="null"/>.
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when script extensions are configured without a script runner.
     /// </exception>
     /// <remarks>
     /// <para>
-    /// <b>Supported frontmatter fields:</b> <c>name</c>, <c>description</c>, <c>license</c>,
-    /// <c>compatibility</c>. The raw SKILL.md content is passed as the skill's
-    /// <c>Content</c> property (returned verbatim by <c>load_skill</c>).
+    /// MAF validates the YAML frontmatter and discovers resources according to the configured
+    /// <see cref="AgentFileSkillsSourceOptions"/>. The raw SKILL.md content is available through
+    /// <c>load_skill</c>.
     /// </para>
     /// <para>
-    /// <b>Not supported:</b> resources, scripts, extension filters, script runners. For
-    /// skills that require these features, use <see cref="AddSkillsSource"/> with a
-    /// custom <see cref="AgentSkillsSource"/> implementation.
-    /// </para>
-    /// <para>
-    /// <b>Frontmatter values must be unquoted strings.</b> A value like
-    /// <c>name: "expense-report"</c> (with quotes) will include the literal quote
-    /// characters, which will fail MAF name validation and cause the skill to be
-    /// silently skipped during the directory scan.
-    /// </para>
-    /// <para>
-    /// <b>Malformed or invalid SKILL.md files are silently skipped</b> (no diagnostics)
-    /// unless a logger is injected by constructing a <see cref="FileSkillsSource"/> directly
-    /// and passing it to <see cref="AddSkillsSource"/>.
+    /// Resource discovery is enabled by default. File-backed scripts are discovered only when
+    /// both a runner and <see cref="EnableScriptExecution"/> are configured.
     /// </para>
     /// </remarks>
     public SkillsBuilder AddSkillsFromDirectory(
@@ -99,20 +84,28 @@ public sealed class SkillsBuilder
         Action<AgentFileSkillsSourceOptions>? configure = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        if (runner is not null)
+        var options = new AgentFileSkillsSourceOptions();
+        configure?.Invoke(options);
+
+        if (runner is null)
         {
-            throw new NotSupportedException(
-                "File-backed script execution is not supported by the native SKILL.md scanner. " +
-                "Use inline or class-based skills for script execution.");
+            if (options.AllowedScriptExtensions?.Any() == true)
+            {
+                throw new InvalidOperationException(
+                    "File-backed script extensions require a non-null script runner. " +
+                    "Supply a runner and call EnableScriptExecution().");
+            }
+
+            // AgentFileSkillsSource otherwise uses its default script extensions. Suppress
+            // discovery unless the caller explicitly supplies a runnable script path.
+            options.AllowedScriptExtensions = [];
+        }
+        else
+        {
+            _hasDirectoryScriptRunner = true;
         }
 
-        if (configure is not null)
-        {
-            throw new NotSupportedException(
-                "AgentFileSkillsSourceOptions is not supported by the native SKILL.md scanner.");
-        }
-
-        _sources.Add(new FileSkillsSource(path));
+        _sources.Add(new AgentFileSkillsSource(path, runner, options));
         return this;
     }
 
@@ -172,12 +165,8 @@ public sealed class SkillsBuilder
     /// <remarks>
     /// <para>
     /// When enabled, the <c>run_skill_script</c> tool is registered and will always require
-    /// human approval before dispatching (Rule 2 floor). File-backed scripts are <b>not</b>
-    /// supported by the native SKILL.md scanner — <see cref="AddSkillsFromDirectory"/> throws
-    /// <see cref="NotSupportedException"/> when a runner is supplied. Script execution applies
-    /// only to inline (<see cref="AgentInlineSkill"/>) and class-based
-    /// (<see cref="AgentClassSkill{TSelf}"/>) skills, or to skills provided by a custom
-    /// <see cref="AgentSkillsSource"/> registered via <see cref="AddSkillsSource"/>.
+    /// human approval before dispatching (Rule 2 floor). Directory-backed scripts also require
+    /// a non-null runner supplied to <see cref="AddSkillsFromDirectory"/>.
     /// </para>
     /// </remarks>
     public SkillsBuilder EnableScriptExecution()
@@ -190,6 +179,15 @@ public sealed class SkillsBuilder
     /// Builds and returns a <see cref="SkillResolver"/> from the registered skills and sources.
     /// Called internally by <c>DurableAgentBuilder.UseSkills()</c>.
     /// </summary>
-    internal SkillResolver BuildResolver() =>
-        new SkillResolver(_skills.AsReadOnly(), _sources.AsReadOnly());
+    internal SkillResolver BuildResolver()
+    {
+        if (_hasDirectoryScriptRunner && !ScriptsEnabled)
+        {
+            throw new InvalidOperationException(
+                "File-backed script runners require EnableScriptExecution() so scripts are " +
+                "executed through the approval-gated durable tool.");
+        }
+
+        return new SkillResolver(_skills.AsReadOnly(), _sources.AsReadOnly());
+    }
 }
