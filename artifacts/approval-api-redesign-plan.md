@@ -109,6 +109,7 @@ The explicit `IDurableSessionControl.ResolveApprovalAsync` implementation on `De
 - Keep the inherited `[WorkflowUpdate("ResolveApproval")]` handler unchanged for generic dashboard resolution. Add a separate `[WorkflowUpdate("ResolveAgentApproval")]` handler for `DurableAgentApprovalDecision`; do not rely on overload discovery or runtime polymorphic JSON.
 - If `ResolveAgentApprovalAsync` needs a workflow-update validator, declare it with `[WorkflowUpdateValidator(nameof(ResolveAgentApprovalAsync))]` and exercise that validator through an integration test. Never reference the generic `ResolveApprovalAsync` method name from the typed handler's validator attribute.
 - Convert an accepted `DurableAgentApprovalDecision` to the generic core decision only at the `DurableApprovalMixin` boundary. The typed handler uses the mixin to accept and unblock a currently pending request, but must never return the mixin's status directly: it recomputes `Accepted`, `AlreadyResolved`, and `Conflict` from the full MAF decision ledger.
+- Add a protected no-op base hook invoked only when the inherited generic `ResolveApproval` accepts a decision. `AgentWorkflow` overrides it to write the same request ID to the MAF ledger as an explicit `ThisCallOnly` decision with no pattern before the update returns. This symmetric write-through means both endpoints populate both views of the shared retention window.
 - Preserve the full MAF decision separately until the approval resolves, then use it for scope normalization and persistence. A successful generic decision is always `ThisCallOnly`.
 - Add MAF-specific retained-resolution records to `AgentWorkflowInput` and carry them in `AgentWorkflow.CreateContinueAsNewException`.
   Full MAF decision identity—core fields plus scope and pattern—must determine `AlreadyResolved` versus `Conflict` for a typed reviewer retry.
@@ -150,6 +151,7 @@ The explicit `IDurableSessionControl.ResolveApprovalAsync` implementation on `De
 - Generic MEAI approval, retry after a lost response, and retry after continue-as-new.
 - MAF typed approval with each scope; retry of the identical typed decision; a retry that changes scope or pattern and returns `Conflict`.
 - Generic dashboard resolution against an MAF workflow through the inherited `ResolveApproval` update, proving it resolves the pending request but grants no scope.
+- Cross-endpoint retry tests: generic-first then typed retry returns `AlreadyResolved` only for the equivalent explicit `ThisCallOnly` decision; typed-first then generic retry also returns `AlreadyResolved`; either route returns `Conflict` for a changed scoped decision.
 - A direct raw Temporal attempt to invoke the removed `SubmitApproval` update fails as an unknown update; no SDK documentation, sample, or test retains that wire name.
 - Typed `ResolveAgentApproval` update wiring, including its validator when present, is exercised through an integration test rather than inferred from a method overload.
 - Retention-boundary tests that prove generic and typed MAF resolution agree on `AlreadyResolved` versus `NotPending` before and after a shared archive eviction.
