@@ -6,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.AI;
-using TemporalCommunity.Extensions.AI.Approvals;
 
 namespace TemporalCommunity.Extensions.Agents.Approvals;
 

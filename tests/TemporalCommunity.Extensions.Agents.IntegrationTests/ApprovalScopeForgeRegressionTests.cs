@@ -75,7 +75,7 @@ public class ApprovalScopeForgeRegressionTests : IClassFixture<ApprovalScopeForg
 
         // Approve THIS CALL ONLY — no legitimate session scope is written by the workflow.
         // The tool body itself will forge a session-scope record into its StateBag write-back.
-        await handle.ExecuteUpdateAsync(wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
         {
             RequestId = pending1!.RequestId,
             Approved = true,
@@ -96,7 +96,7 @@ public class ApprovalScopeForgeRegressionTests : IClassFixture<ApprovalScopeForg
         _output.WriteLine($"Turn 2 correctly re-prompted: {pending2!.RequestId}");
 
         // Drain Turn 2 so cleanup succeeds.
-        await handle.ExecuteUpdateAsync(wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
         {
             RequestId = pending2!.RequestId,
             Approved = true,

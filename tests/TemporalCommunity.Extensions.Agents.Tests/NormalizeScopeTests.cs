@@ -1,3 +1,4 @@
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
@@ -15,11 +16,11 @@ namespace TemporalCommunity.Extensions.Agents.Tests;
 /// </summary>
 public class NormalizeScopeTests
 {
-    // Helper: build a DurableApprovalDecision with scope and pattern.
-    private static DurableApprovalDecision Decision(
+    // Helper: build a DurableAgentApprovalDecision with scope and pattern.
+    private static DurableAgentApprovalDecision Decision(
         ApprovalScope scope,
         ApprovalScopePattern? pattern = null) =>
-        new DurableApprovalDecision
+        new DurableAgentApprovalDecision
         {
             RequestId = "req-norm-test",
             Approved = true,

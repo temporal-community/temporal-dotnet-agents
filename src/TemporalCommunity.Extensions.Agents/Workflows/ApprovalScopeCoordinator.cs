@@ -3,7 +3,6 @@ using System.Text.RegularExpressions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.Agents.Approvals;
-using TemporalCommunity.Extensions.AI.Approvals;
 
 namespace TemporalCommunity.Extensions.Agents.Workflows;
 
@@ -208,7 +207,7 @@ internal static class ApprovalScopeCoordinator
     /// here and handles logging.
     /// </remarks>
     internal static (ApprovalScope Scope, string? DegradationReason) EvaluateScopeNormalization(
-        DurableApprovalDecision decision)
+        DurableAgentApprovalDecision decision)
     {
         var scope = decision.Scope;
 

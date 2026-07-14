@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
@@ -183,21 +184,17 @@ public class ApprovalScopeRegressionTests
         Assert.Equal(0, workerInvocationCount); // factory not invoked at registration time
     }
 
-    // ── MEAI scope fields are silently ignored on the MEAI path ─────────────
+    // ── MAF-only scope decision defaults ────────────────────────────────────
 
     [Fact]
-    public void DurableApprovalDecision_ScopeFields_ExistButDoNotAffectMeaiPath()
+    public void DurableAgentApprovalDecision_DefaultsToThisCallOnly()
     {
-        // MEAI DurableChatWorkflow approval behavior is unchanged: scope fields on
-        // DurableApprovalDecision are defined but the MEAI workflow loop does not use them.
-        // This test is a type-existence and default-value guard.
-        var decision = new DurableApprovalDecision
+        var decision = new DurableAgentApprovalDecision
         {
-            RequestId = "req-meai-compat",
+            RequestId = "req-agent-scope",
             Approved = true,
         };
 
-        // Scope defaults to ThisCallOnly (0) — the zero-value, which is also the wire default.
         Assert.Equal(ApprovalScope.ThisCallOnly, decision.Scope);
         Assert.Null(decision.ScopePattern);
     }

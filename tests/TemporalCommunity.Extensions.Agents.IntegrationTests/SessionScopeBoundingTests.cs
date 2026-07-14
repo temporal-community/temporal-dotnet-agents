@@ -199,7 +199,7 @@ public class SessionScopeBoundingTests : IClassFixture<SessionScopeBoundingTests
     }
 
     private static Task ApproveAsync(WorkflowHandle<AgentWorkflow> handle, DurableApprovalRequest req, ApprovalScope scope) =>
-        handle.ExecuteUpdateAsync(wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+        handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
         {
             RequestId = req.RequestId,
             Approved = true,

@@ -1,5 +1,3 @@
-using TemporalCommunity.Extensions.AI.Approvals;
-
 namespace TemporalCommunity.Extensions.Agents.Approvals;
 
 /// <summary>

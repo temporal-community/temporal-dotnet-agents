@@ -52,7 +52,7 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
     ///   → Test submits approval with Scope = Session.
     ///   → Workflow writes ApprovalScopeRecord to StateBag key "temporal.approval_scopes.session".
     /// Turn 2: same tool call → interceptor finds matching session scope → returns Proceed.
-    ///   → No new SubmitApprovalAsync needed.
+    ///   → No new approval resolution needed.
     /// </summary>
     [Fact]
     public async Task SessionScope_WrittenAfterApproval_SecondCallAutoApproves()
@@ -97,7 +97,7 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         _output.WriteLine($"Pending approval: {pendingApproval!.RequestId}");
 
         // Submit approval with Scope = Session.
-        await handle.ExecuteUpdateAsync(wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
         {
             RequestId = pendingApproval!.RequestId,
             Approved = true,
@@ -174,7 +174,7 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         Assert.NotNull(pending);
 
         // Approve with Scope = Session (non-scope-aware tool ignores the scope).
-        await handle.ExecuteUpdateAsync(wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
         {
             RequestId = pending!.RequestId,
             Approved = true,
@@ -200,7 +200,7 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         Assert.NotNull(pending2);
 
         // Approve Turn 2 so test cleanup succeeds.
-        await handle.ExecuteUpdateAsync(wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
         {
             RequestId = pending2!.RequestId,
             Approved = true,
@@ -252,7 +252,7 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         _output.WriteLine($"Pending approval: {pending!.RequestId}");
 
         // Approve with Scope = Always.
-        await handle.ExecuteUpdateAsync(wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
         {
             RequestId = pending!.RequestId,
             Approved = true,

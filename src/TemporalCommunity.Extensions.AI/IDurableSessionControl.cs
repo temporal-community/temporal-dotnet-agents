@@ -17,9 +17,8 @@ namespace TemporalCommunity.Extensions.AI;
 /// conversation ID or session key). Callers can obtain it via the client's own
 /// <c>GetWorkflowId</c> / <c>SessionId.WorkflowId</c> helpers.
 /// For MEAI applications, prefer <see cref="IDurableChatSessionClient.ResolveApprovalAsync"/>,
-/// which returns retry-safe resolution status. MAF approval clients use
-/// <see cref="SubmitApprovalAsync"/> with their typed session IDs; this raw-workflow-ID member
-/// lets shared approval tooling address either library.
+/// which returns retry-safe resolution status. This raw-workflow-ID surface provides the same
+/// retry-safe generic resolution contract to shared approval tooling for either library.
 /// </remarks>
 public interface IDurableSessionControl
 {
@@ -34,21 +33,22 @@ public interface IDurableSessionControl
         CancellationToken ct = default);
 
     /// <summary>
-    /// Submits a human decision for a pending tool approval request, unblocking the workflow.
-    /// This raw-workflow-ID form does not report an idempotency status; MEAI callers should use
-    /// <see cref="IDurableChatSessionClient.ResolveApprovalAsync"/> instead.
+    /// Resolves a human decision for a pending tool approval request and returns a retry-safe
+    /// status. An identical retry after a lost response returns <c>AlreadyResolved</c>; a
+    /// different decision for the same request returns <c>Conflict</c>.
     /// </summary>
     /// <param name="workflowId">The raw Temporal workflow ID for the session.</param>
     /// <param name="decision">The approval or rejection decision.</param>
-    /// <param name="ct">Cancellation token.</param>
-    Task SubmitApprovalAsync(
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
         string workflowId,
         DurableApprovalDecision decision,
-        CancellationToken ct = default);
+        CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Cancels the pending approval request (if any) by submitting a rejected decision on
-    /// behalf of an external system. No-op when no approval is pending.
+    /// Cancels the pending approval request (if any) by resolving it as rejected on behalf of
+    /// an external system. No-op when no approval is pending. An <c>AlreadyResolved</c> result
+    /// is intentionally ignored because another reviewer already completed the request.
     /// </summary>
     /// <param name="workflowId">The raw Temporal workflow ID for the session.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -62,7 +62,7 @@ public interface IDurableSessionControl
             return;
         }
 
-        await SubmitApprovalAsync(
+        _ = await ResolveApprovalAsync(
             workflowId,
             new DurableApprovalDecision
             {

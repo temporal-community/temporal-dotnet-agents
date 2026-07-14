@@ -1,5 +1,3 @@
-using System.Text.Json.Serialization;
-
 namespace TemporalCommunity.Extensions.AI.Approvals;
 
 /// <summary>
@@ -23,28 +21,4 @@ public sealed class DurableApprovalDecision
     /// </summary>
     public string? Reason { get; init; }
 
-    /// <summary>
-    /// When <see cref="Approved"/> is <see langword="true"/>, controls how far this decision
-    /// carries forward. Defaults to <see cref="ApprovalScope.ThisCallOnly"/>, which reproduces
-    /// today's per-invocation behavior.
-    /// </summary>
-    /// <remarks>
-    /// <c>ApprovalScope</c> is defined in <c>TemporalCommunity.Extensions.AI</c> because this DTO is
-    /// the shared approval wire contract. The MEAI workflow path currently ignores scope fields;
-    /// the Agents workflow path applies them.
-    /// </remarks>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public ApprovalScope Scope { get; init; } = ApprovalScope.ThisCallOnly;
-
-    /// <summary>
-    /// Optional pattern that scopes the decision to a subset of tool calls sharing the same
-    /// name. When <see langword="null"/>, the decision applies to any call of the named tool
-    /// regardless of arguments. When non-null, only tool calls whose arguments match the
-    /// pattern are auto-approved; others still require human review.
-    /// </summary>
-    /// <remarks>
-    /// Serialized as a JSON object: <c>{ "type": "Glob", "parameter": "path", "pattern": "/tmp/*" }</c>.
-    /// </remarks>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public ApprovalScopePattern? ScopePattern { get; init; }
 }

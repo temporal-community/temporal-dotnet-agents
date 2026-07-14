@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
@@ -80,6 +81,27 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
             var pending = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
                 wf => wf.GetPendingApproval());
             Assert.Null(pending);
+
+            // Timeout decisions are retained in both approval ledgers. A typed retry with the
+            // synthesized ThisCallOnly scope is idempotent; a changed scope conflicts.
+            var timeoutRetry = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
+                {
+                    RequestId = decision.RequestId,
+                    Approved = false,
+                    Reason = decision.Reason,
+                }));
+            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, timeoutRetry.Status);
+
+            var timeoutConflict = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
+                {
+                    RequestId = decision.RequestId,
+                    Approved = false,
+                    Reason = decision.Reason,
+                    Scope = ApprovalScope.Session,
+                }));
+            Assert.Equal(DurableApprovalResolutionStatus.Conflict, timeoutConflict.Status);
         }
         finally
         {
@@ -88,7 +110,7 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
     }
 
     [Fact]
-    public async Task SubmitApproval_BeforeTimeout_ReturnsApprovedTicket()
+    public async Task ResolveAgentApproval_RetryAndGenericCrossEndpoint_ReturnExpectedStatuses()
     {
         // Verify the happy path still works: approval submitted before timeout elapses.
         var taskQueue = $"hitl-approve-{Guid.NewGuid():N}";
@@ -127,14 +149,17 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
             // Wait briefly for the workflow to register the pending approval.
             await Task.Delay(TimeSpan.FromMilliseconds(500));
 
-            // Submit the approval decision.
-            await handle.ExecuteUpdateAsync(
-                wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
-                {
-                    RequestId = approvalRequest.RequestId,
-                    Approved = true,
-                    Reason = "Looks good!"
-                }));
+            // Resolve through the MAF-specific endpoint with reusable scope semantics.
+            var typedDecision = new DurableAgentApprovalDecision
+            {
+                RequestId = approvalRequest.RequestId,
+                Approved = true,
+                Reason = "Looks good!",
+                Scope = ApprovalScope.Session,
+            };
+            var accepted = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                wf => wf.ResolveAgentApprovalAsync(typedDecision));
+            Assert.Equal(DurableApprovalResolutionStatus.Accepted, accepted.Status);
 
             var decision = await approvalTask;
 
@@ -142,7 +167,74 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
             Assert.Equal(approvalRequest.RequestId, decision.RequestId);
             Assert.Equal("Looks good!", decision.Reason);
 
-            _output.WriteLine("Approval submitted and received correctly before timeout.");
+            // The same typed decision is retry-safe, but changing MAF-only scope identity is a
+            // conflict even though the generic core fields are unchanged.
+            var typedRetry = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                wf => wf.ResolveAgentApprovalAsync(typedDecision));
+            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, typedRetry.Status);
+
+            var changedScope = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
+                {
+                    RequestId = approvalRequest.RequestId,
+                    Approved = true,
+                    Reason = "Looks good!",
+                    Scope = ApprovalScope.ThisCallOnly,
+                }));
+            Assert.Equal(DurableApprovalResolutionStatus.Conflict, changedScope.Status);
+
+            // Shared dashboards can retry the core decision and see the generic status without
+            // being able to grant MAF reusable scope.
+            var genericRetry = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
+                {
+                    RequestId = approvalRequest.RequestId,
+                    Approved = true,
+                    Reason = "Looks good!",
+                }));
+            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, genericRetry.Status);
+
+            // Resolve a second request through the generic endpoint first. A typed retry can
+            // only be equivalent when it explicitly uses the synthesized ThisCallOnly scope.
+            var genericFirstRequest = new DurableApprovalRequest
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                Description = "Generic dashboard decision.",
+            };
+            var genericFirstTask = handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
+                wf => wf.RequestApprovalAsync(genericFirstRequest));
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+
+            var genericAccepted = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
+                {
+                    RequestId = genericFirstRequest.RequestId,
+                    Approved = true,
+                    Reason = "Approved generically.",
+                }));
+            Assert.Equal(DurableApprovalResolutionStatus.Accepted, genericAccepted.Status);
+            await genericFirstTask;
+
+            var typedAfterGeneric = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
+                {
+                    RequestId = genericFirstRequest.RequestId,
+                    Approved = true,
+                    Reason = "Approved generically.",
+                }));
+            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, typedAfterGeneric.Status);
+
+            var typedScopeAfterGeneric = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
+                {
+                    RequestId = genericFirstRequest.RequestId,
+                    Approved = true,
+                    Reason = "Approved generically.",
+                    Scope = ApprovalScope.Session,
+                }));
+            Assert.Equal(DurableApprovalResolutionStatus.Conflict, typedScopeAfterGeneric.Status);
+
+            _output.WriteLine("Typed and generic approval retry statuses verified.");
         }
         finally
         {

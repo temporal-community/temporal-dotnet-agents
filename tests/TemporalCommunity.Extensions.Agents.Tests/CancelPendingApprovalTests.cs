@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI;
 using Temporalio.Client.Schedules;
 using TemporalCommunity.Extensions.Agents.Scheduling;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
@@ -33,7 +34,7 @@ public class CancelPendingApprovalTests
         await ((ITemporalAgentClient)stub).CancelPendingApprovalAsync(SessionId);
 
         Assert.Equal(1, stub.GetPendingApprovalCallCount);
-        Assert.Equal(0, stub.SubmitApprovalCallCount);
+        Assert.Equal(0, stub.ResolveApprovalCallCount);
     }
 
     [Fact]
@@ -47,7 +48,7 @@ public class CancelPendingApprovalTests
 
         await ((ITemporalAgentClient)stub).CancelPendingApprovalAsync(SessionId, reason: "User cancelled.");
 
-        Assert.Equal(1, stub.SubmitApprovalCallCount);
+        Assert.Equal(1, stub.ResolveApprovalCallCount);
         Assert.NotNull(stub.LastSubmittedDecision);
         Assert.Equal("req-123", stub.LastSubmittedDecision!.RequestId);
         Assert.False(stub.LastSubmittedDecision.Approved);
@@ -66,7 +67,7 @@ public class CancelPendingApprovalTests
 
         await ((ITemporalAgentClient)stub).CancelPendingApprovalAsync(SessionId);
 
-        Assert.Equal(1, stub.SubmitApprovalCallCount);
+        Assert.Equal(1, stub.ResolveApprovalCallCount);
         Assert.NotNull(stub.LastSubmittedDecision);
         Assert.Equal("req-default", stub.LastSubmittedDecision!.RequestId);
         Assert.False(stub.LastSubmittedDecision.Approved);
@@ -74,7 +75,7 @@ public class CancelPendingApprovalTests
     }
 
     /// <summary>
-    /// Records inputs to <see cref="GetPendingApprovalAsync"/> and <see cref="SubmitApprovalAsync"/>
+    /// Records inputs to <see cref="GetPendingApprovalAsync"/> and <see cref="ResolveApprovalAsync"/>
     /// so tests can assert the default interface method dispatched correctly.
     /// All other interface members throw <see cref="NotImplementedException"/>.
     /// </summary>
@@ -84,11 +85,11 @@ public class CancelPendingApprovalTests
 
         public int GetPendingApprovalCallCount { get; private set; }
 
-        public int SubmitApprovalCallCount { get; private set; }
+        public int ResolveApprovalCallCount { get; private set; }
 
         public TemporalAgentSessionId? LastSubmittedSessionId { get; private set; }
 
-        public DurableApprovalDecision? LastSubmittedDecision { get; private set; }
+        public DurableAgentApprovalDecision? LastSubmittedDecision { get; private set; }
 
         public Task<DurableApprovalRequest?> GetPendingApprovalAsync(
             TemporalAgentSessionId sessionId,
@@ -98,15 +99,19 @@ public class CancelPendingApprovalTests
             return Task.FromResult(_pending);
         }
 
-        public Task SubmitApprovalAsync(
+        public Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
             TemporalAgentSessionId sessionId,
-            DurableApprovalDecision decision,
+            DurableAgentApprovalDecision decision,
             CancellationToken cancellationToken = default)
         {
-            SubmitApprovalCallCount++;
+            ResolveApprovalCallCount++;
             LastSubmittedSessionId = sessionId;
             LastSubmittedDecision = decision;
-            return Task.CompletedTask;
+            return Task.FromResult(new DurableApprovalResolutionResult
+            {
+                RequestId = decision.RequestId,
+                Status = DurableApprovalResolutionStatus.Accepted,
+            });
         }
 
         public Task<AgentResponse> SendAsync(TemporalAgentSessionId sessionId, RunRequest request, CancellationToken cancellationToken = default) =>
@@ -133,9 +138,13 @@ public class CancelPendingApprovalTests
             string workflowId, CancellationToken ct) =>
             GetPendingApprovalAsync(TemporalAgentSessionId.Parse(workflowId), ct);
 
-        Task IDurableSessionControl.SubmitApprovalAsync(
+        Task<DurableApprovalResolutionResult> IDurableSessionControl.ResolveApprovalAsync(
             string workflowId, DurableApprovalDecision decision, CancellationToken ct) =>
-            SubmitApprovalAsync(TemporalAgentSessionId.Parse(workflowId), decision, ct);
+            Task.FromResult(new DurableApprovalResolutionResult
+            {
+                RequestId = decision.RequestId,
+                Status = DurableApprovalResolutionStatus.Accepted,
+            });
 
         Task IDurableSessionControl.ShutdownAsync(string workflowId, CancellationToken ct) =>
             ShutdownAsync(TemporalAgentSessionId.Parse(workflowId), ct);

@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode;
@@ -58,7 +59,7 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
     /// Turn N+1:
     ///   - LLM returns one more FunctionCallContent for the same tool.
     ///   - Phase 1: interceptor sees Call A's scope record and returns Proceed immediately.
-    ///   - No new SubmitApprovalAsync is needed.
+    ///   - No new approval resolution is needed.
     /// </summary>
     [Fact]
     public async Task OneTurnLag_CallB_RequiresOwnApproval_TurnNPlus1_AutoApproves()
@@ -116,7 +117,7 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
         // Approve Call A with Scope = Session.
         // This writes the scope record to _currentStateBag, but Call B's interceptor result
         // was already frozen in Phase 1 — Call B cannot see this record in the same turn.
-        await handle.ExecuteUpdateAsync(wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
         {
             RequestId = callARequest!.RequestId,
             Approved = true,
@@ -146,7 +147,7 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
         _output.WriteLine($"Turn N, Call B still pending (one-turn lag confirmed): {callBRequest.RequestId}");
 
         // Approve Call B (plain approval, no scope).
-        await handle.ExecuteUpdateAsync(wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
         {
             RequestId = callBRequest!.RequestId,
             Approved = true,

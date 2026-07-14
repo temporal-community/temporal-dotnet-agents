@@ -482,14 +482,14 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
             new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = ct } }).ConfigureAwait(false);
     }
 
-    async Task IDurableSessionControl.SubmitApprovalAsync(
-        string workflowId, DurableApprovalDecision decision, CancellationToken ct)
+    async Task<DurableApprovalResolutionResult> IDurableSessionControl.ResolveApprovalAsync(
+        string workflowId, DurableApprovalDecision decision, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(decision);
         var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
-        await handle.ExecuteUpdateAsync(
-            wf => wf.SubmitApprovalAsync(decision),
-            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = ct } }).ConfigureAwait(false);
+        return await handle.ExecuteUpdateAsync<DurableChatWorkflow, DurableApprovalResolutionResult>(
+            wf => wf.ResolveApprovalAsync(decision),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
     }
 
     async Task IDurableSessionControl.ShutdownAsync(string workflowId, CancellationToken ct)

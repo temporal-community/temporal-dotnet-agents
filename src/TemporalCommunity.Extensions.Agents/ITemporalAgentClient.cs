@@ -43,18 +43,20 @@ public interface ITemporalAgentClient : IDurableSessionControl
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Submits a human <see cref="DurableApprovalDecision"/> to the agent workflow,
-    /// unblocking the pending <see cref="DurableApprovalRequest"/>.
+    /// Resolves a pending agent approval with optional MAF-only reusable-scope semantics.
+    /// An identical retry returns <see cref="DurableApprovalResolutionStatus.AlreadyResolved"/>;
+    /// a retry that changes any decision or scope field returns
+    /// <see cref="DurableApprovalResolutionStatus.Conflict"/>.
     /// </summary>
-    Task SubmitApprovalAsync(
+    Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
         TemporalAgentSessionId sessionId,
-        DurableApprovalDecision decision,
+        DurableAgentApprovalDecision decision,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Cancels the pending approval request (if any) by submitting a rejected
-    /// <see cref="DurableApprovalDecision"/> on behalf of an external system.
-    /// No-op when no approval is pending.
+    /// Cancels the pending approval request (if any) by resolving it as rejected on behalf of
+    /// an external system. No-op when no approval is pending; an already-resolved request is
+    /// intentionally ignored.
     /// </summary>
     /// <param name="sessionId">The agent session ID.</param>
     /// <param name="reason">Optional reason recorded on the rejection. Defaults to <c>"Cancelled externally."</c>.</param>
@@ -70,9 +72,9 @@ public interface ITemporalAgentClient : IDurableSessionControl
             return;
         }
 
-        await SubmitApprovalAsync(
+        _ = await ResolveApprovalAsync(
             sessionId,
-            new DurableApprovalDecision
+            new DurableAgentApprovalDecision
             {
                 RequestId = pending.RequestId,
                 Approved = false,

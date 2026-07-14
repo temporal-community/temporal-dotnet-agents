@@ -64,28 +64,6 @@ internal sealed class DurableApprovalMixin
                 "An approval request is already pending. Submit or timeout the current request before sending another.");
     }
 
-    /// <summary>
-    /// Validates an incoming <see cref="DurableApprovalDecision"/> before it enters workflow history.
-    /// Throws <see cref="InvalidOperationException"/> when no request is pending or the RequestId
-    /// does not match, matching the exception type used by both callers prior to this extraction.
-    /// </summary>
-    public void ValidateSubmitApproval(DurableApprovalDecision decision)
-    {
-        ArgumentNullException.ThrowIfNull(decision);
-
-        if (_pendingApproval is null)
-        {
-            throw new InvalidOperationException(
-                "No approval request is pending. Ensure RequestApprovalAsync was called first.");
-        }
-
-        if (_pendingApproval.RequestId != decision.RequestId)
-        {
-            throw new InvalidOperationException(
-                $"Decision RequestId '{decision.RequestId}' does not match pending request '{_pendingApproval.RequestId}'.");
-        }
-    }
-
     // ── Updates ─────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -162,14 +140,6 @@ internal sealed class DurableApprovalMixin
         _pendingApproval = null;        // then clear state
         _approvalDecision = null;
         return decision;
-    }
-
-    /// <summary>
-    /// Stores the human decision, unblocking the <see cref="RequestApprovalAsync"/> wait condition.
-    /// </summary>
-    public void SubmitApproval(DurableApprovalDecision decision)
-    {
-        _approvalDecision = decision;
     }
 
     /// <summary>

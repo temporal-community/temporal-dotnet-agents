@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Temporalio.Common;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.AI;
 using Temporalio.Workflows;
 
@@ -17,6 +18,13 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// </summary>
 internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 {
+    /// <summary>
+    /// Gets the MAF-specific approval decisions retained across continue-as-new. This ledger is
+    /// ordered and request-ID aligned with the shared generic approval-resolution history.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<DurableAgentApprovalDecision>? AgentApprovalResolutionHistory { get; init; }
+
     /// <summary>Gets the name of the agent that this workflow manages.</summary>
     public required string AgentName { get; init; }
 

@@ -62,13 +62,25 @@ TemporalCommunity.Extensions.Agents.AgentNotRegisteredException.AgentNotRegister
 TemporalCommunity.Extensions.Agents.AgentNotRegisteredException.AgentNotRegisteredException(string! agentName, System.Exception? innerException) -> void
 TemporalCommunity.Extensions.Agents.AIAgentExtensions
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeHelpers
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScope
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScope.Always = 2 -> TemporalCommunity.Extensions.Agents.Approvals.ApprovalScope
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScope.Session = 1 -> TemporalCommunity.Extensions.Agents.Approvals.ApprovalScope
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScope.ThisCallOnly = 0 -> TemporalCommunity.Extensions.Agents.Approvals.ApprovalScope
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern.ApprovalScopePattern() -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern.Parameter.get -> string?
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern.Parameter.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern.Pattern.get -> string!
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern.Pattern.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern.Type.get -> TemporalCommunity.Extensions.Agents.Approvals.PatternMatchType
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern.Type.init -> void
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.ApprovalScopeRecord() -> void
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.GrantedAt.get -> System.DateTimeOffset
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.GrantedAt.init -> void
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.OriginatingRequestId.get -> string!
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.OriginatingRequestId.init -> void
-TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.Pattern.get -> TemporalCommunity.Extensions.AI.Approvals.ApprovalScopePattern?
+TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.Pattern.get -> TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern?
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.Pattern.init -> void
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.ToolName.get -> string!
 TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord.ToolName.init -> void
@@ -91,6 +103,22 @@ TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopesOptions.MaxAlwaysSco
 TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore
 TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore.AppendAsync(string! agentName, string! storeKey, TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord! record, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
 TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore.LoadAsync(string! agentName, string! storeKey, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord!>!>!
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.Approved.get -> bool
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.Approved.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.DurableAgentApprovalDecision() -> void
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.Reason.get -> string?
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.Reason.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.RequestId.get -> string!
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.RequestId.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.Scope.get -> TemporalCommunity.Extensions.Agents.Approvals.ApprovalScope
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.Scope.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.ScopePattern.get -> TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopePattern?
+TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision.ScopePattern.init -> void
+TemporalCommunity.Extensions.Agents.Approvals.PatternMatchType
+TemporalCommunity.Extensions.Agents.Approvals.PatternMatchType.Exact = 0 -> TemporalCommunity.Extensions.Agents.Approvals.PatternMatchType
+TemporalCommunity.Extensions.Agents.Approvals.PatternMatchType.Glob = 1 -> TemporalCommunity.Extensions.Agents.Approvals.PatternMatchType
+TemporalCommunity.Extensions.Agents.Approvals.PatternMatchType.Regex = 2 -> TemporalCommunity.Extensions.Agents.Approvals.PatternMatchType
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ActivityTimeout.get -> System.TimeSpan?
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ActivityTimeout.set -> void
@@ -144,7 +172,7 @@ TemporalCommunity.Extensions.Agents.ITemporalAgentClient.RunAgentFireAndForgetAs
 TemporalCommunity.Extensions.Agents.ITemporalAgentClient.ScheduleAgentAsync(string! agentName, string! scheduleId, TemporalCommunity.Extensions.Agents.Scheduling.RunRequest! request, Temporalio.Client.Schedules.ScheduleSpec! spec, Temporalio.Client.Schedules.SchedulePolicy? policy = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Temporalio.Client.Schedules.ScheduleHandle!>!
 TemporalCommunity.Extensions.Agents.ITemporalAgentClient.SendAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, TemporalCommunity.Extensions.Agents.Scheduling.RunRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Microsoft.Agents.AI.AgentResponse!>!
 TemporalCommunity.Extensions.Agents.ITemporalAgentClient.ShutdownAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
-TemporalCommunity.Extensions.Agents.ITemporalAgentClient.SubmitApprovalAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision! decision, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+TemporalCommunity.Extensions.Agents.ITemporalAgentClient.ResolveApprovalAsync(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId, TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision! decision, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalResolutionResult!>!
 TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun
 TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.AgentName.get -> string!
 TemporalCommunity.Extensions.Agents.Scheduling.OneTimeAgentRun.AgentName.init -> void

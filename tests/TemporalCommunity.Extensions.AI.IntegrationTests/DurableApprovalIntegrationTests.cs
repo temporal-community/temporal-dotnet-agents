@@ -84,7 +84,7 @@ public class DurableApprovalIntegrationTests
         }
         finally
         {
-            // If requestTask is still running (assertion failed before SubmitApprovalAsync),
+            // If requestTask is still running (assertion failed before resolution),
             // inject a reject decision to unblock the workflow, then drain the task.
             if (!requestTask.IsCompleted)
             {
@@ -128,7 +128,7 @@ public class DurableApprovalIntegrationTests
         var requestTask = RequestApprovalAsync(conversationId, request);
 
         // Poll deterministically for the pending approval — no fixed-duration sleep.
-        // Without this poll the SubmitApprovalAsync below could arrive BEFORE the
+        // Without this poll the resolution update below could arrive BEFORE the
         // workflow's WaitConditionAsync is entered, leaving the workflow permanently
         // parked. 30 × 200ms = 6 s deadline.
         DurableApprovalRequest? pending = null;

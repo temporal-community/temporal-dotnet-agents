@@ -109,16 +109,16 @@ internal sealed class DefaultTemporalAgentClient(
     }
 
     /// <inheritdoc/>
-    public async Task SubmitApprovalAsync(
+    public async Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
         TemporalAgentSessionId sessionId,
-        DurableApprovalDecision decision,
+        DurableAgentApprovalDecision decision,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(decision);
 
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
-        await handle.ExecuteUpdateAsync(
-            wf => wf.SubmitApprovalAsync(decision),
+        return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+            wf => wf.ResolveAgentApprovalAsync(decision),
             new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
             .ConfigureAwait(false);
     }
@@ -235,7 +235,7 @@ internal sealed class DefaultTemporalAgentClient(
     }
 
     // ── IDurableSessionControl — explicit implementations ───────────────────
-    // ITemporalAgentClient.GetPendingApprovalAsync / SubmitApprovalAsync / ShutdownAsync take
+    // ITemporalAgentClient.GetPendingApprovalAsync / ResolveApprovalAsync / ShutdownAsync take
     // TemporalAgentSessionId. IDurableSessionControl uses string workflowId so approval
     // dashboards can address any session directly without constructing a session-ID value.
 
@@ -249,13 +249,13 @@ internal sealed class DefaultTemporalAgentClient(
             .ConfigureAwait(false);
     }
 
-    async Task IDurableSessionControl.SubmitApprovalAsync(
+    async Task<DurableApprovalResolutionResult> IDurableSessionControl.ResolveApprovalAsync(
         string workflowId, DurableApprovalDecision decision, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(decision);
         var handle = client.GetWorkflowHandle<AgentWorkflow>(workflowId);
-        await handle.ExecuteUpdateAsync(
-            wf => wf.SubmitApprovalAsync(decision),
+        return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+            wf => wf.ResolveApprovalAsync(decision),
             new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = ct } })
             .ConfigureAwait(false);
     }

@@ -522,13 +522,10 @@ public abstract class DurableChatWorkflowBase<TOutput>
     public void ValidateRequestApproval(DurableApprovalRequest request) =>
         _approvalMixin.ValidateRequestApproval(request);
 
-    /// <summary>
-    /// Shared approval update used by MAF in-tool approvals. Managed MEAI session clients use
-    /// <see cref="ResolveApprovalAsync"/> instead, which returns a retry-safe status.
-    /// </summary>
     [WorkflowUpdate("RequestApproval")]
-    public Task<DurableApprovalDecision> RequestApprovalAsync(DurableApprovalRequest request) =>
-        _approvalMixin.RequestApprovalAsync(
+    public async Task<DurableApprovalDecision> RequestApprovalAsync(DurableApprovalRequest request)
+    {
+        var decision = await _approvalMixin.RequestApprovalAsync(
             request,
             approvalTimeout: RequiredInput.ApprovalTimeout,
             onRequested: req => Workflow.Logger.LogInformation(
@@ -538,23 +535,8 @@ public abstract class DurableChatWorkflowBase<TOutput>
                 "[{ConversationId}] Approval resolved (RequestId: {RequestId}, Approved: {Approved})",
                 Workflow.Info.WorkflowId, d.RequestId, d.Approved));
 
-    /// <summary>
-    /// Validates a submitted approval decision for the shared approval update.
-    /// </summary>
-    [WorkflowUpdateValidator(nameof(SubmitApprovalAsync))]
-    public void ValidateSubmitApproval(DurableApprovalDecision decision) =>
-        _approvalMixin.ValidateSubmitApproval(decision);
-
-    /// <summary>
-    /// Shared cross-library submission path. It unblocks <see cref="RequestApprovalAsync"/>
-    /// but does not provide retry-safe result semantics; use <see cref="ResolveApprovalAsync"/>
-    /// for managed MEAI sessions.
-    /// </summary>
-    [WorkflowUpdate("SubmitApproval")]
-    public Task SubmitApprovalAsync(DurableApprovalDecision decision)
-    {
-        _approvalMixin.SubmitApproval(decision);
-        return Task.CompletedTask;
+        OnApprovalRequestResolved(decision);
+        return decision;
     }
 
     /// <summary>
@@ -581,7 +563,33 @@ public abstract class DurableChatWorkflowBase<TOutput>
             _approvalMixin.RestoreResolvedApprovals(carriedResolutions);
         }
 
-        return _approvalMixin.ResolveApproval(decision);
+        var result = _approvalMixin.ResolveApproval(decision);
+        if (result.Status == DurableApprovalResolutionStatus.Accepted)
+        {
+            OnApprovalResolutionAccepted(decision);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Invoked when the generic approval resolution update accepts <paramref name="decision"/>.
+    /// Derived workflows can record workflow-specific resolution state. The base workflow has no
+    /// additional state to record.
+    /// </summary>
+    /// <param name="decision">The accepted generic approval decision.</param>
+    protected virtual void OnApprovalResolutionAccepted(DurableApprovalDecision decision)
+    {
+    }
+
+    /// <summary>
+    /// Invoked after an approval request completes, including rejection and timeout. Derived
+    /// workflows can synchronize workflow-specific state with the generic resolved-decision
+    /// archive. The base workflow has no additional state to record.
+    /// </summary>
+    /// <param name="decision">The final approval decision.</param>
+    protected virtual void OnApprovalRequestResolved(DurableApprovalDecision decision)
+    {
     }
 
     /// <summary>
@@ -601,13 +609,21 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// </summary>
     /// <remarks>
     /// Must only be called from workflow-thread code. The approval unblocks when a matching
-    /// decision arrives through <see cref="ResolveApprovalAsync"/> or
-    /// <see cref="SubmitApprovalAsync"/>.
+    /// decision arrives through <see cref="ResolveApprovalAsync"/>.
     /// </remarks>
-    protected Task<DurableApprovalDecision> RequestApprovalFromTurnLoopAsync(
+    protected async Task<DurableApprovalDecision> RequestApprovalFromTurnLoopAsync(
         DurableApprovalRequest request,
         TimeSpan approvalTimeout,
         Action<DurableApprovalRequest>? onRequested = null,
-        Action<DurableApprovalDecision>? onResolved = null) =>
-        _approvalMixin.RequestApprovalAsync(request, approvalTimeout, onRequested, onResolved);
+        Action<DurableApprovalDecision>? onResolved = null)
+    {
+        var decision = await _approvalMixin.RequestApprovalAsync(
+            request,
+            approvalTimeout,
+            onRequested,
+            onResolved);
+
+        OnApprovalRequestResolved(decision);
+        return decision;
+    }
 }

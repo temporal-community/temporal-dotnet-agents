@@ -39,6 +39,15 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     // MAF-specific input (typed view of the base's Input). Set in RunAsync.
     private AgentWorkflowInput? _input;
 
+    // MAF's complete approval decisions. The shared base owns the core decision archive; this
+    // list carries the additional scope identity in the same order and with the same retention
+    // bound. A pending entry is held separately until the request completes so eviction occurs
+    // only when both archives record the final resolution.
+    private const int MaxRetainedAgentApprovalResolutions = 32;
+    private readonly List<DurableAgentApprovalDecision> _resolvedAgentApprovals = [];
+    private DurableAgentApprovalDecision? _pendingAgentApprovalDecision;
+    private DurableAgentApprovalDecision? _resolvingAgentApprovalDecision;
+
     // GAP 6: StateBag persisted across turns so AIContextProvider state survives replay.
     private JsonElement? _currentStateBag;
 
@@ -73,6 +82,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         ArgumentNullException.ThrowIfNull(input);
         _input = input;
         _currentStateBag = input.CarriedStateBag;
+        RestoreResolvedAgentApprovals(input.AgentApprovalResolutionHistory);
 
         Workflow.Logger.LogWorkflowStarted(input.AgentName, Workflow.Info.WorkflowId, input.TimeToLive);
 
@@ -117,7 +127,85 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Resolves a pending agent approval with optional MAF-only reusable-scope semantics.
+    /// </summary>
+    [WorkflowUpdate("ResolveAgentApproval")]
+    public async Task<DurableApprovalResolutionResult> ResolveAgentApprovalAsync(
+        DurableAgentApprovalDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+
+        // The base handler waits for its own input initialization. AgentWorkflow's typed ledger
+        // has a parallel carried input, so initialize it before comparing an early update retry.
+        if (_input is null)
+        {
+            await Workflow.WaitConditionAsync(() => _input is not null).ConfigureAwait(true);
+        }
+
+        if (_resolvedAgentApprovals.Count == 0
+            && _input!.AgentApprovalResolutionHistory is { Count: > 0 } carriedResolutions)
+        {
+            RestoreResolvedAgentApprovals(carriedResolutions);
+        }
+
+        var coreDecision = new DurableApprovalDecision
+        {
+            RequestId = decision.RequestId,
+            Approved = decision.Approved,
+            Reason = decision.Reason,
+        };
+
+        _resolvingAgentApprovalDecision = decision;
+        try
+        {
+            var genericResult = await base.ResolveApprovalAsync(coreDecision).ConfigureAwait(true);
+            if (genericResult.Status == DurableApprovalResolutionStatus.Accepted)
+            {
+                return genericResult;
+            }
+
+            var knownDecision = FindKnownAgentApproval(decision.RequestId);
+            return knownDecision is null
+                ? genericResult
+                : CreateResolutionResult(
+                    IsEquivalent(knownDecision, decision)
+                        ? DurableApprovalResolutionStatus.AlreadyResolved
+                        : DurableApprovalResolutionStatus.Conflict,
+                    decision.RequestId);
+        }
+        finally
+        {
+            _resolvingAgentApprovalDecision = null;
+        }
+    }
+
     // ── Hooks supplied to the base class ────────────────────────────────────
+
+    /// <inheritdoc/>
+    protected override void OnApprovalResolutionAccepted(DurableApprovalDecision decision)
+    {
+        // The generic update is a shared-dashboard path and therefore has no scope. When the
+        // typed update entered the base state machine, preserve its complete MAF identity
+        // instead. The entry is finalized only from OnApprovalRequestResolved so both retained
+        // archives add and evict the same request IDs together.
+        _pendingAgentApprovalDecision = _resolvingAgentApprovalDecision is { } typed
+            && string.Equals(typed.RequestId, decision.RequestId, StringComparison.Ordinal)
+            ? typed
+            : CreateThisCallOnlyDecision(decision);
+    }
+
+    /// <inheritdoc/>
+    protected override void OnApprovalRequestResolved(DurableApprovalDecision decision)
+    {
+        var resolvedDecision = _pendingAgentApprovalDecision is { } pending
+            && string.Equals(pending.RequestId, decision.RequestId, StringComparison.Ordinal)
+            ? pending
+            : CreateThisCallOnlyDecision(decision);
+
+        RememberResolvedAgentApproval(resolvedDecision);
+        _pendingAgentApprovalDecision = null;
+    }
 
     /// <inheritdoc/>
     protected override DurableSessionResponse BuildResponseEntry(
@@ -179,6 +267,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
             OriginalCreatedAt = input.OriginalCreatedAt,
             ActivityTimeout = input.ActivityTimeout,
             HeartbeatTimeout = input.HeartbeatTimeout,
+            AgentApprovalResolutionHistory = _resolvedAgentApprovals.ToList(),
         };
 
         // StateBag size guard (Feature D): emit a warning when the serialized StateBag
@@ -559,7 +648,9 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                         if (decision.Approved)
                         {
                             // Feature B — Task 6.6: persist scope before dispatching the tool.
-                            var scope = NormalizeApprovalScopeForPersistence(decision);
+                            var agentDecision = FindKnownAgentApproval(decision.RequestId)
+                                ?? CreateThisCallOnlyDecision(decision);
+                            var scope = NormalizeApprovalScopeForPersistence(agentDecision);
                             var isScopeAwareTool = _input!.ScopeAwareTools?.Contains(
                                 tc.Name, StringComparer.OrdinalIgnoreCase) == true;
 
@@ -570,7 +661,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                                 _currentStateBag = ApprovalScopeCoordinator.WriteSessionScopeToStateBag(
                                     _currentStateBag,
                                     tc.Name,
-                                    decision.ScopePattern,
+                                    agentDecision.ScopePattern,
                                     decision.RequestId,
                                     Workflow.UtcNow,
                                     _input!.MaxAlwaysScopeCacheRecords,
@@ -599,7 +690,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                                             SessionId = Workflow.Info.WorkflowId,
                                             StoreKey = _input!.AlwaysScopesStoreKey!,
                                             ToolName = tc.Name,
-                                            Pattern = decision.ScopePattern,
+                                            Pattern = agentDecision.ScopePattern,
                                             GrantedAt = Workflow.UtcNow,
                                             OriginatingRequestId = decision.RequestId,
                                         }),
@@ -774,14 +865,90 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         return ex.InnerException is Temporalio.Exceptions.CanceledFailureException;
     }
 
+    private void RestoreResolvedAgentApprovals(
+        IReadOnlyList<DurableAgentApprovalDecision>? decisions)
+    {
+        _resolvedAgentApprovals.Clear();
+        if (decisions is null)
+        {
+            return;
+        }
+
+        foreach (var decision in decisions.TakeLast(MaxRetainedAgentApprovalResolutions))
+        {
+            _resolvedAgentApprovals.Add(decision);
+        }
+    }
+
+    private void RememberResolvedAgentApproval(DurableAgentApprovalDecision decision)
+    {
+        _resolvedAgentApprovals.RemoveAll(existing =>
+            string.Equals(existing.RequestId, decision.RequestId, StringComparison.Ordinal));
+        _resolvedAgentApprovals.Add(decision);
+        if (_resolvedAgentApprovals.Count > MaxRetainedAgentApprovalResolutions)
+        {
+            _resolvedAgentApprovals.RemoveRange(
+                0,
+                _resolvedAgentApprovals.Count - MaxRetainedAgentApprovalResolutions);
+        }
+    }
+
+    private DurableAgentApprovalDecision? FindKnownAgentApproval(string requestId)
+    {
+        if (_pendingAgentApprovalDecision is { } pending
+            && string.Equals(pending.RequestId, requestId, StringComparison.Ordinal))
+        {
+            return pending;
+        }
+
+        return _resolvedAgentApprovals.LastOrDefault(existing =>
+            string.Equals(existing.RequestId, requestId, StringComparison.Ordinal));
+    }
+
+    private static DurableAgentApprovalDecision CreateThisCallOnlyDecision(
+        DurableApprovalDecision decision) =>
+        new()
+        {
+            RequestId = decision.RequestId,
+            Approved = decision.Approved,
+            Reason = decision.Reason,
+            Scope = ApprovalScope.ThisCallOnly,
+            ScopePattern = null,
+        };
+
+    private static bool IsEquivalent(
+        DurableAgentApprovalDecision left,
+        DurableAgentApprovalDecision right) =>
+        left.Approved == right.Approved
+        && string.Equals(left.Reason, right.Reason, StringComparison.Ordinal)
+        && left.Scope == right.Scope
+        && AreEquivalent(left.ScopePattern, right.ScopePattern);
+
+    private static bool AreEquivalent(ApprovalScopePattern? left, ApprovalScopePattern? right) =>
+        ReferenceEquals(left, right)
+        || (left is not null
+            && right is not null
+            && left.Type == right.Type
+            && string.Equals(left.Parameter, right.Parameter, StringComparison.Ordinal)
+            && string.Equals(left.Pattern, right.Pattern, StringComparison.Ordinal));
+
+    private static DurableApprovalResolutionResult CreateResolutionResult(
+        DurableApprovalResolutionStatus status,
+        string requestId) =>
+        new()
+        {
+            RequestId = requestId,
+            Status = status,
+        };
+
     /// <summary>
     /// Normalizes the <see cref="ApprovalScope"/> from an approved
-    /// <see cref="DurableApprovalDecision"/>, applying all validation rules.
+    /// <see cref="DurableAgentApprovalDecision"/>, applying all validation rules.
     /// Returns <see cref="ApprovalScope.ThisCallOnly"/> for any invalid input.
     /// Delegates to <see cref="ApprovalScopeCoordinator.EvaluateScopeNormalization"/> and logs
     /// the degradation reason when applicable.
     /// </summary>
-    private ApprovalScope NormalizeApprovalScopeForPersistence(DurableApprovalDecision decision)
+    private ApprovalScope NormalizeApprovalScopeForPersistence(DurableAgentApprovalDecision decision)
     {
         var (result, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
         if (result == ApprovalScope.ThisCallOnly && reason is not null)

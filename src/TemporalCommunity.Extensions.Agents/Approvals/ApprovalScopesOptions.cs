@@ -25,8 +25,8 @@ public sealed class ApprovalScopesOptions
     /// <summary>
     /// Gets or sets the per-agent store factory for always-scopes. When <see langword="null"/>,
     /// the worker-level default <see cref="TemporalAgentsOptions.ApprovalScopeStore"/> is used.
-    /// If neither is configured, <see cref="AI.ApprovalScope.Always"/> degrades to
-    /// <see cref="AI.ApprovalScope.Session"/> for scope-aware tools.
+    /// If neither is configured, <see cref="ApprovalScope.Always"/> degrades to
+    /// <see cref="ApprovalScope.Session"/> for scope-aware tools.
     /// </summary>
     public Func<IServiceProvider, IApprovalScopeStore>? ApprovalScopeStore { get; set; }
 
@@ -37,7 +37,7 @@ public sealed class ApprovalScopesOptions
     /// </summary>
     /// <remarks>
     /// When <see langword="false"/>, always-scopes are NOT loaded or auto-applied at session start.
-    /// Decisions with <see cref="AI.ApprovalScope.Always"/> are still persisted when a store is
+    /// Decisions with <see cref="ApprovalScope.Always"/> are still persisted when a store is
     /// configured. This option is reserved for applications that want to manage/display always-scopes
     /// through their own UI or policy layer.
     /// </remarks>

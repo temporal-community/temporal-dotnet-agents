@@ -68,18 +68,4 @@ public class AgentWorkflowValidatorTests
         workflow.ValidateRequestApproval(request);
     }
 
-    [Fact]
-    public void ValidateSubmitApproval_NullDecision_ThrowsArgumentNullException()
-    {
-        var workflow = new AgentWorkflow();
-        Assert.Throws<ArgumentNullException>(() => workflow.ValidateSubmitApproval(null!));
-    }
-
-    [Fact]
-    public void ValidateSubmitApproval_NoPendingApproval_ThrowsInvalidOperationException()
-    {
-        var workflow = new AgentWorkflow();
-        var decision = new DurableApprovalDecision { RequestId = "abc123", Approved = true };
-        Assert.Throws<InvalidOperationException>(() => workflow.ValidateSubmitApproval(decision));
-    }
 }

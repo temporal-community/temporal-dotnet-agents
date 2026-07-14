@@ -2,6 +2,7 @@ using System.Linq.Expressions;
 using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Client;
 using Temporalio.Exceptions;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI.Approvals;
 
@@ -96,7 +97,7 @@ public sealed class TemporalAgentContext
 
     /// <summary>
     /// Sends an approval request to the backing <see cref="AgentWorkflow"/> and blocks
-    /// until a human submits a decision via <see cref="ITemporalAgentClient.SubmitApprovalAsync"/>.
+    /// until a human resolves a decision via <see cref="ITemporalAgentClient.ResolveApprovalAsync"/>.
     /// </summary>
     /// <remarks>
     /// Call this from inside a tool implementation when the action requires human review:
@@ -115,8 +116,9 @@ public sealed class TemporalAgentContext
     /// waiting for a human response, <c>_pendingApproval</c> remains set in the workflow state.
     /// The workflow will then reject any new <c>RunAgentAsync</c> updates until the stale approval
     /// is resolved. To recover, submit an explicit denial externally using
-    /// <see cref="ITemporalAgentClient.SubmitApprovalAsync"/> with a <see cref="DurableApprovalDecision"/>
-    /// whose <c>Approved</c> is <see langword="false"/>.
+    /// <see cref="ITemporalAgentClient.ResolveApprovalAsync"/> with a
+    /// <see cref="DurableAgentApprovalDecision"/> whose <c>Approved</c> is
+    /// <see langword="false"/>.
     /// </para>
     /// </remarks>
     public async Task<DurableApprovalDecision> RequestApprovalAsync(

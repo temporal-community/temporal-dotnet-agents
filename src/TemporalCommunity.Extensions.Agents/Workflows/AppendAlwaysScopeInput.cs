@@ -1,5 +1,5 @@
 using System.Text.Json.Serialization;
-using TemporalCommunity.Extensions.AI.Approvals;
+using TemporalCommunity.Extensions.Agents.Approvals;
 
 namespace TemporalCommunity.Extensions.Agents.Workflows;
 

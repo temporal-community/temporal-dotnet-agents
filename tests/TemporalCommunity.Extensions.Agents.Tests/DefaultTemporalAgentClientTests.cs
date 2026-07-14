@@ -3,6 +3,7 @@ using System.Linq.Expressions;
 using Temporalio.Client;
 using Temporalio.Client.Schedules;
 using TemporalCommunity.Extensions.Agents.Scheduling;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Xunit;
@@ -72,16 +73,16 @@ public class DefaultTemporalAgentClientTests
             .MustNotHaveHappened();
     }
 
-    // ─── SubmitApprovalAsync ─────────────────────────────────────────────────
+    // ─── ResolveApprovalAsync ────────────────────────────────────────────────
 
     [Fact]
-    public async Task SubmitApprovalAsync_NullDecision_ThrowsArgumentNullException()
+    public async Task ResolveApprovalAsync_NullDecision_ThrowsArgumentNullException()
     {
         var client = CreateClient();
         var sessionId = TemporalAgentSessionId.WithRandomKey("Agent");
 
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            client.SubmitApprovalAsync(sessionId, null!));
+            client.ResolveApprovalAsync(sessionId, null!));
     }
 
     // ─── RunAgentDelayedAsync ────────────────────────────────────────────────

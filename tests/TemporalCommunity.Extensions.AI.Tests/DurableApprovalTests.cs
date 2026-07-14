@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Reflection;
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
 using Xunit;
@@ -102,6 +103,38 @@ public class DurableApprovalTests
         Assert.Equal("req-42", deserialized!.RequestId);
         Assert.True(deserialized.Approved);
         Assert.Equal("LGTM", deserialized.Reason);
+    }
+
+    [Fact]
+    public void DurableApprovalDecision_ExposesOnlyCoreDecisionFields()
+    {
+        var properties = typeof(DurableApprovalDecision)
+            .GetProperties()
+            .Select(property => property.Name)
+            .OrderBy(name => name)
+            .ToArray();
+
+        Assert.Equal(["Approved", "Reason", "RequestId"], properties);
+        Assert.DoesNotContain(
+            typeof(DurableApprovalDecision).Assembly.GetReferencedAssemblies(),
+            assembly => string.Equals(
+                assembly.Name,
+                "TemporalCommunity.Extensions.Agents",
+                StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DurableChatWorkflowBase_DoesNotRegisterLegacySubmitApprovalUpdate()
+    {
+        var updateNames = typeof(DurableChatWorkflowBase<>)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .SelectMany(method => method.GetCustomAttributesData()
+                .Where(attribute => attribute.AttributeType.FullName == "Temporalio.Workflows.WorkflowUpdateAttribute")
+                .Select(attribute => attribute.ConstructorArguments.FirstOrDefault().Value as string ?? method.Name))
+            .ToArray();
+
+        Assert.Contains("ResolveApproval", updateNames);
+        Assert.DoesNotContain("SubmitApproval", updateNames);
     }
 
     [Fact]
