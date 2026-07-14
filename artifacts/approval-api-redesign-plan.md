@@ -1,6 +1,6 @@
 # Durable Approval API Redesign — Draft Plan
 
-**Status:** Implementation complete locally — remote CI verification pending.
+**Status:** Complete — implementation and verification evidence recorded.
 
 **Scope:** A breaking pre-release redesign of the approval APIs. Implement MEAI first, then the MAF-specific scope API. This is separate from the completed `0.10.2` durable-execution baseline and does not alter its tag.
 
@@ -18,6 +18,15 @@
 - `just smoke-downlevel-proxy` — packed `netstandard2.1` consumer gate passed for both libraries; packages were local test artifacts only.
 - `just verify-sample-coverage` and `just test-samples` passed; all changed approval samples compiled successfully.
 - Local Markdown-link validation passed for 64 Markdown files; `git diff --check` passed.
+
+### Remote verification evidence
+
+The implementation commits `5e4435f` and `1137f82` were verified by the workflow run for
+`1137f82e7420c1cdff1e17dfa46b4e1aa09eac4e`:
+
+- [Build — Ubuntu/macOS unit tests and package-artifact validation](https://github.com/temporal-community/temporal-dotnet-agents/actions/runs/29298629219)
+- [Integration Tests — AI and Agents](https://github.com/temporal-community/temporal-dotnet-agents/actions/runs/29298629222)
+- [CodeQL](https://github.com/temporal-community/temporal-dotnet-agents/actions/runs/29298628800)
 
 ## Problem statement and source baseline
 
