@@ -117,8 +117,7 @@ internal static class TemporalAgentsRegistrar
 
         // Startup C-check: validates user-supplied ConfigureAgentPipeline callbacks against the
         // function-invocation conflict before any workflow can dispatch an activity. Skipped when
-        // TemporalAgentsOptions.SkipDryRunCCheck = true. See artifacts/maf-gap-implementation-plan-v2.md
-        // Step 3b for the design rationale.
+        // TemporalAgentsOptions.SkipDryRunCCheck = true.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             DurableAgentPipelineValidator>());

@@ -49,4 +49,4 @@
 // the per-file pragma / NoWarn entry should be revisited. The base-contract guard tests
 // (Wave 2) turn a removal/rename into a red CI test rather than a silent drift.
 //
-// See artifacts/research/codebase-remediation-plan.md §2.2 (S-F-1).
+// Contract-guard tests turn upstream experimental API drift into a visible CI failure.

@@ -21,8 +21,7 @@ namespace TemporalCommunity.Extensions.Agents.Internal;
 /// fail loudly at worker boot rather than at first conversation.
 /// </para>
 /// <para>
-/// <b>Detection strategy — two paths.</b> Per the Step 0 spike findings in
-/// <c>artifacts/maf-gap-implementation-plan-v2.md</c>:
+/// <b>Detection strategy — two paths.</b>
 /// </para>
 /// <list type="number">
 ///   <item>

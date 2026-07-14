@@ -28,7 +28,7 @@ namespace TemporalCommunity.Extensions.Agents.Testing;
 /// </code>
 /// <para>
 /// <b>Secondary use case — library-internal dry-run validation.</b> The C-check that runs at
-/// worker startup (per Step 3b of the MAF gap-analysis plan) constructs an
+/// worker startup constructs an
 /// <see cref="AIAgentBuilder"/> wrapping <see cref="Instance"/>, applies the user's configure
 /// delegate, and calls <c>Build()</c> to materialize the chain so it can be walked for forbidden
 /// middleware (e.g. <c>FunctionInvocationDelegatingAgent</c>). <see cref="Instance"/> is the
@@ -36,9 +36,8 @@ namespace TemporalCommunity.Extensions.Agents.Testing;
 /// </para>
 /// <para>
 /// <b>Why the singleton.</b> The placeholder has no state, no I/O, and identical behavior across
-/// all callers. A static singleton avoids per-validation allocation and matches the contract that
-/// the dry-run spike (Step 0) validated — see the spike outcome in
-/// <c>artifacts/maf-gap-implementation-plan-v2.md</c>.
+/// all callers. A static singleton avoids per-validation allocation and matches the contract
+/// exercised by the dry-run validation tests.
 /// </para>
 /// </remarks>
 public sealed class NoOpAgent : AIAgent
