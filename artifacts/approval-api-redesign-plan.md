@@ -99,6 +99,7 @@ The explicit `IDurableSessionControl.ResolveApprovalAsync` implementation on `De
 - Remove `ApprovalScope.cs` and `ApprovalScopePattern.cs` from the AI project, including their AI JSON-converter registration.
 - Keep `DurableApprovalMeaiAdapter` in AI; it already converts only generic decision data. Correct its XML documentation if it references scope behavior.
 - Rename the raw control operation from `SubmitApprovalAsync` to `ResolveApprovalAsync` and return `DurableApprovalResolutionResult` from both concrete implementations.
+- Remove the workflow-side `[WorkflowUpdate("SubmitApproval")]` handler and its `[WorkflowUpdateValidator(nameof(SubmitApprovalAsync))]` pair from `DurableChatWorkflowBase`; do not retain a raw Temporal wire alias for the non-retry-safe path. After all callers are migrated, remove the now-orphaned `DurableApprovalMixin.SubmitApproval` and `ValidateSubmitApproval` methods as well.
 - Retain the current `DurableApprovalMixin` state machine, its 32-item bounded history, and continue-as-new snapshot mechanism. Do not change its generic equivalence rules except as required by the renamed API.
 - Move the current scope serialization tests out of the AI test project. MEAI tests must prove that scope types are absent from the bare MEAI package/API surface.
 
@@ -106,6 +107,7 @@ The explicit `IDurableSessionControl.ResolveApprovalAsync` implementation on `De
 
 - Add the MAF-local scope types and `DurableAgentApprovalDecision`.
 - Keep the inherited `[WorkflowUpdate("ResolveApproval")]` handler unchanged for generic dashboard resolution. Add a separate `[WorkflowUpdate("ResolveAgentApproval")]` handler for `DurableAgentApprovalDecision`; do not rely on overload discovery or runtime polymorphic JSON.
+- If `ResolveAgentApprovalAsync` needs a workflow-update validator, declare it with `[WorkflowUpdateValidator(nameof(ResolveAgentApprovalAsync))]` and exercise that validator through an integration test. Never reference the generic `ResolveApprovalAsync` method name from the typed handler's validator attribute.
 - Convert an accepted `DurableAgentApprovalDecision` to the generic core decision only at the `DurableApprovalMixin` boundary. The typed handler uses the mixin to accept and unblock a currently pending request, but must never return the mixin's status directly: it recomputes `Accepted`, `AlreadyResolved`, and `Conflict` from the full MAF decision ledger.
 - Preserve the full MAF decision separately until the approval resolves, then use it for scope normalization and persistence. A successful generic decision is always `ThisCallOnly`.
 - Add MAF-specific retained-resolution records to `AgentWorkflowInput` and carry them in `AgentWorkflow.CreateContinueAsNewException`.
@@ -148,6 +150,8 @@ The explicit `IDurableSessionControl.ResolveApprovalAsync` implementation on `De
 - Generic MEAI approval, retry after a lost response, and retry after continue-as-new.
 - MAF typed approval with each scope; retry of the identical typed decision; a retry that changes scope or pattern and returns `Conflict`.
 - Generic dashboard resolution against an MAF workflow through the inherited `ResolveApproval` update, proving it resolves the pending request but grants no scope.
+- A direct raw Temporal attempt to invoke the removed `SubmitApproval` update fails as an unknown update; no SDK documentation, sample, or test retains that wire name.
+- Typed `ResolveAgentApproval` update wiring, including its validator when present, is exercised through an integration test rather than inferred from a method overload.
 - Retention-boundary tests that prove generic and typed MAF resolution agree on `AlreadyResolved` versus `NotPending` before and after a shared archive eviction.
 - Timeout, cancellation, delayed duplicate resolution, and a resolution beyond the 32-record retention window.
 - Replay and continue-as-new tests that confirm the MAF scope record and the retained typed-resolution record survive exactly as specified.
