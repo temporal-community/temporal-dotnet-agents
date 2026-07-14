@@ -30,14 +30,14 @@ TemporalAgents supports two HITL flavors. Choose based on how long the approval 
 | **In-tool** (`RequestApprovalAsync`) | Explicit call inside a tool implementation | Yes — activity heartbeats during the wait | Short, interactive approvals (seconds to minutes); gates mid-tool logic |
 | **Workflow-parked** (`RequireApproval()` / `PauseForApproval`) | `DurableToolOptions.RequireApproval()` or `IAgentToolInterceptor` returning `PauseForApproval` | No — turn loop parks; no activity pinned | Multi-day waits; cost-sensitive workloads; approval before any tool work begins |
 
-Both flavors use `SubmitApprovalAsync` for external systems to unblock the workflow.
+Both flavors use retry-safe `ResolveApprovalAsync` for external systems to unblock the workflow.
 
 Three `[WorkflowUpdate]` / `[WorkflowQuery]` handlers make this work:
 
 | Handler | Type | Purpose |
 |---------|------|---------|
 | `RequestApprovalAsync` | Update | Called from inside a tool; blocks until human responds |
-| `SubmitApprovalAsync` | Update | Called from external system; unblocks the tool |
+| `ResolveApprovalAsync` | Update | Called from external system; resolves the request and returns a retry-safe status |
 | `GetPendingApproval` | Query | Called from external system; polls for pending requests |
 
 ---
@@ -58,7 +58,7 @@ Agent Tool                    AgentWorkflow                  External System
     │                              │──────────────────────────────>│
     │                              │  returns DurableApprovalRequest │
     │                              │                              │
-    │                              │  SubmitApprovalAsync (update)│
+    │                              │  ResolveApprovalAsync (update)│
     │                              │<─────────────────────────────│
     │                              │  sets _approvalDecision      │
     │                              │  WaitConditionAsync unblocks │
@@ -130,19 +130,26 @@ if (pending is not null)
 }
 ```
 
-### Submitting a Decision
+### Resolving a Decision
 
-`SubmitApprovalAsync` is a `[WorkflowUpdate]` — it validates the `RequestId`, sets the decision, and unblocks the tool:
+`ResolveApprovalAsync` is a retry-safe `[WorkflowUpdate]`. For agent workflows it accepts
+`DurableAgentApprovalDecision`, validates the `RequestId`, and returns an explicit outcome:
 
 ```csharp
-await client.SubmitApprovalAsync(
+var result = await client.ResolveApprovalAsync(
     sessionId,
-    new DurableApprovalDecision
+    new DurableAgentApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved  = true,
         Reason    = "Reviewed and approved by operations team."
     });
+
+if (result.Status is not (DurableApprovalResolutionStatus.Accepted or
+    DurableApprovalResolutionStatus.AlreadyResolved))
+{
+    Console.WriteLine($"Decision was not applied: {result.Status}");
+}
 ```
 
 ### Validation Guards
@@ -181,12 +188,18 @@ while (!agentTask.IsCompleted)
     // Display the request and collect human input
     var approved = PromptForDecision(pending);
 
-    await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+    var result = await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved  = approved,
         Reason    = approved ? null : "Rejected by reviewer."
     });
+
+    if (result.Status is not (DurableApprovalResolutionStatus.Accepted or
+        DurableApprovalResolutionStatus.AlreadyResolved))
+    {
+        Console.WriteLine($"Decision was not applied: {result.Status}");
+    }
 }
 
 var response = await agentTask; // Agent resumes and returns final response
@@ -318,21 +331,23 @@ The `Reason` field distinguishes the two cases — timeouts include "timed out" 
 
 ### Handling Submission Errors
 
-`SubmitApprovalAsync` can throw `InvalidOperationException` if:
-- No approval is pending (the tool hasn't called `RequestApprovalAsync` yet)
-- The `RequestId` doesn't match the pending request
+`ResolveApprovalAsync` returns a status when the workflow is not waiting for this request:
 
-Handle these in the external system:
+- `NotPending` when no pending or retained request has this ID
+- `RequestMismatch` when another request is pending
+- `Conflict` when an already-resolved request receives a different decision
+
+Handle those outcomes in the external system:
 
 ```csharp
 try
 {
-    await client.SubmitApprovalAsync(sessionId, decision);
-}
-catch (InvalidOperationException ex)
-{
-    // Stale request — the approval may have timed out
-    Console.WriteLine($"Cannot submit: {ex.Message}");
+    var result = await client.ResolveApprovalAsync(sessionId, decision);
+    if (result.Status is not (DurableApprovalResolutionStatus.Accepted or
+        DurableApprovalResolutionStatus.AlreadyResolved))
+    {
+        Console.WriteLine($"Cannot resolve: {result.Status}");
+    }
 }
 ```
 
@@ -342,7 +357,7 @@ catch (InvalidOperationException ex)
 
 The in-tool path (`RequestApprovalAsync`) keeps an activity running while waiting for a human — the activity heartbeats during the pause. This is the right choice for interactive approvals (seconds to minutes) where the tool has logic to execute after the gate.
 
-For multi-day approval windows or cost-sensitive workloads where pinning an activity slot is undesirable, use the **workflow-parked** flavor: the turn loop itself parks, no activity is pinned, and the workflow resumes only after `SubmitApprovalAsync` is called.
+For multi-day approval windows or cost-sensitive workloads where pinning an activity slot is undesirable, use the **workflow-parked** flavor: the turn loop itself parks, no activity is pinned, and the workflow resumes only after `ResolveApprovalAsync` is called.
 
 ### Triggering Workflow-Parked Approval
 
@@ -402,8 +417,9 @@ opts.DefaultToolInterceptor = sp => new RiskyToolInterceptor();
 
 > **Rename only:** Returning `DurableToolDecision.PauseForApproval(description)` from an interceptor is a rename
 > of the former `AgentToolDecision.PauseForApproval` — the approval flow is identical. The `description` still
-> becomes `DurableApprovalRequest.Description` on the reviewer's side. `SubmitApprovalAsync`,
-> `GetPendingApprovalAsync`, `DurableApprovalRequest`, and `DurableApprovalDecision` are all unchanged;
+> becomes `DurableApprovalRequest.Description` on the reviewer's side. The reviewer uses
+> `ResolveApprovalAsync` and `DurableAgentApprovalDecision`; only the interceptor outcome type
+> changed (it now lives in `TemporalCommunity.Extensions.AI.Tools`).
 > only the interceptor outcome type name changed (it now lives in `TemporalCommunity.Extensions.AI.Tools`).
 
 > **Note:** `PauseForApproval` is supported only by session-backed `AgentWorkflow` executions
@@ -413,10 +429,10 @@ opts.DefaultToolInterceptor = sp => new RiskyToolInterceptor();
 
 ### Unblocking a Parked Workflow
 
-The external system calls `SubmitApprovalAsync` exactly as in the in-tool path — the API surface is identical:
+The external system calls `ResolveApprovalAsync` exactly as in the in-tool path — the API surface is identical:
 
 ```csharp
-await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
 {
     RequestId = pending.RequestId,
     Approved  = true,
@@ -479,10 +495,10 @@ Without `.ScopeAware()`, a `RequireApproval()` tool always pauses for human revi
 
 ### Submitting a decision with a scope
 
-The reviewer calls `SubmitApprovalAsync` with the desired `Scope` field populated:
+The reviewer calls `ResolveApprovalAsync` with the desired `Scope` field populated:
 
 ```csharp
-await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
 {
     RequestId = pending.RequestId,
     Approved  = true,
@@ -497,7 +513,7 @@ When `Scope = ThisCallOnly` (the default when the field is omitted), no scope re
 To scope approval to a specific argument value rather than the entire tool, set `ScopePattern` on the decision:
 
 ```csharp
-await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
 {
     RequestId    = pending.RequestId,
     Approved     = true,
@@ -626,7 +642,7 @@ public async Task RequestApproval_TimesOut_ReturnsRejectedDecision()
 }
 
 [Fact]
-public async Task SubmitApproval_BeforeTimeout_ReturnsApprovedDecision()
+public async Task ResolveApproval_BeforeTimeout_ReturnsAcceptedResult()
 {
     // Use a longer timeout so we can submit before it elapses
     var host = BuildHostWithApprovalTimeout(TimeSpan.FromMinutes(5));
@@ -638,12 +654,14 @@ public async Task SubmitApproval_BeforeTimeout_ReturnsApprovedDecision()
 
     // Wait for the request to be pending, then submit
     await Task.Delay(500);
-    await handle.ExecuteUpdateAsync(
-        wf => wf.SubmitApprovalAsync(new DurableApprovalDecision
+    var resolution = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+        wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
         {
             RequestId = request.RequestId,
             Approved  = true
         }));
+
+    Assert.Equal(DurableApprovalResolutionStatus.Accepted, resolution.Status);
 
     var decision = await approvalTask;
     Assert.True(decision.Approved);
@@ -671,28 +689,38 @@ public sealed record DurableApprovalRequest
 
 > **Note:** In MAF HITL flows, `FunctionName` and `CallId` are always `null`. These fields are populated by `DurableAIFunction` in MEAI tool-call flows (`TemporalCommunity.Extensions.AI`), which are not part of the MAF pipeline. When building a shared approval UI that handles requests from both libraries, check these fields for null before displaying them. Tool authors should always populate `RequestId` and `Description` — these are the fields a human reviewer will see.
 
-### DurableApprovalDecision
+### DurableApprovalDecision (shared core)
 
 ```csharp
 // Namespace: TemporalCommunity.Extensions.AI.Approvals
-// Used for both the submitted decision and the returned outcome
 public sealed class DurableApprovalDecision
 {
     public required string RequestId { get; init; }             // must match pending request
     public bool Approved { get; init; }
     public string? Reason { get; init; }                       // reviewer note or timeout message
-    public ApprovalScope Scope { get; init; }                  // default: ThisCallOnly (no scope record written)
-    public ApprovalScopePattern? ScopePattern { get; init; }   // optional argument-level pattern constraint
 }
 ```
 
-`Scope` and `ScopePattern` are optional. When omitted, `Scope` defaults to `ThisCallOnly` and
-no pattern constraint is applied.
+This generic decision is used by MEAI and shared dashboards. It always resolves the current request only.
+
+### DurableAgentApprovalDecision (MAF scopes)
+
+```csharp
+// Namespace: TemporalCommunity.Extensions.Agents.Approvals
+public sealed class DurableAgentApprovalDecision
+{
+    public required string RequestId { get; init; }
+    public bool Approved { get; init; }
+    public string? Reason { get; init; }
+    public ApprovalScope Scope { get; init; }                  // default: ThisCallOnly
+    public ApprovalScopePattern? ScopePattern { get; init; }   // optional argument-level constraint
+}
+```
 
 ### ApprovalScopePattern
 
 ```csharp
-// Namespace: TemporalCommunity.Extensions.AI.Approvals
+// Namespace: TemporalCommunity.Extensions.Agents.Approvals
 public sealed class ApprovalScopePattern
 {
     public PatternMatchType Type { get; init; }    // Exact | Glob | Regex
@@ -704,7 +732,7 @@ public sealed class ApprovalScopePattern
 ### ApprovalScope
 
 ```csharp
-// Namespace: TemporalCommunity.Extensions.AI.Approvals
+// Namespace: TemporalCommunity.Extensions.Agents.Approvals
 public enum ApprovalScope
 {
     ThisCallOnly,   // default — no scope record written
@@ -776,7 +804,7 @@ while (!agentTask.IsCompleted)
 
     // Display approval request and prompt for decision
     var approved = choice == "approve";
-    await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+    await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved  = approved,
@@ -798,9 +826,10 @@ dotnet run --project samples/MAF/HumanInTheLoop
 ## References
 
 - `src/TemporalCommunity.Extensions.AI/Approvals/DurableApprovalRequest.cs` — request type
-- `src/TemporalCommunity.Extensions.AI/Approvals/DurableApprovalDecision.cs` — decision and outcome type (includes `Scope`, `ScopePattern`)
-- `src/TemporalCommunity.Extensions.AI/Approvals/ApprovalScope.cs` — `ApprovalScope` enum
-- `src/TemporalCommunity.Extensions.AI/Approvals/ApprovalScopePattern.cs` — `ApprovalScopePattern` and `PatternMatchType`
+- `src/TemporalCommunity.Extensions.AI/Approvals/DurableApprovalDecision.cs` — shared per-request decision type
+- `src/TemporalCommunity.Extensions.Agents/Approvals/DurableAgentApprovalDecision.cs` — scoped agent decision type
+- `src/TemporalCommunity.Extensions.Agents/Approvals/ApprovalScope.cs` — `ApprovalScope` enum
+- `src/TemporalCommunity.Extensions.Agents/Approvals/ApprovalScopePattern.cs` — `ApprovalScopePattern` and `PatternMatchType`
 - `src/TemporalCommunity.Extensions.Agents/Approvals/ApprovalScopeRecord.cs` — persisted scope record
 - `src/TemporalCommunity.Extensions.Agents/Approvals/ApprovalScopeHelpers.cs` — `TryMatchScope` public helper
 - `src/TemporalCommunity.Extensions.Agents/Approvals/ApprovalScopesOptions.cs` — per-agent scope configuration

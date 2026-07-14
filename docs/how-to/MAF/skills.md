@@ -287,7 +287,7 @@ When `EnableScriptExecution()` is called:
 
 - The `run_skill_script` tool is registered with `RequireApproval()` and `NoRetry()`.
 - The LLM can call `run_skill_script(skillName, scriptName, argumentsJson)`.
-- Before the tool activity dispatches, the HITL approval flow pauses the workflow and waits for a human to approve via `SubmitApprovalAsync`. For the full approval API, see [HITL Patterns](./hitl-patterns.md).
+- Before the tool activity dispatches, the HITL approval flow pauses the workflow and waits for a human to resolve it via `ResolveApprovalAsync`. For the full approval API, see [HITL Patterns](./hitl-patterns.md).
 
 **File-backed scripts are not supported.** `AddSkillsFromDirectory` throws `NotSupportedException` if you pass a `runner` argument. Script execution is available only for inline skills (`AgentInlineSkill`), class-based skills (`AgentClassSkill<TSelf>`), or a custom `AgentSkillsSource`.
 

@@ -26,7 +26,7 @@ SendAsync -> DurableChatWorkflow -> GetChatStep activity
   a Temporal activity with independently configurable timeout and retry behavior.
 - Pre-tool decisions through `IDurableToolInterceptor<DurableToolContext>`, including block,
   skip, and approval outcomes.
-- Human approval APIs: `GetPendingApprovalAsync`, retry-safe `ResolveApprovalAsync`, and `ShutdownAsync`.
+- Human approval APIs: `GetPendingApprovalAsync`, retry-safe `ResolveApprovalAsync`, and `ShutdownAsync`. Approvals are per-request; reusable approval scopes are an MAF-only capability.
   Approval requests carry an expiration and interceptor-authored reviewer-safe context; use
   `WithApprovalTimeout(...)` when a tool needs a deadline different from the session default.
 - Keyed MEAI client resolution through `DefaultChatClientKey` or a per-turn
@@ -115,6 +115,8 @@ This package defines the current managed-session contract. It does not offer a c
 for inline function invocation or caller-supplied session tools.
 
 ## Documentation and samples
+
+- [Durable approvals](../../docs/concepts/durable-approvals.md) — generic per-request approval lifecycle and retry outcomes
 
 - [MEAI usage](../../docs/how-to/MEAI/usage.md)
 - [Durable tool contract](../../docs/how-to/MEAI/tool-functions.md)

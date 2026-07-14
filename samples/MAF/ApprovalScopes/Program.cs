@@ -225,13 +225,13 @@ while (true)
 
         if (choice == "0")
         {
-            await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+            var denialResolution = await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
             {
                 RequestId = pending.RequestId,
                 Approved  = false,
                 Reason    = "Denied by user.",
             });
-            Console.WriteLine("\n  Denied.");
+            Console.WriteLine($"\n  Denied ({denialResolution.Status}).");
             continue;
         }
 
@@ -253,9 +253,8 @@ while (true)
             _           => ApprovalScope.ThisCallOnly,
         };
 
-        // SubmitApprovalAsync is a [WorkflowUpdate] — strongly consistent,
-        // validates the RequestId, and unblocks WaitConditionAsync in the workflow.
-        await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+        // ResolveApprovalAsync is retry-safe and supports MAF-specific scopes.
+        var resolution = await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
         {
             RequestId    = pending.RequestId,
             Approved     = true,
@@ -272,7 +271,9 @@ while (true)
             (ApprovalScope.ThisCallOnly, _)   => "this call only",
             _                                 => throw new UnreachableException("Unexpected scope/pattern combination."),
         };
-        Console.WriteLine($"\n  Approved [{label}] — agent is resuming...\n");
+        Console.WriteLine(resolution.Status is DurableApprovalResolutionStatus.Accepted
+            ? $"\n  Approved [{label}] — agent is resuming...\n"
+            : $"\n  Approval was not applied: {resolution.Status}.\n");
         // No break: the agent may call write_file again in the same turn, queuing
         // another approval. The poll loop continues until agentTask completes.
     }

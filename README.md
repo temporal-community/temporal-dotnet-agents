@@ -38,6 +38,8 @@ dotnet add package TemporalCommunity.Extensions.Agents
 [Full documentation →](src/TemporalCommunity.Extensions.Agents/README.md)
 
 For help choosing between the two packages, see the [Library Combinations Guide](docs/library-combinations.md).
+For the shared approval lifecycle, retry outcomes, and MAF-only scope boundary, see
+[Durable approvals](docs/concepts/durable-approvals.md).
 
 ## How It Works
 

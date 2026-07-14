@@ -126,7 +126,7 @@ For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientA
 
 `TemporalCommunity.Extensions.Agents` depends on `TemporalCommunity.Extensions.AI`. Installing the Agents NuGet package pulls in the AI package automatically — no separate `<PackageReference>` for `TemporalCommunity.Extensions.AI` is needed.
 
-The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI` and used by both libraries as the shared wire protocol for approval flows. They are available in your project as soon as you reference `TemporalCommunity.Extensions.Agents`.
+The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI`. Agent-specific reusable scopes use `DurableAgentApprovalDecision` from `TemporalCommunity.Extensions.Agents.Approvals`; a generic dashboard resolving through `IDurableSessionControl` always applies `ThisCallOnly` to an agent workflow.
 
 ---
 
@@ -684,8 +684,9 @@ waits for all of them before continuing.
 ## Human-in-the-Loop (HITL) Approval Gates
 
 Agent tools can pause mid-turn and wait for a human decision before proceeding. The backing `AgentWorkflow` exposes
-two `[WorkflowUpdate]` handlers — `RequestApprovalAsync` (called from inside a tool) and `SubmitApprovalAsync` (called
-from an external system) — and one `[WorkflowQuery]` handler, `GetPendingApproval`, for polling the current pending
+two approval `[WorkflowUpdate]` handlers — the inherited generic `ResolveApprovalAsync` (for shared dashboards) and
+`ResolveAgentApprovalAsync` (for MAF scopes) — plus `RequestApprovalAsync` (called from inside a tool) and one
+`[WorkflowQuery]` handler, `GetPendingApproval`, for polling the current pending
 request without modifying workflow state.
 
 ### Requesting Approval (Inside a Tool)
@@ -743,29 +744,30 @@ if (pending is not null)
 }
 ```
 
-### Submitting a Decision (External System)
+### Resolving a Decision (External System)
 
 ```csharp
-await client.SubmitApprovalAsync(
+var result = await client.ResolveApprovalAsync(
     sessionId,
-    new DurableApprovalDecision
+    new DurableAgentApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved  = true,
         Reason    = "Reviewed and approved by operations team."
     });
 
-Console.WriteLine("Decision submitted.");
+Console.WriteLine($"Decision status: {result.Status}");
 ```
 
-`SubmitApprovalAsync` unblocks the tool in the workflow, and `RequestApprovalAsync` in the tool returns the same
+`ResolveApprovalAsync` unblocks the tool when its result is `Accepted`; an identical retry returns
+`AlreadyResolved`, while a changed retry returns `Conflict`. `RequestApprovalAsync` in the tool returns a generic
 `DurableApprovalDecision`.
 
 #### `IDurableSessionControl` — shared approval and lifecycle interface
 
 `ITemporalAgentClient` implements `IDurableSessionControl`, defined in `TemporalCommunity.Extensions.AI`. The same interface is also implemented by `DurableChatSessionClient` in `TemporalCommunity.Extensions.AI`. This gives approval dashboards and ops tooling a single `IDurableSessionControl` dependency that works against either library without coupling to a specific client type.
 
-In addition to `GetPendingApprovalAsync` and `SubmitApprovalAsync`, the interface exposes:
+In addition to `GetPendingApprovalAsync` and retry-safe `ResolveApprovalAsync`, the interface exposes:
 
 - `CancelPendingApprovalAsync(workflowId)` — cancels the pending approval by submitting a rejection on behalf of the external system. No-op when no approval is currently pending.
 - `ShutdownAsync(workflowId)` — sends a graceful shutdown signal so the session workflow exits its loop rather than sitting parked until its TTL expires.
@@ -776,13 +778,13 @@ The `workflowId` parameter on `IDurableSessionControl` is the raw Temporal workf
 
 For long approval windows or cost-sensitive workloads where pinning an activity slot is undesirable, use the
 workflow-parked flavor: the turn loop itself parks, no activity is held open, and the workflow resumes only after
-`SubmitApprovalAsync` is called. Triggered two ways:
+`ResolveApprovalAsync` is called. Triggered two ways:
 
 - `agent.AddTool(tool, opts => opts.RequireApproval())` — absolute floor; always parks before the tool runs.
 - `IAgentToolInterceptor` returning `DurableToolDecision.PauseForApproval(description)` — dynamic, interceptor-driven.
 
 Register an interceptor per agent (`agent.AddToolInterceptor(sp => ...)`) or as a worker-level default
-(`opts.DefaultToolInterceptor`). `SubmitApprovalAsync` is the same external API for both flavors.
+(`opts.DefaultToolInterceptor`). `ResolveApprovalAsync` is the same external API for both flavors.
 
 See [HITL Patterns](./hitl-patterns.md) for the full guide including the two-flavor comparison table and testing patterns.
 

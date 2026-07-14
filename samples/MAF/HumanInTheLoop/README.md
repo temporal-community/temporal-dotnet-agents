@@ -7,7 +7,7 @@ Demonstrates how to pause an agent mid-turn and wait for a human decision before
 This sample demonstrates:
 - `TemporalAgentContext.Current.RequestApprovalAsync()` suspending a tool inside an activity
 - `ITemporalAgentClient.GetPendingApprovalAsync()` polling for pending approvals from outside the workflow
-- `ITemporalAgentClient.SubmitApprovalAsync()` unblocking the workflow with a decision
+- `ITemporalAgentClient.ResolveApprovalAsync()` resolving the workflow with a retry-safe decision
 - `ActivityTimeout` set to 24 hours to accommodate human review time
 
 ## Architecture
@@ -30,7 +30,7 @@ proxy.RunAsync(messages, session)            ← [WorkflowUpdate] to AgentWorkfl
                   ┌──────┴──────────────────────────────────────┐
                   │  Human review (console in this sample)       │
                   │  client.GetPendingApprovalAsync(sessionId)   │  ← [WorkflowQuery]
-                  │  client.SubmitApprovalAsync(sessionId, ...)  │  ← [WorkflowUpdate]
+                  │  client.ResolveApprovalAsync(sessionId, ...) │  ← [WorkflowUpdate]
                   └──────┬──────────────────────────────────────┘
                          │
                   WaitConditionAsync satisfied → tool resumes
@@ -43,7 +43,7 @@ proxy.RunAsync(messages, session)            ← [WorkflowUpdate] to AgentWorkfl
 
 - **Suspension without polling.** The workflow blocks on `WaitConditionAsync` — no spin-wait, no timer. The worker thread is released and other workflows continue normally while waiting.
 - **`GetPendingApprovalAsync` is a `[WorkflowQuery]`.** Queries never block the workflow and are safe to call as frequently as needed. This sample polls every second from outside the workflow while the agent task is in-flight.
-- **`SubmitApprovalAsync` is a `[WorkflowUpdate]`.** Strongly consistent: it validates the `RequestId` matches the pending request before unblocking, preventing stale or duplicate decisions.
+- **`ResolveApprovalAsync` is a retry-safe `[WorkflowUpdate]`.** It reports `Accepted`, `AlreadyResolved`, or a non-success status so a reviewer can safely retry after an ambiguous client response.
 - **`ActivityTimeout` must exceed `ApprovalTimeout`.** `ActivityTimeout = TimeSpan.FromHours(24)` gives Temporal the outer bound for how long the tool activity may run; `ApprovalTimeout = TimeSpan.FromHours(23)` is the inner bound — how long the workflow will wait for a human decision before timing out the approval. If `ApprovalTimeout >= ActivityTimeout`, the activity can expire while the workflow still holds an open approval request, blocking all subsequent turns indefinitely. A heartbeat timeout of 5 minutes ensures the worker is still alive. All three are set in `AddTemporalAgents()`.
 - **`send_email` is registered with `opts.NoRetry()`.** The tool delivers an email after the human approves. Without `NoRetry()`, a transient failure immediately after delivery (before the activity reports success) would cause Temporal to retry the activity — re-entering the approval gate, issuing a second approval request, and potentially sending the email a second time. Write-style tools that produce side effects must set `MaximumAttempts = 1`.
 

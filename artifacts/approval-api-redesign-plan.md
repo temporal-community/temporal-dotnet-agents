@@ -1,8 +1,23 @@
 # Durable Approval API Redesign — Draft Plan
 
-**Status:** Draft for design review. No implementation is authorized by this document.
+**Status:** Implementation complete locally — remote CI verification pending.
 
 **Scope:** A breaking pre-release redesign of the approval APIs. Implement MEAI first, then the MAF-specific scope API. This is separate from the completed `0.10.2` durable-execution baseline and does not alter its tag.
+
+**Implementation tracking:**
+
+- [#9 — Contract and MEAI core](https://github.com/temporal-community/temporal-dotnet-agents/issues/9)
+- [#10 — MAF scoped resolution](https://github.com/temporal-community/temporal-dotnet-agents/issues/10)
+- [#11 — API cleanup and migration guidance](https://github.com/temporal-community/temporal-dotnet-agents/issues/11)
+- [#12 — Documentation, samples, and verification](https://github.com/temporal-community/temporal-dotnet-agents/issues/12)
+
+### Local verification evidence
+
+- `just test` — Release build plus all unit and integration tests passed with zero build warnings/errors.
+- Focused MAF checks — 589 unit tests passed (1 skipped), 89 integration tests passed, and 2 focused HITL retry/timeout tests passed.
+- `just smoke-downlevel-proxy` — packed `netstandard2.1` consumer gate passed for both libraries; packages were local test artifacts only.
+- `just verify-sample-coverage` and `just test-samples` passed; all changed approval samples compiled successfully.
+- Local Markdown-link validation passed for 64 Markdown files; `git diff --check` passed.
 
 ## Problem statement and source baseline
 
@@ -110,6 +125,7 @@ The explicit `IDurableSessionControl.ResolveApprovalAsync` implementation on `De
 - If `ResolveAgentApprovalAsync` needs a workflow-update validator, declare it with `[WorkflowUpdateValidator(nameof(ResolveAgentApprovalAsync))]` and exercise that validator through an integration test. Never reference the generic `ResolveApprovalAsync` method name from the typed handler's validator attribute.
 - Convert an accepted `DurableAgentApprovalDecision` to the generic core decision only at the `DurableApprovalMixin` boundary. The typed handler uses the mixin to accept and unblock a currently pending request, but must never return the mixin's status directly: it recomputes `Accepted`, `AlreadyResolved`, and `Conflict` from the full MAF decision ledger.
 - Add a protected no-op base hook invoked only when the inherited generic `ResolveApproval` accepts a decision. `AgentWorkflow` overrides it to write the same request ID, `Approved`, and `Reason` values to the MAF ledger as an explicit `ThisCallOnly` decision with no pattern before the update returns. Only the scope fields are synthesized. This symmetric write-through means both endpoints populate both views of the shared retention window.
+- Add a second protected no-op base hook invoked exactly once after every `RequestApproval` completion, including approval, rejection, and timeout, on both the public-update and turn-loop paths. `AgentWorkflow` uses it to finalize a missing `ThisCallOnly` record—preserving a pending full typed decision when one exists—so timeout resolutions populate both archives too.
 - Preserve the full MAF decision separately until the approval resolves, then use it for scope normalization and persistence. A successful generic decision is always `ThisCallOnly`.
 - Add MAF-specific retained-resolution records to `AgentWorkflowInput` and carry them in `AgentWorkflow.CreateContinueAsNewException`.
   Full MAF decision identity—core fields plus scope and pattern—must determine `AlreadyResolved` versus `Conflict` for a typed reviewer retry.
@@ -152,6 +168,7 @@ The explicit `IDurableSessionControl.ResolveApprovalAsync` implementation on `De
 - MAF typed approval with each scope; retry of the identical typed decision; a retry that changes scope or pattern and returns `Conflict`.
 - Generic dashboard resolution against an MAF workflow through the inherited `ResolveApproval` update, proving it resolves the pending request but grants no scope.
 - Cross-endpoint retry tests: generic-first then typed retry returns `AlreadyResolved` only for the equivalent explicit `ThisCallOnly` decision; typed-first then generic retry also returns `AlreadyResolved`; either route returns `Conflict` for a changed scoped decision.
+- A timeout-resolution test proves both the generic core archive and MAF typed ledger retain the same `ThisCallOnly` denial through continue-as-new.
 - A direct raw Temporal attempt to invoke the removed `SubmitApproval` update fails as an unknown update; no SDK documentation, sample, or test retains that wire name.
 - Typed `ResolveAgentApproval` update wiring, including its validator when present, is exercised through an integration test rather than inferred from a method overload.
 - Retention-boundary tests that prove generic and typed MAF resolution agree on `AlreadyResolved` versus `NotPending` before and after a shared archive eviction.

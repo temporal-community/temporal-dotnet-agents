@@ -97,10 +97,9 @@ The session effectively *is* the workflow. Creating a session doesn't start the 
 `AgentWorkflow` inherits from `DurableChatWorkflowBase<AgentResponse>` (declared in
 `TemporalCommunity.Extensions.AI`). The base class owns the session-loop body — the turn
 mutex, continue-as-new triggering, history reduction, the `[WorkflowQuery("GetHistory")]`
-handler, the `[WorkflowSignal("RequestShutdown")]` handler, and all four HITL
-approval methods (`RequestApproval`, `SubmitApproval`, `GetPendingApproval`, plus
-the `[WorkflowUpdateValidator]` for `SubmitApproval`). These are inherited verbatim;
-the MAF library no longer carries its own copies.
+handler, the `[WorkflowSignal("RequestShutdown")]` handler, and the generic HITL
+approval methods (`RequestApproval`, `ResolveApproval`, and `GetPendingApproval`). MAF
+inherits these and adds `ResolveAgentApproval` for decisions that include reusable scopes.
 
 The shared shape:
 
@@ -110,7 +109,7 @@ DurableChatWorkflowBase<TOutput>           ← in TemporalCommunity.Extensions.A
     ├─ session-loop body (turn mutex, CAN trigger, history reducer)
     ├─ [WorkflowQuery("GetHistory")]
     ├─ [WorkflowSignal("RequestShutdown")]
-    ├─ [WorkflowUpdate("RequestApproval" | "SubmitApproval")] + validators
+    ├─ [WorkflowUpdate("RequestApproval" | "ResolveApproval")] + validators
     ├─ [WorkflowQuery("GetPendingApproval")]
     ├─ protected abstract BuildResponseEntry(...)         ← MAF override below
     ├─ protected abstract ExecuteTurnAsync(...)           ← MAF override below
@@ -121,6 +120,7 @@ AgentWorkflow : DurableChatWorkflowBase<AgentResponse>     ← in TemporalCommun
     ├─ _currentStateBag: JsonElement?  (MAF-specific)
     ├─ _input: AgentWorkflowInput?     (MAF-specific)
     ├─ [WorkflowUpdate("RunAgent")] + [WorkflowUpdateValidator]
+    ├─ [WorkflowUpdate("ResolveAgentApproval")] for MAF scoped decisions
     ├─ [WorkflowSignal("RunFireAndForget")]
     ├─ override BuildResponseEntry → AgentSessionResponse.FromAgentResponse(...)
     ├─ override ExecuteTurnAsync   → drives ExecuteDurableAgentTurnAsync (the durable loop)

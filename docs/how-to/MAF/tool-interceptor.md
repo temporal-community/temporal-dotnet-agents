@@ -118,7 +118,7 @@ return DurableToolDecision.PauseForApproval(
     $"Arguments: {JsonSerializer.Serialize(context.Arguments)}");
 ```
 
-The `description` string is shown to the reviewer via `DurableApprovalRequest.Description`. The external system polls `GetPendingApprovalAsync` and calls `SubmitApprovalAsync` to unblock the workflow — the same API used by the in-tool HITL path.
+The `description` string is shown to the reviewer via `DurableApprovalRequest.Description`. The external system polls `GetPendingApprovalAsync` and calls retry-safe `ResolveApprovalAsync` to unblock the workflow — the same API used by the in-tool HITL path.
 
 If approved, the tool proceeds. If rejected, the tool is skipped and the agent receives a synthetic rejection result.
 
@@ -168,7 +168,7 @@ When both `RequireApproval()` and an interceptor are active, the interceptor's `
 
 ## Approval scope records
 
-When an agent is configured with `UseApprovalScopes()` and a reviewer submits a `DurableApprovalDecision` with `Scope = ApprovalScope.Session` or `Scope = ApprovalScope.Always`, the workflow writes a scope record so future calls to the same tool can proceed automatically without another human review.
+When an agent is configured with `UseApprovalScopes()` and a reviewer resolves a `DurableAgentApprovalDecision` with `Scope = ApprovalScope.Session` or `Scope = ApprovalScope.Always`, the workflow writes a scope record so future calls to the same tool can proceed automatically without another human review.
 
 ### Where scope records live
 
@@ -189,7 +189,7 @@ public sealed class ApprovalScopeRecord
 }
 ```
 
-`Pattern` is `null` when the reviewer approved without argument constraints. When the reviewer supplies a `ScopePattern` on the `DurableApprovalDecision`, the scope record carries the pattern and `TryMatchScope` evaluates it on every future call.
+`Pattern` is `null` when the reviewer approved without argument constraints. When the reviewer supplies a `ScopePattern` on the `DurableAgentApprovalDecision`, the scope record carries the pattern and `TryMatchScope` evaluates it on every future call.
 
 ### Reading scope records from a custom interceptor
 
@@ -451,7 +451,7 @@ The tool receives the token instead of the raw SSN. `ModifiedArguments` affects 
 ## See also
 
 - [Durable Agents](./durable-agents.md) — per-tool activity configuration, `DurableToolOptions` reference
-- [HITL Patterns](./hitl-patterns.md) — approval dashboard API, `SubmitApprovalAsync`, in-tool vs workflow-parked comparison
+- [HITL Patterns](./hitl-patterns.md) — approval dashboard API, `ResolveApprovalAsync`, in-tool vs workflow-parked comparison
 - [Usage Guide — Per-Tool Activity Configuration](./usage.md#per-tool-activity-configuration)
 - [`samples/MAF/ToolInterceptor/`](../../../samples/MAF/ToolInterceptor/) — runnable sample: all four decision paths + `RequireApproval()` in a refund-agent scenario
 

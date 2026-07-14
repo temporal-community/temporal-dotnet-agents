@@ -13,6 +13,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
@@ -43,7 +44,7 @@ var openAiClient = new OpenAIClient(
 // ── send_email tool — the heart of this sample ───────────────────────────────
 // Before sending, the tool suspends the activity by sending a structured
 // DurableApprovalRequest to the workflow. Execution resumes only when a human
-// submits a decision via ITemporalAgentClient.SubmitApprovalAsync.
+// resolves a decision via ITemporalAgentClient.ResolveApprovalAsync.
 var sendEmailTool = AIFunctionFactory.Create(
     async (
         [Description("Recipient email address")] string to,
@@ -52,7 +53,7 @@ var sendEmailTool = AIFunctionFactory.Create(
     {
         var ctx = TemporalAgentContext.Current;
 
-        // This call sends a [WorkflowUpdate] and blocks until SubmitApprovalAsync
+        // This call sends a [WorkflowUpdate] and blocks until ResolveApprovalAsync
         // is called from the approval console below, or until agent.ApprovalTimeout
         // (effective: 23 h) elapses — at which point a rejected decision is returned.
         var decision = await ctx.RequestApprovalAsync(new DurableApprovalRequest
@@ -210,18 +211,22 @@ while (true)
             if (string.IsNullOrWhiteSpace(comment)) comment = null;
         }
 
-        // SubmitApprovalAsync is a [WorkflowUpdate] — strongly consistent,
-        // validates the RequestId, and unblocks WaitConditionAsync in the workflow.
-        await client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+        // ResolveApprovalAsync is retry-safe: the returned status distinguishes an
+        // accepted decision from a duplicate delivery or a conflicting retry.
+        var resolution = await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
         {
             RequestId = pending.RequestId,
             Approved = choice == "approve",
             Reason = comment
         });
 
-        Console.WriteLine(choice == "approve"
-            ? "\n  ✓ Approved — agent is resuming..."
-            : "\n  ✗ Rejected — agent is resuming...");
+        Console.WriteLine(resolution.Status switch
+        {
+            DurableApprovalResolutionStatus.Accepted when choice == "approve" => "\n  ✓ Approved — agent is resuming...",
+            DurableApprovalResolutionStatus.Accepted => "\n  ✗ Rejected — agent is resuming...",
+            DurableApprovalResolutionStatus.AlreadyResolved => "\n  ✓ This decision was already recorded.",
+            _ => $"\n  Approval was not applied: {resolution.Status}.",
+        });
         Console.WriteLine();
     }
 

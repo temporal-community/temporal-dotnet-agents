@@ -19,6 +19,7 @@ using Microsoft.Extensions.Logging;
 using OpenAI;
 using ToolInterceptor;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
@@ -166,12 +167,14 @@ while (!agentTask.IsCompleted)
     Console.WriteLine($"[Approval requested] {pending.Description}");
     Console.WriteLine("[Auto-approving for demo]");
 
-    await agentClient.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
+    var resolution = await agentClient.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved  = true,
         Reason    = "Demo auto-approve",
     });
+
+    Console.WriteLine($"[Approval resolution: {resolution.Status}]");
 
     // Break so we don't loop and re-approve after the tool has already run.
     break;

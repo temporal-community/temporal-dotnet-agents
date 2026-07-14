@@ -32,8 +32,8 @@ ScopedApprovalInterceptor.BeforeToolCallAsync()
                 │
         Human reviews via console (scope choice [0-5])
                 │
-        client.SubmitApprovalAsync(sessionId, new DurableApprovalDecision
-                {  RequestId, Approved, Scope, ScopePattern  })
+        client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
+                { RequestId, Approved, Scope, ScopePattern })
                 │
                 ▼
         Scope stored:

@@ -206,11 +206,13 @@ Set the option to `false` to opt out.
 
 This library depends on `TemporalCommunity.Extensions.AI`. Installing `TemporalCommunity.Extensions.Agents` pulls in `TemporalCommunity.Extensions.AI` automatically — no separate package reference is needed.
 
-The HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI.Approvals` and used here as the shared wire protocol for approval flows. An external approval system built against these types works against both `AgentWorkflow` and `DurableChatWorkflow` without modification.
+The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI.Approvals`. An external approval system using `IDurableSessionControl.ResolveApprovalAsync` works against both `AgentWorkflow` and `DurableChatWorkflow`, and applies `ThisCallOnly` when it targets an agent workflow. MAF-only reusable scopes use `DurableAgentApprovalDecision` from `TemporalCommunity.Extensions.Agents.Approvals` with `ITemporalAgentClient.ResolveApprovalAsync`.
 
 `DurableAIDataConverter` is auto-wired by `AddTemporalAgents()` for the standard registration patterns (3-arg `AddHostedTemporalWorker` and `AddTemporalClient`). Manual setup is only required when creating the client via `TemporalClient.ConnectAsync` and registering it with `AddSingleton<ITemporalClient>`.
 
 ## Documentation
+
+- [Durable approvals](../../docs/concepts/durable-approvals.md) — shared approval lifecycle and the MAF-only scope boundary
 
 ### How-To Guides
 
