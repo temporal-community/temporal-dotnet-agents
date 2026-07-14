@@ -105,12 +105,13 @@ The explicit `IDurableSessionControl.ResolveApprovalAsync` implementation on `De
 ### 2. MAF scope-owned decision path
 
 - Add the MAF-local scope types and `DurableAgentApprovalDecision`.
-- Add distinct workflow update names/types for generic and agent-scoped resolution; do not rely on overload discovery or runtime polymorphic JSON.
-- Convert an accepted `DurableAgentApprovalDecision` to the generic core decision only at the `DurableApprovalMixin` boundary.
+- Keep the inherited `[WorkflowUpdate("ResolveApproval")]` handler unchanged for generic dashboard resolution. Add a separate `[WorkflowUpdate("ResolveAgentApproval")]` handler for `DurableAgentApprovalDecision`; do not rely on overload discovery or runtime polymorphic JSON.
+- Convert an accepted `DurableAgentApprovalDecision` to the generic core decision only at the `DurableApprovalMixin` boundary. The typed handler uses the mixin to accept and unblock a currently pending request, but must never return the mixin's status directly: it recomputes `Accepted`, `AlreadyResolved`, and `Conflict` from the full MAF decision ledger.
 - Preserve the full MAF decision separately until the approval resolves, then use it for scope normalization and persistence. A successful generic decision is always `ThisCallOnly`.
 - Add MAF-specific retained-resolution records to `AgentWorkflowInput` and carry them in `AgentWorkflow.CreateContinueAsNewException`.
   Full MAF decision identity—core fields plus scope and pattern—must determine `AlreadyResolved` versus `Conflict` for a typed reviewer retry.
-- Keep the retention limit at 32. Retained records must be bounded before serialization and restored before accepting the first post-continue-as-new resolution update.
+- Treat the core mixin archive and MAF typed-decision ledger as one ordered, request-ID-keyed retention window. Evict and restore entries in lockstep, using the same 32 retained request IDs, so the generic and typed endpoints cannot disagree solely because one archive retained an entry that the other evicted.
+- Keep the retention limit at 32. Both views must be bounded before serialization and restored before accepting the first post-continue-as-new resolution update.
 - Update `ApprovalScopeCoordinator`, `ApprovalScopeRecord`, `ScopedApprovalInterceptor`, builder validation, and workflow persistence to use only the MAF-local scope types.
 - Keep the existing scope semantics unchanged: invalid scope input degrades to `ThisCallOnly`; non-scope-aware tools do not gain reusable scope; existing StateBag/store budgets and key-collision guards remain enforced.
 
@@ -146,7 +147,8 @@ The explicit `IDurableSessionControl.ResolveApprovalAsync` implementation on `De
 
 - Generic MEAI approval, retry after a lost response, and retry after continue-as-new.
 - MAF typed approval with each scope; retry of the identical typed decision; a retry that changes scope or pattern and returns `Conflict`.
-- Generic dashboard resolution against an MAF workflow, proving it resolves the pending request but grants no scope.
+- Generic dashboard resolution against an MAF workflow through the inherited `ResolveApproval` update, proving it resolves the pending request but grants no scope.
+- Retention-boundary tests that prove generic and typed MAF resolution agree on `AlreadyResolved` versus `NotPending` before and after a shared archive eviction.
 - Timeout, cancellation, delayed duplicate resolution, and a resolution beyond the 32-record retention window.
 - Replay and continue-as-new tests that confirm the MAF scope record and the retained typed-resolution record survive exactly as specified.
 
