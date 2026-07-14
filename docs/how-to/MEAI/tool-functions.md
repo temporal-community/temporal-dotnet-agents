@@ -54,5 +54,5 @@ function. It is not a replacement for the managed chat loop, and it does not mak
 `ChatOptions.Tools` durable. See the `samples/MEAI/DurableTools` sample for that direct activity
 dispatch use case.
 
-For the prerelease breaking-change checklist, see
-[MEAI durable-chat breaking changes](migration-breaking-changes.md).
+For the complete managed-session boundary, see the
+[managed-session tool contract](managed-session-tool-contract.md).

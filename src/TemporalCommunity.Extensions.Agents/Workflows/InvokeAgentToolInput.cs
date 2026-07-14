@@ -47,11 +47,7 @@ internal sealed class InvokeAgentToolInput
     /// empty bag. Mutations the tool makes are returned via
     /// <see cref="InvokeAgentToolResult.UpdatedStateBag"/> and merged back by the workflow.
     /// </summary>
-    /// <remarks>
-    /// Optional and <c>[JsonIgnore(WhenWritingNull)]</c> so in-flight histories serialized
-    /// before this field existed continue to replay (wire-compatible). <see langword="null"/>
-    /// means no accumulated state.
-    /// </remarks>
+    /// <remarks><see langword="null"/> means no accumulated state.</remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? SerializedStateBag { get; init; }
 }

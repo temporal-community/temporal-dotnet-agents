@@ -15,13 +15,6 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// MAF-specific fields (<see cref="AgentName"/>, <see cref="TaskQueue"/>,
 /// <see cref="CarriedStateBag"/>, etc.) live on this subclass.
 /// </summary>
-/// <remarks>
-/// Worker-side resolved settings (<see cref="MaxToolCallsPerTurn"/> and
-/// <see cref="DurableAgentToolActivityOptions"/>) are stored
-/// in <see cref="ResolvedWorkerConfig"/> as of the maf-gap Step 3c.1 migration. The legacy
-/// flat-field names remain as forwarding computed properties so consumers don't need updating;
-/// only construction sites assign to <see cref="ResolvedWorkerConfig"/> directly.
-/// </remarks>
 internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 {
     /// <summary>Gets the name of the agent that this workflow manages.</summary>
@@ -53,7 +46,7 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ProxyResolvedWorkerConfig? ResolvedWorkerConfig { get; init; }
 
-    // ── Forwarding properties — preserve consumer call sites across the Step 3c.1 migration ──
+    // ── Workflow accessors for the resolved worker settings bundle ───────────
 
     /// <summary>
     /// Maximum number of LLM-step iterations within a single agent turn. Each iteration may

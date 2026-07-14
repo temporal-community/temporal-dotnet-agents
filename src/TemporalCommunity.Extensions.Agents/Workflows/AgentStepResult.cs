@@ -65,31 +65,6 @@ internal sealed class AgentStepResult
     /// Only populated when <see cref="AgentStepInput.NeedsWorkerSettingsResolution"/> was
     /// <see langword="true"/>; <see langword="null"/> on non-resolution steps.
     /// </summary>
-    /// <remarks>
-    /// Replaces the prior <c>ResolvedToolActivityOptions</c> /
-    /// <c>ResolvedMaxToolCallsPerTurn</c> trio (Step 3c.1 migration). The legacy field names are
-    /// preserved as forwarding computed properties below so consumers don't need updating; new
-    /// fields flow through the same record without further schema thrashing.
-    /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ProxyResolvedWorkerConfig? ResolvedWorkerConfig { get; init; }
-
-    // ── Forwarding properties — preserve consumer call sites across the Step 3c.1 migration ──
-
-    /// <summary>
-    /// Resolved per-tool <see cref="ActivityOptions"/> dictionary. Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.ToolActivityOptions"/>;
-    /// <see langword="null"/> on non-resolution steps.
-    /// </summary>
-    [JsonIgnore]
-    public IReadOnlyDictionary<string, ActivityOptions>? ResolvedToolActivityOptions =>
-        ResolvedWorkerConfig?.ToolActivityOptions;
-
-    /// <summary>
-    /// Resolved <c>MaxToolCallsPerTurn</c>. Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.MaxToolCallsPerTurn"/>;
-    /// <see langword="null"/> on non-resolution steps.
-    /// </summary>
-    [JsonIgnore]
-    public int? ResolvedMaxToolCallsPerTurn => ResolvedWorkerConfig?.MaxToolCallsPerTurn;
 }

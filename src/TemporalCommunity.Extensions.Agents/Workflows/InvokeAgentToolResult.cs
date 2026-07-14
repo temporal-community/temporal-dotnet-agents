@@ -25,8 +25,7 @@ internal sealed class InvokeAgentToolResult
     /// (see <c>AgentWorkflow</c> FunctionResultContent construction). Downstream consumers reading
     /// tool results from history therefore observe a <see cref="System.Text.Json.JsonElement"/>, not
     /// the tool's return type. This is intentional: rehydrating domain types would require carrying
-    /// type metadata across the boundary and would break replay of histories serialized before such
-    /// a change. Consumers that need a typed value should deserialize the
+    /// type metadata across the boundary. Consumers that need a typed value should deserialize the
     /// <see cref="System.Text.Json.JsonElement"/> explicitly.
     /// </remarks>
     public object? Result { get; init; }
@@ -44,10 +43,6 @@ internal sealed class InvokeAgentToolResult
     /// StateBag after the tool fan-out completes, in tool-call index order (later index wins
     /// on key conflict) for replay determinism.
     /// </summary>
-    /// <remarks>
-    /// Optional and <c>[JsonIgnore(WhenWritingNull)]</c> so in-flight histories serialized
-    /// before this field existed continue to replay (wire-compatible).
-    /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? UpdatedStateBag { get; init; }
 }

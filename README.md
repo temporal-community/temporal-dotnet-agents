@@ -118,7 +118,10 @@ Alternatively, set `OPENAI_API_KEY` as an environment variable — the samples p
 
 ```bash
 # Start Temporal (separate terminal)
-temporal server start-dev --namespace default
+temporal server start-dev --namespace default \
+  --search-attribute AgentName=Keyword \
+  --search-attribute SessionCreatedAt=Datetime \
+  --search-attribute TurnCount=Int
 
 # Run a sample
 dotnet run --project samples/MEAI/DurableChat

@@ -43,10 +43,9 @@ internal sealed class AgentStepInput
     public TemporalAgentSessionId? SessionId { get; init; }
 
     /// <summary>
-    /// When <see langword="true"/>, the activity resolves and returns worker-side durable-agent
-    /// settings (per-tool <see cref="ActivityOptions"/> dictionary and
-    /// <see cref="AgentStepResult.ResolvedMaxToolCallsPerTurn"/>) so the workflow can patch its
-    /// input on the first turn of a proxy-started session or sub-agent orchestration.
+    /// When <see langword="true"/>, the activity resolves and returns the worker-side durable-agent
+    /// settings bundle so the workflow can patch its input on the first turn of a proxy-started
+    /// session or sub-agent orchestration.
     /// Only set on the first step of the first turn when <see cref="AgentWorkflowInput.WorkerSettingsResolved"/>
     /// is <see langword="false"/>, or by <see cref="TemporalAIAgent"/> on every first iteration.
     /// Defaults to <see langword="false"/> for all existing callers.

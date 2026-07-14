@@ -523,9 +523,8 @@ public abstract class DurableChatWorkflowBase<TOutput>
         _approvalMixin.ValidateRequestApproval(request);
 
     /// <summary>
-    /// Legacy cross-library update that blocks until a human submits a decision. Managed MEAI
-    /// session clients use <see cref="ResolveApprovalAsync"/> instead, which returns a
-    /// retry-safe status.
+    /// Shared approval update used by MAF in-tool approvals. Managed MEAI session clients use
+    /// <see cref="ResolveApprovalAsync"/> instead, which returns a retry-safe status.
     /// </summary>
     [WorkflowUpdate("RequestApproval")]
     public Task<DurableApprovalDecision> RequestApprovalAsync(DurableApprovalRequest request) =>
@@ -540,14 +539,14 @@ public abstract class DurableChatWorkflowBase<TOutput>
                 Workflow.Info.WorkflowId, d.RequestId, d.Approved));
 
     /// <summary>
-    /// Validates the legacy submitted approval decision used by the MAF bridge.
+    /// Validates a submitted approval decision for the shared approval update.
     /// </summary>
     [WorkflowUpdateValidator(nameof(SubmitApprovalAsync))]
     public void ValidateSubmitApproval(DurableApprovalDecision decision) =>
         _approvalMixin.ValidateSubmitApproval(decision);
 
     /// <summary>
-    /// Legacy cross-library submission path. It unblocks <see cref="RequestApprovalAsync"/>
+    /// Shared cross-library submission path. It unblocks <see cref="RequestApprovalAsync"/>
     /// but does not provide retry-safe result semantics; use <see cref="ResolveApprovalAsync"/>
     /// for managed MEAI sessions.
     /// </summary>
@@ -602,8 +601,8 @@ public abstract class DurableChatWorkflowBase<TOutput>
     /// </summary>
     /// <remarks>
     /// Must only be called from workflow-thread code. The approval unblocks when a matching
-    /// decision arrives through <see cref="ResolveApprovalAsync"/> or the legacy
-    /// <see cref="SubmitApprovalAsync"/> bridge.
+    /// decision arrives through <see cref="ResolveApprovalAsync"/> or
+    /// <see cref="SubmitApprovalAsync"/>.
     /// </remarks>
     protected Task<DurableApprovalDecision> RequestApprovalFromTurnLoopAsync(
         DurableApprovalRequest request,

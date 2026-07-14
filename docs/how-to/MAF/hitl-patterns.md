@@ -676,9 +676,9 @@ public sealed record DurableApprovalRequest
 ```csharp
 // Namespace: TemporalCommunity.Extensions.AI.Approvals
 // Used for both the submitted decision and the returned outcome
-public sealed record DurableApprovalDecision
+public sealed class DurableApprovalDecision
 {
-    public string RequestId { get; init; } = string.Empty;     // must match pending request
+    public required string RequestId { get; init; }             // must match pending request
     public bool Approved { get; init; }
     public string? Reason { get; init; }                       // reviewer note or timeout message
     public ApprovalScope Scope { get; init; }                  // default: ThisCallOnly (no scope record written)
@@ -686,7 +686,8 @@ public sealed record DurableApprovalDecision
 }
 ```
 
-`Scope` and `ScopePattern` are serialized with `JsonIgnoreCondition.WhenWritingDefault` / `WhenWritingNull`, so legacy JSON without these fields deserializes as `ThisCallOnly` with no pattern — no breaking change for existing approval integrations.
+`Scope` and `ScopePattern` are optional. When omitted, `Scope` defaults to `ThisCallOnly` and
+no pattern constraint is applied.
 
 ### ApprovalScopePattern
 

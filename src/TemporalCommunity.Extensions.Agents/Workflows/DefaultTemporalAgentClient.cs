@@ -484,8 +484,8 @@ internal sealed class DefaultTemporalAgentClient(
             HistoryReducer = perAgentHistoryReducer,
             HistoryReducerKey = perAgentHistoryReducerKey,
             EnableSearchAttributes = options.EnableSearchAttributes,
-            // Worker-side settings are baked in — non-null ResolvedWorkerConfig also serves as
-            // the "WorkerSettingsResolved = true" signal under the Step 3c.1 migration.
+            // Worker-side settings are baked in. A non-null bundle means this workflow does not
+            // need the proxy-start resolution handshake.
             ResolvedWorkerConfig = new ProxyResolvedWorkerConfig
             {
                 MaxToolCallsPerTurn = registration.MaxToolCallsPerTurn,

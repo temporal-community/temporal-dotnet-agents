@@ -141,7 +141,10 @@ For the experimental plugin alternative, see `TemporalAgentsPlugin` and
 
 ```bash
 # Start Temporal (in a separate terminal)
-temporal server start-dev --namespace default
+temporal server start-dev --namespace default \
+  --search-attribute AgentName=Keyword \
+  --search-attribute SessionCreatedAt=Datetime \
+  --search-attribute TurnCount=Int
 
 # Run a sample
 dotnet run --project samples/MAF/BasicAgent/BasicAgent.csproj
@@ -160,7 +163,10 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 | `DefaultActivityTimeout` | `TimeSpan` | `5 min` | Default start-to-close timeout for agent activities |
 | `DefaultApprovalTimeout` | `TimeSpan` | `7 days` | How long a HITL gate waits before auto-rejecting |
 
-`EnableSearchAttributes` defaults to `true`. The three search attributes must be pre-registered on the Temporal server. With `temporal server start-dev` this happens automatically; on production clusters run the CLI commands in the [Observability guide](../../docs/how-to/MAF/observability.md#search-attributes). Set the option to `false` to opt out.
+`EnableSearchAttributes` defaults to `true`. The three search attributes must be pre-registered on
+the Temporal server. Pass them to `temporal server start-dev` as shown above, or run the production
+CLI commands in the [Observability guide](../../docs/how-to/MAF/observability.md#search-attributes).
+Set the option to `false` to opt out.
 
 ## Samples
 

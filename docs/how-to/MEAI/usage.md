@@ -67,4 +67,4 @@ known function, use `AIFunction.AsDurable()`; it is separate from managed chat-s
 selection.
 
 See [tool functions](tool-functions.md), [pipeline architecture](../../architecture/MEAI/durable-chat-pipeline.md), and the
-[migration guide](migration-breaking-changes.md) for the complete contract.
+[managed-session tool contract](managed-session-tool-contract.md) for the complete contract.

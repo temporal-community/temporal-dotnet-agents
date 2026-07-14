@@ -41,7 +41,5 @@ worker implementation. A chat pipeline used by a durable session must not includ
 
 - The client and all workers need `DurableAIDataConverter.Instance`.
 - Every worker on the task queue must register the same durable tool names and compatible schemas.
-- Do not deploy this breaking prerelease change over in-flight executions created by the retired
-  inline-loop behavior. Drain or retire those executions before deploying the new worker set.
 - `AsDurable()` is a separate direct-function primitive for custom workflows. It does not alter the
   managed-session contract.

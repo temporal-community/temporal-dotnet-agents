@@ -97,10 +97,6 @@ internal sealed class DurableToolInterceptorResult
     /// into its carried StateBag after the interceptor activity returns and before tool
     /// dispatch, so interceptor-driven state changes are durable.
     /// </summary>
-    /// <remarks>
-    /// Optional and <c>[JsonIgnore(WhenWritingNull)]</c> so in-flight histories serialized
-    /// before this field existed continue to replay (wire-compatible).
-    /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? UpdatedStateBag { get; init; }
 

@@ -468,7 +468,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         return result;
     }
 
-    // ── IDurableSessionControl — explicit implementations ───────────────────
+    // ── IDurableSessionControl — raw workflow-ID implementations ────────────
     // The public API uses conversationId (applies GetWorkflowId prefix). The interface uses the
     // raw workflowId so approval dashboards can address any session directly without knowing the
     // prefix. These explicit members bypass the prefix transformation.

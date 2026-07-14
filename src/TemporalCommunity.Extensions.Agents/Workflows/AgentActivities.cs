@@ -903,8 +903,7 @@ internal sealed class AgentActivities(
         var result = DurableToolInterceptorResult.FromDecision(decision);
 
         // X-2: propagate StateBag mutations the interceptor made in place. Only emit
-        // UpdatedStateBag when the serialized bag actually changed, so the no-mutation
-        // case stays null (wire-compatible with old histories). The workflow merges this
+        // UpdatedStateBag when the serialized bag actually changed. The workflow merges it
         // back into _currentStateBag before tool dispatch (AgentWorkflow).
         if (toolContext.StateBag is { Count: > 0 } mutatedBag)
         {

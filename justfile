@@ -564,7 +564,8 @@ _sample-preflight:
 # Run all non-interactive MEAI samples end-to-end. Per-sample timeouts:
 # default 90s, with overrides for samples that legitimately take longer
 # (DurableEmbeddings parallel-indexes a corpus). Reports PASS / FAIL / HANG.
-# Requires OPENAI_API_KEY and a running Temporal server. Skips HumanInTheLoop.
+# Requires OPENAI_API_KEY and a running Temporal server. HumanInTheLoop auto-approves its
+# deterministic review path and is included.
 test-samples-meai: build _sample-preflight
     #!/usr/bin/env bash
     set -uo pipefail
@@ -597,7 +598,8 @@ test-samples-meai: build _sample-preflight
         "DurableEmbeddings:samples/MEAI/DurableEmbeddings:180" \
         "CustomWorkflow:samples/MEAI/CustomWorkflow:90" \
         "OpenTelemetry:samples/MEAI/OpenTelemetry:90" \
-        "ToolInterceptor:samples/MEAI/ToolInterceptor:120" ; do
+        "ToolInterceptor:samples/MEAI/ToolInterceptor:120" \
+        "HumanInTheLoop:samples/MEAI/HumanInTheLoop:120" ; do
         IFS=':' read -r name dir cap <<< "$entry"
         echo "═══ MEAI/$name (cap ${cap}s) ═══"
         start=$(date +%s)
@@ -613,7 +615,6 @@ test-samples-meai: build _sample-preflight
             FAIL=$((FAIL+1)); printf "[%4ds] FAIL  MEAI/%s (exit %d)\n" "$elapsed" "$name" "$status"
         fi
     done
-    echo "Skipped (interactive): MEAI/HumanInTheLoop — run manually."
     echo "----- MEAI Summary: $PASS pass / $FAIL fail / $HANG hang -----"
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
 
@@ -688,7 +689,6 @@ test-samples: test-samples-meai test-samples-maf
 # uncategorized (so adding a sample without updating test-samples-* surfaces).
 #
 # Intentional exclusions (interactive or multi-process — must run manually):
-#   - samples/MEAI/HumanInTheLoop  (interactive Console.ReadLine)
 #   - samples/MAF/HumanInTheLoop   (interactive Console.ReadLine)
 #   - samples/MAF/SplitWorkerClient (two-process — Worker + Client)
 #   - samples/MAF/ApprovalScopes   (interactive Console.ReadLine — scope selector)
@@ -699,9 +699,7 @@ verify-sample-coverage:
     declared_meai=$(awk '/^test-samples-meai:/,/^test-samples-maf:/' justfile \
         | grep -oE 'samples/MEAI/[A-Za-z]+' | sort -u)
     actual_meai=$(find samples/MEAI -mindepth 1 -maxdepth 1 -type d \
-        -not -name 'bin' -not -name 'obj' \
-        -not -name 'HumanInTheLoop' \
-        | sort -u)
+        -not -name 'bin' -not -name 'obj' | sort -u)
     missing_meai=$(comm -23 <(echo "$actual_meai") <(echo "$declared_meai"))
     if [ -n "$missing_meai" ]; then
         echo "WARN: MEAI samples missing from test-samples-meai:"

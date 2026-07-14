@@ -7,9 +7,7 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// Carries enough context for the interceptor to make a pre-tool decision.
 /// </summary>
 /// <remarks>
-/// JSON property names on this type must NOT change — Temporal serializes by value and existing
-/// workflow history must replay cleanly. Only the .NET class name changed from
-/// <c>AgentToolInterceptorInput</c> to <c>DurableToolInterceptorInput</c>.
+/// JSON property names on this workflow payload must remain stable for replay.
 /// </remarks>
 internal sealed class DurableToolInterceptorInput
 {
@@ -40,10 +38,7 @@ internal sealed class DurableToolInterceptorInput
     /// <see cref="DurableToolOptions.ScopeAware()"/> and the interceptor should consult
     /// session and always-scope records before deciding.
     /// </summary>
-    /// <remarks>
-    /// Wire-compatibility: existing workflow history lacks this field and deserializes with
-    /// <see langword="false"/> (C# default). JSON property name must never change.
-    /// </remarks>
+    /// <remarks>JSON property name must remain stable for replay.</remarks>
     [System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool ScopeAware { get; init; }
@@ -57,8 +52,7 @@ internal sealed class DurableToolInterceptorInput
     /// This is intentionally broader than <c>ProxyResolvedWorkerConfig.RequiresApprovalTools</c>,
     /// which excludes scope-aware tools. The interceptor needs this flag so it can return
     /// <c>PauseForApproval</c> when no matching scope record is found.
-    /// Wire-compatibility: existing workflow history lacks this field and deserializes with
-    /// <see langword="false"/> (C# default). JSON property name must never change.
+    /// JSON property name must remain stable for replay.
     /// </remarks>
     [System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]

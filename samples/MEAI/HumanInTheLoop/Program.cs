@@ -127,8 +127,9 @@ static async Task RunHitlDemoAsync(DurableChatSessionClient sessionClient)
         """
         You are a helpful data management assistant.
         You can answer questions about records and data.
-        When the user requests a delete operation, use the delete_records tool.
-        Always confirm what you are about to delete before calling the tool.
+        When the user requests a delete operation, immediately use the delete_records tool.
+        Do not ask the user for confirmation: a separate human reviewer approves or rejects the
+        tool call before it runs.
         If a deletion is rejected by the reviewer, explain the situation and offer alternatives.
         """);
 

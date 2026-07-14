@@ -299,10 +299,8 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 stepActivityOptions).ConfigureAwait(true);
 
-            // Apply resolved worker-side settings once and carry forward via CAN. The
-            // entire resolved bundle travels as ProxyResolvedWorkerConfig —
-            // the flat MaxToolCallsPerTurn / DurableAgentToolActivityOptions
-            // fields are now forwarding computed properties on AgentWorkflowInput.
+            // Apply resolved worker-side settings once and carry the complete bundle forward
+            // through continue-as-new.
             if (needsResolution && stepResult.ResolvedWorkerConfig is not null)
             {
                 _input = _input! with

@@ -107,18 +107,18 @@ The session client has no streaming API. `DurableChatClient.GetStreamingResponse
 directly inside a workflow, buffers one activity result and emits synthetic updates rather than
 token-by-token streaming.
 
-## Compatibility and deployment
+## Target framework support
 
 The package ships `net10.0` and `netstandard2.1` assets. Repository samples target `net10.0`.
 
-This is a prerelease breaking change for durable tools. Drain or retire in-flight sessions created
-with the retired inline tool behavior before deploying workers that use this managed tool loop.
+This package defines the current managed-session contract. It does not offer a compatibility mode
+for inline function invocation or caller-supplied session tools.
 
 ## Documentation and samples
 
 - [MEAI usage](../../docs/how-to/MEAI/usage.md)
 - [Durable tool contract](../../docs/how-to/MEAI/tool-functions.md)
-- [Migration guide](../../docs/how-to/MEAI/migration-breaking-changes.md)
+- [Managed-session tool contract](../../docs/how-to/MEAI/managed-session-tool-contract.md)
 - [Pipeline architecture](../../docs/architecture/MEAI/durable-chat-pipeline.md)
 - [DurableChat sample](../../samples/MEAI/DurableChat)
 - [DurableTools sample](../../samples/MEAI/DurableTools)
