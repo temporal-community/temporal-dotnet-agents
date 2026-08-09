@@ -69,6 +69,7 @@ internal sealed class DurableChatActivities(
         // the A-check cannot reach. Per-client cache so the walk runs at most once per
         // resolved instance.
         EnsureMixedPatternCheck(chatClient);
+        chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
 
         // Per-call IChatClientDecorator resolution. Per-call WithChatClientFactoryKey
         // wins; worker-level DefaultChatClientFactoryKey is the fallback. Empty-string per-call
@@ -164,6 +165,7 @@ internal sealed class DurableChatActivities(
 
         var chatClient = ResolveChatClient(input.ClientKey);
         EnsureMixedPatternCheck(chatClient);
+        chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
 
         var factoryKey = effectiveOptions.GetChatClientFactoryKey()
             ?? services.GetService<DurableExecutionOptions>()?.DefaultChatClientFactoryKey;

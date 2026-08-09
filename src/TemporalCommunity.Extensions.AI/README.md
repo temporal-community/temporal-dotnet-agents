@@ -88,6 +88,30 @@ var response = await sessionClient.SendAsync(
 Console.WriteLine(response.Text);
 ```
 
+## Per-call decorators and metadata
+
+Select a keyed worker decorator and provide its built-in tag metadata from either a managed session
+or the direct workflow adapter:
+
+```csharp
+var options = new ChatOptions()
+    .WithChatClientFactoryKey("tags")
+    .WithChatClientTag("tenant", "customer-42")
+    .WithChatClientTag("request_id", requestId);
+
+await sessionClient.SendAsync("customer-42", messages, options);
+```
+
+An empty factory key explicitly disables `DefaultChatClientFactoryKey` for that call. Serializable
+Temporal routing values cross the workflow/activity boundary and are visible to the selected
+`IChatClientDecorator`. The decorator must delegate through the supplied inner client. Immediately
+before the provider call, the library removes all Temporal-private keys while retaining ordinary
+MEAI options and user-owned `AdditionalProperties`.
+
+Object-typed user properties preserve their JSON content across the default durable converter, but
+may arrive at the activity as `JsonElement`; their original CLR runtime type is not guaranteed.
+`RawRepresentationFactory` and `ContinuationToken` intentionally do not cross the durable boundary.
+
 ## Direct custom-workflow adapters
 
 For a custom workflow that calls a chat client directly, build the middleware in workflow code and

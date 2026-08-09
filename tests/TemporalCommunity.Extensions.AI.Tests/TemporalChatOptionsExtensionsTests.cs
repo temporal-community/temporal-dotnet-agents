@@ -6,6 +6,35 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 public class TemporalChatOptionsExtensionsTests
 {
     [Fact]
+    public void TemporalGetters_ReadDurableConverterJsonElements()
+    {
+        var original = new ChatOptions()
+            .WithActivityTimeout(TimeSpan.FromMinutes(2))
+            .WithHeartbeatTimeout(TimeSpan.FromSeconds(15))
+            .WithMaxRetryAttempts(4)
+            .WithChatClientKey("provider")
+            .WithChatClientFactoryKey(string.Empty)
+            .WithChatClientTag("tenant", "acme");
+
+        var converter = DurableAIDataConverter.Instance.PayloadConverter;
+        var payload = converter.ToPayload(new DurableChatInput
+        {
+            Messages = [new ChatMessage(ChatRole.User, "hello")],
+            Options = original,
+            ConversationId = "round-trip",
+        });
+        var roundTripped = (DurableChatInput)converter.ToValue(payload, typeof(DurableChatInput))!;
+        var options = Assert.IsType<ChatOptions>(roundTripped.Options);
+
+        Assert.Equal(TimeSpan.FromMinutes(2), options.GetActivityTimeout());
+        Assert.Equal(TimeSpan.FromSeconds(15), options.GetHeartbeatTimeout());
+        Assert.Equal(4, options.GetMaxRetryAttempts());
+        Assert.Equal("provider", options.GetChatClientKey());
+        Assert.Equal(string.Empty, options.GetChatClientFactoryKey());
+        Assert.Contains(options.GetChatClientTags(), tag => tag is { Key: "tenant", Value: "acme" });
+    }
+
+    [Fact]
     public void WithActivityTimeout_SetsProperty()
     {
         var options = new ChatOptions();
@@ -158,14 +187,14 @@ public class TemporalChatOptionsExtensionsTests
     }
 
     [Fact]
-    public async Task StripTemporalOptions_RemovesChatClientKey()
+    public async Task ProviderPreparation_RemovesChatClientKey()
     {
         var options = new ChatOptions()
             .WithActivityTimeout(TimeSpan.FromMinutes(5))
             .WithChatClientKey("my-client");
         options.AdditionalProperties!["user.custom"] = "keep";
 
-        // StripTemporalOptions is internal — exercise it through DurableChatClient pass-through
+        // Provider preparation is internal — exercise it through DurableChatClient pass-through
         // (not in workflow context) so the inner client receives stripped options.
         var captured = (ChatOptions?)null;
         var innerClient = new CapturingChatClient(opts => captured = opts);

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 
 namespace TemporalCommunity.Extensions.AI;
@@ -122,6 +123,11 @@ public static class TemporalChatOptionsExtensions
     /// worker default).
     /// </para>
     /// <para>
+    /// The key crosses the durable boundary so the worker can select the decorator. The selected
+    /// decorator receives it in <see cref="ChatOptions.AdditionalProperties"/>; the library removes
+    /// it before the ultimate provider call.
+    /// </para>
+    /// <para>
     /// Mutates <see cref="ChatOptions.AdditionalProperties"/> on <paramref name="options"/>
     /// in-place and returns the same instance. Clone first if the original must be preserved.
     /// </para>
@@ -161,6 +167,10 @@ public static class TemporalChatOptionsExtensions
     /// using their own well-known prefix.
     /// </para>
     /// <para>
+    /// Tags cross the durable boundary and are visible to the selected worker decorator. The
+    /// library removes every Temporal-owned tag key before the ultimate provider call.
+    /// </para>
+    /// <para>
     /// Mutates <see cref="ChatOptions.AdditionalProperties"/> on <paramref name="options"/>
     /// in-place and returns the same instance.
     /// </para>
@@ -194,10 +204,13 @@ public static class TemporalChatOptionsExtensions
         if (options?.AdditionalProperties?.TryGetValue(MaxRetryAttemptsKey, out var value) != true)
             return null;
 
-        if (value is string s && int.TryParse(s, out var v))
+        if (TryGetString(value) is { } s && int.TryParse(s, out var v))
             return v;
         if (value is int direct) // backward compat
             return direct;
+        if (value is JsonElement { ValueKind: JsonValueKind.Number } element &&
+            element.TryGetInt32(out var jsonValue))
+            return jsonValue;
 
         return null;
     }
@@ -206,8 +219,8 @@ public static class TemporalChatOptionsExtensions
     /// Tries to read a per-request chat client key from <see cref="ChatOptions.AdditionalProperties"/>.
     /// </summary>
     internal static string? GetChatClientKey(this ChatOptions? options) =>
-        options?.AdditionalProperties?.TryGetValue(ChatClientKeySettingKey, out var v) == true
-            ? v as string
+        options?.AdditionalProperties?.TryGetValue(ChatClientKeySettingKey, out var value) == true
+            ? TryGetString(value)
             : null;
 
     /// <summary>
@@ -215,8 +228,8 @@ public static class TemporalChatOptionsExtensions
     /// <see cref="ChatOptions.AdditionalProperties"/>.
     /// </summary>
     internal static string? GetChatClientFactoryKey(this ChatOptions? options) =>
-        options?.AdditionalProperties?.TryGetValue(ChatClientFactoryKeySettingKey, out var v) == true
-            ? v as string
+        options?.AdditionalProperties?.TryGetValue(ChatClientFactoryKeySettingKey, out var value) == true
+            ? TryGetString(value)
             : null;
 
     /// <summary>
@@ -236,10 +249,10 @@ public static class TemporalChatOptionsExtensions
         foreach (var kvp in options.AdditionalProperties)
         {
             if (kvp.Key.StartsWith(ChatClientTagsKeyPrefix, StringComparison.Ordinal)
-                && kvp.Value is string s)
+                && TryGetString(kvp.Value) is { } value)
             {
                 var name = kvp.Key.Substring(ChatClientTagsKeyPrefix.Length);
-                tags.Add(new KeyValuePair<string, string>(name, s));
+                tags.Add(new KeyValuePair<string, string>(name, value));
             }
         }
         return tags;
@@ -250,11 +263,18 @@ public static class TemporalChatOptionsExtensions
         if (options?.AdditionalProperties?.TryGetValue(key, out var value) != true)
             return null;
 
-        if (value is string s && TimeSpan.TryParseExact(s, "c", null, out var ts))
+        if (TryGetString(value) is { } s && TimeSpan.TryParseExact(s, "c", null, out var ts))
             return ts;
         if (value is TimeSpan direct) // backward compat
             return direct;
 
         return null;
     }
+
+    private static string? TryGetString(object? value) => value switch
+    {
+        string text => text,
+        JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+        _ => null,
+    };
 }

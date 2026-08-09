@@ -1,5 +1,11 @@
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Temporalio.Client;
 using Temporalio.Exceptions;
+using Temporalio.Extensions.Hosting;
+using Temporalio.Testing;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.AI.Session;
@@ -15,6 +21,66 @@ public class DurableChatSessionIntegrationTests
     public DurableChatSessionIntegrationTests(IntegrationTestFixture fixture)
     {
         _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task ManagedGetChatStep_DecoratorMetadataReachesDecoratorNotProvider()
+    {
+        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var providerClient = new MetadataRecordingChatClient();
+        var decorator = new MetadataRecordingDecorator();
+        var taskQueue = $"managed-metadata-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(providerClient);
+        builder.Services.AddKeyedSingleton<IChatClientDecorator>("inspect", decorator);
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new NoopEmbeddingGenerator());
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options =>
+            {
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+                options.HeartbeatTimeout = TimeSpan.FromSeconds(10);
+                options.SessionTimeToLive = TimeSpan.FromMinutes(5);
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+            var options = new ChatOptions
+            {
+                Instructions = "managed instructions",
+            }
+                .WithChatClientFactoryKey("inspect")
+                .WithChatClientTag("tenant", "acme")
+                .WithActivityTimeout(TimeSpan.FromSeconds(20))
+                .WithMaxRetryAttempts(2);
+            options.AdditionalProperties!["user.custom"] = "keep";
+
+            await sessionClient.SendAsync(
+                $"managed-metadata-{Guid.NewGuid():N}",
+                [new ChatMessage(ChatRole.User, "hello")],
+                options);
+
+            Assert.Equal("inspect", decorator.Options?.GetChatClientFactoryKey());
+            Assert.Contains(
+                decorator.Options!.GetChatClientTags(),
+                tag => tag is { Key: "tenant", Value: "acme" });
+            Assert.Equal("keep", providerClient.Options?.AdditionalProperties?["user.custom"]?.ToString());
+            Assert.Equal("managed instructions", providerClient.Options?.Instructions);
+            Assert.DoesNotContain(
+                providerClient.Options!.AdditionalProperties!,
+                pair => pair.Key.StartsWith("temporal.", StringComparison.Ordinal));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
     }
 
     [Fact]
@@ -200,5 +266,70 @@ public class DurableChatSessionIntegrationTests
         var handle = _fixture.Client.GetWorkflowHandle(workflowId);
         var description = await handle.DescribeAsync();
         Assert.NotNull(description);
+    }
+
+    private sealed class MetadataRecordingChatClient : IChatClient
+    {
+        public ChatOptions? Options { get; private set; }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Options = options;
+            return Task.FromResult(
+                new ChatResponse([new ChatMessage(ChatRole.Assistant, "managed response")])
+                {
+                    Usage = new UsageDetails { InputTokenCount = 1, OutputTokenCount = 1 },
+                });
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class MetadataRecordingDecorator : IChatClientDecorator
+    {
+        public ChatOptions? Options { get; private set; }
+
+        public IChatClient Decorate(IChatClient inner, ChatOptions? options)
+        {
+            Options = options;
+            return inner;
+        }
+    }
+
+    private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
+    {
+        public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
+
+        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
+            IEnumerable<string> values,
+            EmbeddingGenerationOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
+                values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
     }
 }

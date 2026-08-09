@@ -54,7 +54,10 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         {
             // Outside a workflow — pass through directly, stripping Temporal-internal keys
             // that the inner client does not understand.
-            return await base.GetResponseAsync(messages, StripTemporalOptions(options), cancellationToken)
+            return await base.GetResponseAsync(
+                messages,
+                Internal.ChatOptionsSanitizer.PrepareForProvider(options),
+                cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -92,7 +95,10 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         {
             // Outside a workflow — real streaming is preserved. Pass through directly,
             // stripping Temporal-internal keys that the inner client does not understand.
-            await foreach (var update in base.GetStreamingResponseAsync(messages, StripTemporalOptions(options), cancellationToken)
+            await foreach (var update in base.GetStreamingResponseAsync(
+                messages,
+                Internal.ChatOptionsSanitizer.PrepareForProvider(options),
+                cancellationToken)
                 .ConfigureAwait(false))
             {
                 yield return update;
@@ -147,7 +153,7 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         return new DurableChatInput
         {
             Messages = messages as IList<ChatMessage> ?? messages.ToList(),
-            Options = StripNonSerializableOptions(options),
+            Options = Internal.ChatOptionsSanitizer.PrepareForDurableTransport(options),
             ConversationId = Workflow.Info.WorkflowId,
             ClientKey = options.GetChatClientKey() ?? _durableOptions.DefaultChatClientKey,
         };
@@ -188,124 +194,4 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         return string.IsNullOrWhiteSpace(modelId) ? null : modelId;
     }
 
-    /// <summary>
-    /// Creates a serializable copy of ChatOptions, stripping non-serializable fields
-    /// and Temporal-internal keys from AdditionalProperties.
-    /// </summary>
-    private static ChatOptions? StripNonSerializableOptions(ChatOptions? options)
-    {
-        if (options is null)
-        {
-            return null;
-        }
-
-        // Clone the options to avoid mutating the caller's instance.
-        //
-        // ALLOW (copied — serializable and materially steer the model):
-        //   Temperature, MaxOutputTokens, TopP, TopK, StopSequences, FrequencyPenalty,
-        //   PresencePenalty, Seed, ModelId, ResponseFormat, ToolMode,
-        //   AdditionalProperties (Temporal keys stripped), ConversationId,
-        //   Instructions, Reasoning, AllowMultipleToolCalls, AllowBackgroundResponses.
-        //
-        // DENY (intentionally dropped — delegate-backed / not durably serializable):
-        //   - RawRepresentationFactory: a delegate; cannot be serialized.
-        //   - ContinuationToken: a provider-specific opaque token (experimental,
-        //     ResponseContinuationToken) that is not meaningful to replay across the
-        //     durable boundary; dropping it keeps the durable request self-contained.
-        return new ChatOptions
-        {
-            Temperature = options.Temperature,
-            MaxOutputTokens = options.MaxOutputTokens,
-            TopP = options.TopP,
-            TopK = options.TopK,
-            StopSequences = options.StopSequences,
-            FrequencyPenalty = options.FrequencyPenalty,
-            PresencePenalty = options.PresencePenalty,
-            Seed = options.Seed,
-            ModelId = options.ModelId,
-            ResponseFormat = options.ResponseFormat,
-            Tools = options.Tools,
-            ToolMode = options.ToolMode,
-            AdditionalProperties = StripTemporalKeys(options.AdditionalProperties),
-            ConversationId = options.ConversationId,
-            Instructions = options.Instructions,
-            Reasoning = options.Reasoning,
-            AllowMultipleToolCalls = options.AllowMultipleToolCalls,
-            AllowBackgroundResponses = options.AllowBackgroundResponses,
-        };
-    }
-
-    /// <summary>
-    /// Returns a shallow copy of <paramref name="options"/> with Temporal-internal keys removed
-    /// from <see cref="ChatOptions.AdditionalProperties"/>. Used for the pass-through path.
-    /// Returns null when <paramref name="options"/> is null.
-    /// </summary>
-    private static ChatOptions? StripTemporalOptions(ChatOptions? options)
-    {
-        if (options is null) return null;
-        if (options.AdditionalProperties is not { Count: > 0 }) return options;
-
-        // Only allocate a stripped copy when there are Temporal keys to remove.
-        bool hasTemporalKeys = false;
-        foreach (var kvp in options.AdditionalProperties)
-        {
-            if (IsTemporalKey(kvp.Key))
-            {
-                hasTemporalKeys = true;
-                break;
-            }
-        }
-
-        if (!hasTemporalKeys) return options;
-
-        return new ChatOptions
-        {
-            Temperature = options.Temperature,
-            MaxOutputTokens = options.MaxOutputTokens,
-            TopP = options.TopP,
-            TopK = options.TopK,
-            StopSequences = options.StopSequences,
-            FrequencyPenalty = options.FrequencyPenalty,
-            PresencePenalty = options.PresencePenalty,
-            Seed = options.Seed,
-            ModelId = options.ModelId,
-            ResponseFormat = options.ResponseFormat,
-            Tools = options.Tools,
-            ToolMode = options.ToolMode,
-            AdditionalProperties = StripTemporalKeys(options.AdditionalProperties),
-            ConversationId = options.ConversationId,
-        };
-    }
-
-    /// <summary>
-    /// Returns a copy of <paramref name="props"/> with Temporal-internal keys removed,
-    /// or null if <paramref name="props"/> is null or all entries are Temporal keys.
-    /// </summary>
-    private static AdditionalPropertiesDictionary? StripTemporalKeys(AdditionalPropertiesDictionary? props)
-    {
-        if (props is null) return null;
-
-        AdditionalPropertiesDictionary? result = null;
-        foreach (var kvp in props)
-        {
-            if (IsTemporalKey(kvp.Key))
-                continue;
-            result ??= new AdditionalPropertiesDictionary();
-            result[kvp.Key] = kvp.Value;
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Returns <see langword="true"/> when the key is a Temporal-internal marker that must be
-    /// stripped before passing options through to the inner <see cref="IChatClient"/>. Centralized
-    /// here so adding new keys only requires one update site.
-    /// </summary>
-    private static bool IsTemporalKey(string key) =>
-        key is TemporalChatOptionsExtensions.ActivityTimeoutKey
-            or TemporalChatOptionsExtensions.HeartbeatTimeoutKey
-            or TemporalChatOptionsExtensions.MaxRetryAttemptsKey
-            or TemporalChatOptionsExtensions.ChatClientKeySettingKey
-            or TemporalChatOptionsExtensions.ChatClientFactoryKeySettingKey
-            || key.StartsWith(TemporalChatOptionsExtensions.ChatClientTagsKeyPrefix, StringComparison.Ordinal);
 }

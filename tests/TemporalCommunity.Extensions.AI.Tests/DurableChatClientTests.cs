@@ -121,6 +121,12 @@ public class DurableChatClientTests
             .WithActivityTimeout(TimeSpan.FromMinutes(5))
             .WithHeartbeatTimeout(TimeSpan.FromMinutes(1))
             .WithMaxRetryAttempts(3);
+        chatOptions.Instructions = "retain instructions";
+        chatOptions.Reasoning = new ReasoningOptions { Effort = ReasoningEffort.High };
+        chatOptions.AllowMultipleToolCalls = true;
+        chatOptions.AllowBackgroundResponses = true;
+        chatOptions.ContinuationToken = ResponseContinuationToken.FromBytes(new byte[] { 1, 2, 3 });
+        chatOptions.RawRepresentationFactory = _ => null;
         chatOptions.AdditionalProperties!["user.custom.key"] = "keep-me";
 
         var messages = new List<ChatMessage> { new(ChatRole.User, "hello") };
@@ -134,6 +140,55 @@ public class DurableChatClientTests
         // Non-Temporal keys must be preserved.
         Assert.True(capturedOptions.AdditionalProperties.ContainsKey("user.custom.key"));
         Assert.Equal("keep-me", capturedOptions.AdditionalProperties["user.custom.key"]);
+        Assert.Equal("retain instructions", capturedOptions.Instructions);
+        Assert.Equal(ReasoningEffort.High, capturedOptions.Reasoning?.Effort);
+        Assert.True(capturedOptions.AllowMultipleToolCalls);
+        Assert.True(capturedOptions.AllowBackgroundResponses);
+        Assert.Same(chatOptions.ContinuationToken, capturedOptions.ContinuationToken);
+        Assert.Same(chatOptions.RawRepresentationFactory, capturedOptions.RawRepresentationFactory);
+        Assert.NotSame(chatOptions, capturedOptions);
+        Assert.True(chatOptions.AdditionalProperties.ContainsKey(TemporalChatOptionsExtensions.ActivityTimeoutKey));
+    }
+
+    [Fact]
+    public async Task GetStreamingResponseAsync_PreservesOrdinaryOptionsWhileStrippingTemporalKeys()
+    {
+        ChatOptions? capturedOptions = null;
+        var innerClient = A.Fake<IChatClient>();
+        var updates = new ChatResponse([new ChatMessage(ChatRole.Assistant, "ok")])
+            .ToChatResponseUpdates()
+            .ToAsyncEnumerable();
+        A.CallTo(() => innerClient.GetStreamingResponseAsync(
+                A<IEnumerable<ChatMessage>>._, A<ChatOptions?>._, A<CancellationToken>._))
+            .Invokes((IEnumerable<ChatMessage> _, ChatOptions? opts, CancellationToken _) =>
+                capturedOptions = opts)
+            .Returns(updates);
+
+        var client = new DurableChatClient(
+            innerClient,
+            new DurableExecutionOptions { TaskQueue = "test" });
+        var chatOptions = new ChatOptions
+        {
+            Instructions = "stream instructions",
+            ContinuationToken = ResponseContinuationToken.FromBytes(new byte[] { 4, 5, 6 }),
+            RawRepresentationFactory = _ => null,
+        }.WithChatClientFactoryKey("factory");
+        chatOptions.AdditionalProperties!["user.custom"] = "keep";
+
+        await foreach (var _ in client.GetStreamingResponseAsync(
+            [new ChatMessage(ChatRole.User, "hello")], chatOptions))
+        {
+        }
+
+        Assert.NotNull(capturedOptions);
+        Assert.Equal("stream instructions", capturedOptions!.Instructions);
+        Assert.Same(chatOptions.ContinuationToken, capturedOptions.ContinuationToken);
+        Assert.Same(chatOptions.RawRepresentationFactory, capturedOptions.RawRepresentationFactory);
+        Assert.Equal("keep", capturedOptions.AdditionalProperties!["user.custom"]);
+        Assert.DoesNotContain(
+            capturedOptions.AdditionalProperties,
+            pair => pair.Key.StartsWith("temporal.", StringComparison.Ordinal));
+        Assert.Equal("factory", chatOptions.GetChatClientFactoryKey());
     }
 
     // ── Activity Summary (visible in Temporal Web UI activity list) ────────

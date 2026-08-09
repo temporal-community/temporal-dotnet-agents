@@ -150,6 +150,10 @@ On top of everything in Combination 1:
 
 Do not register an `AIAgent` or `ChatClientAgent` with `AddDurableAI()`. `DurableChatWorkflow` does not know about `AIAgent`, `AgentSession`, `AgentSessionStateBag`, or `TemporalAgentContext` — the agent runs as a plain `IChatClient`. You pay the `Microsoft.Agents.AI` dependency cost and receive exactly Combination 1's capabilities, with none of the Agents-specific features.
 
+The Agents package uses its own MAF activity/agent pipeline. It does not compose or depend on the
+MEAI durable-chat transport/provider sanitizer used by `DurableChatClient` and
+`DurableChatSessionClient`.
+
 If you use `Microsoft.Agents.AI`, use Combination 2 (`AddTemporalAgents()`).
 
 ---

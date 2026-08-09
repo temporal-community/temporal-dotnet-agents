@@ -35,7 +35,12 @@ public sealed class DurableChatClientWorkflow
         {
             options = new ChatOptions()
                 .WithChatClientFactoryKey("capture")
-                .WithChatClientTag("fixture", "v1");
+                .WithChatClientTag("fixture", "v1")
+                .WithChatClientTag("tenant", "acme")
+                .WithActivityTimeout(TimeSpan.FromSeconds(20))
+                .WithMaxRetryAttempts(2);
+            options.Instructions = "Preserve this instruction.";
+            options.AdditionalProperties!["user.custom"] = "keep";
         }
 
         var messages = new[] { new ChatMessage(ChatRole.User, "scheduler probe") };

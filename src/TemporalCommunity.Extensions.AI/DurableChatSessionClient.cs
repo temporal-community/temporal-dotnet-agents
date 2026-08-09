@@ -198,7 +198,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         var input = new DurableChatInput
         {
             Messages = messages as IList<ChatMessage> ?? messages.ToList(),
-            Options = options,
+            Options = Internal.ChatOptionsSanitizer.PrepareForDurableTransport(options),
             ConversationId = conversationId,
             ClientKey = effectiveKey,
             CorrelationId = string.IsNullOrEmpty(correlationId) ? null : correlationId,

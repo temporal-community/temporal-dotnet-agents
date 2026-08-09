@@ -7,6 +7,9 @@
   System.Text.Json dependency floors.
 - Fixed direct `UseDurableExecution()` chat calls so both non-streaming and buffered-streaming
   workflow continuations remain on Temporal's workflow task scheduler.
+- Preserved serializable chat routing/decorator metadata through durable transport, normalized its
+  converter representation, retained ordinary MEAI options, and removed Temporal-private keys at
+  the provider boundary for direct and managed chat calls.
 
 ## [0.10.0] - 2026-07-13
 

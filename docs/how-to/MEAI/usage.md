@@ -31,6 +31,34 @@ builder.Services
 For a keyed client, register it with `AddKeyedChatClient` and set
 `DurableExecutionOptions.DefaultChatClientKey`.
 
+## Worker decorators and option visibility
+
+Register a keyed `IChatClientDecorator`, or use the built-in `"tags"` decorator, then select it per
+request:
+
+```csharp
+var options = new ChatOptions()
+    .WithChatClientFactoryKey("tags")
+    .WithChatClientTag("tenant", "acme")
+    .WithChatClientTag("request_id", requestId);
+
+await sessionClient.SendAsync(conversationId, messages, options);
+```
+
+The same `ChatOptions` contract applies to direct `UseDurableExecution()` calls inside custom
+workflows. A per-call factory key wins over `DefaultChatClientFactoryKey`; an empty string disables
+the worker default for that call.
+
+Serializable Temporal routing metadata remains in the durable payload until the activity selects
+and invokes the decorator. Decorators see those keys and must delegate through the inner client
+supplied to `Decorate`. The inner provider boundary removes all Temporal-owned keys while retaining
+ordinary MEAI properties and user-owned `AdditionalProperties`.
+
+With the default durable converter, arbitrary object-typed user values preserve their JSON content
+but may deserialize as `JsonElement`. The library's own routing/tag/timeout/retry getters handle
+that converter shape. `RawRepresentationFactory` and `ContinuationToken` are deliberately removed
+from durable transport because they cannot be safely resumed.
+
 ## Durable tools
 
 Register functions on the worker. The registry supplies the schema to the model and the activity

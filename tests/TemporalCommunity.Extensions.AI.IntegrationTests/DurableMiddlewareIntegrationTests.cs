@@ -34,6 +34,70 @@ public class DurableMiddlewareIntegrationTests
     public Task DurableChatClientWorkflow_BufferedStreaming_CompletesAfterActivity() =>
         AssertDirectChatWorkflowAsync(streaming: true);
 
+    /// <summary>
+    /// Verifies direct-workflow routing metadata reaches the selected decorator while Temporal
+    /// private keys are removed immediately before the worker-side provider call.
+    /// </summary>
+    [Fact]
+    public async Task DurableChatClientWorkflow_DecoratorMetadataReachesDecoratorNotProvider()
+    {
+        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var providerClient = new MetadataRecordingChatClient();
+        var decorator = new MetadataRecordingDecorator();
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(providerClient);
+        builder.Services.AddKeyedSingleton<IChatClientDecorator>("capture", decorator);
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new StubEmbeddingGenerator(4));
+        builder.Services
+            .AddHostedTemporalWorker(DurableChatClientWorkflow.TaskQueue)
+            .AddDurableAI(options =>
+            {
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+                options.HeartbeatTimeout = TimeSpan.FromSeconds(10);
+                options.SessionTimeToLive = TimeSpan.FromMinutes(5);
+            })
+            .AddWorkflow<DurableChatClientWorkflow>();
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var handle = await env.Client.StartWorkflowAsync(
+                (DurableChatClientWorkflow workflow) => workflow.RunAsync(
+                    new DurableChatClientWorkflowInput { IncludeCompatibilityMetadata = true }),
+                new WorkflowOptions(
+                    $"durable-chat-metadata-{Guid.NewGuid():N}",
+                    DurableChatClientWorkflow.TaskQueue));
+
+            Assert.Equal(
+                MetadataRecordingChatClient.ResponseText,
+                await handle.GetResultAsync().WaitAsync(TimeSpan.FromSeconds(15)));
+
+            Assert.Equal("capture", decorator.Options?.GetChatClientFactoryKey());
+            Assert.Contains(
+                decorator.Options!.GetChatClientTags(),
+                tag => tag is { Key: "fixture", Value: "v1" });
+            Assert.Contains(
+                decorator.Options.GetChatClientTags(),
+                tag => tag is { Key: "tenant", Value: "acme" });
+            Assert.Equal(
+                "keep",
+                providerClient.Options?.AdditionalProperties?["user.custom"]?.ToString());
+            Assert.Equal("Preserve this instruction.", providerClient.Options?.Instructions);
+            Assert.DoesNotContain(
+                providerClient.Options!.AdditionalProperties!,
+                pair => pair.Key.StartsWith("temporal.", StringComparison.Ordinal));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     // ── Test 4: Durable tool invocation ─────────────────────────────────────
 
     /// <summary>
@@ -323,6 +387,52 @@ public class DurableMiddlewareIntegrationTests
 
         public void Dispose()
         {
+        }
+    }
+
+    private sealed class MetadataRecordingChatClient : IChatClient
+    {
+        public const string ResponseText = "metadata response";
+
+        public ChatOptions? Options { get; private set; }
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Options = options;
+            return Task.FromResult(
+                new ChatResponse([new ChatMessage(ChatRole.Assistant, ResponseText)]));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class MetadataRecordingDecorator : IChatClientDecorator
+    {
+        public ChatOptions? Options { get; private set; }
+
+        public IChatClient Decorate(IChatClient inner, ChatOptions? options)
+        {
+            Options = options;
+            return inner;
         }
     }
 

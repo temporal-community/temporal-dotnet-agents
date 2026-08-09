@@ -189,7 +189,16 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
 
     var q1 = "What is the capital of France?";
     Console.WriteLine($" User : {q1}");
-    var r1 = await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, q1)]);
+    // The built-in keyed "tags" decorator consumes these values inside the activity. Temporal
+    // routing keys are removed before the OpenAI provider receives the ChatOptions.
+    var turnOptions = new ChatOptions()
+        .WithChatClientFactoryKey("tags")
+        .WithChatClientTag("sample", "multi-turn")
+        .WithChatClientTag("conversation_id", conversationId);
+    var r1 = await sessionClient.SendAsync(
+        conversationId,
+        [new ChatMessage(ChatRole.User, q1)],
+        turnOptions);
     Console.WriteLine($" Agent: {r1.Text}\n");
 
     // The workflow's history already contains the previous exchange, so the

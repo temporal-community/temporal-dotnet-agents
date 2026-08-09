@@ -38,7 +38,12 @@ namespace TemporalCommunity.Extensions.AI;
 /// <para>
 /// <b>Composition with other Temporal middleware.</b> The decorator runs INSIDE the durable-chat
 /// activity, after <see cref="IChatClient"/> resolution and before
-/// <c>GetStreamingResponseAsync</c>. The decorated chain is validated on first use, so decorators
+/// <c>GetStreamingResponseAsync</c>. Its per-call options include Temporal routing metadata so the
+/// decorator can consume factory keys, tags, and custom values. The supplied <c>inner</c> client
+/// is a provider boundary that removes Temporal-private keys while
+/// preserving ordinary MEAI options and user-owned properties. Decorators must delegate provider
+/// calls through that supplied inner client; replacing or bypassing it is unsupported. The
+/// decorated chain is validated on first use, so decorators
 /// MUST NOT insert <see cref="Microsoft.Extensions.AI.FunctionInvokingChatClient"/> when the
 /// managed session has durable tools registered. That middleware would bypass the workflow-owned
 /// tool activity loop.
@@ -57,6 +62,9 @@ public interface IChatClientDecorator
     /// <see cref="TemporalChatOptionsExtensions.WithChatClientTag(ChatOptions, string, string)"/>)
     /// pull it from <see cref="ChatOptions.AdditionalProperties"/>.
     /// </param>
-    /// <returns>The wrapped <see cref="IChatClient"/>. MUST NOT return <see langword="null"/>.</returns>
+    /// <returns>
+    /// A wrapper around the supplied <paramref name="inner"/>. MUST NOT return
+    /// <see langword="null"/> or bypass/replace <paramref name="inner"/>.
+    /// </returns>
     IChatClient Decorate(IChatClient inner, ChatOptions? options);
 }

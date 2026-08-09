@@ -14,8 +14,11 @@ public sealed class DurableChatInput
     public required IList<ChatMessage> Messages { get; init; }
 
     /// <summary>
-    /// Optional chat options. Non-serializable fields (e.g. RawRepresentationFactory)
-    /// are not preserved across the activity boundary.
+    /// Optional chat options. Non-serializable or non-resumable provider fields
+    /// (<see cref="ChatOptions.RawRepresentationFactory"/> and
+    /// <see cref="ChatOptions.ContinuationToken"/>) are not preserved across the activity
+    /// boundary. Serializable Temporal routing metadata remains available to worker decorators
+    /// and is removed immediately before the provider call.
     /// </summary>
     public ChatOptions? Options { get; init; }
 

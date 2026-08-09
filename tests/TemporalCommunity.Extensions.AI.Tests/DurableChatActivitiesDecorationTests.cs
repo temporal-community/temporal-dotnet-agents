@@ -46,6 +46,8 @@ public class DurableChatActivitiesDecorationTests
 
         var opts = new ChatOptions();
         opts.WithChatClientFactoryKey("custom");
+        opts.WithChatClientTag("tenant", "acme");
+        opts.AdditionalProperties!["user.custom"] = "keep";
 
         await activities.GetResponseAsync(new DurableChatInput
         {
@@ -56,7 +58,70 @@ public class DurableChatActivitiesDecorationTests
         });
 
         Assert.Equal(1, inner.CallCount);
-        Assert.True(((TextRewritingDecorator)provider.GetRequiredKeyedService<IChatClientDecorator>("custom")).WasInvoked);
+        var decorator = (TextRewritingDecorator)provider.GetRequiredKeyedService<IChatClientDecorator>("custom");
+        Assert.True(decorator.WasInvoked);
+        Assert.Equal("custom", decorator.Options?.GetChatClientFactoryKey());
+        Assert.Contains(decorator.Options!.GetChatClientTags(), tag => tag.Key == "tenant");
+        Assert.Equal("keep", inner.Options?.AdditionalProperties?["user.custom"]);
+        Assert.DoesNotContain(
+            inner.Options!.AdditionalProperties!,
+            pair => pair.Key.StartsWith("temporal.", StringComparison.Ordinal));
+        provider.Dispose();
+    }
+
+    [Fact]
+    public async Task GetChatStep_DecoratorSeesMetadata_ProviderDoesNot()
+    {
+        var inner = new RecordingChatClient("inner");
+        var decorator = new TextRewritingDecorator("decorated");
+        var (provider, activities) = BuildActivities(
+            inner,
+            options => { },
+            registerCustom: ("custom", decorator));
+        var options = new ChatOptions()
+            .WithChatClientFactoryKey("custom")
+            .WithChatClientTag("tenant", "acme")
+            .WithActivityTimeout(TimeSpan.FromSeconds(10));
+        options.AdditionalProperties!["user.custom"] = "keep";
+
+        await activities.GetChatStepAsync(new DurableChatInput
+        {
+            Messages = [new ChatMessage(ChatRole.User, "hello")],
+            Options = options,
+            ConversationId = "test",
+            TurnNumber = 1,
+        });
+
+        Assert.Equal("custom", decorator.Options?.GetChatClientFactoryKey());
+        Assert.Contains(decorator.Options!.GetChatClientTags(), tag => tag.Key == "tenant");
+        Assert.Equal("keep", inner.Options?.AdditionalProperties?["user.custom"]);
+        Assert.DoesNotContain(
+            inner.Options!.AdditionalProperties!,
+            pair => pair.Key.StartsWith("temporal.", StringComparison.Ordinal));
+        provider.Dispose();
+    }
+
+    [Fact]
+    public async Task EmptyPerCallFactoryKey_DisablesWorkerDefault()
+    {
+        var inner = new RecordingChatClient("inner");
+        var workerDefault = new TextRewritingDecorator("worker-default");
+        var (provider, activities) = BuildActivities(
+            inner,
+            options => options.DefaultChatClientFactoryKey = "worker",
+            registerCustom: ("worker", workerDefault));
+        var options = new ChatOptions().WithChatClientFactoryKey(string.Empty);
+
+        await activities.GetResponseAsync(new DurableChatInput
+        {
+            Messages = [new ChatMessage(ChatRole.User, "hello")],
+            Options = options,
+            ConversationId = "test",
+            TurnNumber = 1,
+        });
+
+        Assert.False(workerDefault.WasInvoked);
+        Assert.Null(inner.Options?.GetChatClientFactoryKey());
         provider.Dispose();
     }
 
@@ -196,6 +261,7 @@ public class DurableChatActivitiesDecorationTests
     {
         public string Name { get; } = name;
         public int CallCount { get; private set; }
+        public ChatOptions? Options { get; private set; }
 
         public void Dispose() { }
 
@@ -205,6 +271,7 @@ public class DurableChatActivitiesDecorationTests
             CancellationToken cancellationToken = default)
         {
             CallCount++;
+            Options = options;
             return Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, Name)]));
         }
 
@@ -214,6 +281,7 @@ public class DurableChatActivitiesDecorationTests
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             CallCount++;
+            Options = options;
             await Task.Yield();
             yield return new ChatResponseUpdate(ChatRole.Assistant, Name);
         }
@@ -226,10 +294,12 @@ public class DurableChatActivitiesDecorationTests
     {
         public bool WasInvoked { get; private set; }
         public string Id { get; } = id;
+        public ChatOptions? Options { get; private set; }
 
         public IChatClient Decorate(IChatClient inner, ChatOptions? options)
         {
             WasInvoked = true;
+            Options = options;
             return inner;
         }
     }

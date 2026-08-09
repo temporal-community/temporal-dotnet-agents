@@ -40,3 +40,8 @@ dotnet run --project samples/MEAI/DurableChat/DurableChat.csproj
 Open `http://localhost:8233` to inspect `GetChatStep` model activities and individual
 `InvokeFunction` tool activities. Configure per-tool timeouts and retry behavior through the
 `AddDurableTools` callback; use `NoRetry()` for an unsafe non-idempotent operation.
+
+The first multi-turn request also selects the built-in `"tags"` decorator with
+`WithChatClientFactoryKey("tags")` and supplies two `WithChatClientTag(...)` values. The decorator
+sees those values inside the activity; the OpenAI provider receives the ordinary chat options with
+all Temporal-private keys removed.

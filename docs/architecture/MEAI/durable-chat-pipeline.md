@@ -9,8 +9,12 @@ conversation state and completed activity results survive worker restarts.
 ```
 caller
   -> DurableChatSessionClient.SendAsync
+  -> durable transport preparation
   -> DurableChatWorkflow [workflow update]
   -> GetChatStep [LLM activity]
+     -> selected IChatClientDecorator [Temporal metadata visible]
+     -> provider boundary [Temporal metadata removed]
+     -> IChatClient provider
   -> InvokeFunction x N [tool activities]
   -> GetChatStep [next LLM activity]
   -> final ChatResponse
@@ -36,6 +40,25 @@ worker implementation. A chat pipeline used by a durable session must not includ
 | `DurableFunctionActivities.InvokeFunctionAsync` | Resolves and invokes one registered function as an activity. |
 | `DurableFunctionRegistry` | Worker-local, startup-built map of stable function names to `AIFunction` implementations. |
 | `DurableAIDataConverter` | Preserves MEAI polymorphic content such as function call and result messages in Temporal payloads. |
+| `ChatOptionsSanitizer` | Separates durable-transport preparation from provider-boundary removal of Temporal-private keys. |
+
+## Chat options boundaries
+
+Durable transport begins with `ChatOptions.Clone()`. It retains serializable Temporal settings,
+client/decorator routing, tag entries, ordinary MEAI options, and user-owned additional properties.
+It removes only `RawRepresentationFactory` and `ContinuationToken`, which cannot be safely resumed
+across the activity boundary.
+
+After the activity resolves the provider, it wraps that provider in a boundary client and then
+applies the selected decorator outside the boundary. The decorator therefore receives the routing
+metadata it needs. When the decorator delegates, the boundary clones the invocation options and
+removes every Temporal-owned key immediately before the provider call. Both `GetResponse` and
+`GetChatStep` use the same boundary.
+
+The default converter preserves arbitrary user properties by JSON content. Because
+`AdditionalProperties` values are object-typed, they may deserialize as `JsonElement`; original CLR
+runtime types are not promised. Library-owned getters normalize this shape for factory/client keys,
+tags, activity and heartbeat timeouts, and maximum retry attempts.
 
 ## Boundary and deployment rules
 
