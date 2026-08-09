@@ -2,7 +2,10 @@
 
 ## Overview
 
-Demonstrates two complementary patterns for dispatching to multiple agents: sequential routing (classify then dispatch to one specialist) and parallel fan-out (send the same query to all agents simultaneously). Both patterns include OpenTelemetry tracing wired through all four Temporal + agent span sources.
+Demonstrates two complementary patterns for dispatching to multiple agents: sequential routing
+(classify then dispatch to one specialist) and parallel fan-out (send the same query to all agents
+simultaneously). Both patterns include OpenTelemetry tracing through the Temporal SDK/library
+sources plus a named MAF `OpenTelemetryAgent` source.
 
 This sample demonstrates:
 - `RoutingWorkflow`: keyword-based classification via a `RoutingActivities.ClassifyRequest` activity, then dispatch to one of three specialists
@@ -31,10 +34,11 @@ RoutingWorkflow                         ParallelAgentWorkflow
 agent.client.send          (TemporalAgentTelemetry — agent name, session ID)
   UpdateWorkflow:RunAgent  (TracingInterceptor — workflow update span)
     RunActivity:ExecuteAgent  (TracingInterceptor — activity span)
-      agent.turn            (TemporalAgentTelemetry — token counts, correlation ID)
+      agent.turn            (TemporalAgentTelemetry — correlation parent)
+        invoke_agent        (MAF — canonical GenAI usage + matching correlation ID)
 ```
 
-All four sources must be registered for the full trace to appear:
+All five sources must be registered for the full trace to appear:
 
 ```csharp
 Sdk.CreateTracerProviderBuilder()
@@ -42,9 +46,15 @@ Sdk.CreateTracerProviderBuilder()
     .AddSource(TracingInterceptor.WorkflowsSource.Name)
     .AddSource(TracingInterceptor.ActivitiesSource.Name)
     .AddSource(TemporalAgentTelemetry.ActivitySourceName)
+    .AddSource("MultiAgentRouting.Agent")
     .AddConsoleExporter()
     .Build();
 ```
+
+The worker sets `DefaultConfigureAgentPipeline` to `UseOpenTelemetry("MultiAgentRouting.Agent")`.
+Each model step therefore retains its Temporal `agent.turn` correlation parent and emits a sampled
+MAF `invoke_agent` child carrying the same `temporal.agent.correlation_id`. MAF owns the canonical
+GenAI usage attributes; the Temporal parent omits duplicates.
 
 ## Highlights
 

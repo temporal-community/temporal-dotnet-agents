@@ -19,12 +19,15 @@ How to instrument, trace, and query TemporalAgents workloads — from OpenTeleme
 
 ## Overview
 
-TemporalAgents emits two layers of distributed tracing spans:
+TemporalAgents participates in up to three tracing layers:
 
 1. **Agent spans** — emitted by `TemporalAgentTelemetry.ActivitySource` (`"TemporalCommunity.Extensions.Agents"`) to capture agent-semantic events like "agent turn" and "client send"
 2. **Temporal SDK spans** — emitted by the `TracingInterceptor` from `Temporalio.Extensions.OpenTelemetry` to capture protocol-level events like `StartWorkflow` and `RunActivity`
+3. **Canonical GenAI spans (optional)** — emitted by MAF `OpenTelemetryAgent` or MEAI
+   `OpenTelemetryChatClient` under the source name supplied when that middleware is configured
 
-These two layers compose naturally: agent spans nest inside (or wrap) Temporal SDK spans, giving you a single trace that spans the full lifecycle of a request — from the external caller through the workflow down to the LLM inference.
+These layers compose into one trace from the external caller through the workflow and activity to
+the model invocation.
 
 By default, `AgentWorkflow` upserts **search attributes** on each workflow run, enabling operational queries in the Temporal Web UI and via the `ListWorkflowsAsync` API. Set `EnableSearchAttributes = false` to opt out.
 
@@ -46,13 +49,16 @@ using OpenTelemetry.Trace;
 using Temporalio.Extensions.OpenTelemetry;
 using TemporalCommunity.Extensions.Agents;
 
+const string mafTelemetrySource = "MyCompany.MyAgent";
+
 // 1. Configure the OTel tracer provider with all relevant sources
 using var tracerProvider = Sdk.CreateTracerProviderBuilder()
     .AddSource(
         TracingInterceptor.ClientSource.Name,      // Temporal client spans
         TracingInterceptor.WorkflowsSource.Name,   // Temporal workflow spans
         TracingInterceptor.ActivitiesSource.Name,  // Temporal activity spans
-        TemporalAgentTelemetry.ActivitySourceName) // "TemporalCommunity.Extensions.Agents"
+        TemporalAgentTelemetry.ActivitySourceName, // Temporal agent correlation spans
+        mafTelemetrySource)                        // optional MAF GenAI spans
     .AddOtlpExporter()
     .Build();
 
@@ -71,11 +77,14 @@ builder.Services
         opts.AddDurableAgent("MyAgent", agent =>
         {
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+            agent.ConfigureAgentPipeline = pipeline =>
+                pipeline.UseOpenTelemetry(mafTelemetrySource);
         });
     });
 ```
 
-> **Missing spans?** The most common cause is forgetting one of the four `AddSource` calls. All four are required for the complete trace hierarchy.
+> **Missing spans?** The four sources above produce the Temporal/library hierarchy. If you also
+> configure MAF or MEAI OpenTelemetry middleware, add its explicit source name to `AddSource`.
 
 ---
 
@@ -89,27 +98,42 @@ Wraps the full round-trip of sending an update to `AgentWorkflow` — from the e
 
 | Attribute | Value |
 |-----------|-------|
-| `agent.name` | The registered agent name |
-| `agent.session_id` | The Temporal workflow ID (`ta-{name}-{key}`) |
+| `gen_ai.agent.name` | The registered agent name |
+| `gen_ai.conversation.id` | The Temporal workflow ID (`ta-{name}-{key}`) |
 
 **Error handling:** If the update fails, `span.SetStatus(ActivityStatusCode.Error, ex.Message)` is called.
 
-### `agent.turn` (Internal kind)
+### `agent.turn` (Client kind)
 
 **Emitted by:** `AgentActivities.RunDurableAgentStepAsync`
 
-Wraps a single LLM call inside the activity. With the v0.3 durable loop, one turn produces one `agent.turn` span per LLM round (one for the initial call plus one per follow-up after tool dispatch). Token usage metrics are captured per span.
+Wraps one LLM-step activity. A user turn can produce multiple `agent.turn` spans: the initial model
+call plus each follow-up after durable tool dispatch. This span is always retained, including when
+MAF/MEAI telemetry is installed.
 
 | Attribute | Value |
 |-----------|-------|
-| `agent.name` | The registered agent name |
-| `agent.session_id` | The Temporal workflow ID |
-| `agent.correlation_id` | Links the request to its response (from `RunRequest.CorrelationId`) |
-| `agent.input_tokens` | Prompt tokens consumed (from `AgentResponse.Usage`) |
-| `agent.output_tokens` | Completion tokens produced |
-| `agent.total_tokens` | Input + output tokens |
+| `gen_ai.agent.name` | The registered agent name |
+| `gen_ai.conversation.id` | The Temporal workflow ID |
+| `temporal.agent.correlation_id` | Links the request to its response (from `RunRequest.CorrelationId`) |
+| `gen_ai.usage.input_tokens` | Prompt tokens consumed when no upstream GenAI telemetry owns usage |
+| `gen_ai.usage.output_tokens` | Completion tokens produced when no upstream GenAI telemetry owns usage |
+| `gen_ai.usage.total_tokens` | Input + output tokens when no upstream GenAI telemetry owns usage |
 
-Token attributes are only set when the underlying LLM provider reports usage data.
+The three usage attributes are set only when the provider reports usage and no live
+`OpenTelemetryAgent`/`OpenTelemetryChatClient` is present. With upstream telemetry, its canonical
+GenAI span owns usage so token/cost queries do not double-count.
+
+### Optional MAF/MEAI child spans
+
+With MAF `OpenTelemetryAgent`, its sampled `invoke_agent` descendant receives the same
+`temporal.agent.correlation_id` as `agent.turn`. The library selects the nearest active ancestor
+whose `gen_ai.operation.name` is exactly `invoke_agent`; it never tags an arbitrary current span.
+If the MAF source is unsampled, no such activity exists and enrichment is a safe no-op.
+
+A standalone MEAI `OpenTelemetryChatClient` creates its chat span after the library's innermost
+agent boundary. That child shares the `agent.turn` trace but does not inherit the Temporal tag;
+correlation is therefore trace-based for this topology. It still owns usage attributes.
 
 ### `temporal.agent.schedule.create` (Client kind)
 
@@ -119,7 +143,7 @@ Wraps the creation of a recurring Temporal Schedule.
 
 | Attribute | Value |
 |-----------|-------|
-| `agent.name` | The agent being scheduled |
+| `gen_ai.agent.name` | The agent being scheduled |
 | `schedule.id` | The Temporal schedule ID |
 
 ### `temporal.agent.schedule.delayed` (Client kind)
@@ -130,8 +154,8 @@ Wraps the creation of a delayed one-time agent session via `StartDelay`.
 
 | Attribute | Value |
 |-----------|-------|
-| `agent.name` | The agent being scheduled |
-| `agent.session_id` | The Temporal workflow ID |
+| `gen_ai.agent.name` | The agent being scheduled |
+| `gen_ai.conversation.id` | The Temporal workflow ID |
 | `schedule.delay` | The delay as `TimeSpan.ToString()` |
 
 ### `temporal.agent.schedule.one_time` (Internal kind)
@@ -142,7 +166,7 @@ Wraps a one-time scheduled run started from within a workflow via an activity.
 
 | Attribute | Value |
 |-----------|-------|
-| `agent.name` | The agent being scheduled |
+| `gen_ai.agent.name` | The agent being scheduled |
 | `schedule.job_id` | The run ID of the one-time job |
 | `schedule.delay` | The delay before execution |
 
@@ -154,12 +178,12 @@ All attributes are defined as constants on `TemporalAgentTelemetry`:
 
 | Constant | Attribute Name | Type | Used In |
 |----------|---------------|------|---------|
-| `AgentNameAttribute` | `agent.name` | string | All spans |
-| `AgentSessionIdAttribute` | `agent.session_id` | string | `client.send`, `turn`, `schedule.delayed` |
-| `AgentCorrelationIdAttribute` | `agent.correlation_id` | string | `turn` |
-| `InputTokensAttribute` | `agent.input_tokens` | int? | `turn` |
-| `OutputTokensAttribute` | `agent.output_tokens` | int? | `turn` |
-| `TotalTokensAttribute` | `agent.total_tokens` | int? | `turn` |
+| `AgentNameAttribute` | `gen_ai.agent.name` | string | Agent spans |
+| `AgentSessionIdAttribute` | `gen_ai.conversation.id` | string | Session-bearing spans |
+| `AgentCorrelationIdAttribute` | `temporal.agent.correlation_id` | string | `agent.turn`, sampled MAF `invoke_agent` |
+| `InputTokensAttribute` | `gen_ai.usage.input_tokens` | int? | Fallback `agent.turn` only |
+| `OutputTokensAttribute` | `gen_ai.usage.output_tokens` | int? | Fallback `agent.turn` only |
+| `TotalTokensAttribute` | `gen_ai.usage.total_tokens` | int? | Fallback `agent.turn` only |
 | `ScheduleIdAttribute` | `schedule.id` | string | `schedule.create` |
 | `ScheduleDelayAttribute` | `schedule.delay` | string | `schedule.delayed`, `schedule.one_time` |
 | `ScheduleJobIdAttribute` | `schedule.job_id` | string | `schedule.one_time` |
@@ -181,9 +205,11 @@ agent.client.send                           ← TemporalAgentTelemetry (Client k
               │
               └── RunActivity:ExecuteAgent  ← TracingInterceptor.ActivitiesSource
                     │
-                    └── agent.turn          ← TemporalAgentTelemetry (Internal kind)
+                    └── agent.turn          ← Temporal correlation parent
                           │
-                          └── (LLM HTTP call, if instrumented by the HTTP client)
+                          └── invoke_agent  ← optional MAF canonical GenAI span
+                                │
+                                └── (LLM HTTP call, if instrumented)
 ```
 
 The two `TemporalAgentTelemetry` spans bookend the trace — `agent.client.send` at the top (caller-side) and `agent.turn` at the bottom (inference-side). The Temporal SDK spans fill in the middle, showing the workflow and activity execution.
@@ -263,10 +289,12 @@ await foreach (var execution in result)
 
 When `AgentWorkflow` triggers continue-as-new, the Temporal workflow ID stays the same but the run ID changes. Two mechanisms help correlate spans across these boundaries:
 
-1. **Session ID (`agent.session_id`)** — remains constant across continue-as-new transitions since it is the workflow ID
-2. **Correlation ID (`agent.correlation_id`)** — set per-request on `RunRequest.CorrelationId`, allowing you to trace a single request across the boundary
+1. **Session ID (`gen_ai.conversation.id`)** — remains constant across continue-as-new transitions since it is the workflow ID
+2. **Correlation ID (`temporal.agent.correlation_id`)** — set per-request on `RunRequest.CorrelationId`, allowing you to trace a single request across the boundary
 
-To find all spans for a session regardless of which run they belong to, filter by `agent.session_id`. To trace a single request, use `agent.correlation_id`.
+To find all spans for a session regardless of which run they belong to, filter by
+`gen_ai.conversation.id`. To trace a single request, use `temporal.agent.correlation_id` on the
+Temporal turn and sampled MAF invoke span, or use trace identity for a standalone MEAI chat span.
 
 ---
 
@@ -274,12 +302,14 @@ To find all spans for a session regardless of which run they belong to, filter b
 
 ### Finding Expensive Agents by Token Count
 
-Filter `agent.turn` spans by `agent.total_tokens` in your tracing backend:
+Without upstream GenAI telemetry, filter `agent.turn` spans by
+`gen_ai.usage.total_tokens`. With MAF/MEAI telemetry, query that middleware's canonical GenAI span
+instead:
 
 ```
 service.name = "my-agent-service"
 AND name = "agent.turn"
-AND agent.total_tokens > 10000
+AND gen_ai.usage.total_tokens > 10000
 ```
 
 This surfaces turns where the LLM consumed an unusually high number of tokens — useful for identifying agents that need prompt optimization or context trimming.
@@ -304,7 +334,9 @@ Compare `agent.client.send` duration against `agent.turn` duration. The differen
 
 ### Per-LLM-Call Visibility
 
-The `agent.turn` span captures the whole turn — one LLM call plus any tool rounds the model triggers. To go finer and see each individual LLM round (request, response, token usage, finish reason), wrap the inner `IChatClient` with a `DelegatingChatClient` decorator and register it via the `clientFactory` parameter of `AsAIAgent(...)`.
+Each `agent.turn` span already represents one LLM-step activity. To add provider-semantic request,
+response, model, and usage attributes, configure MAF `OpenTelemetryAgent` through
+`ConfigureAgentPipeline` or return an MEAI `OpenTelemetryChatClient` from `agent.ChatClient`.
 
 This is a doc-only pattern with no library opt-in flag. See [Per-LLM-Call Interception via `ChatClientFactory`](./llm-call-interception.md) for the full guide. It is the answer to "I want more visibility into when agents call the model and execute tools" — and it composes cleanly with the rest of the OTel setup described above.
 
@@ -322,4 +354,4 @@ This is a doc-only pattern with no library opt-in flag. See [Per-LLM-Call Interc
 
 ---
 
-_Last updated: 2026-03-13_
+_Last updated: 2026-08-09_

@@ -126,6 +126,7 @@ internal sealed class AgentActivities(
         // Restore the StateBag before building the live pipeline so the innermost session boundary
         // can carry this exact durable instance through outer user middleware.
         var session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
+        var turnTelemetry = new TemporalAgentTurnTelemetryContext(input.Request.CorrelationId);
 
         // Build and own a fresh AIAgent pipeline from the scoped IChatClient. The pipeline lease
         // is declared after the DI scope so it is disposed before scoped services at method exit.
@@ -133,6 +134,7 @@ internal sealed class AgentActivities(
             blueprint,
             chatClient,
             session,
+            turnTelemetry,
             scopedServices);
         var agent = agentPipeline.Agent;
 
@@ -263,35 +265,19 @@ internal sealed class AgentActivities(
         var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, scopedServices);
         TemporalAgentContext.SetCurrent(temporalContext);
 
-        // When the user's pipeline installs OpenTelemetryAgent or
-        // OpenTelemetryChatClient, suppress our own agent.turn span to avoid duplicate gen_ai.*
-        // attributes (downstream cost-aggregation queries would double-count tokens). Instead
-        // tag Activity.Current — which will be MAF's invoke_agent span when present, or the
-        // Temporal SDK's RunActivity span otherwise — with the Temporal-namespaced correlation
-        // ID so the canonical GenAI semconv data (from MAF) carries our additive context too.
-        // The `using var` keeps disposal correct: when suppressed, span is null and the using
-        // statement is a no-op; when emitted, the span is disposed at method exit.
-        var suppressAgentTurnSpan = agentPipeline.HasOpenTelemetryAgent
-            || AgentChainWalker.Contains<OpenTelemetryChatClient>(chatClient);
-        using var span = suppressAgentTurnSpan
-            ? null
-            : TemporalAgentTelemetry.ActivitySource.StartActivity(
-                TemporalAgentTelemetry.AgentTurnSpanName,
-                ActivityKind.Client);
+        // The Temporal turn span always carries Temporal-owned correlation. When upstream MAF or
+        // MEAI telemetry owns canonical GenAI usage, this span omits duplicate usage attributes.
+        var upstreamOwnsUsage = agentPipeline.HasOpenTelemetryAgent
+            || agentPipeline.HasOpenTelemetryChatClient;
+        using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
+            TemporalAgentTelemetry.AgentTurnSpanName,
+            ActivityKind.Client);
 
         if (span is not null)
         {
             span.SetTag(TemporalAgentTelemetry.AgentNameAttribute, input.AgentName);
             span.SetTag(TemporalAgentTelemetry.AgentSessionIdAttribute, sessionId.WorkflowId);
             span.SetTag(TemporalAgentTelemetry.AgentCorrelationIdAttribute, input.Request.CorrelationId);
-        }
-        else
-        {
-            // Survives suppression by attaching the Temporal-namespaced correlation ID to the
-            // canonical span the user's OpenTelemetryAgent / OpenTelemetryChatClient emitted.
-            Activity.Current?.SetTag(
-                TemporalAgentTelemetry.AgentCorrelationIdAttribute,
-                input.Request.CorrelationId);
         }
 
         try
@@ -326,7 +312,7 @@ internal sealed class AgentActivities(
                 .OfType<FunctionCallContent>()
                 .ToList();
 
-            if (span?.IsAllDataRequested == true)
+            if (!upstreamOwnsUsage && span?.IsAllDataRequested == true)
             {
                 span.SetTag(TemporalAgentTelemetry.InputTokensAttribute, response.Usage?.InputTokenCount);
                 span.SetTag(TemporalAgentTelemetry.OutputTokensAttribute, response.Usage?.OutputTokenCount);
@@ -659,6 +645,7 @@ internal sealed class AgentActivities(
         AgentBlueprint blueprint,
         IChatClient chatClient,
         TemporalAgentSession session,
+        TemporalAgentTurnTelemetryContext turnTelemetry,
         IServiceProvider scopedServices)
     {
         var registration = blueprint.Registration;
@@ -695,7 +682,10 @@ internal sealed class AgentActivities(
                 chatClientAgent,
                 configurePipeline,
                 scopedServices,
-                builder => builder.Use(inner => new TemporalSessionBoundaryAgent(inner, session)));
+                builder => builder.Use(inner =>
+                    new TemporalSessionBoundaryAgent(inner, session, turnTelemetry)),
+                chatClient);
+            turnTelemetry.EnrichMafInvokeAgentSpan = pipeline.HasOpenTelemetryAgent;
         }
         catch (InvalidOperationException ex)
             when (ex.Message.StartsWith(

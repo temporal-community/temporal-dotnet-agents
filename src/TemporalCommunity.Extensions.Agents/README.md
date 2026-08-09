@@ -30,7 +30,8 @@ Key benefits over in-memory agent frameworks:
 - Completed request/response only; `RunStreamingAsync` is not supported
 - Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`)
 - `WorkingSetContextProvider` — `AIContextProvider` subclass that extracts recently-referenced file paths and injects a working-set note before each LLM call
-- OpenTelemetry distributed tracing (two-layer span hierarchy; search attributes enabled by default via `EnableSearchAttributes`)
+- OpenTelemetry distributed tracing with a stable Temporal `agent.turn` parent and optional
+  canonical MAF/MEAI child spans; search attributes enabled by default via `EnableSearchAttributes`
 - Plugin composition — `.AddWorkerPlugin()` / `.AddClientPlugin()` available via the `TemporalCommunity.Extensions.AI` dependency (same worker builder, chains after `.AddTemporalAgents()`)
 
 ## How It Works
@@ -46,8 +47,16 @@ AgentWorkflow (long-lived workflow)
     ▼
 AgentActivities.RunDurableAgentStepAsync
     │
+    ├─► agent.turn (Temporal correlation and fallback usage)
+    │     └─► invoke_agent / chat (optional MAF/MEAI telemetry; canonical usage owner)
     └─► Model step and durable tool activities (e.g., ChatClientAgent backed by Azure OpenAI)
 ```
+
+`agent.turn` is retained when upstream MAF/MEAI telemetry is enabled. A sampled MAF
+`invoke_agent` descendant receives the same `temporal.agent.correlation_id`; a standalone MEAI
+chat span shares the trace but is created below the library boundary, so correlation is trace-based.
+Usage attributes appear on the upstream canonical GenAI span when present and otherwise fall back
+to `agent.turn`.
 
 Each agent session maps to a long-lived Temporal **workflow** (`AgentWorkflow`). When an external caller sends a
 message, it uses a Temporal **Update** — a durable, acknowledged request/response primitive — to deliver the message and

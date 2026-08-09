@@ -17,6 +17,12 @@ namespace TemporalCommunity.Extensions.Agents;
 /// consumers (dashboards, alerts) should be prepared to update accordingly.
 /// </para>
 /// <para>
+/// <see cref="AgentTurnSpanName"/> always carries Temporal-owned agent/session/correlation
+/// attributes. When a live MAF <c>OpenTelemetryAgent</c> or MEAI
+/// <c>OpenTelemetryChatClient</c> is present, that upstream span owns GenAI usage attributes and
+/// the Temporal turn omits duplicates. Without upstream telemetry, the turn span owns usage.
+/// </para>
+/// <para>
 /// Two attributes are intentionally non-canonical:
 /// <list type="bullet">
 ///   <item>

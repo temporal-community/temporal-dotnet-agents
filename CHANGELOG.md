@@ -18,6 +18,8 @@
   disposable wrappers.
 - Passed the restored `TemporalAgentSession` through outer MAF middleware, persisted its StateBag
   mutations, rejected session replacement, and translated only at the `ChatClientAgent` leaf.
+- Retained the Temporal `agent.turn` span with upstream telemetry, enriched the actual sampled MAF
+  `invoke_agent` ancestor with its correlation ID, and assigned GenAI usage to exactly one span.
 
 ## [0.10.0] - 2026-07-13
 

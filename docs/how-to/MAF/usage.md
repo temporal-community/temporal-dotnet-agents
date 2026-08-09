@@ -1159,7 +1159,8 @@ To add a pre-dispatch lifecycle hook — for risk scoring, PII scrubbing, argume
 
 ## OpenTelemetry Integration
 
-The library emits two layers of spans that compose with the Temporal SDK's own tracing interceptor.
+The library always emits a Temporal `agent.turn` correlation span that composes with the Temporal
+SDK interceptor. Optional MAF/MEAI OpenTelemetry middleware emits a canonical GenAI child span.
 
 ### Setup
 
@@ -1171,13 +1172,16 @@ using OpenTelemetry.Trace;
 using Temporalio.Extensions.OpenTelemetry;
 using TemporalCommunity.Extensions.Agents;
 
+const string mafTelemetrySource = "MyCompany.MyAgent";
+
 // 1. Configure the OTel tracer provider with all relevant sources
 using var tracerProvider = Sdk.CreateTracerProviderBuilder()
     .AddSource(
         TracingInterceptor.ClientSource.Name,      // Temporal client spans (StartWorkflow, etc.)
         TracingInterceptor.WorkflowsSource.Name,   // Temporal workflow spans
         TracingInterceptor.ActivitiesSource.Name,  // Temporal activity spans (RunActivity)
-        TemporalAgentTelemetry.ActivitySourceName) // "TemporalCommunity.Extensions.Agents"
+        TemporalAgentTelemetry.ActivitySourceName, // Temporal correlation spans
+        mafTelemetrySource)                        // optional MAF canonical GenAI spans
     .AddOtlpExporter()
     .Build();
 
@@ -1195,25 +1199,33 @@ builder.Services
         opts.AddDurableAgent("MyAgent", agent =>
         {
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+            agent.ConfigureAgentPipeline = pipeline =>
+                pipeline.UseOpenTelemetry(mafTelemetrySource);
         });
     });
 ```
 
 ### Span Hierarchy
 
-A single `RunAsync` call produces a two-level span tree:
+A single model step with MAF telemetry produces this span subtree:
 
 ```
 agent.client.send          (DefaultTemporalAgentClient — before the Update reaches Temporal)
   └── StartWorkflow / RunActivity   (Temporal SDK spans via TracingInterceptor)
-        └── agent.turn     (AgentActivities.RunDurableAgentStepAsync — inside the activity)
+        └── agent.turn     (Temporal correlation, always present)
+              └── invoke_agent (MAF canonical GenAI span and usage owner)
 ```
 
 | Span                | Source                                      | Key Attributes                                                                                                                  |
 |---------------------|---------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
-| `agent.client.send` | `TemporalAgentTelemetry.ActivitySourceName` | `agent.name`, `agent.session_id`                                                                                                |
-| `agent.turn`        | `TemporalAgentTelemetry.ActivitySourceName` | `agent.name`, `agent.session_id`, `agent.correlation_id`, `agent.input_tokens`, `agent.output_tokens`, `agent.total_tokens`    |
+| `agent.client.send` | `TemporalAgentTelemetry.ActivitySourceName` | `gen_ai.agent.name`, `gen_ai.conversation.id` |
+| `agent.turn` | `TemporalAgentTelemetry.ActivitySourceName` | `gen_ai.agent.name`, `gen_ai.conversation.id`, `temporal.agent.correlation_id`; fallback `gen_ai.usage.*` only without upstream telemetry |
+| `invoke_agent` | Configured MAF source | Canonical MAF GenAI attributes and usage plus `temporal.agent.correlation_id` when sampled |
 | SDK spans           | `TracingInterceptor.*Source`                | Standard Temporal attributes                                                                                                    |
+
+A standalone MEAI `OpenTelemetryChatClient` also owns usage, but its chat span is created below
+the session boundary. It shares the `agent.turn` trace and is correlated by trace identity; tags do
+not inherit, so the Temporal correlation attribute is not copied to that child.
 
 The span name constants are available on `TemporalAgentTelemetry`:
 

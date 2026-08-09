@@ -13,7 +13,8 @@ namespace TemporalCommunity.Extensions.Agents.Internal;
 /// </summary>
 internal sealed class TemporalSessionBoundaryAgent(
     AIAgent innerAgent,
-    TemporalAgentSession durableSession) : DelegatingAIAgent(innerAgent)
+    TemporalAgentSession durableSession,
+    TemporalAgentTurnTelemetryContext? telemetryContext = null) : DelegatingAIAgent(innerAgent)
 {
     protected override async Task<AgentResponse> RunCoreAsync(
         IEnumerable<ChatMessage> messages,
@@ -22,6 +23,7 @@ internal sealed class TemporalSessionBoundaryAgent(
         CancellationToken cancellationToken = default)
     {
         EnsureExpectedSession(session);
+        telemetryContext?.EnrichNearestMafInvokeAgentAncestor();
         var durableRunContext = CurrentRunContext;
         try
         {
@@ -44,6 +46,7 @@ internal sealed class TemporalSessionBoundaryAgent(
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         EnsureExpectedSession(session);
+        telemetryContext?.EnrichNearestMafInvokeAgentAncestor();
         var durableRunContext = CurrentRunContext;
         try
         {

@@ -4,6 +4,7 @@
 // Run:  dotnet run --project samples/MAF/MultiAgentRouting/MultiAgentRouting.csproj
 
 using System.ClientModel;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,16 +20,20 @@ using Temporalio.Extensions.Hosting;
 using Temporalio.Extensions.OpenTelemetry;
 
 // ── Step 1: Configure OpenTelemetry ──────────────────────────────────────────
-// Register all four activity sources:
+const string agentTelemetrySource = "MultiAgentRouting.Agent";
+
+// Register the four Temporal/library sources plus the MAF source:
 //   • TracingInterceptor.ClientSource      — client outbound spans
 //   • TracingInterceptor.WorkflowsSource   — workflow inbound/outbound spans
 //   • TracingInterceptor.ActivitiesSource  — activity inbound spans
 //   • TemporalAgentTelemetry.ActivitySourceName — agent turn + client send spans
+//   • agentTelemetrySource — canonical MAF invoke_agent spans and GenAI usage
 using var tracerProvider = Sdk.CreateTracerProviderBuilder()
     .AddSource(TracingInterceptor.ClientSource.Name)
     .AddSource(TracingInterceptor.WorkflowsSource.Name)
     .AddSource(TracingInterceptor.ActivitiesSource.Name)
     .AddSource(TemporalAgentTelemetry.ActivitySourceName)
+    .AddSource(agentTelemetrySource)
     .AddConsoleExporter()
     .Build();
 
@@ -72,6 +77,11 @@ builder.Services
     .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
+        // The Temporal agent.turn span remains the correlation parent. MAF owns canonical
+        // invoke_agent usage and receives the same Temporal correlation ID when sampled.
+        opts.DefaultConfigureAgentPipeline = pipeline =>
+            pipeline.UseOpenTelemetry(agentTelemetrySource);
+
         opts.AddDurableAgent("WeatherAgent", agent =>
         {
             agent.Instructions =

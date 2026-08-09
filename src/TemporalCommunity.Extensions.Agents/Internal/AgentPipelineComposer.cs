@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Exceptions;
 
 namespace TemporalCommunity.Extensions.Agents.Internal;
@@ -15,7 +16,8 @@ internal static class AgentPipelineComposer
         AIAgent innerAgent,
         Action<AIAgentBuilder>? configurePipeline,
         IServiceProvider services,
-        Action<AIAgentBuilder>? appendInnermostPipeline = null)
+        Action<AIAgentBuilder>? appendInnermostPipeline = null,
+        IChatClient? chatClient = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
         ArgumentNullException.ThrowIfNull(innerAgent);
@@ -65,7 +67,10 @@ internal static class AgentPipelineComposer
                 }
             }
 
-            return new AgentPipelineLease(builtAgent, ownedOpenTelemetryAgents);
+            return new AgentPipelineLease(
+                builtAgent,
+                ownedOpenTelemetryAgents,
+                AgentChainWalker.Contains<OpenTelemetryChatClient>(chatClient));
         }
         catch
         {
@@ -91,15 +96,19 @@ internal sealed class AgentPipelineLease : IDisposable
 
     internal AgentPipelineLease(
         AIAgent agent,
-        IReadOnlyList<OpenTelemetryAgent> ownedOpenTelemetryAgents)
+        IReadOnlyList<OpenTelemetryAgent> ownedOpenTelemetryAgents,
+        bool hasOpenTelemetryChatClient)
     {
         Agent = agent;
         _ownedOpenTelemetryAgents = ownedOpenTelemetryAgents;
+        HasOpenTelemetryChatClient = hasOpenTelemetryChatClient;
     }
 
     internal AIAgent Agent { get; }
 
     internal bool HasOpenTelemetryAgent => _ownedOpenTelemetryAgents.Count > 0;
+
+    internal bool HasOpenTelemetryChatClient { get; }
 
     public void Dispose()
     {

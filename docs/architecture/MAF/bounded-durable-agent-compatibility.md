@@ -13,7 +13,7 @@ The extension builds a fresh `ChatClientAgent` inside each LLM-step activity fro
 | Static provider tools declared through `IDurableToolSource` | Supported | The declarations are registered as Temporal tool activities. |
 | Static tools supplied through `AddContextProvider(provider, durableTools)` | Supported | Use this adapter path when the provider type cannot implement `IDurableToolSource`. |
 | Transparent `DelegatingAIAgent` middleware via `ConfigureAgentPipeline` | Supported with limits | It must pass the supplied `inner` agent to `base(inner)` and forward the exact supplied `TemporalAgentSession`. It may make retry-safe StateBag changes. Its fields are activity-attempt-local, and the wrapper must not implement `IDisposable` or `IAsyncDisposable`. |
-| `OpenTelemetryAgent` / `OpenTelemetryChatClient` | Supported | The extension detects them to avoid emitting duplicate agent-turn telemetry. |
+| `OpenTelemetryAgent` / `OpenTelemetryChatClient` | Supported | The Temporal `agent.turn` span remains present. Upstream middleware owns usage attributes; a sampled MAF `invoke_agent` span also receives the Temporal correlation ID. A standalone MEAI chat span is correlated by trace ancestry. |
 
 ## Excluded inputs
 
