@@ -2,6 +2,9 @@
 
 This project ships two libraries — `TemporalCommunity.Extensions.AI` and `TemporalCommunity.Extensions.Agents` — and the choices you make at registration time determine which Temporal primitives back your AI calls, what operational features are available, and what constraints you inherit. There are two supported combinations. One pairing — MAF + `Extensions.AI` — is an anti-pattern to avoid.
 
+The combinations in this guide are tested with Microsoft.Extensions.AI 10.8.3 and
+Microsoft.Agents.AI 1.17.0.
+
 ---
 
 ## The Two Combinations at a Glance

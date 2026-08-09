@@ -7,6 +7,10 @@
   -->
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- Keep transitive provider packages aligned in samples and tests. The two
+         packable library projects disable this so unrelated central pins are not
+         promoted into their published dependency groups. -->
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
     <!-- Temporal SDK -->
@@ -14,14 +18,14 @@
     <PackageVersion Include="Temporalio.Extensions.Hosting" Version="1.16.0" />
     <PackageVersion Include="Temporalio.Extensions.OpenTelemetry" Version="1.16.0" />
     <!-- Microsoft Agent Framework + MEAI -->
-    <PackageVersion Include="Microsoft.Agents.AI" Version="1.12.0" />
-    <PackageVersion Include="Microsoft.Agents.AI.OpenAI" Version="1.12.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.7.0" />
-    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.7.0" />
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.17.0" />
+    <PackageVersion Include="Microsoft.Agents.AI.OpenAI" Version="1.17.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.8.3" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.8.3" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
     <!-- OpenAI -->
-    <PackageVersion Include="OpenAI" Version="2.11.0" />
+    <PackageVersion Include="OpenAI" Version="2.12.0" />
     <!-- OpenTelemetry -->
     <PackageVersion Include="OpenTelemetry.Exporter.Console" Version="1.15.3" />
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
@@ -39,9 +43,9 @@
     <!-- Polyfill: source-only compiler/runtime shims (IsExternalInit, required members,
          [Experimental], Argument*Exception.ThrowIf*) for the down-level leg. PrivateAssets="all". -->
     <PackageVersion Include="Polyfill" Version="10.5.1" />
-    <!-- System.Text.Json 10.0.9 matches Microsoft.Extensions.AI 10.7.0's transitive STJ dep;
+    <!-- System.Text.Json 10.0.10 matches Microsoft.Extensions.AI 10.8.3's transitive STJ dep;
          referenced only on netstandard2.1 to supply the STJ API surface for source-gen. -->
-    <PackageVersion Include="System.Text.Json" Version="10.0.9" />
+    <PackageVersion Include="System.Text.Json" Version="10.0.10" />
     <!-- Analyzer (Item 11a) -->
     <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" />
   </ItemGroup>

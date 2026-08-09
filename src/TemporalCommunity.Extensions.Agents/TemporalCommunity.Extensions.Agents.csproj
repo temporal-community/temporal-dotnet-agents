@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <TargetFrameworks>net10.0;netstandard2.1</TargetFrameworks>
+    <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
     <AssemblyName>TemporalCommunity.Extensions.Agents</AssemblyName>
     <RootNamespace>TemporalCommunity.Extensions.Agents</RootNamespace>
     <Description>Temporal integration for Microsoft Agent Framework</Description>
@@ -12,7 +13,7 @@
     <!--
       MEAI001 is suppressed project-wide ONLY because every occurrence is in
       System.Text.Json source-generated code (AgentSessionJsonContext over AgentResponse,
-      which transitively pulls in the experimental ResponseContinuationToken). Generated
+      whose ContinuationToken property remains experimental in MAF 1.17.0). Generated
       files cannot carry a `#pragma warning disable`, so this is the only lever. There is
       no hand-written consumption of an experimental MEAI API in this assembly today.
       When bumping the Microsoft.Extensions.AI version, grep this project for new direct

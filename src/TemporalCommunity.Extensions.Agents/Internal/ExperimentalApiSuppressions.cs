@@ -28,8 +28,8 @@
 //
 //   2. MEAI001 (all occurrences are in GENERATED code only — the System.Text.Json
 //      source generator over AgentSessionJsonContext/AgentResponse pulls in the
-//      experimental ResponseContinuationToken (+ Converter) and
-//      AgentResponse.ContinuationToken). Generated files cannot carry a `#pragma`, so
+//      experimental AgentResponse.ContinuationToken surface). Generated files cannot
+//      carry a `#pragma`, so
 //      MEAI001 is suppressed via a documented, project-scoped <NoWarn> in
 //      TemporalCommunity.Extensions.Agents.csproj. No direct (hand-written) consumption of an
 //      MEAI experimental API exists in this assembly today. Because the <NoWarn> is
@@ -38,9 +38,10 @@
 //      single project and documented here so a reviewer knows to grep for new MEAI usage
 //      when bumping the MEAI version.
 //
-//      NOTE (MEAI 10.7.0): AllowBackgroundResponses on ChatOptions graduated out of
-//      [Experimental] in MEAI 10.7.0. The narrowly-scoped MEAI001 pragma pair in
-//      TemporalCommunity.Extensions.AI/DurableChatClient.cs was dropped at that bump.
+//      NOTE (MEAI 10.8.3 / MAF 1.17.0): ResponseContinuationToken and
+//      AllowBackgroundResponses are not marked [Experimental].
+//      AgentResponse.ContinuationToken remains experimental, so the generated-code
+//      suppression is still required.
 //
 // When a listed API graduates (loses [Experimental]) or is removed/renamed by Microsoft,
 // the per-file pragma / NoWarn entry should be revisited. The base-contract guard tests

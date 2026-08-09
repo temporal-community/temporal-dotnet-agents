@@ -63,6 +63,10 @@ Activity  ←── calls real IChatClient / AIAgent — retried automatically o
 - A running [Temporal server](https://docs.temporal.io/cli#start-dev): `temporal server start-dev`
 - An LLM provider (e.g., Azure OpenAI, OpenAI, Ollama)
 
+The repository is tested against Microsoft.Extensions.AI 10.8.3 and
+Microsoft.Agents.AI 1.17.0. Package consumers should use those versions or compatible
+newer releases.
+
 The published libraries ship `net10.0` and `netstandard2.1` assets. `netstandard2.1` supports
 .NET Core 3.1+ and modern .NET; .NET Framework is out of scope. See each package README for
 down-level limitations.
