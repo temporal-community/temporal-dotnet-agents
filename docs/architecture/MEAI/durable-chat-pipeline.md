@@ -84,4 +84,6 @@ SDK would default the activity to the workflow queue; the adapters set it explic
 - Direct-adapter activity workers must poll the queue configured on
   `DurableExecutionOptions.TaskQueue`; workflow workers may poll a different queue.
 - `AsDurable()` is a separate direct-function primitive for custom workflows. It does not alter the
-  managed-session contract.
+  managed-session contract. Its function activity leaves `ActivityOptions.TaskQueue` unset and
+  therefore runs on the calling workflow's task queue; `DurableExecutionOptions.TaskQueue` does
+  not reroute this adapter.

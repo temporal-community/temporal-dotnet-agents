@@ -52,7 +52,9 @@ The workflow executes this sequence until the model returns a final response:
 `AIFunction.AsDurable()` remains available for a custom workflow that explicitly invokes a known
 function. It is not a replacement for the managed chat loop, and it does not make
 `ChatOptions.Tools` durable. See the `samples/MEAI/DurableTools` sample for that direct activity
-dispatch use case.
+dispatch use case. The function activity runs on the calling workflow's task queue. Even though
+`AsDurable()` accepts the shared `DurableExecutionOptions` type, its `TaskQueue` property applies
+only to managed sessions and direct chat/embedding adapters and does not reroute the function.
 
 For the complete managed-session boundary, see the
 [managed-session tool contract](managed-session-tool-contract.md).

@@ -53,6 +53,10 @@ Use `Glob` / `ls` to discover specific files. Notable types and their locations 
 
 **Durable tools**: `AddDurableTools(workerBuilder, params aiFunctions)` registers functions for managed durable sessions; each model-requested call becomes an `InvokeFunction` activity. A per-tool overload — `AddDurableTools(tool, opts => opts.NoRetry().WithTimeout(...))` — accepts a `DurableChatToolOptions` configuration callback that mirrors MAF's `DurableToolOptions` (`StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` properties + `NoRetry()` / `WithMaxAttempts(int)` / `WithTimeout(TimeSpan)` fluent methods). `AIFunction.AsDurable()` remains the separate adapter for direct calls from custom workflow code. Managed sessions reject caller-supplied `ChatOptions.Tools` and inline `UseFunctionInvocation()` loops; see `docs/how-to/MEAI/tool-functions.md`.
 
+`AIFunction.AsDurable()` activities intentionally use the calling workflow's task queue. They do
+not use `DurableExecutionOptions.TaskQueue`; that property routes managed sessions and direct
+chat/embedding adapters.
+
 **HITL**: see `docs/how-to/MEAI/hitl-patterns.md`. Activity timeout on the underlying `[WorkflowUpdate]` must accommodate human review time.
 
 **Important notes**:

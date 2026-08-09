@@ -27,6 +27,8 @@
   per-attempt middleware ownership.
 - Added regression coverage proving the durable MAF session context is restored to surrounding
   middleware after provider exceptions and activity cancellation.
+- Documented and tested that `AIFunction.AsDurable()` activities use the calling workflow's task
+  queue and are not rerouted by `DurableExecutionOptions.TaskQueue`.
 
 ## [0.10.0] - 2026-07-13
 

@@ -148,7 +148,9 @@ adapters, not an instruction to move the current workflow. A deployment may ther
 call to the provider worker. Sharing one queue remains supported.
 
 `AIFunction.AsDurable()` is likewise for a custom workflow that explicitly invokes a known
-function. The activity worker must register that function with `AddDurableTools`.
+function. Its activity runs on the calling workflow's task queue; the shared
+`DurableExecutionOptions.TaskQueue` value does not reroute it. The worker polling that workflow
+queue must therefore register the function with `AddDurableTools`.
 
 The session client has no streaming API. `DurableChatClient.GetStreamingResponseAsync`, when used
 directly inside a workflow, is workflow-safe but still buffers one complete activity result and

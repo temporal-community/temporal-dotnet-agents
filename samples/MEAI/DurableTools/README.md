@@ -34,6 +34,9 @@ Program.cs
 - **Stub inner function.** The lambda passed to `AIFunctionFactory.Create` inside `WeatherReportWorkflow` is never reached — `Workflow.InWorkflow == true` intercepts the call before the stub executes. The real implementation lives in `Program.cs` and is resolved from the `DurableFunctionRegistry` by name.
 - **Registry lookup by name.** `DurableFunctionActivities` resolves functions from `DurableFunctionRegistry` using the function's `Name` property as the key. The name must match between the workflow-side stub and the `AddDurableTools` registration.
 - **No `DurableChatSessionClient` required.** `AsDurable()` works in any `[Workflow]` class — you are not limited to the stock `DurableChatWorkflow` session model.
+- **Same task queue.** The function activity runs on the calling workflow's task queue, whose
+  worker registers the implementation with `AddDurableTools()`. Setting
+  `DurableExecutionOptions.TaskQueue` on `AsDurable()` does not reroute the function activity.
 
 ## Getting Started
 

@@ -493,8 +493,8 @@ public class DurableMiddlewareIntegrationTests
 // ── Tool dispatch workflow ────────────────────────────────────────────────────
 
 /// <summary>
-/// Minimal workflow that dispatches DurableFunctionActivities.InvokeFunctionAsync directly
-/// to verify the activity registration and invocation path works end-to-end.
+/// Minimal workflow that invokes an <see cref="AIFunctionExtensions.AsDurable"/> wrapper to verify
+/// the adapter and same-task-queue activity registration path end-to-end.
 /// </summary>
 [Workflow("ToolDispatchWorkflow")]
 public sealed class ToolDispatchWorkflow
@@ -502,13 +502,17 @@ public sealed class ToolDispatchWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync()
     {
-        var input = new DurableFunctionInput { FunctionName = "get_tool_result" };
+        var function = AIFunctionFactory.Create(
+            (Func<string>)(() =>
+                throw new InvalidOperationException("Workflow-local stub must not run.")),
+            "get_tool_result").AsDurable(new DurableExecutionOptions
+            {
+                TaskQueue = "intentionally-unpolled-function-queue",
+                ActivityTimeout = TimeSpan.FromSeconds(15),
+            });
 
-        var output = await Workflow.ExecuteActivityAsync(
-            (DurableFunctionActivities a) => a.InvokeFunctionAsync(input),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(15) });
-
-        return output.Result?.ToString() ?? string.Empty;
+        var result = await function.InvokeAsync();
+        return result?.ToString() ?? string.Empty;
     }
 }
 

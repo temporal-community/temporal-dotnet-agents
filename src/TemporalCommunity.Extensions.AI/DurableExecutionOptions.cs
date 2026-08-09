@@ -21,7 +21,8 @@ public sealed class DurableExecutionOptions
     /// Gets or sets the Temporal task queue for durable AI execution. Managed chat workflows start
     /// on this queue. Direct chat and embedding adapters assign it to each scheduled activity, so
     /// their workflow worker may poll a different queue from the AI activity worker. Must be set
-    /// before use.
+    /// before use. <see cref="AIFunctionExtensions.AsDurable"/> function activities instead use the
+    /// calling workflow's task queue and do not read this property.
     /// </summary>
     public string? TaskQueue { get; set; }
 

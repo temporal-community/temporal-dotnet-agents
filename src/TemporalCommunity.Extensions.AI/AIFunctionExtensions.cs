@@ -14,11 +14,16 @@ public static class AIFunctionExtensions
     /// <remarks>
     /// Outside a workflow, the wrapper passes through to the inner function unchanged.
     /// Inside a workflow, the call is dispatched as a Temporal activity, so the activity worker
-    /// handling that task queue must have called <c>AddDurableAI()</c> and <c>AddDurableTools(function)</c> 
+    /// polling the calling workflow's task queue must have called <c>AddDurableAI()</c> and
+    /// <c>AddDurableTools(function)</c>. <see cref="DurableExecutionOptions.TaskQueue"/> is not
+    /// used by this adapter; it applies to managed sessions and direct chat/embedding adapters.
     /// If the function is not registered, the activity throws <see cref="InvalidOperationException"/>
     /// </remarks>
     /// <param name="function">The function to wrap.</param>
-    /// <param name="options">Optional durable execution configuration.</param>
+    /// <param name="options">
+    /// Optional timeout and retry configuration. Its <see cref="DurableExecutionOptions.TaskQueue"/>
+    /// value does not reroute the function activity.
+    /// </param>
     /// <returns>A <see cref="DurableAIFunction"/> wrapping the original function.</returns>
     public static DurableAIFunction AsDurable(
         this AIFunction function,

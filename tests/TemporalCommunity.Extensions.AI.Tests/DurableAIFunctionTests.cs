@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Common;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -62,5 +63,24 @@ public class DurableAIFunctionTests
         Assert.Null(DurableAIFunction.BuildActivitySummary(null));
         Assert.Null(DurableAIFunction.BuildActivitySummary(""));
         Assert.Null(DurableAIFunction.BuildActivitySummary("   "));
+    }
+
+    [Fact]
+    public void CreateActivityOptions_IgnoresConfiguredTaskQueueAndPreservesOtherSettings()
+    {
+        var retryPolicy = new RetryPolicy { MaximumAttempts = 2 };
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "ignored-separate-queue",
+            ActivityTimeout = TimeSpan.FromSeconds(47),
+            RetryPolicy = retryPolicy,
+        };
+
+        var activityOptions = DurableAIFunction.CreateActivityOptions("GetWeather", options);
+
+        Assert.Null(activityOptions.TaskQueue);
+        Assert.Equal(TimeSpan.FromSeconds(47), activityOptions.StartToCloseTimeout);
+        Assert.Equal("GetWeather", activityOptions.Summary);
+        Assert.Same(retryPolicy, activityOptions.RetryPolicy);
     }
 }

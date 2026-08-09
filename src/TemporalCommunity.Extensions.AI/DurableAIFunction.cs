@@ -15,7 +15,10 @@ public sealed class DurableAIFunction : DelegatingAIFunction
     /// Initializes a new instance of the <see cref="DurableAIFunction"/> class.
     /// </summary>
     /// <param name="innerFunction">The inner function to wrap.</param>
-    /// <param name="options">Durable execution configuration.</param>
+    /// <param name="options">
+    /// Durable timeout and retry configuration. <see cref="DurableExecutionOptions.TaskQueue"/>
+    /// is intentionally ignored: function activities run on the calling workflow's task queue.
+    /// </param>
     public DurableAIFunction(AIFunction innerFunction, DurableExecutionOptions? options = null)
         : base(innerFunction)
     {
@@ -41,16 +44,7 @@ public sealed class DurableAIFunction : DelegatingAIFunction
             Arguments = ConvertArguments(arguments),
         };
 
-        var activityOptions = new ActivityOptions
-        {
-            StartToCloseTimeout = _options.ActivityTimeout,
-            Summary = BuildActivitySummary(Name),
-        };
-
-        if (_options.RetryPolicy is not null)
-        {
-            activityOptions.RetryPolicy = _options.RetryPolicy;
-        }
+        var activityOptions = CreateActivityOptions(Name, _options);
 
         // Keep this continuation on Temporal's workflow task scheduler. ConfigureAwait(false)
         // opts out of TaskScheduler.Current, so later workflow commands would no longer execute
@@ -76,4 +70,27 @@ public sealed class DurableAIFunction : DelegatingAIFunction
     /// </summary>
     internal static string? BuildActivitySummary(string? functionName) =>
         string.IsNullOrWhiteSpace(functionName) ? null : functionName;
+
+    /// <summary>Creates activity options for a direct durable-function invocation.</summary>
+    internal static ActivityOptions CreateActivityOptions(
+        string? functionName,
+        DurableExecutionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        // Unlike direct chat and embedding adapters, AsDurable functions intentionally share the
+        // calling workflow's task queue so the worker's AddDurableTools registry is colocated.
+        var activityOptions = new ActivityOptions
+        {
+            StartToCloseTimeout = options.ActivityTimeout,
+            Summary = BuildActivitySummary(functionName),
+        };
+
+        if (options.RetryPolicy is not null)
+        {
+            activityOptions.RetryPolicy = options.RetryPolicy;
+        }
+
+        return activityOptions;
+    }
 }
