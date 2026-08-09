@@ -18,8 +18,10 @@ namespace TemporalCommunity.Extensions.AI;
 public sealed class DurableExecutionOptions
 {
     /// <summary>
-    /// Gets or sets the Temporal task queue for chat activities.
-    /// Must be set before use.
+    /// Gets or sets the Temporal task queue for durable AI execution. Managed chat workflows start
+    /// on this queue. Direct chat and embedding adapters assign it to each scheduled activity, so
+    /// their workflow worker may poll a different queue from the AI activity worker. Must be set
+    /// before use.
     /// </summary>
     public string? TaskQueue { get; set; }
 

@@ -32,7 +32,8 @@ var temporalAddress = builder.Configuration.GetValue<string>("TEMPORAL_ADDRESS")
 if (string.IsNullOrEmpty(apiKey))
     throw new InvalidOperationException("OPENAI_API_KEY is not configured. Set it with: dotnet user-secrets set \"OPENAI_API_KEY\" \"sk-...\" --project samples/MEAI/DurableEmbeddings");
 
-const string taskQueue = "durable-embeddings";
+const string workflowTaskQueue = "durable-embeddings-workflows";
+const string activityTaskQueue = "durable-embeddings-activities";
 
 // ── Setup: Connect Temporal client with DurableAIDataConverter ────────────────
 // DurableAIDataConverter.Instance wraps Temporal's payload converter with
@@ -69,7 +70,7 @@ builder.Services
         openAiClient.GetEmbeddingClient(embeddingModel).AsIEmbeddingGenerator())
     .Build();
 
-// ── Setup: Register worker + durable AI ──────────────────────────────────────
+// ── Setup: Register separate workflow and AI-activity workers ────────────────
 // AddDurableAI registers options, the DurableAIDataConverter auto-wire, internal
 // activities (DurableChatActivities, DurableEmbeddingActivities, DurableFunctionActivities),
 // and the tool/function registry. Only DurableEmbeddingActivities is exercised here.
@@ -80,14 +81,18 @@ builder.Services
 // DurableMixedPatternValidator tolerates a missing unkeyed IChatClient when no durable tools
 // are registered, and DurableChatActivities resolves IChatClient lazily (never invoked here).
 //
-// AddWorkflow<DocumentIndexingWorkflow>() registers our custom workflow on the worker.
+// The activity worker polls activityTaskQueue. The workflow worker polls workflowTaskQueue;
+// DurableEmbeddingGenerator explicitly routes each activity to activityTaskQueue.
 builder.Services
-    .AddHostedTemporalWorker(taskQueue)
+    .AddHostedTemporalWorker(activityTaskQueue)
     .AddDurableAI(opts =>
     {
+        opts.TaskQueue = activityTaskQueue;
         opts.ActivityTimeout = TimeSpan.FromMinutes(2);
         opts.RegisterDefaultWorkflow = false;
-    })
+    });
+builder.Services
+    .AddHostedTemporalWorker(workflowTaskQueue)
     .AddWorkflow<DocumentIndexingWorkflow>()
     .AddWorkflow<ParallelDocumentIndexingWorkflow>();
 
@@ -98,8 +103,16 @@ await host.StartAsync();
 Console.WriteLine("Worker started.\n");
 
 // ── Run demos ─────────────────────────────────────────────────────────────────
-await RunDocumentIndexingDemoAsync(temporalClient, taskQueue, embeddingModel);
-await RunParallelIndexingDemoAsync(temporalClient, taskQueue, embeddingModel);
+await RunDocumentIndexingDemoAsync(
+    temporalClient,
+    workflowTaskQueue,
+    activityTaskQueue,
+    embeddingModel);
+await RunParallelIndexingDemoAsync(
+    temporalClient,
+    workflowTaskQueue,
+    activityTaskQueue,
+    embeddingModel);
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
@@ -112,7 +125,11 @@ Console.WriteLine("Done.");
 // returns the vector dimension and the dot-product similarity between the
 // first two chunks, proving they have distinct semantic representations.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string taskQueue, string modelId)
+static async Task RunDocumentIndexingDemoAsync(
+    ITemporalClient client,
+    string workflowTaskQueue,
+    string activityTaskQueue,
+    string modelId)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
     Console.WriteLine(" Demo: Durable Document Indexing (RAG embedding pipeline)");
@@ -152,13 +169,14 @@ static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string ta
         (DocumentIndexingWorkflow wf) => wf.RunAsync(new DocumentIndexingInput
         {
             Chunks = chunks,
+            ActivityTaskQueue = activityTaskQueue,
             ActivityTimeout = TimeSpan.FromMinutes(2),
             ModelId = modelId,
         }),
         new WorkflowOptions
         {
             Id = workflowId,
-            TaskQueue = taskQueue,
+            TaskQueue = workflowTaskQueue,
         });
 
     sw.Stop();
@@ -194,7 +212,11 @@ static async Task RunDocumentIndexingDemoAsync(ITemporalClient client, string ta
 // in a single scheduling round rather than waiting for each to complete before
 // starting the next. Contrast with the sequential demo above.
 // ═════════════════════════════════════════════════════════════════════════════
-static async Task RunParallelIndexingDemoAsync(ITemporalClient client, string taskQueue, string modelId)
+static async Task RunParallelIndexingDemoAsync(
+    ITemporalClient client,
+    string workflowTaskQueue,
+    string activityTaskQueue,
+    string modelId)
 {
     Console.WriteLine("════════════════════════════════════════════════════════");
     Console.WriteLine(" Demo: Parallel Document Indexing (fan-out embedding)");
@@ -247,13 +269,14 @@ static async Task RunParallelIndexingDemoAsync(ITemporalClient client, string ta
         (ParallelDocumentIndexingWorkflow wf) => wf.RunAsync(new DocumentIndexingInput
         {
             Chunks = chunks,
+            ActivityTaskQueue = activityTaskQueue,
             ActivityTimeout = TimeSpan.FromMinutes(2),
             ModelId = modelId,
         }),
         new WorkflowOptions
         {
             Id = workflowId,
-            TaskQueue = taskQueue,
+            TaskQueue = workflowTaskQueue,
         });
 
     sw.Stop();

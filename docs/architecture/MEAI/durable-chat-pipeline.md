@@ -60,9 +60,28 @@ The default converter preserves arbitrary user properties by JSON content. Becau
 runtime types are not promised. Library-owned getters normalize this shape for factory/client keys,
 tags, activity and heartbeat timeouts, and maximum retry attempts.
 
+## Direct-adapter task-queue boundary
+
+The public `DurableChatClient` and `DurableEmbeddingGenerator` adapters can be constructed inside a
+custom workflow. Their `DurableExecutionOptions.TaskQueue` is assigned directly to the Temporal
+`ActivityOptions.TaskQueue` for each provider call:
+
+```
+custom workflow worker [workflow task queue]
+  -> DurableChatClient / DurableEmbeddingGenerator
+  -> Temporal activity [DurableExecutionOptions.TaskQueue]
+  -> worker-side IChatClient / IEmbeddingGenerator
+```
+
+The configured queue does not change the workflow's own task queue. This makes workflow and AI
+activity workers independently deployable. If the adapter omitted the activity queue, the Temporal
+SDK would default the activity to the workflow queue; the adapters set it explicitly.
+
 ## Boundary and deployment rules
 
 - The client and all workers need `DurableAIDataConverter.Instance`.
 - Every worker on the task queue must register the same durable tool names and compatible schemas.
+- Direct-adapter activity workers must poll the queue configured on
+  `DurableExecutionOptions.TaskQueue`; workflow workers may poll a different queue.
 - `AsDurable()` is a separate direct-function primitive for custom workflows. It does not alter the
   managed-session contract.

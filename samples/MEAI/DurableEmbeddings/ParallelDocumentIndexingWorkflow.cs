@@ -51,6 +51,7 @@ public sealed class ParallelDocumentIndexingWorkflow
         // — embeddings are idempotent so retries are safe, but unbounded retries are not.
         var durableOptions = new DurableExecutionOptions
         {
+            TaskQueue = input.ActivityTaskQueue,
             ActivityTimeout = input.ActivityTimeout,
             RetryPolicy = new RetryPolicy { MaximumAttempts = 3 },
         };

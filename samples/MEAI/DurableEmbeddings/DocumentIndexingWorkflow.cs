@@ -19,6 +19,12 @@ public sealed class DocumentIndexingInput
     public required IReadOnlyList<string> Chunks { get; init; }
 
     /// <summary>
+    /// The task queue polled by the worker that hosts <c>DurableEmbeddingActivities</c>.
+    /// This can differ from the workflow worker's queue.
+    /// </summary>
+    public required string ActivityTaskQueue { get; init; }
+
+    /// <summary>
     /// Activity start-to-close timeout forwarded to DurableEmbeddingGenerator.
     /// </summary>
     public TimeSpan ActivityTimeout { get; init; } = TimeSpan.FromMinutes(2);
@@ -88,6 +94,7 @@ public sealed class DocumentIndexingWorkflow
         // — persistent failure should fail the workflow rather than spin indefinitely.
         var options = new DurableExecutionOptions
         {
+            TaskQueue = input.ActivityTaskQueue,
             ActivityTimeout = input.ActivityTimeout,
             // HeartbeatTimeout defaults to 2 minutes. The activity heartbeats once before
             // GenerateAsync (see DurableEmbeddingActivities.cs:47) — fine for short calls,

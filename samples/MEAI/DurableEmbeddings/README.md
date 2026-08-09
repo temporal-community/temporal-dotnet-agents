@@ -2,16 +2,20 @@
 
 ## Overview
 
-This sample demonstrates `IEmbeddingGenerator` wrapped with `UseDurableExecution()`, where each
-`GenerateAsync` call dispatches as a separate Temporal activity. Two workflow variants show
+This sample demonstrates direct `DurableEmbeddingGenerator` middleware, where each `GenerateAsync`
+call dispatches as a separate Temporal activity. Two workflow variants show
 sequential and parallel fan-out strategies for indexing a document corpus. If the worker crashes
 mid-batch, completed embeddings replay from workflow history — no API calls are repeated.
 
-- `UseDurableExecution()` on `EmbeddingGeneratorBuilder` — middleware that detects workflow context
+- `DurableEmbeddingGenerator` — middleware that detects workflow context and routes to the
+  configured activity task queue
 - `DocumentIndexingWorkflow` — sequential per-chunk embedding; one activity per chunk
 - `ParallelDocumentIndexingWorkflow` — concurrent fan-out via `Workflow.WhenAllAsync`
 - Crash recovery: completed activities replay from history; only remaining chunks are re-run
 - `DurableEmbeddingActivities` is registered automatically by `AddDurableAI()` (when used with `AddHostedTemporalWorker(...)`)
+- Separate task queues: workflow workers poll `durable-embeddings-workflows`; the direct adapter
+  routes embedding activities to `durable-embeddings-activities` through
+  `DurableExecutionOptions.TaskQueue`
 
 ## Architecture
 
@@ -25,6 +29,12 @@ DocumentIndexingWorkflow             ParallelDocumentIndexingWorkflow
            └─ IEmbeddingGenerator             └─ IEmbeddingGenerator (per activity)
                 └─ OpenAI API                      └─ OpenAI API
 ```
+
+The sample deliberately registers two workers. The workflows start on
+`durable-embeddings-workflows`, while the worker containing `DurableEmbeddingActivities` polls
+`durable-embeddings-activities`. Each workflow input carries the activity queue into
+`DurableExecutionOptions.TaskQueue`; `DurableEmbeddingGenerator` assigns that value to the
+scheduled `ActivityOptions.TaskQueue`.
 
 ## Highlights
 

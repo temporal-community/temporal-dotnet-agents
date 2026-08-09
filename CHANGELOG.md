@@ -20,6 +20,8 @@
   mutations, rejected session replacement, and translated only at the `ChatClientAgent` leaf.
 - Retained the Temporal `agent.turn` span with upstream telemetry, enriched the actual sampled MAF
   `invoke_agent` ancestor with its correlation ID, and assigned GenAI usage to exactly one span.
+- Routed direct chat and embedding activities to `DurableExecutionOptions.TaskQueue`, enabling
+  workflow and AI activity workers to poll separate queues as the option contract specifies.
 
 ## [0.10.0] - 2026-07-13
 

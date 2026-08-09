@@ -59,6 +59,7 @@ public class DurableEmbeddingGeneratorTests
 
         var activityOptions = generator.CreateActivityOptions(options: null);
 
+        Assert.Equal("test", activityOptions.TaskQueue);
         Assert.NotNull(activityOptions.RetryPolicy);
         Assert.Equal(
             global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumAttempts,

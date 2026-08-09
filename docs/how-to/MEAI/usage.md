@@ -49,6 +49,12 @@ The same `ChatOptions` contract applies to direct `UseDurableExecution()` calls 
 workflows. A per-call factory key wins over `DefaultChatClientFactoryKey`; an empty string disables
 the worker default for that call.
 
+For direct chat and embedding adapters, `DurableExecutionOptions.TaskQueue` is copied to
+`ActivityOptions.TaskQueue` on every scheduled model activity. The workflow itself continues on
+the queue from its `WorkflowOptions`. This supports a split deployment where workflow workers poll
+`my-workflows` and provider/activity workers registered with `AddDurableAI()` poll
+`my-ai-activities`. Both queues may be the same, but they are not required to be.
+
 Serializable Temporal routing metadata remains in the durable payload until the activity selects
 and invokes the decorator. Decorators see those keys and must delegate through the inner client
 supplied to `Decorate`. The inner provider boundary removes all Temporal-owned keys while retaining

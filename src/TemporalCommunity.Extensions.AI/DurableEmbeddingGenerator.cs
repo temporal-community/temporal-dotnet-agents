@@ -64,6 +64,7 @@ public sealed class DurableEmbeddingGenerator(
     internal ActivityOptions CreateActivityOptions(EmbeddingGenerationOptions? options) =>
         new()
         {
+            TaskQueue = _durableOptions.TaskQueue,
             StartToCloseTimeout = _durableOptions.ActivityTimeout,
             HeartbeatTimeout = _durableOptions.HeartbeatTimeout,
             // A null policy would otherwise delegate to Temporal's unlimited server default.

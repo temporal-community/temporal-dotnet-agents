@@ -141,6 +141,12 @@ Register the real provider-side `IChatClient`, `AddDurableAI()`, and `SummaryWor
 worker. Workflow classes do not receive application DI services, and the workflow-local sentinel
 must never perform provider I/O.
 
+`DurableExecutionOptions.TaskQueue` is the activity destination for direct chat and embedding
+adapters, not an instruction to move the current workflow. A deployment may therefore register
+`SummaryWorkflow` on `summary-workflows` and register `AddDurableAI()` activities on
+`durable-ai-activities`; setting the adapter task queue to `durable-ai-activities` routes the model
+call to the provider worker. Sharing one queue remains supported.
+
 `AIFunction.AsDurable()` is likewise for a custom workflow that explicitly invokes a known
 function. The activity worker must register that function with `AddDurableTools`.
 

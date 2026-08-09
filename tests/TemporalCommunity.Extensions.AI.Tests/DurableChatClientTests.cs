@@ -78,6 +78,7 @@ public class DurableChatClientTests
 
         var activityOptions = client.CreateActivityOptions();
 
+        Assert.Equal("test", activityOptions.TaskQueue);
         Assert.NotNull(activityOptions.RetryPolicy);
         Assert.Equal(
             global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumAttempts,

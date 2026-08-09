@@ -163,6 +163,7 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
     {
         var activityOptions = new ActivityOptions
         {
+            TaskQueue = _durableOptions.TaskQueue,
             StartToCloseTimeout = chatOptions.GetActivityTimeout() ?? _durableOptions.ActivityTimeout,
             HeartbeatTimeout = chatOptions.GetHeartbeatTimeout() ?? _durableOptions.HeartbeatTimeout,
             // A null policy would otherwise delegate to Temporal's unlimited server default.
