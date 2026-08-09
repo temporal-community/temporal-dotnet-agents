@@ -39,10 +39,13 @@ public class AgentPipelineIntegrationTests
             var proxy = host.Services.GetTemporalAgentProxy("PipelineAgent");
             var session = await proxy.CreateSessionAsync();
             var response = await proxy.RunAsync("hello", session);
+            var secondResponse = await proxy.RunAsync("again", session);
 
             Assert.Contains("hello", response.Text);
-            Assert.Equal(1, observation.BeforeCount);
-            Assert.Equal(1, observation.AfterCount);
+            Assert.Contains("again", secondResponse.Text);
+            Assert.Equal(2, observation.BeforeCount);
+            Assert.Equal(2, observation.AfterCount);
+            Assert.Equal(3, observation.ConstructionCount); // one startup validation + two activities
         }
         finally
         {
@@ -54,12 +57,16 @@ public class AgentPipelineIntegrationTests
     {
         public int BeforeCount;
         public int AfterCount;
+        public int ConstructionCount;
     }
 
     private sealed class ObservingDelegatingAgent(
         AIAgent inner,
         PipelineObservation observation) : DelegatingAIAgent(inner)
     {
+        public int ConstructionOrdinal { get; } =
+            Interlocked.Increment(ref observation.ConstructionCount);
+
         protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
             IEnumerable<ChatMessage> messages,
             AgentSession? session = null,

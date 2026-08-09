@@ -174,6 +174,19 @@ Do not return a separate agent from the factory, and do not hide `inner` inside 
 `ChatClientAgent` remains the durable model-call leaf. Request-level short-circuiting inside a
 valid `DelegatingAIAgent` remains supported.
 
+The pipeline callback runs once during worker-startup validation and once for each
+`RunDurableAgentStep` activity attempt, including retries. Both validation and live construction
+use a DI scope, so middleware factories may resolve scoped dependencies. Treat wrapper fields as
+attempt-local, never session-local.
+
+Custom middleware wrappers must not implement `IDisposable` or `IAsyncDisposable`: MAF 1.17.0 does
+not expose whether a factory-created wrapper or DI owns that instance, so the library rejects that
+ambiguous shape. Put resource-owning dependencies in the activity DI scope instead. The one
+supported exception is MAF's built-in `OpenTelemetryAgent`; the library knows that wrapper owns
+its internal telemetry client and disposes it at the end of each validation or activity build.
+If `AIAgentBuilder.Build` throws before returning a root, MAF does not expose any partially built
+wrappers, so this library cannot dispose inaccessible instances.
+
 `AIContextProvider.InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per `RunDurableAgentStep` activity). A turn that takes 3 LLM-step iterations to converge will see 3 invocation pairs. Make these hooks idempotent and cheap, or cache results via `StateBag` to skip redundant work within a turn.
 
 For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).

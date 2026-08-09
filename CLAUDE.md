@@ -75,6 +75,11 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 
 **`AddDurableAgent` is the only registration path in v0.3.** A single fluent `DurableAgentBuilder` consolidates `ChatClient`, tools (with per-tool retry overrides via `DurableToolOptions`), context providers, per-agent timeouts, and external history. DI access happens via per-slot factories on the builder — no `BuildServiceProvider()` bootstrap, no string-keyed dictionaries. Each LLM call dispatches a separate `RunDurableAgentStep` activity; each tool call dispatches a separately named `InvokeAgentTool` activity (per-agent local registry, distinct from MEAI's flat `InvokeFunction`). The library composes the chat pipeline with `UseProvidedChatClientAsIs = true` so users do NOT call `.UseFunctionInvocation()` on their `IChatClient`.
 
+`ConfigureAgentPipeline` is dry-built once at startup in a validation scope and built once per
+`RunDurableAgentStep` activity attempt in that attempt's DI scope. No pipeline is cached in the
+blueprint. Custom wrappers must be transparent, non-disposable `DelegatingAIAgent` instances;
+MAF's built-in `OpenTelemetryAgent` is owned and disposed by the per-build pipeline lease.
+
 **Configuration**: see `docs/how-to/MAF/usage.md` for the full `TemporalAgentsOptions` reference. Worker-level defaults are prefixed `Default*` (e.g. `DefaultActivityTimeout`, `DefaultHeartbeatTimeout`, `DefaultApprovalTimeout`, `DefaultMaxEntryCount`, `DefaultRetryPolicy`, `DefaultHistoryReducer`, `DefaultTimeToLive`); per-agent overrides on `DurableAgentBuilder` use the unprefixed names. Inheritance rule: `effective = registration.X ?? options.DefaultX`.
 
 **Two agent types** (use the right one for context):

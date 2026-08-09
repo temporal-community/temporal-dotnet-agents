@@ -33,7 +33,13 @@ In v0.3, `AddDurableAgent` lazily composes the agent at first activity dispatch 
 3. Build a `ChatClientAgent` with `UseProvidedChatClientAsIs = true` so MAF does **not** auto-wrap the client in `FunctionInvokingChatClient`. The tool loop is owned by the workflow (`AgentWorkflow.ExecuteDurableAgentTurnAsync`) which dispatches each LLM call as a separate `RunDurableAgentStep` activity and each tool call as a separate `InvokeAgentTool` activity, fanned out via `Workflow.WhenAllAsync`.
 4. Cache the composed agent on `AgentActivities._durableAgentCache`.
 
-Each `RunDurableAgentStep` activity calls `IChatClient.GetStreamingResponseAsync` on the cached client with a freshly constructed `ChatOptions` (cloned from `registration.ChatOptions`, with library-stamped `Tools` / `Instructions` / `ResponseFormat`). Per-request tool filtering (`TemporalAgentRunOptions.EnableToolNames`) and response-format selection are applied to that `ChatOptions` before the call — they do **not** require an additional `ChatClientFactory` decorator.
+Each `RunDurableAgentStep` activity resolves the `IChatClient` from a fresh DI scope, builds one
+live `ChatClientAgent` middleware pipeline for that activity attempt, and calls
+`IChatClient.GetStreamingResponseAsync` with freshly constructed `ChatOptions` (cloned from
+`registration.ChatOptions`, with library-stamped `Tools` / `Instructions` / `ResponseFormat`).
+Per-request tool filtering (`TemporalAgentRunOptions.EnableToolNames`) and response-format
+selection are applied to that `ChatOptions` before the call — they do **not** require an
+additional `ChatClientFactory` decorator.
 
 The cleanest interception point for application code is therefore the `agent.ChatClient` factory itself: return a decorated `IChatClient` from the factory and every `RunDurableAgentStep` activity sees calls flow through it. Because the factory runs inside the activity (not on the workflow side), OTel spans, logs, and metrics emitted by the decorator nest naturally inside the activity's existing trace context.
 

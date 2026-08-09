@@ -218,11 +218,12 @@ public sealed class DurableAgentBuilder
     /// pipeline.Use(inner => new OpaqueAgent(inner));     // rejected: not DelegatingAIAgent
     /// </code>
     /// <para>
-    /// <b>Construction-idempotency contract.</b> Decorators added through this callback are
-    /// constructed twice per agent registration per worker-process lifetime — once at startup
-    /// validation (C-check dry-run) and once at first activity dispatch. Decorators with
-    /// side-effect-bearing constructors (file handles, listeners, network connections) must
-    /// defer those side effects to <c>RunAsync</c> or use lazy initialization patterns.
+    /// <b>Construction and lifetime contract.</b> The callback runs once during startup validation
+    /// and once for every <c>RunDurableAgentStep</c> activity attempt, including retries. Each
+    /// live build uses that activity's scoped service provider. Custom wrappers must not implement
+    /// <see cref="IDisposable"/> or <see cref="IAsyncDisposable"/> because MAF does not expose
+    /// factory ownership; inject resource-owning dependencies from the activity scope instead.
+    /// The library owns and disposes MAF's built-in <see cref="OpenTelemetryAgent"/> wrapper.
     /// </para>
     /// <para>
     /// <b>Forbidden middleware.</b> Calling <c>.Use(funcInvocationCallback)</c> (the agent-side

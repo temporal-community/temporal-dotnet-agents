@@ -12,7 +12,7 @@ The extension builds a fresh `ChatClientAgent` inside each LLM-step activity fro
 | Instructions/messages-only `AIContextProvider` | Supported | It runs once per LLM step. Keep session state in `AgentSession.StateBag`; make external effects safe to retry. |
 | Static provider tools declared through `IDurableToolSource` | Supported | The declarations are registered as Temporal tool activities. |
 | Static tools supplied through `AddContextProvider(provider, durableTools)` | Supported | Use this adapter path when the provider type cannot implement `IDurableToolSource`. |
-| Transparent `DelegatingAIAgent` middleware via `ConfigureAgentPipeline` | Supported with limits | It must pass the supplied `inner` agent to `base(inner)` so the exact library-created `ChatClientAgent` remains reachable. It cannot own tools, history, or mutable session state. |
+| Transparent `DelegatingAIAgent` middleware via `ConfigureAgentPipeline` | Supported with limits | It must pass the supplied `inner` agent to `base(inner)` so the exact library-created `ChatClientAgent` remains reachable. Its fields are activity-attempt-local, not session-local, and the wrapper must not implement `IDisposable` or `IAsyncDisposable`. |
 | `OpenTelemetryAgent` / `OpenTelemetryChatClient` | Supported | The extension detects them to avoid emitting duplicate agent-turn telemetry. |
 
 ## Excluded inputs
@@ -22,6 +22,7 @@ The extension builds a fresh `ChatClientAgent` inside each LLM-step activity fro
 | Arbitrary caller-built `AIAgent` | Not accepted | Durable registration takes an `IChatClient`; `A2AAgent`, graph agents, and their session protocols remain outside this contract. |
 | Middleware factory that returns an unrelated agent | Rejected | It removes the library-created `ChatClientAgent`, so the configured provider and durable model/tool boundary are no longer guaranteed. |
 | Opaque `AIAgent` wrapper | Rejected | A non-`DelegatingAIAgent` wrapper is not structurally inspectable, even if it privately stores and forwards to the supplied agent. |
+| Custom disposable `DelegatingAIAgent` wrapper | Rejected | MAF 1.17.0 exposes no factory/DI ownership metadata. Put resource-owning dependencies in the activity scope; the library only owns the known `OpenTelemetryAgent` wrapper. |
 | Function-invocation middleware or `FunctionInvokingChatClient` | Rejected | Inline function invocation bypasses durable tool activities, retries, approval, and Temporal visibility. |
 | Tools dynamically returned by `AIContextProvider.InvokingAsync` | Disabled | The activity drops them and logs an error. Convert them into static durable declarations. |
 | Provider-owned history or external writes (for example `ChatHistoryMemoryProvider`) | Unsupported | `InvokedAsync` runs in a retryable activity, and no atomic idempotent provider-history contract exists. |
@@ -40,6 +41,10 @@ For every LLM step, the activity restores `TemporalAgentSession` from the serial
 activity attempt. Every custom wrapper must derive from `DelegatingAIAgent` and pass the factory's
 exact `inner` argument to `base(inner)`. The library validates reference identity through the
 resulting delegating chain at startup and again for live activity builds.
+
+Startup validation uses a fresh DI scope. Every activity attempt, including a retry, constructs a
+new live chain from that attempt's scope and disposes MAF's built-in `OpenTelemetryAgent` before
+disposing the scope. No middleware object or mutable field is carried between attempts.
 
 This is a structural requirement, independent of request behavior. A supported middleware may
 short-circuit an individual run, recover from an exception, or replace messages/options while the

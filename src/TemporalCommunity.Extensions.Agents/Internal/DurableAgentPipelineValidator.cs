@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.Agents.Testing;
@@ -15,7 +16,7 @@ namespace TemporalCommunity.Extensions.Agents.Internal;
 /// <para>
 /// <b>Why it runs at IPostConfigureOptions time.</b> The <see cref="DurableAgentBuilder.ToRegistration"/>
 /// site doesn't have an <see cref="IServiceProvider"/> available. <c>IPostConfigureOptions</c> is
-/// the earliest lifecycle hook with the worker's root <see cref="IServiceProvider"/> resolved —
+/// the earliest lifecycle hook with the worker's <see cref="IServiceScopeFactory"/> resolved —
 /// the same hook the data-converter wiring uses in <see cref="TemporalAgentsRegistrar"/>. This
 /// runs once at host startup before any workflow can dispatch an activity, so misconfigurations
 /// fail loudly at worker boot rather than at first conversation.
@@ -75,25 +76,24 @@ internal sealed class DurableAgentPipelineValidator
         "The function invocation middleware can only be used with";
 
     private readonly TemporalAgentsOptions _agentsOptions;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DurableAgentPipelineValidator"/> class.
     /// </summary>
     /// <param name="agentsOptions">The shared agents options snapshot.</param>
-    /// <param name="serviceProvider">
-    /// The worker's root service provider. Required because MAF's <c>UseLogging()</c> decorator
-    /// resolves <c>ILoggerFactory</c> from the service provider during <c>Build()</c>; passing
-    /// <see langword="null"/> would cause that decorator to throw.
+    /// <param name="serviceScopeFactory">
+    /// Creates a validation scope for each agent so middleware factories can resolve scoped
+    /// dependencies without promoting them to the worker root.
     /// </param>
     public DurableAgentPipelineValidator(
         TemporalAgentsOptions agentsOptions,
-        IServiceProvider serviceProvider)
+        IServiceScopeFactory serviceScopeFactory)
     {
         ArgumentNullException.ThrowIfNull(agentsOptions);
-        ArgumentNullException.ThrowIfNull(serviceProvider);
+        ArgumentNullException.ThrowIfNull(serviceScopeFactory);
         _agentsOptions = agentsOptions;
-        _serviceProvider = serviceProvider;
+        _serviceScopeFactory = serviceScopeFactory;
     }
 
     /// <inheritdoc/>
@@ -123,7 +123,11 @@ internal sealed class DurableAgentPipelineValidator
                 continue;
             }
 
-            ValidateAgentPipeline(agentName, configurePipeline);
+            using var validationScope = _serviceScopeFactory.CreateScope();
+            ValidateAgentPipeline(
+                agentName,
+                configurePipeline,
+                validationScope.ServiceProvider);
         }
     }
 
@@ -136,15 +140,18 @@ internal sealed class DurableAgentPipelineValidator
     /// <param name="configurePipeline">User's pipeline-configuration callback.</param>
     private void ValidateAgentPipeline(
         string agentName,
-        Action<AIAgentBuilder> configurePipeline)
+        Action<AIAgentBuilder> configurePipeline,
+        IServiceProvider scopedServices)
     {
-        AIAgent built;
+        AgentPipelineLease pipeline;
 
         try
         {
-            var builder = new AIAgentBuilder(NoOpAgent.Instance);
-            configurePipeline.Invoke(builder);
-            built = builder.Build(_serviceProvider);
+            pipeline = AgentPipelineComposer.Compose(
+                agentName,
+                NoOpAgent.Instance,
+                configurePipeline,
+                scopedServices);
         }
         catch (InvalidOperationException ex)
             when (ex.Message.StartsWith(
@@ -163,21 +170,19 @@ internal sealed class DurableAgentPipelineValidator
             };
         }
 
-        DurableAgentPipelineTopology.EnsurePreservesInnerAgent(
-            agentName,
-            built,
-            NoOpAgent.Instance);
-
-        // Path B: walk the built chain.
-        foreach (var link in AgentChainWalker.WalkAIAgent(built))
+        using (pipeline)
         {
-            if (link.GetType().FullName == FunctionInvocationDelegatingAgentFullName)
+            // Path B: walk the built chain.
+            foreach (var link in AgentChainWalker.WalkAIAgent(pipeline.Agent))
             {
-                throw new DurableFunctionInvocationConflictException(
-                    BuildConflictMessage(agentName, FunctionInvocationDelegatingAgentFullName))
+                if (link.GetType().FullName == FunctionInvocationDelegatingAgentFullName)
                 {
-                    OffendingType = FunctionInvocationDelegatingAgentFullName,
-                };
+                    throw new DurableFunctionInvocationConflictException(
+                        BuildConflictMessage(agentName, FunctionInvocationDelegatingAgentFullName))
+                    {
+                        OffendingType = FunctionInvocationDelegatingAgentFullName,
+                    };
+                }
             }
         }
     }

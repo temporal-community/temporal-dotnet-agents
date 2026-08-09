@@ -14,17 +14,15 @@ namespace TemporalCommunity.Extensions.Agents.Testing;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Primary use case — construction-idempotency tests.</b> User-supplied
+/// <b>Primary use case — repeatable-construction tests.</b> User-supplied
 /// <see cref="DelegatingAIAgent"/> decorators registered via
-/// <c>DurableAgentBuilder.ConfigureAgentPipeline</c> are constructed twice per agent registration
-/// per worker process — once for startup validation (dry-run) and once on first activity dispatch.
-/// Users testing their decorators against this contract can use <see cref="Instance"/> as the
-/// inner agent for both constructions in a unit test:
+/// <c>DurableAgentBuilder.ConfigureAgentPipeline</c> are constructed once for startup validation
+/// and once for every LLM-step activity attempt, including retries. Users can use
+/// <see cref="Instance"/> as the inner agent when testing that construction is side-effect free:
 /// </para>
 /// <code>
 /// new MyDecorator(NoOpAgent.Instance, deps);  // validation build
-/// new MyDecorator(NoOpAgent.Instance, deps);  // real-use build
-/// Assert.Equal(2, MyDecorator.ConstructionCount);
+/// new MyDecorator(NoOpAgent.Instance, deps);  // one activity-attempt build
 /// </code>
 /// <para>
 /// <b>Secondary use case — library-internal dry-run validation.</b> The C-check that runs at

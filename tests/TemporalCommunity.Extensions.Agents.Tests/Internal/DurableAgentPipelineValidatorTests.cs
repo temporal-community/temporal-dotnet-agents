@@ -162,6 +162,71 @@ public class DurableAgentPipelineValidatorTests
     }
 
     [Fact]
+    public void PostConfigure_ScopedMiddlewareDependency_UsesValidationScope()
+    {
+        ScopedMarker? resolvedMarker = null;
+        var (validator, options) = BuildValidator(
+            opts =>
+            {
+                opts.AddDurableAgent("scoped-agent", agent =>
+                {
+                    agent.ChatClient = _ => new NoopChatClient();
+                    agent.ConfigureAgentPipeline = builder => builder.Use((inner, services) =>
+                        new ScopedDelegatingAgent(
+                            inner,
+                            resolvedMarker = services.GetRequiredService<ScopedMarker>()));
+                });
+            },
+            services => services.AddScoped<ScopedMarker>(),
+            validateScopes: true);
+
+        var ex = Record.Exception(() => validator.PostConfigure(null, options));
+
+        Assert.Null(ex);
+        Assert.NotNull(resolvedMarker);
+    }
+
+    [Fact]
+    public void PostConfigure_RejectsCustomDisposableDelegatingAgent()
+    {
+        var (validator, options) = BuildValidator(opts =>
+        {
+            opts.AddDurableAgent("disposable-agent", agent =>
+            {
+                agent.ChatClient = _ => new NoopChatClient();
+                agent.ConfigureAgentPipeline = builder => builder.Use(inner =>
+                    new DisposableDelegatingAgent(inner));
+            });
+        });
+
+        var ex = Assert.Throws<DurableConfigurationException>(
+            () => validator.PostConfigure(null, options));
+
+        Assert.Contains("disposable-agent", ex.Message);
+        Assert.Contains("ownership", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PostConfigure_RejectsCustomAsyncDisposableDelegatingAgent()
+    {
+        var (validator, options) = BuildValidator(opts =>
+        {
+            opts.AddDurableAgent("async-disposable-agent", agent =>
+            {
+                agent.ChatClient = _ => new NoopChatClient();
+                agent.ConfigureAgentPipeline = builder => builder.Use(inner =>
+                    new AsyncDisposableDelegatingAgent(inner));
+            });
+        });
+
+        var ex = Assert.Throws<DurableConfigurationException>(
+            () => validator.PostConfigure(null, options));
+
+        Assert.Contains("async-disposable-agent", ex.Message);
+        Assert.Contains("ownership", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void PostConfigure_RejectsOpaqueAIAgentThatManuallyDelegates()
     {
         var (validator, options) = BuildValidator(opts =>
@@ -264,16 +329,25 @@ public class DurableAgentPipelineValidatorTests
     // =========================================================================
 
     private static (DurableAgentPipelineValidator Validator, TemporalWorkerServiceOptions WorkerOptions)
-        BuildValidator(Action<TemporalAgentsOptions>? configure = null)
+        BuildValidator(
+            Action<TemporalAgentsOptions>? configure = null,
+            Action<IServiceCollection>? configureServices = null,
+            bool validateScopes = false)
     {
         var agentsOptions = TemporalAgentsOptionsTestAccessor.New();
         configure?.Invoke(agentsOptions);
 
         var services = new ServiceCollection();
         services.AddLogging();
-        var serviceProvider = services.BuildServiceProvider();
+        configureServices?.Invoke(services);
+        var serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateScopes = validateScopes,
+        });
 
-        var validator = new DurableAgentPipelineValidator(agentsOptions, serviceProvider);
+        var validator = new DurableAgentPipelineValidator(
+            agentsOptions,
+            serviceProvider.GetRequiredService<IServiceScopeFactory>());
         var workerOptions = new TemporalWorkerServiceOptions();
 
         return (validator, workerOptions);
@@ -311,6 +385,28 @@ public class DurableAgentPipelineValidatorTests
     private sealed class BenignDelegatingAgent : DelegatingAIAgent
     {
         public BenignDelegatingAgent(AIAgent inner) : base(inner) { }
+    }
+
+    private sealed class ScopedMarker;
+
+    private sealed class ScopedDelegatingAgent(AIAgent inner, ScopedMarker marker)
+        : DelegatingAIAgent(inner)
+    {
+        public ScopedMarker Marker { get; } = marker;
+    }
+
+    private sealed class DisposableDelegatingAgent(AIAgent inner)
+        : DelegatingAIAgent(inner), IDisposable
+    {
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class AsyncDisposableDelegatingAgent(AIAgent inner)
+        : DelegatingAIAgent(inner), IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class OpaqueForwardingAgent(AIAgent inner) : AIAgent

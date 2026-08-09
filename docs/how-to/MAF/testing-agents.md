@@ -122,6 +122,13 @@ library rejects factories that return an unrelated agent and opaque `AIAgent` su
 their forwarding target. A short-circuiting middleware is valid as long as its structural chain
 still preserves the supplied inner agent.
 
+Also test the actual construction contract: one validation construction at worker startup and one
+construction per LLM-step activity attempt, including every retry. Middleware factories receive a
+scoped service provider. Custom wrappers themselves must be non-disposable; inject disposable
+dependencies from the scope and let that scope own them. If the pipeline uses MAF's built-in
+`OpenTelemetryAgent`, verify that no new telemetry is emitted through that exact wrapper after the
+activity-owned pipeline is disposed.
+
 ### Testing TemporalAgentsOptions Configuration
 
 The fluent `.AddTemporalAgents()` API registers workflows, activities, keyed proxies, and the agent client. Test it by building a `ServiceCollection` and inspecting the resulting `IServiceProvider`:

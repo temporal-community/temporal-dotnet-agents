@@ -26,8 +26,8 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// Immutable blueprint for a durable agent registered via <c>TemporalAgentsOptions.AddDurableAgent</c>.
 /// Computed once at first activity dispatch (lazy) and reused for the lifetime of the worker.
 /// Contains only things that depend on registration <em>shape</em>, not live DI instances:
-/// the tool registry, frozen per-tool activity options, structural chain-walk booleans, and the
-/// source-of-truth <see cref="DurableAgentRegistration"/>. Live DI instances
+/// the tool registry, frozen per-tool activity options, and the source-of-truth
+/// <see cref="DurableAgentRegistration"/>. Live DI instances
 /// (<see cref="IChatClient"/>, context providers, tool interceptor, approval scope
 /// store) are resolved fresh per activity call via an <see cref="IServiceScope"/> so that scoped
 /// services (e.g. <c>DbContext</c>) are never captured as implicit captive singletons.
@@ -35,19 +35,10 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// <param name="Tools">Resolved per-agent tool registry keyed by case-insensitive name.</param>
 /// <param name="Registration">Source-of-truth registration snapshot from the builder.</param>
 /// <param name="AgentsOptions">Reference to the shared agents-options snapshot.</param>
-/// <param name="SuppressAgentTurnSpan">
-/// Step 3c.3 (2b-enriched OTel): when <see langword="true"/>, the activity skips emitting its
-/// own <c>agent.turn</c> span and instead tags <c>Activity.Current</c> with the
-/// Temporal-namespaced correlation ID — deferring the canonical GenAI span to MAF's
-/// <c>OpenTelemetryAgent</c> (or MEAI's <c>OpenTelemetryChatClient</c>) if either is present in
-/// the pipeline. Computed once at blueprint-build time via <c>AgentChainWalker</c> so the per-turn
-/// dispatch path does no extra walks.
-/// </param>
 internal sealed record AgentBlueprint(
     IReadOnlyDictionary<string, AIFunction> Tools,
     DurableAgentRegistration Registration,
     TemporalAgentsOptions AgentsOptions,
-    bool SuppressAgentTurnSpan,
     IReadOnlyList<AITool> ToolsAsAITools);
 
 /// <summary>
@@ -62,8 +53,8 @@ internal sealed class AgentActivities(
     private readonly ILogger _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<AgentActivities>();
 
     // Per-durable-agent blueprint cache. Computed lazily at first dispatch and reused for the
-    // lifetime of the worker. Contains only frozen config (tool registry, chain-walk booleans,
-    // registration shape) — no live DI instances. Live instances are resolved per call via scope.
+    // lifetime of the worker. Contains only frozen config (tool registry and registration shape)
+    // — no live DI instances. Live instances are resolved per call via scope.
     private readonly ConcurrentDictionary<string, AgentBlueprint> _blueprintCache =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -131,8 +122,10 @@ internal sealed class AgentActivities(
         var interceptorFactory = registration.ToolInterceptorFactory ?? agentsOptions.DefaultToolInterceptor;
         var toolInterceptor = interceptorFactory?.Invoke(scopedServices);
 
-        // Build a fresh AIAgent from the scoped IChatClient (and optional decorator pipeline).
-        var agent = BuildLiveAgent(blueprint, chatClient, scopedServices);
+        // Build and own a fresh AIAgent pipeline from the scoped IChatClient. The pipeline lease
+        // is declared after the DI scope so it is disposed before scoped services at method exit.
+        using var agentPipeline = BuildLiveAgentPipeline(blueprint, chatClient, scopedServices);
+        var agent = agentPipeline.Agent;
 
         // When the workflow was started by a proxy-only client, resolve
         // and return worker-side settings so the workflow can patch its input on the first turn.
@@ -177,7 +170,7 @@ internal sealed class AgentActivities(
 
         // LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
         // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire
-        // around the call. The agent is built fresh per call via BuildLiveAgent above.
+        // around the call. The agent is built fresh per call via BuildLiveAgentPipeline above.
 
         var augmentedMessages = messagesForLlm;
         if (contextProviders.Length > 0)
@@ -274,7 +267,9 @@ internal sealed class AgentActivities(
         // ID so the canonical GenAI semconv data (from MAF) carries our additive context too.
         // The `using var` keeps disposal correct: when suppressed, span is null and the using
         // statement is a no-op; when emitted, the span is disposed at method exit.
-        using var span = blueprint.SuppressAgentTurnSpan
+        var suppressAgentTurnSpan = agentPipeline.HasOpenTelemetryAgent
+            || AgentChainWalker.Contains<OpenTelemetryChatClient>(chatClient);
+        using var span = suppressAgentTurnSpan
             ? null
             : TemporalAgentTelemetry.ActivitySource.StartActivity(
                 TemporalAgentTelemetry.AgentTurnSpanName,
@@ -600,13 +595,8 @@ internal sealed class AgentActivities(
     /// <summary>
     /// Builds an <see cref="AgentBlueprint"/> for the named agent. Called at most once per agent
     /// name (per worker lifetime) — subsequent calls reuse the cached blueprint.
-    /// <para>
-    /// Resolves a temporary <see cref="IChatClient"/> from the root provider solely to perform the
-    /// structural chain-walk checks (function-invocation conflict, OTel suppression detection).
-    /// That temporary client is discarded immediately after the checks; it is NOT stored on the
-    /// blueprint. All per-call live instances are resolved fresh from an <see cref="IServiceScope"/>
-    /// inside each activity method.
-    /// </para>
+    /// Pipeline construction and structural checks occur at startup and once per live activity
+    /// attempt; blueprint creation does not construct middleware or resolve a chat client.
     /// </summary>
     private AgentBlueprint BuildAgentBlueprint(string name, IServiceProvider providerServices)
     {
@@ -646,83 +636,6 @@ internal sealed class AgentActivities(
             toolList.Add(resolved);
         }
 
-        // ── Structural chain-walk checks (computed once, result cached as bool) ────────
-        // Resolve a temporary IChatClient from the root provider only for structural inspection.
-        // This client is used to build a temporary ChatClientAgent for pipeline validation and
-        // OTel detection; it is discarded immediately after — NOT stored on the blueprint.
-        var tempChatClient = registration.ChatClient(providerServices);
-
-        var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
-        chatOptions.Instructions = registration.Instructions;
-        chatOptions.Tools = toolList.Count > 0 ? toolList.Cast<AITool>().ToList() : null;
-
-        var agentOptions = new ChatClientAgentOptions
-        {
-            Name = registration.Name,
-            Description = registration.Description,
-            ChatOptions = chatOptions,
-            AIContextProviders = null,
-            UseProvidedChatClientAsIs = true,
-        };
-
-        var tempChatClientAgent = new ChatClientAgent(tempChatClient, agentOptions);
-
-        var configurePipeline = registration.ConfigureAgentPipeline
-            ?? agentsOptions.DefaultConfigureAgentPipeline;
-
-        AIAgent tempAgent;
-        if (configurePipeline is null)
-        {
-            tempAgent = tempChatClientAgent;
-        }
-        else
-        {
-            var agentBuilder = new AIAgentBuilder(tempChatClientAgent);
-            configurePipeline.Invoke(agentBuilder);
-            tempAgent = agentBuilder.Build(providerServices);
-        }
-
-        Internal.DurableAgentPipelineTopology.EnsurePreservesInnerAgent(
-            name,
-            tempAgent,
-            tempChatClientAgent);
-
-        // Step 3c.3: B-check (runtime fallback to startup C-check). Walk the composed agent
-        // chain for FunctionInvocationDelegatingAgent (matched by Type.FullName because the
-        // type is internal sealed in Microsoft.Agents.AI). This catches misconfigurations the
-        // C-check at IPostConfigureOptions time couldn't reach — e.g., factory-deferred DI
-        // patterns where the chat-client factory isn't resolvable at host build time, or
-        // worker-only paths that bypass the IPostConfigureOptions hook entirely. Same exception
-        // shape, same OffendingType field as the C-check.
-        foreach (var link in AgentChainWalker.WalkAIAgent(tempAgent))
-        {
-            if (link.GetType().FullName == FunctionInvocationDelegatingAgentFullName)
-            {
-                throw new DurableFunctionInvocationConflictException(
-                    $"Agent '{name}' has '{FunctionInvocationDelegatingAgentFullName}' in its pipeline. " +
-                    "The durable agent library handles tool invocation as separate Temporal activities " +
-                    "(InvokeAgentTool); installing agent-side function-invocation middleware would " +
-                    "conflict with this contract and silently break per-tool durability. Remove the " +
-                    ".Use(functionInvocationCallback) / UseFunctionInvocation() call from your " +
-                    "ConfigureAgentPipeline configuration.")
-                {
-                    OffendingType = FunctionInvocationDelegatingAgentFullName,
-                };
-            }
-        }
-
-        // Step 3c.3: 2b-enriched OTel suppression detection. When the user installed
-        // OpenTelemetryAgent (agent-pipeline level) OR OpenTelemetryChatClient (chat-client
-        // level), suppress our own agent.turn span — otherwise downstream consumers receive
-        // duplicate gen_ai.usage.* attributes and cost-aggregation queries double-count.
-        // Computed once here using the temporary agent; the per-turn dispatch path reads the bool.
-        var hasOTelAgent = AgentChainWalker.Contains<OpenTelemetryAgent>(tempAgent);
-        var hasOTelChatClient = AgentChainWalker.Contains<OpenTelemetryChatClient>(tempChatClient);
-        var suppressAgentTurnSpan = hasOTelAgent || hasOTelChatClient;
-
-        // Discard tempAgent and tempChatClient — they are NOT stored on the blueprint.
-        // Per-call live instances are resolved fresh from an IServiceScope in each activity method.
-
         IReadOnlyList<AITool> toolsAsAITools = [.. resolvedTools.Values.Cast<AITool>()];
 
         // Audit-log provider-contributed tools so operators can confirm durable registration.
@@ -738,14 +651,14 @@ internal sealed class AgentActivities(
             resolvedTools,
             registration,
             agentsOptions,
-            suppressAgentTurnSpan,
             toolsAsAITools);
     }
 
-    // ── Per-call helper: build a live AIAgent from a scoped IChatClient ──────────────────────
-    // Creates a fresh ChatClientAgent (+ optional decorator pipeline) per activity call.
-    // This is the per-call equivalent of what BuildAgentBlueprint does once for structural checks.
-    private AIAgent BuildLiveAgent(AgentBlueprint blueprint, IChatClient chatClient, IServiceProvider scopedServices)
+    // ── Per-call helper: build and own a live AIAgent pipeline ───────────────────────────────
+    private AgentPipelineLease BuildLiveAgentPipeline(
+        AgentBlueprint blueprint,
+        IChatClient chatClient,
+        IServiceProvider scopedServices)
     {
         var registration = blueprint.Registration;
         var agentsOptions = blueprint.AgentsOptions;
@@ -773,24 +686,63 @@ internal sealed class AgentActivities(
         var configurePipeline = registration.ConfigureAgentPipeline
             ?? agentsOptions.DefaultConfigureAgentPipeline;
 
-        if (configurePipeline is null)
+        AgentPipelineLease pipeline;
+        try
         {
-            return chatClientAgent;
+            pipeline = AgentPipelineComposer.Compose(
+                registration.Name,
+                chatClientAgent,
+                configurePipeline,
+                scopedServices);
+        }
+        catch (InvalidOperationException ex)
+            when (ex.Message.StartsWith(
+                FunctionInvocationRejectMessagePrefix,
+                StringComparison.Ordinal))
+        {
+            throw BuildFunctionInvocationConflictException(registration.Name, ex);
         }
 
-        var agentBuilder = new AIAgentBuilder(chatClientAgent);
-        configurePipeline.Invoke(agentBuilder);
-        var builtAgent = agentBuilder.Build(scopedServices);
-        Internal.DurableAgentPipelineTopology.EnsurePreservesInnerAgent(
-            registration.Name,
-            builtAgent,
-            chatClientAgent);
-        return builtAgent;
+        foreach (var link in AgentChainWalker.WalkAIAgent(pipeline.Agent))
+        {
+            if (link.GetType().FullName == FunctionInvocationDelegatingAgentFullName)
+            {
+                pipeline.Dispose();
+                throw BuildFunctionInvocationConflictException(registration.Name);
+            }
+        }
+
+        return pipeline;
+    }
+
+    private static DurableFunctionInvocationConflictException BuildFunctionInvocationConflictException(
+        string agentName,
+        Exception? innerException = null)
+    {
+        var message =
+            $"Agent '{agentName}' has '{FunctionInvocationDelegatingAgentFullName}' in its pipeline. " +
+            "The durable agent library handles tool invocation as separate Temporal activities " +
+            "(InvokeAgentTool); installing agent-side function-invocation middleware would " +
+            "conflict with this contract and silently break per-tool durability. Remove the " +
+            ".Use(functionInvocationCallback) / UseFunctionInvocation() call from your " +
+            "ConfigureAgentPipeline configuration.";
+        return innerException is null
+            ? new DurableFunctionInvocationConflictException(message)
+            {
+                OffendingType = FunctionInvocationDelegatingAgentFullName,
+            }
+            : new DurableFunctionInvocationConflictException(message, innerException)
+            {
+                OffendingType = FunctionInvocationDelegatingAgentFullName,
+            };
     }
 
     /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
     private const string FunctionInvocationDelegatingAgentFullName =
         Internal.AgentInternalConstants.FunctionInvocationDelegatingAgentFullName;
+
+    private const string FunctionInvocationRejectMessagePrefix =
+        "The function invocation middleware can only be used with";
 
     /// <summary>
     /// Pre-tool lifecycle activity. Fires before <c>InvokeAgentTool</c> for each tool call in a

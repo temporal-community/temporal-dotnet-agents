@@ -13,6 +13,9 @@
 - Added startup and activity-time topology validation that rejects MAF middleware factories which
   replace or hide the library-created `ChatClientAgent` instead of preserving it through a
   `DelegatingAIAgent` chain.
+- Built MAF middleware from validation/activity DI scopes, removed the extra blueprint-time build,
+  and closed the known `OpenTelemetryAgent` lifetime while rejecting ownership-ambiguous custom
+  disposable wrappers.
 
 ## [0.10.0] - 2026-07-13
 

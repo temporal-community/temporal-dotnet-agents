@@ -66,26 +66,13 @@ public class AgentActivitiesContextProviderTests
     public async Task RunDurableAgentStep_SkipDryRun_RejectsSeveredLivePipelineBeforeInvocation()
     {
         var replacement = new CountingReplacementAgent();
-        var buildCount = 0;
         var (activities, _) = BuildHarness(opts =>
         {
             opts.SkipDryRunCCheck = true;
             opts.AddDurableAgent("SeveredAgent", agent =>
             {
                 agent.ChatClient = _ => new SimpleStreamingChatClient();
-                agent.ConfigureAgentPipeline = builder =>
-                {
-                    if (Interlocked.Increment(ref buildCount) == 1)
-                    {
-                        // The blueprint probe preserves the leaf. The live activity build below
-                        // is deliberately severed so the per-call fallback must catch it.
-                        builder.Use(inner => new RecordingDelegatingAgent(inner, null, null));
-                    }
-                    else
-                    {
-                        builder.Use(_ => replacement);
-                    }
-                };
+                agent.ConfigureAgentPipeline = builder => builder.Use(_ => replacement);
             });
         });
         var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
@@ -96,6 +83,29 @@ public class AgentActivitiesContextProviderTests
 
         Assert.Contains("SeveredAgent", ex.Message);
         Assert.Equal(0, replacement.StreamingRunCount);
+    }
+
+    [Fact]
+    public async Task RunDurableAgentStep_RejectsCustomDisposableLiveMiddleware()
+    {
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.SkipDryRunCCheck = true;
+            opts.AddDurableAgent("DisposableAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.ConfigureAgentPipeline = builder => builder.Use(inner =>
+                    new DisposableRecordingAgent(inner));
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        var ex = await Assert.ThrowsAsync<DurableConfigurationException>(
+            () => env.RunAsync(() =>
+                activities.RunDurableAgentStepAsync(MakeInput("DisposableAgent"))));
+
+        Assert.Contains("DisposableAgent", ex.Message);
+        Assert.Contains("ownership", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -414,6 +424,14 @@ public class AgentActivitiesContextProviderTests
                 yield return update;
             }
             after?.Invoke();
+        }
+    }
+
+    private sealed class DisposableRecordingAgent(AIAgent inner)
+        : DelegatingAIAgent(inner), IDisposable
+    {
+        public void Dispose()
+        {
         }
     }
 

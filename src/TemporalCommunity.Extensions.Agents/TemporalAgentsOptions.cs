@@ -192,10 +192,11 @@ public sealed class TemporalAgentsOptions
     /// pipeline.Use(inner => new OpaqueAgent(inner));     // rejected: not DelegatingAIAgent
     /// </code>
     /// <para>
-    /// Decorators added through this callback must be construction-idempotent — they may be
-    /// constructed twice per agent registration per worker process lifetime (once for startup
-    /// validation via the C-check, once on first activity dispatch). Defer side-effect-bearing
-    /// initialization to <c>RunAsync</c> rather than the constructor.
+    /// The callback runs once per registered agent during startup validation and once for every
+    /// live LLM-step activity attempt, including retries. Validation and live builds each receive
+    /// a scoped service provider. Custom wrappers must be non-disposable; resolve resource-owning
+    /// dependencies from that scope. The library owns and disposes MAF's built-in
+    /// <see cref="OpenTelemetryAgent"/> wrapper.
     /// </para>
     /// </remarks>
     public Action<AIAgentBuilder>? DefaultConfigureAgentPipeline { get; set; }

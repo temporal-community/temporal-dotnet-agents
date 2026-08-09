@@ -501,11 +501,20 @@ The signal handler starts a background task inside the workflow that follows the
 
 ### Blueprint construction and per-step composition
 
-In v0.3, the durable-agent dispatch path does not accept or cache a caller-built `AIAgent`. `AgentActivities` first builds an immutable blueprint, caching only registered durable tools and structural validation results. For every LLM-step activity attempt it then:
+In v0.3, the durable-agent dispatch path does not accept or cache a caller-built `AIAgent`.
+`AgentActivities` first builds an immutable blueprint that caches only registration and durable-tool
+shape; it does not resolve a chat client or construct middleware. For every LLM-step activity
+attempt it then:
 
 1. Creates an activity DI scope and resolves `IChatClient` through `registration.ChatClient`.
 2. Resolves each `AIContextProvider` through its factory from that scope, restores the `TemporalAgentSession` StateBag, and invokes the providers explicitly before and after the model call.
 3. Clones `registration.ChatOptions`, stamps `Instructions` and the blueprint's durable tools, and builds a fresh `ChatClientAgent` with `AIContextProviders = null` and `UseProvidedChatClientAsIs = true`.
+4. Builds and validates one configured `AIAgent` decorator chain from the same activity scope,
+   then disposes its supported owned wrapper (`OpenTelemetryAgent`) before disposing the scope.
+
+Worker startup performs one independent dry-run build per registered pipeline using a validation
+scope. There is no additional first-dispatch blueprint build. Consequently middleware is
+constructed once at startup and once per activity attempt; retries construct a new chain.
 
 The explicit provider loop is intentional: it makes StateBag serialization and the durable-tool boundary visible to `AgentActivities`, rather than allowing MAF's internal agent loop to own them.
 
