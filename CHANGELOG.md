@@ -2,9 +2,13 @@
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-08-09
+
 - Updated the tested dependency baseline to Microsoft.Extensions.AI 10.8.3 and
   Microsoft.Agents.AI 1.17.0, including their required OpenAI, logging, and
   System.Text.Json dependency floors.
+- Updated Temporalio, Temporalio.Extensions.Hosting, and
+  Temporalio.Extensions.OpenTelemetry to 1.17.0.
 - Fixed direct `UseDurableExecution()` chat calls so both non-streaming and buffered-streaming
   workflow continuations remain on Temporal's workflow task scheduler.
 - Preserved serializable chat routing/decorator metadata through durable transport, normalized its

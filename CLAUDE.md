@@ -14,7 +14,7 @@ This document gives load-bearing project context: structure, gotchas, behavioral
   `netstandard2.1` assets; samples and tests remain `net10.0`.
 - **Solution File**: `TemporalAgents.slnx` (.slnx format, not .sln)
 - **Minimum Temporal Service**: 1.31.0. Embedded tests pin Temporal CLI `v1.8.0` and verify its
-  Server 1.31.2 through `GetSystemInfo`; Temporalio NuGet packages remain at 1.16.0.
+  Server 1.31.2 through `GetSystemInfo`; Temporalio NuGet packages use 1.17.0.
 
 ---
 

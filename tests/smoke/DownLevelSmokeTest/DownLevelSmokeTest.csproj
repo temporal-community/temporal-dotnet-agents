@@ -58,7 +58,7 @@
     <!-- Host + hosting-worker plumbing used by AddDurableAI. Versions match the
          libraries' transitive expectations; restore will unify them. -->
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.0" />
-    <PackageReference Include="Temporalio.Extensions.Hosting" Version="1.16.0" />
+    <PackageReference Include="Temporalio.Extensions.Hosting" Version="1.17.0" />
   </ItemGroup>
 
 </Project>
