@@ -10,6 +10,9 @@
 - Preserved serializable chat routing/decorator metadata through durable transport, normalized its
   converter representation, retained ordinary MEAI options, and removed Temporal-private keys at
   the provider boundary for direct and managed chat calls.
+- Added startup and activity-time topology validation that rejects MAF middleware factories which
+  replace or hide the library-created `ChatClientAgent` instead of preserving it through a
+  `DelegatingAIAgent` chain.
 
 ## [0.10.0] - 2026-07-13
 

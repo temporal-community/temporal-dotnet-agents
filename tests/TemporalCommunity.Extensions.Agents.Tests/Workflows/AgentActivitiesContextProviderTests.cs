@@ -10,6 +10,7 @@ using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.Agents.Workflows;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Client;
 using Temporalio.Testing;
 using Xunit;
@@ -60,6 +61,68 @@ public class AgentActivitiesContextProviderTests
         };
 
     // ── Tests ──────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunDurableAgentStep_SkipDryRun_RejectsSeveredLivePipelineBeforeInvocation()
+    {
+        var replacement = new CountingReplacementAgent();
+        var buildCount = 0;
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.SkipDryRunCCheck = true;
+            opts.AddDurableAgent("SeveredAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.ConfigureAgentPipeline = builder =>
+                {
+                    if (Interlocked.Increment(ref buildCount) == 1)
+                    {
+                        // The blueprint probe preserves the leaf. The live activity build below
+                        // is deliberately severed so the per-call fallback must catch it.
+                        builder.Use(inner => new RecordingDelegatingAgent(inner, null, null));
+                    }
+                    else
+                    {
+                        builder.Use(_ => replacement);
+                    }
+                };
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        var ex = await Assert.ThrowsAsync<DurableConfigurationException>(
+            () => env.RunAsync(() =>
+                activities.RunDurableAgentStepAsync(MakeInput("SeveredAgent"))));
+
+        Assert.Contains("SeveredAgent", ex.Message);
+        Assert.Equal(0, replacement.StreamingRunCount);
+    }
+
+    [Fact]
+    public async Task RunDurableAgentStep_DelegatingMiddlewareRunsBeforeAndAfterModelStep()
+    {
+        var beforeCount = 0;
+        var afterCount = 0;
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("DelegatingAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.ConfigureAgentPipeline = builder => builder.Use(inner =>
+                    new RecordingDelegatingAgent(
+                        inner,
+                        () => Interlocked.Increment(ref beforeCount),
+                        () => Interlocked.Increment(ref afterCount)));
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        await env.RunAsync(() =>
+            activities.RunDurableAgentStepAsync(MakeInput("DelegatingAgent")));
+
+        Assert.Equal(1, beforeCount);
+        Assert.Equal(1, afterCount);
+    }
 
     /// <summary>
     /// When a context provider returns <see cref="AIContext.Tools"/>, exactly one
@@ -328,6 +391,69 @@ public class AgentActivitiesContextProviderTests
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
         public void Dispose() { }
+    }
+
+    private sealed class RecordingDelegatingAgent(
+        AIAgent inner,
+        Action? before,
+        Action? after) : DelegatingAIAgent(inner)
+    {
+        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            before?.Invoke();
+            await foreach (var update in base.RunCoreStreamingAsync(
+                messages,
+                session,
+                options,
+                cancellationToken))
+            {
+                yield return update;
+            }
+            after?.Invoke();
+        }
+    }
+
+    private sealed class CountingReplacementAgent : AIAgent
+    {
+        public int StreamingRunCount { get; private set; }
+
+        protected override ValueTask<AgentSession> CreateSessionCoreAsync(
+            CancellationToken cancellationToken = default) =>
+            new(new TemporalAgentSession(TemporalAgentSessionId.WithRandomKey("replacement")));
+
+        protected override ValueTask<System.Text.Json.JsonElement> SerializeSessionCoreAsync(
+            AgentSession session,
+            System.Text.Json.JsonSerializerOptions? jsonSerializerOptions = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        protected override ValueTask<AgentSession> DeserializeSessionCoreAsync(
+            System.Text.Json.JsonElement serializedState,
+            System.Text.Json.JsonSerializerOptions? jsonSerializerOptions = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        protected override Task<AgentResponse> RunCoreAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new AgentResponse());
+
+        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            StreamingRunCount++;
+            await Task.CompletedTask;
+            yield return new AgentResponseUpdate();
+        }
     }
 
     /// <summary>

@@ -115,6 +115,65 @@ Tool factories run once when the worker first builds its immutable agent bluepri
 
 The library composes the chat pipeline internally and passes `UseProvidedChatClientAsIs = true` to MAF so that `FunctionInvokingChatClient` is **not** auto-injected — the workflow owns the tool-dispatch loop. Register a bare `IChatClient` in DI (do not call `.UseFunctionInvocation()`).
 
+Custom agent middleware belongs in `ConfigureAgentPipeline`. Its wrapper must derive from
+`DelegatingAIAgent`, preserve the exact supplied `inner` agent through `base(inner)`, and delegate
+both run shapes it customizes:
+
+```csharp
+sealed class TimingAgent(AIAgent inner, ILogger<TimingAgent> logger)
+    : DelegatingAIAgent(inner)
+{
+    protected override async Task<AgentResponse> RunCoreAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            return await base.RunCoreAsync(messages, session, options, cancellationToken);
+        }
+        finally
+        {
+            logger.LogInformation("Agent run completed in {Elapsed}",
+                Stopwatch.GetElapsedTime(started));
+        }
+    }
+
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            await foreach (var update in base.RunCoreStreamingAsync(
+                messages, session, options, cancellationToken))
+            {
+                yield return update;
+            }
+        }
+        finally
+        {
+            logger.LogInformation("Agent stream completed in {Elapsed}",
+                Stopwatch.GetElapsedTime(started));
+        }
+    }
+}
+
+agent.ConfigureAgentPipeline = pipeline =>
+    pipeline.Use((inner, services) =>
+        new TimingAgent(inner, services.GetRequiredService<ILogger<TimingAgent>>()));
+```
+
+Do not return a separate agent from the factory, and do not hide `inner` inside a custom
+`AIAgent` subclass. Both shapes are rejected because the library cannot prove that its
+`ChatClientAgent` remains the durable model-call leaf. Request-level short-circuiting inside a
+valid `DelegatingAIAgent` remains supported.
+
 `AIContextProvider.InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per `RunDurableAgentStep` activity). A turn that takes 3 LLM-step iterations to converge will see 3 invocation pairs. Make these hooks idempotent and cheap, or cache results via `StateBag` to skip redundant work within a turn.
 
 For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).

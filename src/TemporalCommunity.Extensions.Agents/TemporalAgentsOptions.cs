@@ -182,6 +182,16 @@ public sealed class TemporalAgentsOptions
     /// <see cref="ChatClientAgent"/> the library constructs internally.
     /// </para>
     /// <para>
+    /// Custom wrapper classes must derive from <see cref="DelegatingAIAgent"/>, pass the factory's
+    /// supplied <c>inner</c> agent to their base constructor, and preserve that chain. Returning an
+    /// unrelated agent or an opaque <see cref="AIAgent"/> wrapper is rejected at validation or
+    /// activity dispatch because its durable leaf cannot be verified.
+    /// </para>
+    /// <code>
+    /// pipeline.Use(_ => unrelatedAgent);                 // rejected: replaces inner
+    /// pipeline.Use(inner => new OpaqueAgent(inner));     // rejected: not DelegatingAIAgent
+    /// </code>
+    /// <para>
     /// Decorators added through this callback must be construction-idempotent — they may be
     /// constructed twice per agent registration per worker process lifetime (once for startup
     /// validation via the C-check, once on first activity dispatch). Defer side-effect-bearing

@@ -208,6 +208,16 @@ public sealed class DurableAgentBuilder
     /// adds decorators around it via the supplied <see cref="AIAgentBuilder"/>.
     /// </para>
     /// <para>
+    /// Custom wrapper classes must derive from <see cref="DelegatingAIAgent"/>, pass the factory's
+    /// supplied <c>inner</c> agent to their base constructor, and preserve that chain. A factory
+    /// that returns an unrelated agent, or an opaque <see cref="AIAgent"/> subclass that privately
+    /// forwards calls, is rejected because the library cannot verify the durable leaf.
+    /// </para>
+    /// <code>
+    /// pipeline.Use(_ => unrelatedAgent);                 // rejected: replaces inner
+    /// pipeline.Use(inner => new OpaqueAgent(inner));     // rejected: not DelegatingAIAgent
+    /// </code>
+    /// <para>
     /// <b>Construction-idempotency contract.</b> Decorators added through this callback are
     /// constructed twice per agent registration per worker-process lifetime — once at startup
     /// validation (C-check dry-run) and once at first activity dispatch. Decorators with

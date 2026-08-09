@@ -163,6 +163,11 @@ internal sealed class DurableAgentPipelineValidator
             };
         }
 
+        DurableAgentPipelineTopology.EnsurePreservesInnerAgent(
+            agentName,
+            built,
+            NoOpAgent.Instance);
+
         // Path B: walk the built chain.
         foreach (var link in AgentChainWalker.WalkAIAgent(built))
         {

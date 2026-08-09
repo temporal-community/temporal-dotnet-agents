@@ -1,7 +1,10 @@
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using TemporalCommunity.Extensions.Agents.Internal;
+using TemporalCommunity.Extensions.Agents.Testing;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Extensions.Hosting;
 using Xunit;
@@ -87,6 +90,95 @@ public class DurableAgentPipelineValidatorTests
         var ex = Record.Exception(() => validator.PostConfigure(null, options));
 
         Assert.Null(ex);
+    }
+
+    [Fact]
+    public void PostConfigure_RejectsFactoryThatIgnoresInnerAgent()
+    {
+        var (validator, options) = BuildValidator(opts =>
+        {
+            opts.AddDurableAgent("replacement-agent", agent =>
+            {
+                agent.ChatClient = _ => new NoopChatClient();
+                agent.ConfigureAgentPipeline = builder =>
+                    builder.Use(_ => new NoOpAgent());
+            });
+        });
+
+        var ex = Assert.Throws<DurableConfigurationException>(
+            () => validator.PostConfigure(null, options));
+
+        Assert.Contains("replacement-agent", ex.Message);
+        Assert.Contains("DelegatingAIAgent", ex.Message);
+        Assert.Contains("inner", ex.Message);
+    }
+
+    [Fact]
+    public void PostConfigure_AcceptsDelegatingAgentThatPreservesInner()
+    {
+        var (validator, options) = BuildValidator(opts =>
+        {
+            opts.AddDurableAgent("preserved-agent", agent =>
+            {
+                agent.ChatClient = _ => new NoopChatClient();
+                agent.ConfigureAgentPipeline = builder =>
+                    builder.Use(inner => new BenignDelegatingAgent(inner));
+            });
+        });
+
+        var ex = Record.Exception(() => validator.PostConfigure(null, options));
+
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void PostConfigure_AcceptsMafLoggingPipeline()
+    {
+        var (validator, options) = BuildValidator(opts =>
+        {
+            opts.AddDurableAgent("logging-agent", agent =>
+            {
+                agent.ChatClient = _ => new NoopChatClient();
+                agent.ConfigureAgentPipeline = builder => builder.UseLogging();
+            });
+        });
+
+        Assert.Null(Record.Exception(() => validator.PostConfigure(null, options)));
+    }
+
+    [Fact]
+    public void PostConfigure_AcceptsMafOpenTelemetryPipeline()
+    {
+        var (validator, options) = BuildValidator(opts =>
+        {
+            opts.AddDurableAgent("otel-agent", agent =>
+            {
+                agent.ChatClient = _ => new NoopChatClient();
+                agent.ConfigureAgentPipeline = builder => builder.UseOpenTelemetry();
+            });
+        });
+
+        Assert.Null(Record.Exception(() => validator.PostConfigure(null, options)));
+    }
+
+    [Fact]
+    public void PostConfigure_RejectsOpaqueAIAgentThatManuallyDelegates()
+    {
+        var (validator, options) = BuildValidator(opts =>
+        {
+            opts.AddDurableAgent("opaque-agent", agent =>
+            {
+                agent.ChatClient = _ => new NoopChatClient();
+                agent.ConfigureAgentPipeline = builder =>
+                    builder.Use(inner => new OpaqueForwardingAgent(inner));
+            });
+        });
+
+        var ex = Assert.Throws<DurableConfigurationException>(
+            () => validator.PostConfigure(null, options));
+
+        Assert.Contains("opaque-agent", ex.Message);
+        Assert.Contains("DelegatingAIAgent", ex.Message);
     }
 
     [Fact]
@@ -219,5 +311,47 @@ public class DurableAgentPipelineValidatorTests
     private sealed class BenignDelegatingAgent : DelegatingAIAgent
     {
         public BenignDelegatingAgent(AIAgent inner) : base(inner) { }
+    }
+
+    private sealed class OpaqueForwardingAgent(AIAgent inner) : AIAgent
+    {
+        protected override ValueTask<AgentSession> CreateSessionCoreAsync(
+            CancellationToken cancellationToken = default) =>
+            inner.CreateSessionAsync(cancellationToken);
+
+        protected override ValueTask<JsonElement> SerializeSessionCoreAsync(
+            AgentSession session,
+            JsonSerializerOptions? jsonSerializerOptions = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        protected override ValueTask<AgentSession> DeserializeSessionCoreAsync(
+            JsonElement serializedState,
+            JsonSerializerOptions? jsonSerializerOptions = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        protected override Task<AgentResponse> RunCoreAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            inner.RunAsync(messages, session, options, cancellationToken);
+
+        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await foreach (var update in inner.RunStreamingAsync(
+                messages,
+                session,
+                options,
+                cancellationToken))
+            {
+                yield return update;
+            }
+        }
     }
 }

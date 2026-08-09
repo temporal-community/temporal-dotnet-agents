@@ -47,6 +47,17 @@ public class AgentChainWalkerTests
     }
 
     [Fact]
+    public void ContainsReference_AIAgent_UsesExactIdentity()
+    {
+        var leaf = new MarkerAIAgent();
+        var sameTypeButDifferentInstance = new MarkerAIAgent();
+        var outer = new PassThroughDelegatingAIAgent(leaf);
+
+        Assert.True(AgentChainWalker.ContainsReference(outer, leaf));
+        Assert.False(AgentChainWalker.ContainsReference(outer, sameTypeButDifferentInstance));
+    }
+
+    [Fact]
     public void Contains_OpenTelemetryAgent_DetectsWhenPresent()
     {
         var wrapped = new AIAgentBuilder(new MarkerAIAgent()).UseOpenTelemetry().Build();

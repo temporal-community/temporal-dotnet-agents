@@ -80,6 +80,25 @@ internal static class AgentChainWalker
         where T : class =>
         FindFirst<T>(root) is not null;
 
+    /// <summary>
+    /// Returns whether the exact <paramref name="expected"/> instance is reachable through the
+    /// inspectable <see cref="DelegatingAIAgent"/> chain rooted at <paramref name="root"/>.
+    /// </summary>
+    public static bool ContainsReference(AIAgent? root, AIAgent expected)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+
+        foreach (var link in WalkAIAgent(root))
+        {
+            if (ReferenceEquals(link, expected))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static T? FindFirst<T>(IChatClient? root)
         where T : class
     {

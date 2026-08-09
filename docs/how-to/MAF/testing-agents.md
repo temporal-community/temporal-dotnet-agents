@@ -96,6 +96,32 @@ internal sealed class CapturingChatClient : IChatClient
 }
 ```
 
+### Test custom middleware leaf preservation
+
+A custom `ConfigureAgentPipeline` wrapper should expose the factory's supplied inner agent through
+`DelegatingAIAgent`. Keep a test-visible reference in the wrapper and assert exact identity:
+
+```csharp
+sealed class TestMiddleware(AIAgent inner) : DelegatingAIAgent(inner)
+{
+    internal AIAgent SuppliedInner { get; } = inner;
+}
+
+[Fact]
+public void Middleware_PreservesSuppliedInnerAgent()
+{
+    var inner = NoOpAgent.Instance;
+    var middleware = new TestMiddleware(inner);
+
+    Assert.Same(inner, middleware.SuppliedInner);
+}
+```
+
+Also run worker-startup configuration tests with the real `ConfigureAgentPipeline` callback. The
+library rejects factories that return an unrelated agent and opaque `AIAgent` subclasses that hide
+their forwarding target. A short-circuiting middleware is valid as long as its structural chain
+still preserves the supplied inner agent.
+
 ### Testing TemporalAgentsOptions Configuration
 
 The fluent `.AddTemporalAgents()` API registers workflows, activities, keyed proxies, and the agent client. Test it by building a `ServiceCollection` and inspecting the resulting `IServiceProvider`:

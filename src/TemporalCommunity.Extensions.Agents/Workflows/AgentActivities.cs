@@ -682,6 +682,11 @@ internal sealed class AgentActivities(
             tempAgent = agentBuilder.Build(providerServices);
         }
 
+        Internal.DurableAgentPipelineTopology.EnsurePreservesInnerAgent(
+            name,
+            tempAgent,
+            tempChatClientAgent);
+
         // Step 3c.3: B-check (runtime fallback to startup C-check). Walk the composed agent
         // chain for FunctionInvocationDelegatingAgent (matched by Type.FullName because the
         // type is internal sealed in Microsoft.Agents.AI). This catches misconfigurations the
@@ -775,7 +780,12 @@ internal sealed class AgentActivities(
 
         var agentBuilder = new AIAgentBuilder(chatClientAgent);
         configurePipeline.Invoke(agentBuilder);
-        return agentBuilder.Build(scopedServices);
+        var builtAgent = agentBuilder.Build(scopedServices);
+        Internal.DurableAgentPipelineTopology.EnsurePreservesInnerAgent(
+            registration.Name,
+            builtAgent,
+            chatClientAgent);
+        return builtAgent;
     }
 
     /// <summary>Fully-qualified type name of MAF's internal function-invocation decorator.</summary>
