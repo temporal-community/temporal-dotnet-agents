@@ -79,6 +79,10 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 `RunDurableAgentStep` activity attempt in that attempt's DI scope. No pipeline is cached in the
 blueprint. Custom wrappers must be transparent, non-disposable `DelegatingAIAgent` instances;
 MAF's built-in `OpenTelemetryAgent` is owned and disposed by the per-build pipeline lease.
+During a live run, outer middleware and `TemporalAgentContext.Current.CurrentSession` share the
+exact restored `TemporalAgentSession`; middleware may make retry-safe StateBag changes but cannot
+replace the session. An innermost boundary passes `null` only to `ChatClientAgent`, which creates
+its required transient `ChatClientAgentSession`.
 
 **Configuration**: see `docs/how-to/MAF/usage.md` for the full `TemporalAgentsOptions` reference. Worker-level defaults are prefixed `Default*` (e.g. `DefaultActivityTimeout`, `DefaultHeartbeatTimeout`, `DefaultApprovalTimeout`, `DefaultMaxEntryCount`, `DefaultRetryPolicy`, `DefaultHistoryReducer`, `DefaultTimeToLive`); per-agent overrides on `DurableAgentBuilder` use the unprefixed names. Inheritance rule: `effective = registration.X ?? options.DefaultX`.
 

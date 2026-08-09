@@ -347,6 +347,79 @@ public class AgentActivitiesContextProviderTests
         Assert.Equal([0, 1], provider.ObservedCounts);
     }
 
+    [Fact]
+    public async Task RunDurableAgentStep_MiddlewareReceivesExactDurableSessionAndPersistsStateBag()
+    {
+        var observation = new MiddlewareSessionObservation();
+        var sessionId = TemporalAgentSessionId.WithRandomKey("MiddlewareSessionAgent");
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("MiddlewareSessionAgent", agent =>
+            {
+                agent.ChatClient = _ => new SessionCapturingChatClient(observation);
+                agent.ConfigureAgentPipeline = builder => builder.Use(inner =>
+                    new SessionObservingAgent(inner, observation));
+            });
+        });
+
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+        var first = await env.RunAsync(() => activities.RunDurableAgentStepAsync(new AgentStepInput
+        {
+            AgentName = "MiddlewareSessionAgent",
+            Request = new RunRequest("first"),
+            AccumulatedMessages = [new ChatMessage(ChatRole.User, "first")],
+            SessionId = sessionId,
+        }));
+        var second = await env.RunAsync(() => activities.RunDurableAgentStepAsync(new AgentStepInput
+        {
+            AgentName = "MiddlewareSessionAgent",
+            Request = new RunRequest("second"),
+            AccumulatedMessages = [new ChatMessage(ChatRole.User, "second")],
+            SessionId = sessionId,
+            SerializedStateBag = first.UpdatedStateBag,
+        }));
+
+        Assert.NotNull(first.UpdatedStateBag);
+        Assert.NotNull(second.UpdatedStateBag);
+        Assert.Equal([0, 1], observation.ObservedCounts);
+        Assert.All(observation.Sessions, session =>
+        {
+            var temporal = Assert.IsType<TemporalAgentSession>(session);
+            Assert.Equal(sessionId, temporal.SessionId);
+        });
+        Assert.All(observation.ContextMatchesSession, Assert.True);
+        Assert.All(observation.ContextMatchesAmbientSession, Assert.True);
+        Assert.All(observation.LeafSessionTypes, type =>
+            Assert.Equal("ChatClientAgentSession", type));
+    }
+
+    [Fact]
+    public async Task RunDurableAgentStep_RejectsMiddlewareSessionReplacementBeforeProviderCall()
+    {
+        var providerCalls = 0;
+        var replacement = new TemporalAgentSession(
+            TemporalAgentSessionId.WithRandomKey("ReplacementAgent"));
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("ReplacementAgent", agent =>
+            {
+                agent.ChatClient = _ => new SessionCapturingChatClient(
+                    new MiddlewareSessionObservation(),
+                    () => Interlocked.Increment(ref providerCalls));
+                agent.ConfigureAgentPipeline = builder => builder.Use(inner =>
+                    new SessionReplacingAgent(inner, replacement));
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        var ex = await Assert.ThrowsAsync<DurableConfigurationException>(() =>
+            env.RunAsync(() => activities.RunDurableAgentStepAsync(
+                MakeInput("ReplacementAgent"))));
+
+        Assert.Contains("replaced or removed", ex.Message);
+        Assert.Equal(0, providerCalls);
+    }
+
     // ── Test helpers ────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -401,6 +474,105 @@ public class AgentActivitiesContextProviderTests
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
         public void Dispose() { }
+    }
+
+    private sealed class MiddlewareSessionObservation
+    {
+        internal List<AgentSession?> Sessions { get; } = [];
+        internal List<int> ObservedCounts { get; } = [];
+        internal List<bool> ContextMatchesSession { get; } = [];
+        internal List<bool> ContextMatchesAmbientSession { get; } = [];
+        internal List<string?> LeafSessionTypes { get; } = [];
+    }
+
+    private sealed class SessionObservingAgent(
+        AIAgent inner,
+        MiddlewareSessionObservation observation) : DelegatingAIAgent(inner)
+    {
+        private const string CountKey = "test.middleware_session_count";
+
+        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            observation.Sessions.Add(session);
+            observation.ContextMatchesSession.Add(
+                ReferenceEquals(session, CurrentRunContext?.Session));
+            observation.ContextMatchesAmbientSession.Add(
+                ReferenceEquals(session, TemporalAgentContext.Current.CurrentSession));
+
+            var temporalSession = Assert.IsType<TemporalAgentSession>(session);
+            _ = temporalSession.StateBag.TryGetValue<MiddlewareCountState>(
+                CountKey,
+                out var state,
+                System.Text.Json.JsonSerializerOptions.Default);
+            var count = state?.Count ?? 0;
+            observation.ObservedCounts.Add(count);
+            temporalSession.StateBag.SetValue(
+                CountKey,
+                new MiddlewareCountState(count + 1),
+                System.Text.Json.JsonSerializerOptions.Default);
+
+            await foreach (var update in base.RunCoreStreamingAsync(
+                messages,
+                session,
+                options,
+                cancellationToken))
+            {
+                observation.ContextMatchesSession.Add(
+                    ReferenceEquals(session, CurrentRunContext?.Session));
+                yield return update;
+                observation.ContextMatchesSession.Add(
+                    ReferenceEquals(session, CurrentRunContext?.Session));
+            }
+
+            observation.ContextMatchesSession.Add(
+                ReferenceEquals(session, CurrentRunContext?.Session));
+        }
+
+        private sealed record MiddlewareCountState(int Count);
+    }
+
+    private sealed class SessionReplacingAgent(
+        AIAgent inner,
+        AgentSession replacement) : DelegatingAIAgent(inner)
+    {
+        protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            InnerAgent.RunStreamingAsync(messages, replacement, options, cancellationToken);
+    }
+
+    private sealed class SessionCapturingChatClient(
+        MiddlewareSessionObservation observation,
+        Action? onCall = null) : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            onCall?.Invoke();
+            observation.LeafSessionTypes.Add(AIAgent.CurrentRunContext?.Session?.GetType().Name);
+            await Task.CompletedTask;
+            yield return new ChatResponseUpdate(ChatRole.Assistant, string.Empty);
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
     }
 
     private sealed class RecordingDelegatingAgent(

@@ -198,6 +198,13 @@ public sealed class TemporalAgentsOptions
     /// dependencies from that scope. The library owns and disposes MAF's built-in
     /// <see cref="OpenTelemetryAgent"/> wrapper.
     /// </para>
+    /// <para>
+    /// Live middleware receives the restored
+    /// <see cref="TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession"/>. It may make
+    /// retry-safe <c>StateBag</c> changes but must forward the exact session instance. Replacing or
+    /// removing it is rejected; middleware that requires the leaf's transient
+    /// <c>ChatClientAgentSession</c> is unsupported.
+    /// </para>
     /// </remarks>
     public Action<AIAgentBuilder>? DefaultConfigureAgentPipeline { get; set; }
 

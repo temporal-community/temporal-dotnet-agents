@@ -16,6 +16,8 @@
 - Built MAF middleware from validation/activity DI scopes, removed the extra blueprint-time build,
   and closed the known `OpenTelemetryAgent` lifetime while rejecting ownership-ambiguous custom
   disposable wrappers.
+- Passed the restored `TemporalAgentSession` through outer MAF middleware, persisted its StateBag
+  mutations, rejected session replacement, and translated only at the `ChatClientAgent` leaf.
 
 ## [0.10.0] - 2026-07-13
 

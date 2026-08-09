@@ -226,6 +226,14 @@ public sealed class DurableAgentBuilder
     /// The library owns and disposes MAF's built-in <see cref="OpenTelemetryAgent"/> wrapper.
     /// </para>
     /// <para>
+    /// During a live activity, outer middleware receives the exact restored
+    /// <see cref="TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession"/> and may
+    /// update its <c>StateBag</c> with retry-safe state. It must forward that exact session
+    /// instance. Replacing it or passing <see langword="null"/> is rejected. The innermost
+    /// library boundary translates only the <see cref="ChatClientAgent"/> leaf to its transient
+    /// sealed session type; middleware that requires <c>ChatClientAgentSession</c> is unsupported.
+    /// </para>
+    /// <para>
     /// <b>Forbidden middleware.</b> Calling <c>.Use(funcInvocationCallback)</c> (the agent-side
     /// equivalent of <c>FunctionInvokingChatClient</c>) inside this callback is rejected at
     /// worker startup with <see cref="TemporalCommunity.Extensions.AI.Exceptions.DurableFunctionInvocationConflictException"/>

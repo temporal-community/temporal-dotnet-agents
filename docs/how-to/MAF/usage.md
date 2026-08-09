@@ -187,6 +187,35 @@ its internal telemetry client and disposes it at the end of each validation or a
 If `AIAgentBuilder.Build` throws before returning a root, MAF does not expose any partially built
 wrappers, so this library cannot dispose inaccessible instances.
 
+Live middleware receives the restored `TemporalAgentSession`. It may persist retry-safe state in
+the supplied session's `StateBag`, but it must pass the exact session object to `next`:
+
+```csharp
+sealed class AttemptCountingAgent(AIAgent inner) : DelegatingAIAgent(inner)
+{
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var durable = (TemporalAgentSession)session!;
+        // Read/write a JSON-serializable StateBag value here. The activity persists the bag.
+
+        await foreach (var update in base.RunCoreStreamingAsync(
+            messages, durable, options, cancellationToken))
+        {
+            yield return update;
+        }
+    }
+}
+```
+
+Do not pass `null` or substitute another session. The library rejects either shape because only the
+original restored StateBag is durably serialized. The final `ChatClientAgent` uses a separate,
+transient `ChatClientAgentSession` behind the library's innermost boundary; middleware that
+requires that leaf-specific type is not supported.
+
 `AIContextProvider.InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per `RunDurableAgentStep` activity). A turn that takes 3 LLM-step iterations to converge will see 3 invocation pairs. Make these hooks idempotent and cheap, or cache results via `StateBag` to skip redundant work within a turn.
 
 For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).

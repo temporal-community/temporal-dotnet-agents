@@ -14,17 +14,21 @@ internal static class AgentPipelineComposer
         string agentName,
         AIAgent innerAgent,
         Action<AIAgentBuilder>? configurePipeline,
-        IServiceProvider services)
+        IServiceProvider services,
+        Action<AIAgentBuilder>? appendInnermostPipeline = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
         ArgumentNullException.ThrowIfNull(innerAgent);
         ArgumentNullException.ThrowIfNull(services);
 
         AIAgent builtAgent = innerAgent;
-        if (configurePipeline is not null)
+        if (configurePipeline is not null || appendInnermostPipeline is not null)
         {
             var builder = new AIAgentBuilder(innerAgent);
-            configurePipeline(builder);
+            configurePipeline?.Invoke(builder);
+            // AIAgentBuilder applies factories in reverse. Appending library middleware after
+            // user middleware therefore places it immediately above the supplied leaf.
+            appendInnermostPipeline?.Invoke(builder);
             builtAgent = builder.Build(services);
         }
 

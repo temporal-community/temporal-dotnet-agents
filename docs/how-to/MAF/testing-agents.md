@@ -129,6 +129,14 @@ dependencies from the scope and let that scope own them. If the pipeline uses MA
 `OpenTelemetryAgent`, verify that no new telemetry is emitted through that exact wrapper after the
 activity-owned pipeline is disposed.
 
+For session-aware middleware, run the real activity path and assert all of the following: the
+middleware parameter is a `TemporalAgentSession`; it is reference-equal to
+`AIAgent.CurrentRunContext.Session` and `TemporalAgentContext.Current.CurrentSession` around
+`next`; a StateBag write appears in `AgentStepResult.UpdatedStateBag` and is restored on the next
+step; and passing a replacement session fails before the provider call. The chat-client leaf may
+observe MAF's transient `ChatClientAgentSession`; that type is intentionally hidden from outer
+middleware.
+
 ### Testing TemporalAgentsOptions Configuration
 
 The fluent `.AddTemporalAgents()` API registers workflows, activities, keyed proxies, and the agent client. Test it by building a `ServiceCollection` and inspecting the resulting `IServiceProvider`:

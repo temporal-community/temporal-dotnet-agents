@@ -36,7 +36,11 @@ public sealed class TemporalAgentContext
 
     internal static void SetCurrent(TemporalAgentContext? ctx) => s_current.Value = ctx;
 
-    /// <summary>Gets the current agent session.</summary>
+    /// <summary>
+    /// Gets the restored durable agent session for this activity attempt. This is the same
+    /// instance supplied to outer MAF middleware; retry-safe <c>StateBag</c> changes made through
+    /// either reference are serialized after the model step.
+    /// </summary>
     public TemporalAgentSession CurrentSession { get; }
 
     /// <summary>Starts a new workflow and returns its workflow ID.</summary>

@@ -122,9 +122,18 @@ internal sealed class AgentActivities(
         var interceptorFactory = registration.ToolInterceptorFactory ?? agentsOptions.DefaultToolInterceptor;
         var toolInterceptor = interceptorFactory?.Invoke(scopedServices);
 
+        var sessionId = input.SessionId ?? TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!);
+        // Restore the StateBag before building the live pipeline so the innermost session boundary
+        // can carry this exact durable instance through outer user middleware.
+        var session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
+
         // Build and own a fresh AIAgent pipeline from the scoped IChatClient. The pipeline lease
         // is declared after the DI scope so it is disposed before scoped services at method exit.
-        using var agentPipeline = BuildLiveAgentPipeline(blueprint, chatClient, scopedServices);
+        using var agentPipeline = BuildLiveAgentPipeline(
+            blueprint,
+            chatClient,
+            session,
+            scopedServices);
         var agent = agentPipeline.Agent;
 
         // When the workflow was started by a proxy-only client, resolve
@@ -145,11 +154,6 @@ internal sealed class AgentActivities(
                 effectiveHeartbeatTimeout,
                 effectiveRetryPolicy);
         }
-        var sessionId = input.SessionId ?? TemporalAgentSessionId.Parse(ctx.Info.WorkflowId!);
-
-        // Restore the StateBag so AIContextProvider state survives across step iterations.
-        var session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
-
         IReadOnlyList<ChatMessage> messagesForLlm = input.AccumulatedMessages;
 
         var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
@@ -303,15 +307,11 @@ internal sealed class AgentActivities(
             };
 
             var collected = new List<AgentResponseUpdate>();
-            // MAF's ChatClientAgent.PrepareSessionAndMessagesAsync requires `session is
-            // ChatClientAgentSession` and that class is sealed — our TemporalAgentSession
-            // cannot satisfy that contract. Pass null so MAF mints a fresh transient
-            // ChatClientAgentSession per turn. Our own session state (StateBag,
-            // AIContextProvider invocation) is managed outside MAF and passed explicitly
-            // via the TemporalAgentSession to context providers at the call site above
-            // (AIContextProvider.InvokingContext) and via TemporalAgentContext for tools.
+            // Outer middleware receives the exact restored TemporalAgentSession. The internal
+            // innermost boundary translates to null only for ChatClientAgent, which then mints
+            // the transient sealed ChatClientAgentSession required by its leaf implementation.
             await foreach (var update in agent.RunStreamingAsync(
-                    augmentedMessages, session: null, runOptions, ct).WithCancellation(ct).ConfigureAwait(false))
+                    augmentedMessages, session, runOptions, ct).WithCancellation(ct).ConfigureAwait(false))
             {
                 collected.Add(update);
                 ctx.Heartbeat(update.Text);
@@ -658,6 +658,7 @@ internal sealed class AgentActivities(
     private AgentPipelineLease BuildLiveAgentPipeline(
         AgentBlueprint blueprint,
         IChatClient chatClient,
+        TemporalAgentSession session,
         IServiceProvider scopedServices)
     {
         var registration = blueprint.Registration;
@@ -693,7 +694,8 @@ internal sealed class AgentActivities(
                 registration.Name,
                 chatClientAgent,
                 configurePipeline,
-                scopedServices);
+                scopedServices,
+                builder => builder.Use(inner => new TemporalSessionBoundaryAgent(inner, session)));
         }
         catch (InvalidOperationException ex)
             when (ex.Message.StartsWith(

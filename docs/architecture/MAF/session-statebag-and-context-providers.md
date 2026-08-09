@@ -215,6 +215,21 @@ var stepInput = new AgentStepInput
 };
 ```
 
+### Session identity through agent middleware
+
+The restored `TemporalAgentSession` is also the exact `AgentSession` passed through outer
+`ConfigureAgentPipeline` middleware. `TemporalAgentContext.Current.CurrentSession` refers to that
+same object. Middleware may write retry-safe values to its `StateBag`; the activity serializes
+those changes into `AgentStepResult.UpdatedStateBag`, so the next step restores them.
+
+The library inserts an innermost session boundary immediately above `ChatClientAgent`.
+`ChatClientAgent` accepts only its own sealed `ChatClientAgentSession`, so the boundary forwards
+`null` only at that final leaf and MAF creates a transient leaf session. Middleware outside the
+boundary never receives that transient session. It must forward the exact supplied
+`TemporalAgentSession`; replacing it or passing `null` is rejected because the replacement's
+StateBag could not be persisted unambiguously. Session lifecycle APIs on this internal activity
+pipeline are unsupported because Temporal, not the MAF leaf, owns durable session serialization.
+
 ### Across Continue-as-New
 
 When Temporal workflow history grows too large, `AgentWorkflow` triggers a continue-as-new. The `StateBag` survives this via `AgentWorkflowInput.CarriedStateBag`:
