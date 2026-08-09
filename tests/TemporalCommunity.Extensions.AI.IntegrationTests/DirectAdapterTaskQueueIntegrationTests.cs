@@ -19,7 +19,7 @@ public class DirectAdapterTaskQueueIntegrationTests
         DirectAdapterKind kind,
         string expected)
     {
-        await using var environment = await WorkflowEnvironment.StartLocalAsync();
+        await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
         environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var workflowQueue = $"direct-workflow-{Guid.NewGuid():N}";
         var activityQueue = $"direct-activity-{Guid.NewGuid():N}";

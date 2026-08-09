@@ -39,7 +39,7 @@ proving that retries are scoped to the failing tool.
 ## Prerequisites
 
 - .NET 10 SDK
-- Temporal dev server running: `temporal server start-dev`
+- Temporal Service 1.31.0 or newer (local: `temporal server start-dev`)
 - An OpenAI API key:
   ```bash
   dotnet user-secrets set "OPENAI_API_KEY" "sk-..." \

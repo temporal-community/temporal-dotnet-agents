@@ -11,7 +11,7 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 /// <summary>
 /// Shared xunit fixture that manages the lifecycle of:
 /// <list type="bullet">
-///   <item>A local Temporal test server (<see cref="WorkflowEnvironment.StartLocalAsync"/>)</item>
+///   <item>A pinned Temporal Server 1.31.x test environment</item>
 ///   <item>A .NET Generic Host with the Temporal worker and agent registered</item>
 /// </list>
 ///

@@ -22,7 +22,7 @@ This sample demonstrates:
 ### Prerequisites
 
 - [.NET 10 SDK](https://dot.net) or later
-- A local Temporal server: `temporal server start-dev`
+- Temporal Service 1.31.0 or newer (local: `temporal server start-dev`)
 - An OpenAI-compatible API key
 
 ### Configure API credentials

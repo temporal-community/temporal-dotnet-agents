@@ -37,4 +37,4 @@ dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --proj
 dotnet run --project samples/MEAI/HumanInTheLoop/HumanInTheLoop.csproj
 ```
 
-Start a local Temporal server first, for example with `temporal server start-dev`.
+Start Temporal Service 1.31.0 or newer first; for local development use `temporal server start-dev`.

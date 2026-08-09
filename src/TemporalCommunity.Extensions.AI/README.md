@@ -4,6 +4,12 @@
 [`Microsoft.Extensions.AI`](https://learn.microsoft.com/en-us/dotnet/ai/ai-extensions). The
 package references MEAI and the Temporal .NET SDK; it does not reference Microsoft Agent Framework.
 
+## Prerequisites
+
+- Temporal Service 1.31.0 or newer.
+- .NET 10 SDK or later to build the repository and run its samples. The published package also
+  ships a `netstandard2.1` asset.
+
 ## What the managed session does
 
 `DurableChatSessionClient` maps a `conversationId` to a Temporal workflow. Each `SendAsync` call

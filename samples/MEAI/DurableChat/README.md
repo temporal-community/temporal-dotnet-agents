@@ -18,7 +18,7 @@ DurableChatSessionClient
 
 ## Run
 
-Start a local server:
+Start Temporal Service 1.31.0 or newer. For local development:
 
 ```bash
 temporal server start-dev

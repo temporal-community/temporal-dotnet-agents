@@ -47,7 +47,7 @@ public class HistoryReducerAtCanTests
         const int maxEntryCount = 6; // DefaultBoundedTrim would produce 3; reducer should produce 1.
         const string reducerKey = "keep-last-1-test";
 
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var scripted = new ScriptedChatClient(

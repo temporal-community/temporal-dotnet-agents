@@ -517,7 +517,7 @@ public async Task AgentFactory_ResolvesServiceDependencies_AtActivityTime()
 # Unit tests only (fast, no server needed)
 just test-unit
 
-# Integration tests (requires: temporal server start-dev)
+# Integration tests (embedded Temporal Server 1.31.2)
 just test-integration
 
 # Both suites
@@ -530,11 +530,11 @@ just test-filter "FullyQualifiedName~Router"
 just test-coverage
 ```
 
-> **Integration tests** require a running Temporal server:
-> ```bash
-> temporal server start-dev --namespace default
-> ```
-> Alternatively, `TestEnvironmentHelper.StartLocalAsync()` in the test fixture starts an in-process server automatically — no manual setup needed for the standard integration test suite. Use `TestEnvironmentHelper` (not bare `WorkflowEnvironment.StartLocalAsync()`) for standard Agents integration tests — it pre-registers the `AgentName`, `SessionCreatedAt`, and `TurnCount` custom search attributes that `AgentWorkflow` upserts by default. Bare `WorkflowEnvironment.StartLocalAsync()` is sufficient only when your test explicitly sets `EnableSearchAttributes = false`.
+> **Integration tests** use `TestEnvironmentHelper.StartLocalAsync()`; no external server is
+> required. The helper pins Temporal CLI `v1.8.0` (embedded Temporal Server 1.31.2), verifies the
+> reported version through `GetSystemInfo`, and pre-registers the `AgentName`, `SessionCreatedAt`,
+> and `TurnCount` search attributes. Do not use bare `WorkflowEnvironment.StartLocalAsync()` in
+> repository tests because its downloaded server baseline can float.
 
 ---
 

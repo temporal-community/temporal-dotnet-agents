@@ -538,7 +538,7 @@ test-individual project filter="" limit="180": build
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
 
 # Shared preflight for sample-canary recipes: verify GNU timeout, OPENAI_API_KEY,
-# and that a Temporal server is reachable. Exits non-zero with an actionable
+# and that a supported Temporal Service is reachable. Exits non-zero with an actionable
 # message rather than letting every sample fail identically with a confusing
 # error. (Trinity review, 2026-05-21.)
 _sample-preflight:
@@ -560,6 +560,26 @@ _sample-preflight:
         echo "  Start one with:  temporal server start-dev --namespace default"; \
         exit 2; \
     fi
+    @if ! command -v temporal >/dev/null 2>&1; then \
+        echo "ERROR: Temporal CLI is required to verify the connected service version."; \
+        exit 127; \
+    fi
+    @server_json="$(temporal operator cluster describe --address localhost:7233 --detail --output json 2>/dev/null)" || { \
+        echo "ERROR: Temporal CLI could not query the service version at localhost:7233."; \
+        exit 2; \
+    }; \
+    server_version="$(printf '%s\n' "$server_json" | sed -n 's/.*"serverVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"; \
+    numeric_version="${server_version%%[^0-9.]*}"; \
+    IFS=. read -r major minor patch <<< "$numeric_version"; \
+    if [[ ! "$major" =~ ^[0-9]+$ || ! "$minor" =~ ^[0-9]+$ ]]; then \
+        echo "ERROR: Temporal CLI returned an unrecognized service version: '${server_version:-missing}'."; \
+        exit 2; \
+    fi; \
+    if (( major < 1 || (major == 1 && minor < 31) )); then \
+        echo "ERROR: Temporal Service 1.31.0 or newer is required; detected $server_version."; \
+        exit 2; \
+    fi; \
+    echo "Temporal Service $server_version detected (minimum 1.31.0)."
 
 # Run all non-interactive MEAI samples end-to-end. Per-sample timeouts:
 # default 90s, with overrides for samples that legitimately take longer

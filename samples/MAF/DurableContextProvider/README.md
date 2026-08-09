@@ -57,6 +57,8 @@ and retries only the failed one.
 
 ## Prerequisites
 
+Temporal Service 1.31.0 or newer is required. For local development:
+
 ```bash
 temporal server start-dev
 dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MAF/DurableContextProvider

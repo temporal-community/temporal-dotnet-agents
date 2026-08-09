@@ -41,7 +41,7 @@ public class DurableMiddlewareIntegrationTests
     [Fact]
     public async Task DurableChatClientWorkflow_DecoratorMetadataReachesDecoratorNotProvider()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var providerClient = new MetadataRecordingChatClient();
@@ -112,7 +112,7 @@ public class DurableMiddlewareIntegrationTests
     [Fact]
     public async Task DurableAIFunction_InvokesToolAsActivity_WhenCalledInsideWorkflow()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         // The real tool implementation — registered in DurableFunctionRegistry via
         // AddDurableTools so DurableFunctionActivities can resolve it by name.
@@ -174,7 +174,7 @@ public class DurableMiddlewareIntegrationTests
     [Fact]
     public async Task DurableEmbeddingGenerator_DispatchesAsActivity_WhenCalledInsideWorkflow()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         const int stubDimensions = 4;
         var stubGenerator = new StubEmbeddingGenerator(stubDimensions);
@@ -239,7 +239,7 @@ public class DurableMiddlewareIntegrationTests
     [Fact]
     public async Task DurableChatActivities_HeartbeatsKeepActivityAlive_UnderTightTimeout()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(env.Client);
@@ -280,7 +280,7 @@ public class DurableMiddlewareIntegrationTests
 
     private static async Task AssertDirectChatWorkflowAsync(bool streaming)
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var builder = Host.CreateApplicationBuilder();

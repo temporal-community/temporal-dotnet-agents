@@ -1,4 +1,5 @@
 using Temporalio.Testing;
+using TemporalCommunity.Extensions.Tests.Shared;
 
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 
@@ -27,12 +28,6 @@ internal static class TestEnvironmentHelper
         var allArgs = new List<string>(SearchAttributeArgs);
         allArgs.AddRange(extraArgs);
 
-        return WorkflowEnvironment.StartLocalAsync(new()
-        {
-            DevServerOptions = new()
-            {
-                ExtraArgs = [.. allArgs],
-            },
-        });
+        return TemporalServiceTestEnvironment.StartLocalAsync([.. allArgs]);
     }
 }

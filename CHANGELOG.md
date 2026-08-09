@@ -29,6 +29,9 @@
   middleware after provider exceptions and activity cancellation.
 - Documented and tested that `AIFunction.AsDurable()` activities use the calling workflow's task
   queue and are not rerouted by `DurableExecutionOptions.TaskQueue`.
+- Raised the minimum supported Temporal Service version to 1.31.0, pinned embedded tests to
+  Temporal CLI `v1.8.0` (Server 1.31.2), and added fail-closed service-version checks for tests,
+  smoke coverage, and sample preflight.
 
 ## [0.10.0] - 2026-07-13
 

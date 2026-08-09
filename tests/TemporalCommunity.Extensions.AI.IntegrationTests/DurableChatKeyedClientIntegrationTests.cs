@@ -21,7 +21,7 @@ public class DurableChatKeyedClientIntegrationTests
     [Fact]
     public async Task KeyedClient_WorkerUsesDefaultKey_WhenRegisteredWithKeyedClientOnly()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var defaultClient = new LabeledChatClient("default");
         var otherClient = new LabeledChatClient("other");

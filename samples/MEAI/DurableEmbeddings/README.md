@@ -48,7 +48,7 @@ scheduled `ActivityOptions.TaskQueue`.
 ### Prerequisites
 
 - [.NET 10 SDK](https://dot.net) or later
-- A local Temporal server: `temporal server start-dev`
+- Temporal Service 1.31.0 or newer (local: `temporal server start-dev`)
 - An OpenAI-compatible API key (`OPENAI_API_KEY`)
 - Optional: `OPENAI_API_BASE_URL` (defaults to `https://api.openai.com/v1`) and `OPENAI_EMBEDDING_MODEL` (defaults to `text-embedding-3-small`)
 

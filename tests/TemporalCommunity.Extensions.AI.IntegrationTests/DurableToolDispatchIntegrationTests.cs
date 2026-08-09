@@ -44,7 +44,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task SingleToolCall_SingleTurn()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var weatherTool = harness.BuildAlwaysSucceeds(
@@ -90,7 +90,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task ParallelToolCalls_BothDispatchedInParallel()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var tool1 = harness.BuildAlwaysSucceeds("tool_a", "Tool A.", _ => "result-a");
@@ -142,7 +142,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task PerToolRetry_NoRetryThrows_FailsWithoutRetry()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var alwaysFails = harness.BuildAlwaysThrows("write_record", "Non-idempotent write.", "boom");
@@ -183,7 +183,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task MaxToolCallsPerTurn_Cap_ReturnsSentinelResponse()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var endlessTool = harness.BuildAlwaysSucceeds("loop_tool", "Returns nothing useful.", _ => "ok");
@@ -223,7 +223,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task CallerSuppliedTools_AreRejectedBeforeWorkflowDispatch()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var weatherTool = harness.BuildAlwaysSucceeds("get_weather", "Weather.", _ => "sunny");
@@ -276,7 +276,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task CatchAndFeedBack_RoundTrip()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         // Fails once then succeeds — the workflow must call the LLM twice.
@@ -338,7 +338,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task MaximumConsecutiveErrorsPerRequest_Threshold_FailsAfterCap()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var alwaysFails = harness.BuildAlwaysThrows("broken_tool", "Always fails.", "scripted failure");
@@ -402,7 +402,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task MaximumConsecutiveErrorsPerRequest_SuccessResetsCounter()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         // Deterministic per-invocation behaviour: fail, success, fail, fail, fail.
         // Use a closure counter rather than the harness so the exact sequence is
@@ -469,7 +469,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task MixedSuccessFailure_ParallelFanout_AllCallIdsSynthesized()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var good = harness.BuildAlwaysSucceeds("good_tool", "Always succeeds.", _ => "good-result");
@@ -532,7 +532,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task ImmediatePropagation_MaximumConsecutiveErrorsPerRequest_Zero()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var bad = harness.BuildAlwaysThrows("fail_tool", "fails", "boom");
@@ -584,7 +584,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task WhenAllAsync_WorkflowCancelledDuringToolFanOut_DoesNotSurfaceApplicationFailureException()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         // A gate that the tool will block on until the test releases it.
         // The tool never returns on its own — the workflow will be cancelled first.
@@ -721,7 +721,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task Pattern3_ContinueAsNew_CarriesToolActivityOptionsAndMaxToolCallsPerTurn()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("ping", "Ping tool.", _ => "pong");
@@ -776,7 +776,7 @@ public class DurableToolDispatchIntegrationTests
     [Fact]
     public async Task RegisteredTools_AreProvidedToModel()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         var harness = new ScriptedToolHarness();
         var weather = harness.BuildAlwaysSucceeds("weather", "Weather", _ => "sunny");

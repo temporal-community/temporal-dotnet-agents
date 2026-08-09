@@ -31,7 +31,7 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        Environment = await WorkflowEnvironment.StartLocalAsync();
+        Environment = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         _host = BuildHost();
         await _host.StartAsync();

@@ -54,7 +54,7 @@ Every agent call runs as a durable Temporal activity. If the worker crashes afte
 ### Prerequisites
 
 - [.NET 10 SDK](https://dot.net) or later
-- A local Temporal server
+- Temporal Service 1.31.0 or newer
 - An OpenAI-compatible API key
 
 ### 1. Start Temporal

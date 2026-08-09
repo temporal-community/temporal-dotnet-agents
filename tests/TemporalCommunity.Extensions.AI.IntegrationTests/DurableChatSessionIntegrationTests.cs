@@ -26,7 +26,7 @@ public class DurableChatSessionIntegrationTests
     [Fact]
     public async Task ManagedGetChatStep_DecoratorMetadataReachesDecoratorNotProvider()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var providerClient = new MetadataRecordingChatClient();

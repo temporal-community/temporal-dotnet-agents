@@ -57,7 +57,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
     [Fact]
     public async Task Pattern3_ConcurrentTurns_ClientKeyNotCrossRouted()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         // Two independently recording clients, one per key.
         var client1 = new RecordingChatClient("key-1");
@@ -163,7 +163,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
     [Fact]
     public async Task Pattern1_ConcurrentTurns_ClientKeyNotCrossRouted()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
 
         // Three independently recording clients.
         var client0 = new RecordingChatClient("key-0");

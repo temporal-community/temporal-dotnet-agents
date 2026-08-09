@@ -45,7 +45,7 @@ Note: cart tools execute inline inside the single `ShoppingActivity` invocation 
 ### Prerequisites
 
 - [.NET 10 SDK](https://dot.net) or later
-- A local Temporal server: `temporal server start-dev`
+- Temporal Service 1.31.0 or newer (local: `temporal server start-dev`)
 - An OpenAI-compatible API key (`OPENAI_API_KEY`)
 - An OpenAI-compatible base URL (`OPENAI_API_BASE_URL`) — required; `Program.cs` throws `InvalidOperationException` if missing
 - Optionally, `OPENAI_MODEL` to override the default (`gpt-4o-mini`)

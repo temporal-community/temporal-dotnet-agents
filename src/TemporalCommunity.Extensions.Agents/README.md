@@ -66,7 +66,8 @@ determinism.
 ## Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download) or later to run the samples below
-- A running [Temporal server](https://docs.temporal.io/cli#start-dev) (`temporal server start-dev`)
+- Temporal Service 1.31.0 or newer ([local development](https://docs.temporal.io/cli#start-dev):
+  `temporal server start-dev`)
 - An LLM provider (e.g., Azure OpenAI, OpenAI)
 
 Install the NuGet package:

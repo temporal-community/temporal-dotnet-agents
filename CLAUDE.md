@@ -13,6 +13,8 @@ This document gives load-bearing project context: structure, gotchas, behavioral
 - **Development target**: C# (.NET 10.0). The two published libraries also ship
   `netstandard2.1` assets; samples and tests remain `net10.0`.
 - **Solution File**: `TemporalAgents.slnx` (.slnx format, not .sln)
+- **Minimum Temporal Service**: 1.31.0. Embedded tests pin Temporal CLI `v1.8.0` and verify its
+  Server 1.31.2 through `GetSystemInfo`; Temporalio NuGet packages remain at 1.16.0.
 
 ---
 
@@ -163,7 +165,10 @@ For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how
 - **`Assert.Throws<T>` requires exact type, not subtype.** Use `Assert.Throws<ArgumentNullException>` for null, not `ArgumentException`. xUnit will fail the test if the thrown exception is a subtype of the expected.
 - **Hand-written stubs preferred** over FakeItEasy/Moq in this project. See `StubAIAgent` and `TestChatClient` in the test helpers.
 - **Search-attribute pre-registration is required by default.** `EnableSearchAttributes` now defaults to `true`. Agents integration tests must use `TestEnvironmentHelper.StartLocalAsync()` (which pre-registers `AgentName`/`SessionCreatedAt`/`TurnCount`) unless `opts.EnableSearchAttributes = false` is explicitly set. Bare `WorkflowEnvironment.StartLocalAsync()` is only sufficient when search attributes are disabled. AI integration tests never need pre-registration.
-- **Both suites use embedded server** — `WorkflowEnvironment.StartLocalAsync()`. No external `temporal server start-dev` process.
+- **Both suites use a pinned embedded server** —
+  `TemporalServiceTestEnvironment.StartLocalAsync()` uses Temporal CLI `v1.8.0` (Server 1.31.2)
+  and verifies `GetSystemInfo`. Agents tests call it through `TestEnvironmentHelper` for search
+  attributes. Do not add bare `WorkflowEnvironment.StartLocalAsync()` calls.
 
 ---
 
@@ -234,7 +239,11 @@ just clean-test-artifacts  # remove artifacts/{test-individual,sample-runs}/
 - `samples/{MEAI,MAF}/HumanInTheLoop` — interactive (Console.ReadLine)
 - `samples/MAF/SplitWorkerClient` — two processes (Worker + Client)
 
-**Pre-requisites for sample-canary:** GNU coreutils `timeout` (macOS: `brew install coreutils`), `nc` (netcat), `OPENAI_API_KEY` in env or user-secrets, `temporal server start-dev` running on `localhost:7233`. The `_sample-preflight` recipe checks all four and fails with actionable messages.
+**Pre-requisites for sample-canary:** GNU coreutils `timeout` (macOS: `brew install coreutils`),
+`nc` (netcat), `OPENAI_API_KEY` in env or user-secrets, and Temporal Service 1.31.0 or newer on
+`localhost:7233` (local: `temporal server start-dev`). `_sample-preflight` queries the connected
+service version with the Temporal CLI and fails closed; it does not infer the service version from
+the CLI binary's own version.
 
 ### Versioning
 

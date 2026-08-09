@@ -60,7 +60,7 @@ public class HistoryCaptureTests
     [Fact]
     public async Task Capture_DirectMiddlewareOptionsV1()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         using var host = BuildDirectMiddlewareHost(env.Client);
@@ -91,7 +91,7 @@ public class HistoryCaptureTests
     [Fact]
     public async Task Capture_Pattern1_SimpleTurn()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var chatClient = new TestChatClient();
@@ -124,7 +124,7 @@ public class HistoryCaptureTests
     [Fact]
     public async Task Capture_Pattern3_WithTool()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
@@ -173,7 +173,7 @@ public class HistoryCaptureTests
     [Fact]
     public async Task Capture_CanTransition()
     {
-        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var scripted = new ScriptedChatClient(

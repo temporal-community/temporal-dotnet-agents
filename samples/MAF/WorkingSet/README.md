@@ -25,7 +25,7 @@ By Turn 4, the agent can answer "what files are we working with?" from the injec
 ## Prerequisites
 
 - .NET 10 SDK
-- `temporal server start-dev` running on `localhost:7233`
+- Temporal Service 1.31.0 or newer on `localhost:7233` (local: `temporal server start-dev`)
 - OpenAI API key configured via user-secrets:
   ```bash
   dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MAF/WorkingSet

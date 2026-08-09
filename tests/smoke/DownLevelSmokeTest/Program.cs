@@ -22,6 +22,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Temporalio.Api.WorkflowService.V1;
 using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
@@ -86,11 +87,21 @@ namespace DownLevelSmokeTest
 
         private static async Task RunDurableChatWithToolAsync()
         {
-            Console.WriteLine("Starting embedded Temporal dev server (WorkflowEnvironment.StartLocalAsync)...");
+            Console.WriteLine("Starting embedded Temporal Server 1.31.x...");
 #pragma warning disable CA2007 // Console smoke gate has no synchronization context; creation already configures its await.
-            await using var env = await WorkflowEnvironment.StartLocalAsync().ConfigureAwait(false);
+            await using var env = await WorkflowEnvironment.StartLocalAsync(
+                new WorkflowEnvironmentStartLocalOptions
+                {
+                    DevServerOptions = new DevServerOptions
+                    {
+                        DownloadVersion = "v1.8.0",
+                    },
+                }).ConfigureAwait(false);
 #pragma warning restore CA2007
-            Console.WriteLine("Embedded server up.");
+            var systemInfo = await env.Client.WorkflowService.GetSystemInfoAsync(
+                new GetSystemInfoRequest()).ConfigureAwait(false);
+            var serverVersion = ParseAndValidateServerVersion(systemInfo.ServerVersion);
+            Console.WriteLine("Embedded server up: {0} (minimum 1.31.0).", serverVersion);
 
             // One durable tool: get_weather → "sunny, 72F".
             var toolInvoked = 0;
@@ -203,6 +214,26 @@ namespace DownLevelSmokeTest
             Console.WriteLine("Assertions passed: durable chat + tool and durable-agent paths succeeded on ns2.1.");
 
             await host.StopAsync().ConfigureAwait(false);
+        }
+
+        private static Version ParseAndValidateServerVersion(string serverVersion)
+        {
+            var numericPrefix = new string((serverVersion ?? string.Empty)
+                .TakeWhile(character => char.IsDigit(character) || character == '.')
+                .ToArray())
+                .TrimEnd('.');
+            Version? parsed;
+            if (!Version.TryParse(numericPrefix, out parsed)
+                || parsed == null
+                || parsed.Major < 1
+                || (parsed.Major == 1 && parsed.Minor < 31))
+            {
+                throw new InvalidOperationException(
+                    "Temporal Service 1.31.0 or newer is required; detected '" +
+                    (serverVersion ?? "(missing)") + "'.");
+            }
+
+            return parsed;
         }
 
         /// <summary>

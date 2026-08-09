@@ -12,8 +12,8 @@ nearest-TFM **asset selection** are part of the test. It is deliberately
 **outside `TemporalAgents.slnx`** so `just build` never pulls it in.
 
 The test drives one durable chat turn + one durable tool call and one durable-agent
-turn end-to-end against an **embedded** Temporal dev server
-(`WorkflowEnvironment.StartLocalAsync()` — no external `temporal server start-dev`). It uses
+turn end-to-end against an **embedded Temporal Server 1.31.2**, pinned through Temporal CLI
+`v1.8.0` and verified with `GetSystemInfo` (no external `temporal server start-dev`). It uses
 inline scripted `IChatClient` instances, so it validates both package paths on ns2.1 with no
 live LLM / no `OPENAI_API_KEY` required. It fails before server startup unless **both** loaded
 library assemblies report `netstandard2.1`. Search attributes are disabled for the agent flow
@@ -23,6 +23,9 @@ PASS, non-zero = FAIL.
 ---
 
 ## Prerequisites
+
+The libraries require Temporal Service 1.31.0 or newer. This smoke project starts and verifies
+Server 1.31.2 itself.
 
 1. **Pack first** — the local feed must contain the packages under test:
    ```bash

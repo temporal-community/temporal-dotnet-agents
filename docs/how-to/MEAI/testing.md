@@ -108,7 +108,10 @@ services.AddSingleton<IDurableChatSessionClient, StubChatSessionClient>();
 
 ## Integration Testing with `WorkflowEnvironment`
 
-Integration tests use `WorkflowEnvironment.StartLocalAsync()`, which starts an embedded Temporal server inside the test process. No external `temporal server start-dev` is required — the server starts and stops with the test suite.
+Integration tests use `TemporalServiceTestEnvironment.StartLocalAsync()`, which pins Temporal CLI
+`v1.8.0`, starts its embedded Temporal Server 1.31.2 inside the test process, and verifies the
+reported service version through `GetSystemInfo`. No external `temporal server start-dev` is
+required; the server starts and stops with the test suite.
 
 ### Test direct middleware through a registered workflow
 
@@ -324,4 +327,9 @@ just test-integration-ai
 just test
 ```
 
-Both test suites use an embedded Temporal server — no separate `temporal server start-dev` process is needed for either. The AI integration tests use `WorkflowEnvironment.StartLocalAsync()` directly; the Agents integration tests use `TestEnvironmentHelper.StartLocalAsync()`, a thin wrapper that pre-registers the `AgentName`, `SessionCreatedAt`, and `TurnCount` search attributes enabled by default. Bare `WorkflowEnvironment.StartLocalAsync()` is sufficient for Agents tests only when they explicitly set `EnableSearchAttributes = false`.
+Both test suites use an embedded Temporal Server 1.31.2 — no separate `temporal server start-dev`
+process is needed. AI integration tests use `TemporalServiceTestEnvironment.StartLocalAsync()`;
+Agents integration tests use `TestEnvironmentHelper.StartLocalAsync()`, which delegates to the
+same pinned/version-checked helper and pre-registers the `AgentName`, `SessionCreatedAt`, and
+`TurnCount` search attributes enabled by default. Do not add bare
+`WorkflowEnvironment.StartLocalAsync()` calls, because they silently float the tested server.
