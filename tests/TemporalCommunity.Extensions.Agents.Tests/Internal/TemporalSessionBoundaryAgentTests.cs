@@ -65,6 +65,83 @@ public class TemporalSessionBoundaryAgentTests
     }
 
     [Fact]
+    public async Task RunAsync_LeafException_RestoresDurableRunContext()
+    {
+        var durableSession = new TemporalAgentSession(
+            TemporalAgentSessionId.WithRandomKey("boundary"));
+        var expected = new InvalidOperationException("sentinel failure");
+        var leaf = new ExitPathLeafAgent(ExitPath.Throw, expected);
+        var boundary = new TemporalSessionBoundaryAgent(leaf, durableSession);
+        var observations = new List<AgentSession?>();
+        var outer = new ExitContextObservingAgent(boundary, observations);
+
+        var actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            outer.RunAsync(Messages, durableSession));
+
+        Assert.Same(expected, actual);
+        Assert.Null(leaf.ObservedSession);
+        Assert.Null(leaf.ObservedRunContextSession);
+        Assert.NotEmpty(observations);
+        Assert.All(observations, observed => Assert.Same(durableSession, observed));
+    }
+
+    [Fact]
+    public async Task RunStreamingAsync_LeafException_RestoresDurableRunContext()
+    {
+        var durableSession = new TemporalAgentSession(
+            TemporalAgentSessionId.WithRandomKey("boundary"));
+        var expected = new InvalidOperationException("streaming sentinel failure");
+        var leaf = new ExitPathLeafAgent(ExitPath.YieldThenThrow, expected);
+        var boundary = new TemporalSessionBoundaryAgent(leaf, durableSession);
+        var observations = new List<AgentSession?>();
+        var outer = new ExitContextObservingAgent(boundary, observations);
+        var observedUpdates = 0;
+
+        var actual = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var _ in outer.RunStreamingAsync(Messages, durableSession))
+            {
+                observedUpdates++;
+            }
+        });
+
+        Assert.Same(expected, actual);
+        Assert.Equal(1, observedUpdates);
+        Assert.Null(leaf.ObservedSession);
+        Assert.Null(leaf.ObservedRunContextSession);
+        Assert.NotEmpty(observations);
+        Assert.All(observations, observed => Assert.Same(durableSession, observed));
+    }
+
+    [Fact]
+    public async Task RunStreamingAsync_Cancellation_RestoresDurableRunContext()
+    {
+        var durableSession = new TemporalAgentSession(
+            TemporalAgentSessionId.WithRandomKey("boundary"));
+        var leaf = new ExitPathLeafAgent(ExitPath.WaitForCancellation);
+        var boundary = new TemporalSessionBoundaryAgent(leaf, durableSession);
+        var observations = new List<AgentSession?>();
+        var outer = new ExitContextObservingAgent(boundary, observations);
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in outer.RunStreamingAsync(
+                Messages,
+                durableSession,
+                cancellationToken: cancellation.Token))
+            {
+            }
+        });
+
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.Null(leaf.ObservedSession);
+        Assert.Null(leaf.ObservedRunContextSession);
+        Assert.NotEmpty(observations);
+        Assert.All(observations, observed => Assert.Same(durableSession, observed));
+    }
+
+    [Fact]
     public async Task SessionLifecycleApis_AreExplicitlyUnsupported()
     {
         var durableSession = new TemporalAgentSession(
@@ -154,6 +231,123 @@ public class TemporalSessionBoundaryAgentTests
             }
 
             observations.Add(CurrentRunContext?.Session);
+        }
+    }
+
+    private enum ExitPath
+    {
+        Throw,
+        YieldThenThrow,
+        WaitForCancellation,
+    }
+
+    private sealed class ExitPathLeafAgent(
+        ExitPath exitPath,
+        Exception? exception = null) : AIAgent
+    {
+        internal AgentSession? ObservedSession { get; private set; }
+        internal AgentSession? ObservedRunContextSession { get; private set; }
+
+        protected override ValueTask<AgentSession> CreateSessionCoreAsync(
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        protected override ValueTask<JsonElement> SerializeSessionCoreAsync(
+            AgentSession session,
+            JsonSerializerOptions? jsonSerializerOptions = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        protected override ValueTask<AgentSession> DeserializeSessionCoreAsync(
+            JsonElement serializedState,
+            JsonSerializerOptions? jsonSerializerOptions = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        protected override Task<AgentResponse> RunCoreAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            RecordContext(session);
+            return exitPath == ExitPath.Throw
+                ? Task.FromException<AgentResponse>(exception!)
+                : Task.FromResult(new AgentResponse());
+        }
+
+        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            RecordContext(session);
+            if (exitPath == ExitPath.WaitForCancellation)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                yield break;
+            }
+
+            yield return new AgentResponseUpdate();
+            if (exitPath == ExitPath.YieldThenThrow)
+            {
+                throw exception!;
+            }
+        }
+
+        private void RecordContext(AgentSession? session)
+        {
+            ObservedSession = session;
+            ObservedRunContextSession = CurrentRunContext?.Session;
+        }
+    }
+
+    private sealed class ExitContextObservingAgent(
+        AIAgent inner,
+        List<AgentSession?> observations) : DelegatingAIAgent(inner)
+    {
+        protected override async Task<AgentResponse> RunCoreAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            observations.Add(CurrentRunContext?.Session);
+            try
+            {
+                return await base.RunCoreAsync(messages, session, options, cancellationToken);
+            }
+            finally
+            {
+                observations.Add(CurrentRunContext?.Session);
+            }
+        }
+
+        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            observations.Add(CurrentRunContext?.Session);
+            try
+            {
+                await foreach (var update in base.RunCoreStreamingAsync(
+                    messages,
+                    session,
+                    options,
+                    cancellationToken))
+                {
+                    observations.Add(CurrentRunContext?.Session);
+                    yield return update;
+                    observations.Add(CurrentRunContext?.Session);
+                }
+            }
+            finally
+            {
+                observations.Add(CurrentRunContext?.Session);
+            }
         }
     }
 }

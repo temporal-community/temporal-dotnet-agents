@@ -25,6 +25,8 @@
 - Disposed reachable MAF `OpenTelemetryAgent` wrappers when local pipeline validation rejects a
   successfully built chain, and added failure, cancellation, retry, and identity regressions for
   per-attempt middleware ownership.
+- Added regression coverage proving the durable MAF session context is restored to surrounding
+  middleware after provider exceptions and activity cancellation.
 
 ## [0.10.0] - 2026-07-13
 

@@ -138,9 +138,11 @@ For session-aware middleware, run the real activity path and assert all of the f
 middleware parameter is a `TemporalAgentSession`; it is reference-equal to
 `AIAgent.CurrentRunContext.Session` and `TemporalAgentContext.Current.CurrentSession` around
 `next`; a StateBag write appears in `AgentStepResult.UpdatedStateBag` and is restored on the next
-step; and passing a replacement session fails before the provider call. The chat-client leaf may
-observe MAF's transient `ChatClientAgentSession`; that type is intentionally hidden from outer
-middleware.
+step; exceptions and cancellation restore the durable context to surrounding middleware; and
+passing a replacement session fails before the provider call. The chat-client leaf may observe
+MAF's transient `ChatClientAgentSession`; that type is intentionally hidden from outer middleware.
+Durable agent streaming is not public, and the internal activity consumes its stream to completion,
+so early consumer disposal is not part of this package's middleware contract.
 
 ### Testing TemporalAgentsOptions Configuration
 

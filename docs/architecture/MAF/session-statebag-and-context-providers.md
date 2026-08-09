@@ -229,6 +229,10 @@ boundary never receives that transient session. It must forward the exact suppli
 `TemporalAgentSession`; replacing it or passing `null` is rejected because the replacement's
 StateBag could not be persisted unambiguously. Session lifecycle APIs on this internal activity
 pipeline are unsupported because Temporal, not the MAF leaf, owns durable session serialization.
+The boundary restores the durable run context to surrounding middleware after success, provider
+exceptions, and cancellation. Public durable-agent streaming is unsupported, and the activity
+fully enumerates its internal stream, so caller-abandoned enumeration is not part of this
+package's session-context contract.
 
 ### Across Continue-as-New
 
