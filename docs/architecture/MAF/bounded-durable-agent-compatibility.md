@@ -48,6 +48,13 @@ Startup validation uses a fresh DI scope. Every activity attempt, including a re
 new live chain from that attempt's scope and disposes MAF's built-in `OpenTelemetryAgent` before
 disposing the scope. No middleware object or mutable field is carried between attempts.
 
+Once MAF returns an inspectable chain, the composer records every reachable
+`OpenTelemetryAgent` before applying local topology and ownership validation. A chain rejected by
+either validation is therefore cleaned up immediately, just like a chain used by a successful,
+failed, cancelled, or retried activity attempt. If `AIAgentBuilder.Build()` itself throws after an
+upstream factory created an intermediate object, MAF does not expose that partial chain; this
+package cannot dispose objects it never receives.
+
 This is a structural requirement, independent of request behavior. A supported middleware may
 short-circuit an individual run, recover from an exception, or replace messages/options while the
 chain still retains its inner leaf. A factory that ignores `inner`, and an opaque `AIAgent`

@@ -78,7 +78,9 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 `ConfigureAgentPipeline` is dry-built once at startup in a validation scope and built once per
 `RunDurableAgentStep` activity attempt in that attempt's DI scope. No pipeline is cached in the
 blueprint. Custom wrappers must be transparent, non-disposable `DelegatingAIAgent` instances;
-MAF's built-in `OpenTelemetryAgent` is owned and disposed by the per-build pipeline lease.
+MAF's built-in `OpenTelemetryAgent` is owned and disposed by the per-build pipeline lease,
+including when local validation rejects a successfully built chain. A partial chain hidden by an
+exception from MAF's `AIAgentBuilder.Build()` is not available for package-side cleanup.
 During a live run, outer middleware and `TemporalAgentContext.Current.CurrentSession` share the
 exact restored `TemporalAgentSession`; middleware may make retry-safe StateBag changes but cannot
 replace the session. An innermost boundary passes `null` only to `ChatClientAgent`, which creates

@@ -105,6 +105,43 @@ public class AgentActivitiesTelemetryTests
         Assert.DoesNotContain(stopped, a => a.Source.Name == mafSourceName);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenTelemetryAgent_FailedAttempt_DisposesOwnedWrapper(bool cancellation)
+    {
+        var mafSourceName = $"TemporalAgents.Tests.FailedAttempt.{Guid.NewGuid():N}";
+        var stopped = new ConcurrentBag<Activity>();
+        using var listener = CreateListener(source => source.Name == mafSourceName, stopped);
+        OpenTelemetryAgent? attemptWrapper = null;
+        var activities = BuildActivities(opts =>
+            opts.AddDurableAgent("FailedAttemptAgent", agent =>
+            {
+                agent.ChatClient = _ => new ThrowingStreamingChatClient(cancellation);
+                agent.ConfigureAgentPipeline = pipeline =>
+                    pipeline.UseOpenTelemetry(mafSourceName, wrapper => attemptWrapper = wrapper);
+            }));
+
+        if (cancellation)
+        {
+            await Assert.ThrowsAsync<OperationCanceledException>(() =>
+                RunActivityAsync(activities, "FailedAttemptAgent", "corr-cancelled"));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                RunActivityAsync(activities, "FailedAttemptAgent", "corr-failed"));
+        }
+
+        Assert.NotNull(attemptWrapper);
+        var countAfterAttempt = stopped.Count;
+        Assert.True(countAfterAttempt > 0);
+
+        await Assert.ThrowsAnyAsync<Exception>(() => attemptWrapper.RunAsync(
+            [new ChatMessage(ChatRole.User, "after attempt")]));
+        Assert.Equal(countAfterAttempt, stopped.Count);
+    }
+
     [Fact]
     public async Task NoUpstreamTelemetry_TemporalTurnOwnsUsageAttributes()
     {
@@ -276,6 +313,40 @@ public class AgentActivitiesTelemetryTests
                     }),
                 ],
             };
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class ThrowingStreamingChatClient(bool cancellation) : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            cancellation
+                ? Task.FromCanceled<ChatResponse>(new CancellationToken(canceled: true))
+                : Task.FromException<ChatResponse>(new InvalidOperationException("provider failure"));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            if (cancellation)
+            {
+                throw new OperationCanceledException(new CancellationToken(canceled: true));
+            }
+
+            throw new InvalidOperationException("provider failure");
+#pragma warning disable CS0162 // Required to keep this method an async iterator.
+            yield break;
+#pragma warning restore CS0162
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;

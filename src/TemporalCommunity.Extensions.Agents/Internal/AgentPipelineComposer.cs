@@ -34,15 +34,28 @@ internal static class AgentPipelineComposer
             builtAgent = builder.Build(services);
         }
 
-        DurableAgentPipelineTopology.EnsurePreservesInnerAgent(
-            agentName,
-            builtAgent,
-            innerAgent);
-
+        var pipelineLinks = AgentChainWalker.WalkAIAgent(builtAgent).ToList();
         var ownedOpenTelemetryAgents = new List<OpenTelemetryAgent>();
         try
         {
-            foreach (var link in AgentChainWalker.WalkAIAgent(builtAgent))
+            // Discover package-owned disposable middleware before any validation can reject the
+            // successfully built chain. This makes every post-Build failure cleanup-safe.
+            foreach (var link in pipelineLinks)
+            {
+                if (link is OpenTelemetryAgent openTelemetryAgent
+                    && !ownedOpenTelemetryAgents.Any(owned =>
+                        ReferenceEquals(owned, openTelemetryAgent)))
+                {
+                    ownedOpenTelemetryAgents.Add(openTelemetryAgent);
+                }
+            }
+
+            DurableAgentPipelineTopology.EnsurePreservesInnerAgent(
+                agentName,
+                builtAgent,
+                innerAgent);
+
+            foreach (var link in pipelineLinks)
             {
                 if (ReferenceEquals(link, innerAgent))
                 {
@@ -51,7 +64,6 @@ internal static class AgentPipelineComposer
 
                 if (link is OpenTelemetryAgent openTelemetryAgent)
                 {
-                    ownedOpenTelemetryAgents.Add(openTelemetryAgent);
                     continue;
                 }
 

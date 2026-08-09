@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Agents.AI;
@@ -63,6 +64,23 @@ public class AgentChainWalkerTests
         var wrapped = new AIAgentBuilder(new MarkerAIAgent()).UseOpenTelemetry().Build();
 
         Assert.True(AgentChainWalker.Contains<OpenTelemetryAgent>(wrapped));
+    }
+
+    [Fact]
+    public void WalkAIAgent_Cycle_YieldsRepeatedReferenceOnce()
+    {
+        var leaf = new MarkerAIAgent();
+        var outer = new PassThroughDelegatingAIAgent(leaf);
+        var innerAgentField = typeof(DelegatingAIAgent).GetField(
+            "<InnerAgent>k__BackingField",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(innerAgentField);
+        innerAgentField.SetValue(outer, outer);
+
+        var result = AgentChainWalker.WalkAIAgent(outer).ToList();
+
+        Assert.Single(result);
+        Assert.Same(outer, result[0]);
     }
 
     private class MarkerAIAgent : AIAgent

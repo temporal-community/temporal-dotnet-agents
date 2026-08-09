@@ -128,6 +128,79 @@ public class AgentPipelineIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task OpenTelemetryAgent_RetryAttemptsOwnAndDisposeDistinctWrappers()
+    {
+        await using var environment = await TestEnvironmentHelper.StartLocalAsync();
+        environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var sourceName = $"TemporalAgents.Integration.Retry.{Guid.NewGuid():N}";
+        var stopped = new ConcurrentBag<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == sourceName,
+            Sample = static (ref ActivityCreationOptions<ActivityContext> _) =>
+                ActivitySamplingResult.AllDataAndRecorded,
+            SampleUsingParentId = static (ref ActivityCreationOptions<string> _) =>
+                ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStopped = stopped.Add,
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        var wrappers = new ConcurrentBag<OpenTelemetryAgent>();
+        var chatClient = new FailThenSucceedChatClient(failCount: 1);
+        var taskQueue = $"agent-pipeline-retry-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(environment.Client);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
+            {
+                options.EnableSearchAttributes = false;
+                options.AddDurableAgent("RetryPipelineAgent", agent =>
+                {
+                    agent.ChatClient = _ => chatClient;
+                    agent.ConfigureAgentPipeline = pipeline =>
+                        pipeline.UseOpenTelemetry(sourceName, wrappers.Add);
+                });
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("RetryPipelineAgent");
+            var session = await proxy.CreateSessionAsync();
+            var response = await proxy.RunAsync("retry", session);
+
+            Assert.Contains("retry", response.Text);
+            Assert.True(chatClient.CallCount >= 2);
+            Assert.True(wrappers.Count >= 3); // startup validation plus at least two attempts
+            Assert.Equal(wrappers.Count, wrappers.Distinct(ReferenceEqualityComparer.Instance).Count());
+
+            var countAfterAttempts = stopped.Count;
+            Assert.True(countAfterAttempts > 0);
+            foreach (var wrapper in wrappers)
+            {
+                try
+                {
+                    await wrapper.RunAsync([new ChatMessage(ChatRole.User, "after attempt")]);
+                }
+                catch (Exception)
+                {
+                    // Live-attempt wrappers retain their session boundary, which rejects this
+                    // synthetic sessionless probe. Disposal is asserted through telemetry below.
+                }
+            }
+
+            Assert.Equal(countAfterAttempts, stopped.Count);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     private sealed class PipelineObservation
     {
         public int BeforeCount;

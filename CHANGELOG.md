@@ -22,6 +22,9 @@
   `invoke_agent` ancestor with its correlation ID, and assigned GenAI usage to exactly one span.
 - Routed direct chat and embedding activities to `DurableExecutionOptions.TaskQueue`, enabling
   workflow and AI activity workers to poll separate queues as the option contract specifies.
+- Disposed reachable MAF `OpenTelemetryAgent` wrappers when local pipeline validation rejects a
+  successfully built chain, and added failure, cancellation, retry, and identity regressions for
+  per-attempt middleware ownership.
 
 ## [0.10.0] - 2026-07-13
 

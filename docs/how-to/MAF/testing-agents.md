@@ -127,7 +127,12 @@ construction per LLM-step activity attempt, including every retry. Middleware fa
 scoped service provider. Custom wrappers themselves must be non-disposable; inject disposable
 dependencies from the scope and let that scope own them. If the pipeline uses MAF's built-in
 `OpenTelemetryAgent`, verify that no new telemetry is emitted through that exact wrapper after the
-activity-owned pipeline is disposed.
+activity-owned pipeline is disposed. Cover success, provider failure, cancellation, and retry
+attempts: every live attempt owns a distinct wrapper and must dispose it exactly once. Also test
+startup/runtime topology rejection with a real `OpenTelemetryAgent`; successfully built wrappers
+must be disposed even when local validation rejects the chain. A wrapper hidden inside a partial
+chain when `AIAgentBuilder.Build()` itself throws cannot be recovered because MAF never returns
+that chain.
 
 For session-aware middleware, run the real activity path and assert all of the following: the
 middleware parameter is a `TemporalAgentSession`; it is reference-equal to
