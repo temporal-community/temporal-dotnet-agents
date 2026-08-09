@@ -90,22 +90,39 @@ Console.WriteLine(response.Text);
 
 ## Direct custom-workflow adapters
 
-For a custom workflow that calls a chat client directly, add the chat middleware and set its task
-queue. Inside a workflow it schedules one LLM activity; outside a workflow it passes through.
+For a custom workflow that calls a chat client directly, build the middleware in workflow code and
+set its task queue. Inside a workflow it safely schedules one LLM activity and resumes on Temporal's
+workflow task scheduler; outside a workflow the same middleware passes through to its inner client.
 
 ```csharp
-builder.Services
-    .AddChatClient(innerChatClient)
-    .UseDurableExecution(options => options.TaskQueue = "durable-chat")
-    .Build();
+[Workflow]
+public sealed class SummaryWorkflow
+{
+    [WorkflowRun]
+    public async Task<string> RunAsync(IReadOnlyList<ChatMessage> messages)
+    {
+        // WorkflowOnlyChatClient is a sentinel that throws if called. The durable
+        // middleware dispatches the request to the worker-side IChatClient instead.
+        var chatClient = new ChatClientBuilder(new WorkflowOnlyChatClient())
+            .UseDurableExecution(options => options.TaskQueue = "durable-chat")
+            .Build();
+
+        var response = await chatClient.GetResponseAsync(messages);
+        return response.Text ?? string.Empty;
+    }
+}
 ```
+
+Register the real provider-side `IChatClient`, `AddDurableAI()`, and `SummaryWorkflow` on the
+worker. Workflow classes do not receive application DI services, and the workflow-local sentinel
+must never perform provider I/O.
 
 `AIFunction.AsDurable()` is likewise for a custom workflow that explicitly invokes a known
 function. The activity worker must register that function with `AddDurableTools`.
 
 The session client has no streaming API. `DurableChatClient.GetStreamingResponseAsync`, when used
-directly inside a workflow, buffers one activity result and emits synthetic updates rather than
-token-by-token streaming.
+directly inside a workflow, is workflow-safe but still buffers one complete activity result and
+then emits synthetic updates. It is not token-by-token streaming across the workflow boundary.
 
 ## Target framework support
 

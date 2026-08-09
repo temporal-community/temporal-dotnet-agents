@@ -91,7 +91,7 @@ var results = await Workflow.WhenAllAsync(toolTasks);
 ### Don't use `ConfigureAwait(false)` in workflow code
 
 ```csharp
-// WRONG — strips TaskScheduler.Current; the workflow hangs at CompleteWorkflowExecution
+// WRONG — opts out of TaskScheduler.Current
 await Workflow.ExecuteActivityAsync(...).ConfigureAwait(false);
 
 // CORRECT — stay on the workflow scheduler (omit, or use ConfigureAwait(true))
@@ -99,7 +99,7 @@ await Workflow.ExecuteActivityAsync(...);
 await Workflow.ExecuteActivityAsync(...).ConfigureAwait(true);
 ```
 
-**Why:** `ConfigureAwait(false)` bypasses the Temporal workflow scheduler's `SynchronizationContext`, putting the continuation on the ThreadPool. The workflow loses the ability to register `CompleteWorkflowExecution` and hangs at `WorkflowTaskCompleted`. This is a `[Workflow]`-only rule — `AgentActivities.cs` and `DefaultTemporalAgentClient.cs` correctly use `ConfigureAwait(false)` because they are not workflow code. The pattern also applies to `DurableAIFunction.cs` and `DurableEmbeddingGenerator.cs` (workflow-context middleware) — they explicitly note this in inline comments.
+**Why:** `ConfigureAwait(false)` opts the continuation out of the current Temporal workflow `TaskScheduler`. Subsequent workflow commands no longer execute through the active workflow context and the workflow may stop making progress. This is a `[Workflow]`-only rule — `AgentActivities.cs` and `DefaultTemporalAgentClient.cs` correctly use `ConfigureAwait(false)` because they are not workflow code. The same rule applies to the workflow paths in `DurableChatClient`, `DurableAIFunction`, and `DurableEmbeddingGenerator`.
 
 ### Do use GetTemporalAgent() with string constants or activity results
 
@@ -444,7 +444,7 @@ opts.AddScheduledAgentRun("Agent", "my-schedule", request, updatedSpec);
 | Don't query agent registry in workflows | Determinism | Fatal |
 | Don't call `ActivitySource.StartActivity()` in workflows | Determinism | Fatal |
 | Use `Workflow.WhenAllAsync`, not `Task.WhenAll`, in workflows | Determinism | Convention |
-| Don't use `ConfigureAwait(false)` in `[Workflow]` code | Determinism | Workflow hangs |
+| Don't use `ConfigureAwait(false)` in `[Workflow]` code | Determinism | Workflow scheduler is lost |
 | Pass `opts => opts.NoRetry()` to `agent.AddTool` for write tools | Per-tool retry | Non-idempotent re-execution |
 | Register all 4 OTel sources | Observability | Silent data loss |
 | Set `ActivityTimeout` for HITL | Timeouts | Activity failure |

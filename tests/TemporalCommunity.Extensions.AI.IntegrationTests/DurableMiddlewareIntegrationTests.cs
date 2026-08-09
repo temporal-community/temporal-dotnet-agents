@@ -6,6 +6,8 @@ using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
 using Temporalio.Workflows;
+using TemporalCommunity.Extensions.AI.Tests.Compat;
+using TemporalCommunity.Extensions.Tests.Shared;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.IntegrationTests;
@@ -16,6 +18,22 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// </summary>
 public class DurableMiddlewareIntegrationTests
 {
+    /// <summary>
+    /// Verifies the public direct-chat middleware resumes on Temporal's workflow scheduler
+    /// after a non-streaming activity result and can schedule a subsequent workflow timer.
+    /// </summary>
+    [Fact]
+    public Task DurableChatClientWorkflow_NonStreaming_CompletesAfterActivity() =>
+        AssertDirectChatWorkflowAsync(streaming: false);
+
+    /// <summary>
+    /// Verifies the public direct-chat middleware resumes on Temporal's workflow scheduler
+    /// after buffered streaming enumeration and can schedule a subsequent workflow timer.
+    /// </summary>
+    [Fact]
+    public Task DurableChatClientWorkflow_BufferedStreaming_CompletesAfterActivity() =>
+        AssertDirectChatWorkflowAsync(streaming: true);
+
     // ── Test 4: Durable tool invocation ─────────────────────────────────────
 
     /// <summary>
@@ -196,6 +214,64 @@ public class DurableMiddlewareIntegrationTests
 
     // ── Shared helpers ────────────────────────────────────────────────────────
 
+    private static async Task AssertDirectChatWorkflowAsync(bool streaming)
+    {
+        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(new SchedulerProbeChatClient());
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new StubEmbeddingGenerator(4));
+
+        builder.Services
+            .AddHostedTemporalWorker(DurableChatClientWorkflow.TaskQueue)
+            .AddDurableAI(options =>
+            {
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+                options.HeartbeatTimeout = TimeSpan.FromSeconds(10);
+                options.SessionTimeToLive = TimeSpan.FromMinutes(5);
+            })
+            .AddWorkflow<DurableChatClientWorkflow>();
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var handle = await env.Client.StartWorkflowAsync(
+                (DurableChatClientWorkflow workflow) => workflow.RunAsync(
+                    new DurableChatClientWorkflowInput { Streaming = streaming }),
+                new WorkflowOptions(
+                    $"durable-chat-client-{streaming}-{Guid.NewGuid():N}",
+                    DurableChatClientWorkflow.TaskQueue));
+
+            var result = await handle.GetResultAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.Equal(SchedulerProbeChatClient.ResponseText, result);
+
+            Assert.Equal(
+                1,
+                await WorkflowHistoryAssertions.CountActivityScheduledAsync(
+                    handle,
+                    "TemporalCommunity.Extensions.AI.GetResponse"));
+
+            var timerCount = 0;
+            await foreach (var ev in handle.FetchHistoryEventsAsync())
+            {
+                if (ev.TimerStartedEventAttributes is not null)
+                {
+                    timerCount++;
+                }
+            }
+
+            Assert.Equal(1, timerCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     /// <summary>
     /// Minimal IChatClient stub required for DurableChatActivities constructor injection
     /// in tests that do not exercise the chat path.
@@ -219,6 +295,35 @@ public class DurableMiddlewareIntegrationTests
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
+    }
+
+    private sealed class SchedulerProbeChatClient : IChatClient
+    {
+        public const string ResponseText = "worker-side durable response";
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, ResponseText)]));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
     }
 
     /// <summary>

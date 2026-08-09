@@ -655,7 +655,7 @@ The same workflow-determinism rules apply inside `ExecuteDurableAgentTurnAsync` 
 | Random GUIDs | `Workflow.NewGuid()` | `Guid.NewGuid()` differs across replay |
 | Logging | `Workflow.Logger` | Direct `ILogger` captured via closure misbehaves on replay |
 | OTel spans | None inside the loop | `ActivitySource.StartActivity()` is non-deterministic; `agent.turn` lives inside `RunDurableAgentStepAsync` instead |
-| `await` continuations | `.ConfigureAwait(true)` (or omit `ConfigureAwait` entirely) | `ConfigureAwait(false)` strips `TaskScheduler.Current`, putting the continuation on the ThreadPool — the workflow hangs at `CompleteWorkflowExecution` |
+| `await` continuations | `.ConfigureAwait(true)` (or omit `ConfigureAwait` entirely) | `ConfigureAwait(false)` opts out of `TaskScheduler.Current`, so later workflow commands no longer execute through the active workflow context |
 | Threading | No `Task.Run`, no threads, no `Task.Delay`, no `Thread.Sleep` | Same scheduler-stripping risk |
 
 The durable loop in `AgentWorkflow.cs` follows all of these rules: every `await` either omits `ConfigureAwait` or uses `ConfigureAwait(true)`; the loop counter is a local `int`; iteration timestamps for the final `AgentResponse.CreatedAt` come from `Workflow.UtcNow`; and there is no in-workflow OTel span (the `agent.turn` span fires inside `RunDurableAgentStepAsync`, which runs in activity context).

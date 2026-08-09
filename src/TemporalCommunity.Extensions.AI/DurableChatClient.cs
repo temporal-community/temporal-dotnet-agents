@@ -61,9 +61,11 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         // Inside a workflow — dispatch as an activity.
         var input = CreateInput(messages, options);
 
+        // Keep this continuation on Temporal's workflow task scheduler so subsequent
+        // workflow commands are issued through the active workflow context.
         var response = await Workflow.ExecuteActivityAsync(
             (DurableChatActivities a) => a.GetResponseAsync(input),
-            CreateActivityOptions(options)).ConfigureAwait(false);
+            CreateActivityOptions(options));
 
         return response;
     }
@@ -104,9 +106,11 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         // across the workflow/activity boundary is not supported.
         var input = CreateInput(messages, options);
 
+        // Keep this continuation on Temporal's workflow task scheduler so subsequent
+        // workflow commands are issued through the active workflow context.
         var response = await Workflow.ExecuteActivityAsync(
             (DurableChatActivities a) => a.GetResponseAsync(input),
-            CreateActivityOptions(options)).ConfigureAwait(false);
+            CreateActivityOptions(options));
 
         // Convert the buffered response to streaming updates.
         foreach (var update in response.ToChatResponseUpdates())

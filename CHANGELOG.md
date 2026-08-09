@@ -5,6 +5,8 @@
 - Updated the tested dependency baseline to Microsoft.Extensions.AI 10.8.3 and
   Microsoft.Agents.AI 1.17.0, including their required OpenAI, logging, and
   System.Text.Json dependency floors.
+- Fixed direct `UseDurableExecution()` chat calls so both non-streaming and buffered-streaming
+  workflow continuations remain on Temporal's workflow task scheduler.
 
 ## [0.10.0] - 2026-07-13
 

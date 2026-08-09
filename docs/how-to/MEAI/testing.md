@@ -110,6 +110,31 @@ services.AddSingleton<IDurableChatSessionClient, StubChatSessionClient>();
 
 Integration tests use `WorkflowEnvironment.StartLocalAsync()`, which starts an embedded Temporal server inside the test process. No external `temporal server start-dev` is required — the server starts and stops with the test suite.
 
+### Test direct middleware through a registered workflow
+
+`UseDurableExecution()` has two execution paths selected by `Workflow.InWorkflow`. Calling
+`DurableChatActivities` directly tests the activity implementation, but it does not execute the
+middleware's workflow path or verify that its continuation stays on Temporal's workflow task
+scheduler.
+
+For a direct-adapter integration test:
+
+1. Register a real `[Workflow]` type and the backing activities on a local worker.
+2. Construct `ChatClientBuilder` with a sentinel inner client that throws if invoked, then apply
+   `UseDurableExecution()` inside the workflow.
+3. Invoke `GetResponseAsync` or fully enumerate `GetStreamingResponseAsync` from `[WorkflowRun]`.
+4. Issue another workflow command after the call, such as `Workflow.DelayAsync`. This proves the
+   continuation can still use the workflow scheduler; observing only the activity result is not
+   sufficient.
+5. Put a finite `WaitAsync` bound around `handle.GetResultAsync()` so a scheduler regression fails
+   the test instead of hanging the test process.
+6. Inspect workflow history and assert the expected activity and post-call timer were scheduled.
+
+Register the real provider-side `IChatClient` on the worker. The workflow-local sentinel exists
+only to prove that provider I/O was dispatched through the activity. Buffered streaming uses the
+same single activity and emits synthetic updates after that activity returns; it does not provide
+token-by-token workflow streaming.
+
 ### NuGet packages
 
 ```xml

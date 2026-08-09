@@ -8,6 +8,7 @@ using Temporalio.Testing;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.AI.Session;
+using TemporalCommunity.Extensions.AI.Tests.Compat;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.IntegrationTests;
@@ -48,6 +49,38 @@ public class HistoryCaptureTests
                 "TemporalCommunity.Extensions.AI.Tests",
                 "Compat",
                 "Histories"));
+
+    // ── Direct middleware metadata compatibility ─────────────────────────
+
+    /// <summary>
+    /// Captures the pre-metadata-fix direct-adapter payload. The workflow supplies a factory
+    /// key and tag, but the current transport removes those values before scheduling the
+    /// activity. Commit 2 must keep this history replayable while changing new payloads.
+    /// </summary>
+    [Fact]
+    public async Task Capture_DirectMiddlewareOptionsV1()
+    {
+        await using var env = await WorkflowEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        using var host = BuildDirectMiddlewareHost(env.Client);
+        await host.StartAsync();
+
+        var handle = await env.Client.StartWorkflowAsync(
+            (DurableChatClientWorkflow workflow) => workflow.RunAsync(
+                new DurableChatClientWorkflowInput { IncludeCompatibilityMetadata = true }),
+            new WorkflowOptions(
+                $"capture-direct-middleware-{Guid.NewGuid():N}",
+                DurableChatClientWorkflow.TaskQueue));
+
+        var result = await handle.GetResultAsync().WaitAsync(TimeSpan.FromSeconds(15));
+        Assert.Equal("Response: scheduler probe", result);
+
+        var history = await handle.FetchHistoryAsync();
+        await SaveHistoryAsync("direct-middleware-options-v1.json", history);
+
+        await host.StopAsync();
+    }
 
     // ── Pattern 1 simple turn (no tool calls) ─────────────────────────────
 
@@ -255,6 +288,27 @@ public class HistoryCaptureTests
                 opts.HeartbeatTimeout = TimeSpan.FromSeconds(10);
                 opts.SessionTimeToLive = TimeSpan.FromMinutes(5);
             });
+
+        return builder.Build();
+    }
+
+    private static IHost BuildDirectMiddlewareHost(ITemporalClient client)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(client);
+        builder.Services.AddSingleton<IChatClient>(new TestChatClient());
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new NoopEmbeddingGenerator());
+
+        builder.Services
+            .AddHostedTemporalWorker(DurableChatClientWorkflow.TaskQueue)
+            .AddDurableAI(options =>
+            {
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+                options.HeartbeatTimeout = TimeSpan.FromSeconds(10);
+                options.SessionTimeToLive = TimeSpan.FromMinutes(5);
+            })
+            .AddWorkflow<DurableChatClientWorkflow>();
 
         return builder.Build();
     }

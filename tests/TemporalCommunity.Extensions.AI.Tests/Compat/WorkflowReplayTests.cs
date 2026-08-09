@@ -81,6 +81,7 @@ public class WorkflowReplayTests
         };
         var plugin = new DurableAIPlugin();
         plugin.ConfigureReplayer(opts);
+        opts.AddWorkflow<DurableChatClientWorkflow>();
         return new WorkflowReplayer(opts);
     }
 
@@ -98,6 +99,22 @@ public class WorkflowReplayTests
     {
         var replayer = BuildReplayer();
         var history = LoadHistory("pattern-3-with-tool.json");
+
+        var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
+    /// <summary>
+    /// The direct-adapter history captured before Temporal routing metadata was preserved
+    /// remains replayable. This protects the workflow command sequence, not byte-for-byte
+    /// equality of activity-input payloads created by later workflow executions.
+    /// </summary>
+    [Fact]
+    public async Task DirectMiddlewareOptionsV1_ReplaysWithoutError()
+    {
+        var replayer = BuildReplayer();
+        var history = LoadHistory("direct-middleware-options-v1.json");
 
         var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
 
