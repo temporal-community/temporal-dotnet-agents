@@ -233,4 +233,17 @@ public class DurableExecutionOptionsTests
 
         options.Validate(); // Should not throw
     }
+
+    [Fact]
+    public void Validate_ThrowsWhenMaximumConsecutiveErrorsPerRequestIsNegative()
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "q",
+            MaximumConsecutiveErrorsPerRequest = -1,
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
+        Assert.Contains(nameof(DurableExecutionOptions.MaximumConsecutiveErrorsPerRequest), ex.Message);
+    }
 }

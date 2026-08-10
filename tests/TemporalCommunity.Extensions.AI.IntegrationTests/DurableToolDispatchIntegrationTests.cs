@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -33,6 +35,100 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// </remarks>
 public class DurableToolDispatchIntegrationTests
 {
+    [Fact]
+    public async Task TransientModelFailure_DoesNotConsumeSuccessfulIterationBudget()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        var chatClient = new FailingThenFinalChatClient(
+            failuresBeforeSuccess: 1,
+            () => new InvalidOperationException("transient provider failure"));
+        var taskQueue = $"model-transient-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            _ => { },
+            options =>
+            {
+                options.MaxToolCallsPerTurn = 1;
+                options.MaximumConsecutiveErrorsPerRequest = 1;
+                options.RetryPolicy = new RetryPolicy { MaximumAttempts = 1 };
+            });
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var response = await sessionClient.SendAsync(
+            $"model-transient-{Guid.NewGuid():N}",
+            [new ChatMessage(ChatRole.User, "retry the model step")]);
+
+        Assert.Equal("model completed", response.Text);
+        Assert.Equal(2, chatClient.CallCount);
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task ModelFailureAllowance_ThrowsInsteadOfReturningIterationSentinel()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        var chatClient = new FailingThenFinalChatClient(
+            failuresBeforeSuccess: int.MaxValue,
+            () => new InvalidOperationException("persistent transient provider failure"));
+        var taskQueue = $"model-threshold-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            _ => { },
+            options =>
+            {
+                options.MaxToolCallsPerTurn = 1;
+                options.MaximumConsecutiveErrorsPerRequest = 1;
+                options.RetryPolicy = new RetryPolicy { MaximumAttempts = 1 };
+            });
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        await Assert.ThrowsAnyAsync<Exception>(() => sessionClient.SendAsync(
+            $"model-threshold-{Guid.NewGuid():N}",
+            [new ChatMessage(ChatRole.User, "exhaust the failure allowance")]));
+
+        Assert.Equal(2, chatClient.CallCount);
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task PermanentModelFailure_IsNotRetriedByWorkflowLoop()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        var chatClient = new FailingThenFinalChatClient(
+            failuresBeforeSuccess: 1,
+            () => new HttpRequestException(
+                "invalid provider request",
+                inner: null,
+                statusCode: HttpStatusCode.BadRequest));
+        var taskQueue = $"model-permanent-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            _ => { },
+            options =>
+            {
+                options.MaxToolCallsPerTurn = 2;
+                options.MaximumConsecutiveErrorsPerRequest = 3;
+                options.RetryPolicy = new RetryPolicy { MaximumAttempts = 1 };
+            });
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        await Assert.ThrowsAnyAsync<Exception>(() => sessionClient.SendAsync(
+            $"model-permanent-{Guid.NewGuid():N}",
+            [new ChatMessage(ChatRole.User, "do not retry this invalid request")]));
+
+        Assert.Equal(1, chatClient.CallCount);
+        await host.StopAsync();
+    }
+
     private const string GetChatStepActivity = "TemporalCommunity.Extensions.AI.GetChatStep";
     private const string InvokeFunctionActivity = "TemporalCommunity.Extensions.AI.InvokeFunction";
 
@@ -878,6 +974,49 @@ public class DurableToolDispatchIntegrationTests
                 values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class FailingThenFinalChatClient(
+        int failuresBeforeSuccess,
+        Func<Exception> failureFactory) : IChatClient
+    {
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
+        public ChatClientMetadata Metadata { get; } = new("failing-then-final");
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var call = Interlocked.Increment(ref _callCount);
+            if (call <= failuresBeforeSuccess)
+            {
+                throw failureFactory();
+            }
+
+            return Task.FromResult(new ChatResponse(
+                new ChatMessage(ChatRole.Assistant, "model completed")));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
         public void Dispose() { }
     }
 }

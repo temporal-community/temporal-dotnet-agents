@@ -73,7 +73,9 @@ risk external effect using an authoritative service, regardless of whether appro
 `DurableTurnCompletionReason` has exactly two outcomes: `FinalResponse` and
 `IterationLimitReached`. Approval denial/timeout and recoverable tool failures can become model-
 visible synthetic results before a later final response. Workflow cancellation and the configured
-consecutive-error limit throw instead of returning a completion reason.
+consecutive-error limit throw instead of returning a completion reason. A failed model activity
+uses the consecutive-error allowance but does not consume a successful model/tool iteration;
+provider errors classified as permanent fail the turn immediately.
 
 `RunDurableTurnAsync` must be called from a workflow Update and permits one managed turn per Update
 ID in the current workflow run. The SDK Update ID is client retry metadata; it is not copied into

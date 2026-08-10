@@ -194,8 +194,8 @@ public sealed class DurableExecutionOptions
     public int MaxToolCallsPerTurn { get; set; } = 20;
 
     /// <summary>
-    /// Gets or sets the maximum number of consecutive iterations in which one or more tools
-    /// may fail before the durable tool loop surfaces a non-retryable
+    /// Gets or sets the maximum number of consecutive failed model steps or iterations in which
+    /// one or more tools fail before the durable tool loop surfaces a non-retryable
     /// <c>ApplicationFailureException</c>. Defaults to <c>3</c>. Set to <c>0</c> for
     /// immediate propagation (MAF-style behavior where the first tool failure aborts the turn).
     /// </summary>
@@ -286,6 +286,12 @@ public sealed class DurableExecutionOptions
         {
             throw new InvalidOperationException(
                 $"{nameof(MaxToolCallsPerTurn)} must be greater than zero in {nameof(DurableExecutionOptions)}.");
+        }
+
+        if (MaximumConsecutiveErrorsPerRequest < 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(MaximumConsecutiveErrorsPerRequest)} cannot be negative in {nameof(DurableExecutionOptions)}.");
         }
     }
 }

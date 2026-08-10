@@ -44,7 +44,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         var maxIterations = RequiredInput.MaxToolCallsPerTurn;
 
-        for (var iteration = 0; iteration < maxIterations; iteration++)
+        var iteration = 0;
+        while (iteration < maxIterations)
         {
             var stepInput = new DurableChatInput
             {
@@ -71,9 +72,21 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
             catch (ActivityFailureException llmFailure)
             {
+                var permanentProviderFailure =
+                    Internal.TemporalFailureInspector.FindNonRetryableApplicationFailure(
+                        llmFailure,
+                        Internal.LlmFailurePolicy.NonRetryableErrorType);
+                if (permanentProviderFailure is not null)
+                {
+                    throw new ApplicationFailureException(
+                        "The LLM provider rejected the request with a non-retryable error.",
+                        permanentProviderFailure,
+                        errorType: Internal.LlmFailurePolicy.NonRetryableErrorType,
+                        nonRetryable: true);
+                }
+
                 // Retry-hardening (Part 3): the LLM-step activity exhausted its RetryPolicy (bounded
-                // backstop) or failed fast (non-retryable HTTP 4xx classified in the activity). This
-                // arrives as an ActivityFailureException. Route it through the SAME consecutive-error
+                // backstop). This arrives as an ActivityFailureException. Route it through the SAME consecutive-error
                 // counter that tool failures use so the MaximumConsecutiveErrorsPerRequest bound
                 // terminates the turn instead of the loop swallowing the failure and re-dispatching
                 // the same doomed call forever. At threshold we surface a terminal non-retryable
@@ -89,8 +102,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         nonRetryable: true);
                 }
 
-                // Below threshold — retry the LLM step on the next iteration. No assistant message
-                // was produced, so nothing is appended to the accumulated transcript this iteration.
+                // Below threshold — retry the same logical LLM iteration. No model result was
+                // produced, so the successful model/tool iteration budget is not consumed.
                 continue;
             }
 
@@ -446,6 +459,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             var toolResultMessage = new ChatMessage(ChatRole.Tool, functionResultContents);
             accumulated.Add(toolResultMessage);
             allTurnMessages.Add(toolResultMessage);
+            iteration++;
         }
 
         // Iteration cap hit. Per OD-9 we synthesize an explicit sentinel message rather than
