@@ -29,6 +29,8 @@
   StateBag mutations while retaining approval-scope records committed by approval updates.
 - Library-owned durable-tool configuration and state-completion failures now fail the turn
   immediately instead of being returned to the model as recoverable tool output.
+- Sequential typed turns now stop before scheduling later tools in the same model batch after a
+  fatal configuration or state-completion failure.
 - Failed model activities use the consecutive-error allowance without consuming the successful
   model/tool iteration budget; permanent provider errors fail immediately.
 - Documented that managed tool sessions started on 0.10.4 must be drained before upgrading because

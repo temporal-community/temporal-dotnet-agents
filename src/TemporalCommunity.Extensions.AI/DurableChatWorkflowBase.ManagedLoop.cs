@@ -317,10 +317,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     {
                         throw;
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Preserve the last successful state. Phase 3 classifies this task and
-                        // supplies the existing synthetic tool-error result to the model.
+                        var fatalFailure = CreateFatalToolFailure(ex, funcInput.FunctionName);
+                        if (fatalFailure is not null)
+                        {
+                            // Sequential dispatch must stop here. Scheduling a later tool after a
+                            // library-owned configuration/state-completion failure could produce
+                            // external effects even though the turn is already certain to fail.
+                            throw fatalFailure;
+                        }
+
+                        // Preserve the last successful state. Phase 3 supplies the existing
+                        // synthetic result for an ordinary recoverable tool error to the model.
                     }
                 }
             }
@@ -412,18 +421,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 else
                 {
                     var ex = task.Exception?.InnerException ?? task.Exception;
-                    var fatalConfigurationFailure =
-                        Internal.TemporalFailureInspector.FindNonRetryableApplicationFailure(
-                            ex,
-                            nameof(Exceptions.DurableConfigurationException));
-                    if (fatalConfigurationFailure is not null)
+                    var fatalFailure = CreateFatalToolFailure(ex, tc.Name);
+                    if (fatalFailure is not null)
                     {
-                        throw new ApplicationFailureException(
-                            $"Durable tool '{tc.Name}' failed with a non-recoverable " +
-                            "configuration or state-completion error.",
-                            fatalConfigurationFailure,
-                            errorType: nameof(Exceptions.DurableConfigurationException),
-                            nonRetryable: true);
+                        throw fatalFailure;
                     }
 
                     hadError = true;
@@ -522,6 +523,24 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         }
 
         return RequiredInput.ApprovalTimeout;
+    }
+
+    private static ApplicationFailureException? CreateFatalToolFailure(
+        Exception? exception,
+        string toolName)
+    {
+        var fatalConfigurationFailure =
+            Internal.TemporalFailureInspector.FindNonRetryableApplicationFailure(
+                exception,
+                nameof(Exceptions.DurableConfigurationException));
+        return fatalConfigurationFailure is null
+            ? null
+            : new ApplicationFailureException(
+                $"Durable tool '{toolName}' failed with a non-recoverable " +
+                "configuration or state-completion error.",
+                fatalConfigurationFailure,
+                errorType: nameof(Exceptions.DurableConfigurationException),
+                nonRetryable: true);
     }
 
 

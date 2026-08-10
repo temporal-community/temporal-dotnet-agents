@@ -57,6 +57,53 @@ public class ExtensibleDurableTurnIntegrationTests
     }
 
     [Fact]
+    public async Task SequentialStateCompletionFailure_DoesNotScheduleLaterTool()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+            [
+                new FunctionCallContent(
+                    "fatal-first",
+                    "state_failure",
+                    new Dictionary<string, object?>()),
+                new FunctionCallContent(
+                    "must-not-run",
+                    "later_tool",
+                    new Dictionary<string, object?>()),
+            ])),
+        ]);
+        var firstInvocationCount = 0;
+        var laterInvocationCount = 0;
+        var taskQueue = $"extensible-state-failure-order-{Guid.NewGuid():N}";
+        using var host = BuildStateCompletionFailureHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            () => Interlocked.Increment(ref firstInvocationCount),
+            () => Interlocked.Increment(ref laterInvocationCount));
+        await host.StartAsync();
+
+        var handle = await StartWorkflowAsync(env.Client, host.Services, taskQueue);
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+                workflow => workflow.TurnAsync(CreateRequest()),
+                new WorkflowUpdateOptions { Id = "sequential-fatal-stop" }));
+
+        Assert.Equal(1, firstInvocationCount);
+        Assert.Equal(0, laterInvocationCount);
+        Assert.Equal(
+            1,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+    [Fact]
     public async Task FailedTurn_RollsBackHistoryAndTurnCountBeforeNextUpdate()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
@@ -413,7 +460,8 @@ public class ExtensibleDurableTurnIntegrationTests
         ITemporalClient client,
         string taskQueue,
         IChatClient chatClient,
-        Action onInvoke)
+        Action onInvoke,
+        Action? onLaterInvoke = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
@@ -451,6 +499,28 @@ public class ExtensibleDurableTurnIntegrationTests
                     throw new InvalidOperationException("Injected state-completion failure."),
             },
             options => options.WithMaxAttempts(1));
+
+        if (onLaterInvoke is not null)
+        {
+            var laterDeclaration = AIFunctionFactory.Create(
+                () => string.Empty,
+                "later_tool",
+                "Must not run after a fatal sequential tool failure.").AsDeclarationOnly();
+            worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
+                laterDeclaration,
+                _ => new DurableToolActivation<IntegrationTurnState>
+                {
+                    Function = AIFunctionFactory.Create(
+                        () =>
+                        {
+                            onLaterInvoke();
+                            return "later tool completed";
+                        },
+                        laterDeclaration.Name,
+                        laterDeclaration.Description),
+                },
+                options => options.WithMaxAttempts(1));
+        }
 
         return builder.Build();
     }

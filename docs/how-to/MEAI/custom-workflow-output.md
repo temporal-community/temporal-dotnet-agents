@@ -58,6 +58,11 @@ side-effect free. Deterministic callback or state-normalization failures are non
 ordinary function is not automatically repeated solely because post-processing failed. They also
 fail the turn immediately; the workflow does not convert a library-owned configuration or state-
 completion failure into a model-visible tool result and ask the model to invoke the tool again.
+In sequential mode, the workflow also stops scheduling the remaining calls from that model batch
+as soon as it observes such a fatal failure. This prevents later tools from creating new effects
+after the turn is already certain to fail. It does not undo the ordinary function or external
+effect that completed before its state-completion callback failed; write tools must remain
+idempotent and use the invocation metadata's idempotency key.
 
 MEAI chat-client middleware runs around model calls. `DelegatingAIFunction` runs inside an already
 scheduled tool activity. The existing `IDurableToolInterceptor` remains the workflow-controlled
