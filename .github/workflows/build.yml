@@ -77,6 +77,9 @@ jobs:
       - name: Pack
         run: just pack
 
+      - name: Run extensible-turn packed-package gate
+        run: just smoke-extensible-turns-packed
+
       - name: Upload packages
         uses: actions/upload-artifact@v7.0.1
         with:

@@ -30,6 +30,16 @@ activity, one real tool activity with state completion, a final model activity, 
 completed Update. Ordinary test runs exclude `Category=HistoryCapture` so they never rewrite the
 checked-in corpus.
 
+Before adopting or publishing the typed API, run its clean NuGet consumer:
+
+```bash
+just smoke-extensible-turns
+```
+
+This gate does not use project references or the normal global NuGet cache. It validates the local
+source metadata and SHA-512 of the freshly packed AI and Agents packages, then runs the public
+split-registration workflow once with `lib/net10.0` and once with `lib/netstandard2.1` selected.
+
 ---
 
 ## Unit Testing Application Code

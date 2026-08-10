@@ -5,6 +5,9 @@ This project ships two libraries — `TemporalCommunity.Extensions.AI` and `Temp
 The combinations in this guide are tested with Microsoft.Extensions.AI 10.8.3 and
 Microsoft.Agents.AI 1.17.0. Both combinations require Temporal Service 1.31.0 or newer; repository
 integration tests pin Temporal CLI `v1.8.0`, whose embedded server is 1.31.2.
+Both packages expose their supported public surface from `lib/net10.0` and
+`lib/netstandard2.1`; the packed-package gate compiles and runs the extensible typed-turn surface
+through both asset selections.
 
 ---
 
@@ -66,6 +69,8 @@ var response = await sessionClient.SendAsync(
 - HITL approval gates via `DurableApprovalRequest` / `DurableApprovalDecision`.
 - `DurableAIDataConverter` auto-wired when using the managed registration overloads (`AddTemporalClient` + `AddDurableAI`, or the 3-arg `AddHostedTemporalWorker` overload). Manual `TemporalClient.ConnectAsync` callers must set `DataConverter = DurableAIDataConverter.Instance` explicitly.
 - Custom workflow output — subclass `DurableChatWorkflowBase<TOutput>` to return domain-specific types from workflow Update handlers. The session loop, history, HITL, and continue-as-new are all inherited. See [custom-workflow-output.md](how-to/MEAI/custom-workflow-output.md).
+- Extensible typed turns — subclass `DurableToolWorkflowBase<TRequestData, TTurnState>` to retain
+  package-owned per-tool activities while supplying typed request data and sequential turn state.
 
 ### Limitations
 

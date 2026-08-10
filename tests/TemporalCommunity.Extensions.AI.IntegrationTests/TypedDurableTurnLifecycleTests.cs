@@ -152,6 +152,40 @@ public class TypedDurableTurnLifecycleTests
         await host.StopAsync();
     }
 
+    [Fact]
+    public async Task UnknownDispatch_FailsUpdateBeforeModelOrToolDispatch()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "must not run")),
+        ]);
+        var taskQueue = $"typed-turn-invalid-dispatch-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, chatClient);
+        await host.StartAsync();
+        var handle = await StartAsync(env.Client, host.Services, taskQueue);
+        var request = new DurableTurnRequest<TypedTurnRequestData, TypedTurnState>
+        {
+            Messages = [new ChatMessage(ChatRole.User, "invalid-dispatch")],
+            RequestData = new TypedTurnRequestData("invalid-dispatch"),
+            InitialTurnState = new TypedTurnState(0, []),
+            CorrelationId = "invalid-dispatch",
+            Options = new DurableTurnOptions { DispatchMode = (DurableToolDispatchMode)99 },
+        };
+
+        await Assert.ThrowsAnyAsync<Exception>(() => handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(request),
+            new WorkflowUpdateOptions { Id = "invalid-dispatch" }));
+
+        Assert.Equal(0, chatClient.CallCount);
+        Assert.Equal(
+            0,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, GetChatStepActivity));
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
     private static IHost BuildHost(
         ITemporalClient client,
         string taskQueue,

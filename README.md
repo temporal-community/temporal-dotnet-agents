@@ -145,6 +145,7 @@ just test-unit    # Unit tests (no server required)
 just test         # Unit + integration tests (starts embedded Temporal test servers)
 just benchmark-statebag  # Release-mode StateBag rollback timing and allocation measurements
 just pack         # Build NuGet packages → artifacts/packages/
+just smoke-extensible-turns # Pack, isolate restore, and run the public typed-turn consumer
 just ci           # Full pipeline: clean → build → test-unit → pack
 ```
 

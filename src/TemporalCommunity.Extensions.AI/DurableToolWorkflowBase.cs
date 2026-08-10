@@ -54,10 +54,10 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
 
         if (!Enum.IsDefined(typeof(DurableToolDispatchMode), request.Options.DispatchMode))
         {
-            throw new ArgumentOutOfRangeException(
-                nameof(request),
-                request.Options.DispatchMode,
-                "Unknown durable tool dispatch mode.");
+            throw new ApplicationFailureException(
+                $"Unknown durable tool dispatch mode '{(int)request.Options.DispatchMode}'.",
+                errorType: "DurableTurnInvalidDispatchMode",
+                nonRetryable: true);
         }
 
         var requestEntry = DurableSessionRequest.FromMessages(

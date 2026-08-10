@@ -48,6 +48,11 @@ services
 The workflow-starting process still registers or constructs the client it uses to start the typed
 workflow. The executable sample remains a single-process demonstration.
 
+The standalone
+[`ExtensibleDurableTurnsPackageSmokeTest`](../../../tests/smoke/ExtensibleDurableTurnsPackageSmokeTest/README.md)
+continuously tests this split-registration shape through the packed public NuGet surface under both
+package target assets.
+
 `RequestData` and `TTurnState` are application-supplied history payloads, not authorization proof.
 The decorator uses them only to locate subject/resource and obtains the current decision from the
 authoritative service immediately before each stateful function.

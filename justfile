@@ -222,12 +222,18 @@ test-filter filter: build
         --filter "{{filter}}" \
         --logger "console;verbosity=normal"
 
-# Pack NuGet packages (Release, into artifacts/packages/)
-pack: clean build
+# Pack NuGet packages (Release, into artifacts/packages/). Serialize the solution's
+# multi-target clean/build/pack graph; parallel outer builds can deadlock while both package
+# projects evaluate their net10.0 and netstandard2.1 legs.
+pack:
+    dotnet clean {{solution}} --configuration {{configuration}} --nologo -v q -m:1
+    dotnet restore {{solution}} -m:1
+    dotnet build {{solution}} --configuration {{configuration}} --no-restore -m:1
     @echo "Creating NuGet packages with version: {{ version }}"
     @dotnet pack {{solution}} \
         --configuration {{configuration}} \
         --no-build \
+        -m:1 \
         --output {{artifacts_dir}}
     @echo "Packages written to {{artifacts_dir}}/"
 
@@ -237,6 +243,14 @@ pack: clean build
 smoke-downlevel-proxy: pack
     dotnet restore tests/smoke/DownLevelSmokeTest -p:SmokeProxy=true -p:PackedVersion={{version}}
     dotnet run --project tests/smoke/DownLevelSmokeTest --no-restore --configuration Debug -p:SmokeProxy=true -p:PackedVersion={{version}}
+
+# Pack and run the clean extensible-turn consumer against net10.0 and the netstandard2.1
+# package assets. Every run uses a temporary global-packages directory and verifies source/hash.
+smoke-extensible-turns: pack smoke-extensible-turns-packed
+
+# Run the extensible-turn package gate against artifacts already produced by `just pack`.
+smoke-extensible-turns-packed:
+    tests/smoke/ExtensibleDurableTurnsPackageSmokeTest/run-smoke.sh "{{version}}" "{{artifacts_dir}}"
 
 # Push to NuGet.org (NUGET_API_KEY required for local; CI uses OIDC Trusted Publishing in publish.yml)
 publish-nuget: pack

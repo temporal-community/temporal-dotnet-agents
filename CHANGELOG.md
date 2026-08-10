@@ -21,6 +21,10 @@
   otherwise unused `ITemporalClient` when the stock workflow is disabled.
 - Added specialized-workflow Continue-as-New, one-turn-per-Update, and checked-in typed-history
   replay coverage; duplicate managed-turn calls now fail the Update non-retryably.
+- Added an isolated packed-package consumer that validates source and SHA-512 provenance, both
+  package target assets, split client/worker registration, scoped DI, and typed-turn runtime behavior.
+- Unknown numeric durable-tool dispatch values now fail the Update non-retryably before model or
+  tool dispatch.
 - Added sequential typed-turn dispatch as the specialized-base default, threading successful
   explicit state replacements in model-call order while preserving the stock session's parallel
   behavior and the all-approvals-before-tools safety barrier.
