@@ -11,8 +11,11 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 public class DurableFunctionStateCompletionTests
 {
     [Fact]
-    public async Task SequentialCompletion_ReturnsExplicitReplacementIncludingNull()
+    public async Task SequentialCompletion_DistinguishesUnchangedValueAndNullReplacement()
     {
+        var unchangedResult = await InvokeAsync(
+            DurableToolDispatchMode.Sequential,
+            (_, _) => ValueTask.FromResult(DurableStateUpdate<TurnState>.Unchanged));
         var valueResult = await InvokeAsync(
             DurableToolDispatchMode.Sequential,
             (_, _) => ValueTask.FromResult(DurableStateUpdate<TurnState>.Replace(new TurnState(8))));
@@ -20,6 +23,8 @@ public class DurableFunctionStateCompletionTests
             DurableToolDispatchMode.Sequential,
             (_, _) => ValueTask.FromResult(DurableStateUpdate<TurnState>.Replace(null)));
 
+        Assert.False(unchangedResult.HasStateReplacement);
+        Assert.Null(unchangedResult.StateReplacement);
         Assert.True(valueResult.HasStateReplacement);
         Assert.Equal(8, valueResult.StateReplacement!.Value.GetProperty("count").GetInt32());
         Assert.True(nullResult.HasStateReplacement);

@@ -7,7 +7,7 @@ using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests.Internal;
 
-public class DurableToolActivationPrototypeTests
+public class DurableFunctionDeclarationSnapshotTests
 {
     [Fact]
     public void DeclarationSnapshot_ReconstructsDeclarationWithoutImplementation()
@@ -125,106 +125,4 @@ public class DurableToolActivationPrototypeTests
         Assert.Throws<DurableConfigurationException>(
             () => DurableJsonSchemaFingerprint.Create(schema.RootElement));
     }
-
-    [Fact]
-    public async Task Activation_SeparatesOrdinaryModelResultFromStateReplacement()
-    {
-        var function = AIFunctionFactory.Create((string value) => $"accepted:{value}", "accept");
-        var activation = new DurableToolActivation<TestState>
-        {
-            Function = function,
-            CompleteState = (result, _) => ValueTask.FromResult(
-                DurableStateUpdate<TestState>.Replace(new TestState(result!.ToString()!, 1))),
-        };
-
-        var result = await DurableToolActivationInvoker.InvokeAsync(
-            activation,
-            new AIFunctionArguments(new Dictionary<string, object?> { ["value"] = "item" }),
-            DurableToolDispatchMode.Sequential);
-
-        var modelResult = Assert.IsType<JsonElement>(result.ModelResult);
-        Assert.Equal("accepted:item", modelResult.GetString());
-        Assert.True(result.HasStateReplacement);
-        Assert.Equal("accepted:item", result.StateReplacement!.Value.GetProperty("value").GetString());
-        Assert.Equal(1, result.StateReplacement.Value.GetProperty("count").GetInt32());
-    }
-
-    [Fact]
-    public async Task StateUpdate_DistinguishesUnchangedReplaceValueAndReplaceNull()
-    {
-        var function = AIFunctionFactory.Create(() => "ok", "tool");
-
-        var unchanged = await InvokeWithCompletion(
-            function,
-            DurableStateUpdate<TestState>.Unchanged);
-        var replaced = await InvokeWithCompletion(
-            function,
-            DurableStateUpdate<TestState>.Replace(new TestState("value", 2)));
-        var replacedNull = await InvokeWithCompletion(
-            function,
-            DurableStateUpdate<TestState>.Replace(null));
-
-        Assert.False(unchanged.HasStateReplacement);
-        Assert.Null(unchanged.StateReplacement);
-        Assert.True(replaced.HasStateReplacement);
-        Assert.Equal(JsonValueKind.Object, replaced.StateReplacement!.Value.ValueKind);
-        Assert.True(replacedNull.HasStateReplacement);
-        Assert.Equal(JsonValueKind.Null, replacedNull.StateReplacement!.Value.ValueKind);
-    }
-
-    [Fact]
-    public async Task ParallelCompletion_IsRejectedBeforeFunctionInvocation()
-    {
-        var invocationCount = 0;
-        var function = AIFunctionFactory.Create(() => ++invocationCount, "tool");
-        var activation = new DurableToolActivation<int>
-        {
-            Function = function,
-            CompleteState = (_, _) => ValueTask.FromResult(DurableStateUpdate<int>.Replace(1)),
-        };
-
-        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
-            () => DurableToolActivationInvoker.InvokeAsync(
-                activation,
-                new AIFunctionArguments(),
-                DurableToolDispatchMode.Parallel));
-
-        Assert.True(exception.NonRetryable);
-        Assert.Equal(0, invocationCount);
-    }
-
-    [Fact]
-    public async Task CompletionFailure_IsNonRetryableAndFunctionRunsOnce()
-    {
-        var invocationCount = 0;
-        var function = AIFunctionFactory.Create(() => ++invocationCount, "tool");
-        var activation = new DurableToolActivation<int>
-        {
-            Function = function,
-            CompleteState = (_, _) => throw new InvalidOperationException("completion failed"),
-        };
-
-        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
-            () => DurableToolActivationInvoker.InvokeAsync(
-                activation,
-                new AIFunctionArguments(),
-                DurableToolDispatchMode.Sequential));
-
-        Assert.True(exception.NonRetryable);
-        Assert.Equal(1, invocationCount);
-    }
-
-    private static Task<DurableToolActivationResult> InvokeWithCompletion(
-        AIFunction function,
-        DurableStateUpdate<TestState> update) =>
-        DurableToolActivationInvoker.InvokeAsync(
-            new DurableToolActivation<TestState>
-            {
-                Function = function,
-                CompleteState = (_, _) => ValueTask.FromResult(update),
-            },
-            new AIFunctionArguments(),
-            DurableToolDispatchMode.Sequential);
-
-    private sealed record TestState(string Value, int Count);
 }
