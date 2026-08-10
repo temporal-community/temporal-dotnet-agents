@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using TemporalCommunity.Extensions.AI.Approvals;
+using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
 using TemporalCommunity.Extensions.Tests.Shared;
 using Temporalio.Client;
@@ -16,6 +17,60 @@ public class ExtensibleDurableTurnIntegrationTests
 {
     private const string GetChatStepActivity = "TemporalCommunity.Extensions.AI.GetChatStep";
     private const string InvokeFunctionActivity = "TemporalCommunity.Extensions.AI.InvokeFunction";
+
+    [Fact]
+    public async Task FailedTurn_RollsBackHistoryAndTurnCountBeforeNextUpdate()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var chatClient = new ScriptedChatClient([]);
+        var taskQueue = $"extensible-rollback-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            new ConcurrentBag<ToolObservation>(),
+            new ConcurrentDictionary<string, byte>(StringComparer.Ordinal),
+            options => options.MaximumConsecutiveErrorsPerRequest = 0);
+        await host.StartAsync();
+
+        var handle = await StartWorkflowAsync(env.Client, host.Services, taskQueue);
+        var failedRequest = CreateRequest(
+            "This failed request must be rolled back.");
+
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+                workflow => workflow.TurnAsync(failedRequest),
+                new WorkflowUpdateOptions { Id = "failed-turn" }));
+
+        var historyAfterFailure = await handle.QueryAsync<IntegrationDurableTurnWorkflow, IReadOnlyList<DurableSessionEntry>>(
+            workflow => workflow.GetHistory());
+        Assert.Empty(historyAfterFailure);
+
+        chatClient.Enqueue(new ChatResponse(
+            new ChatMessage(ChatRole.Assistant, "The next turn succeeded.")));
+        var successfulRequest = CreateRequest("This request should be retained.");
+        var result = await handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(successfulRequest),
+            new WorkflowUpdateOptions { Id = "successful-turn" });
+
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, result.CompletionReason);
+        var modelCall = Assert.Single(chatClient.Calls);
+        var modelInput = string.Join("\n", modelCall.Messages.Select(message => message.Text));
+        Assert.Contains("This request should be retained.", modelInput, StringComparison.Ordinal);
+        Assert.DoesNotContain("This failed request must be rolled back.", modelInput, StringComparison.Ordinal);
+
+        var historyAfterSuccess = await handle.QueryAsync<IntegrationDurableTurnWorkflow, IReadOnlyList<DurableSessionEntry>>(
+            workflow => workflow.GetHistory());
+        Assert.Collection(
+            historyAfterSuccess,
+            entry => Assert.IsType<DurableSessionRequest>(entry),
+            entry => Assert.IsType<DurableSessionResponse>(entry));
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
 
     [Fact]
     public async Task TypedSequentialTurn_RetriesWithStableIdentity_AndReturnsFinalState()
@@ -277,10 +332,11 @@ public class ExtensibleDurableTurnIntegrationTests
                 new Dictionary<string, object?> { ["value"] = "original" })],
             "done");
 
-    private static DurableTurnRequest<IntegrationRequestData, IntegrationTurnState> CreateRequest() =>
+    private static DurableTurnRequest<IntegrationRequestData, IntegrationTurnState> CreateRequest(
+        string message = "Run the decision tool.") =>
         new()
         {
-            Messages = [new ChatMessage(ChatRole.User, "Run the decision tool.")],
+            Messages = [new ChatMessage(ChatRole.User, message)],
             RequestData = new IntegrationRequestData("operation-decision", "trusted-subject"),
             InitialTurnState = new IntegrationTurnState(0, []),
         };
@@ -290,7 +346,8 @@ public class ExtensibleDurableTurnIntegrationTests
         string taskQueue,
         IChatClient chatClient,
         ConcurrentBag<ToolObservation> observations,
-        ConcurrentDictionary<string, byte> externalEffects)
+        ConcurrentDictionary<string, byte> externalEffects,
+        Action<DurableExecutionOptions>? configureOptions = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
@@ -305,6 +362,7 @@ public class ExtensibleDurableTurnIntegrationTests
                 options.RegisterDefaultWorkflow = false;
                 options.ActivityTimeout = TimeSpan.FromSeconds(30);
                 options.HeartbeatTimeout = TimeSpan.FromSeconds(10);
+                configureOptions?.Invoke(options);
             })
             .AddWorkflow<IntegrationDurableTurnWorkflow>();
 

@@ -812,7 +812,11 @@ AgentWorkflow → ExecuteActivityAsync → AgentActivities running → [WORKER D
 8. The activity runs again on the new worker (fresh LLM call)
 9. If it succeeds, the result is recorded and the workflow continues
 
-**Data loss**: None. The conversation history up to the failed turn is in `_history` (reconstructed during replay from activity results in the event history). The failed turn's request was already appended to `_history` before `ExecuteActivityAsync` was called, but since the activity never completed, the response entry was never added. On retry, the request is re-appended (during replay) and the activity re-executes.
+**Data loss**: None. The conversation history up to the failed turn is in `_history`
+(reconstructed during replay from activity results in the event history). Activity retries happen
+inside the same turn. If the turn ultimately fails, the base workflow rolls back the request entry
+and turn count before the Update failure is returned. A later turn therefore cannot accidentally
+send the failed request to the model as conversation history.
 
 #### Scenario B: Worker Crashes Between Activities (Workflow Code Running)
 

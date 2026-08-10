@@ -465,6 +465,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         await Workflow.WaitConditionAsync(() => !_isProcessing);
         _isProcessing = true;
 
+        var historyCountBeforeTurn = _history.Count;
+        var turnCountBeforeTurn = _turnCount;
+
         try
         {
             // Append the request entry for this turn. When external-history mode is on we
@@ -503,6 +506,23 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
 
             return (output, responseEntry);
+        }
+        catch
+        {
+            // A turn is a transactional unit from the session's perspective. If model/tool
+            // execution, response projection, or search-attribute publication fails, retain
+            // neither the request nor any partially-created response and do not count the
+            // failed attempt as a completed turn. The workflow gate prevents another turn
+            // from mutating these collections while this rollback runs.
+            if (_history.Count > historyCountBeforeTurn)
+            {
+                _history.RemoveRange(
+                    historyCountBeforeTurn,
+                    _history.Count - historyCountBeforeTurn);
+            }
+
+            _turnCount = turnCountBeforeTurn;
+            throw;
         }
         finally
         {
