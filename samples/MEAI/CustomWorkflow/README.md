@@ -12,6 +12,7 @@ the stock `DurableChatWorkflow` / `DurableChatSessionClient` return type is too 
 - `ShoppingAssistantWorkflow` — concrete subclass with a `[WorkflowUpdate("Shop")]` handler
 - `ShoppingActivities` — custom activity class that injects cart tools and returns `ShoppingTurnOutput`
 - `RegisterDefaultWorkflow = false` — skips registering `DurableChatWorkflow` so only the custom workflow is on the worker
+- `IDurableChatWorkflowInputFactory` — creates the same frozen start configuration used by the stock session client, even when that client is disabled
 - Callers use `handle.ExecuteUpdateAsync<ShoppingTurnOutput>("Shop", ...)` directly — no `DurableChatSessionClient`
 
 ## Architecture
@@ -38,6 +39,7 @@ Note: cart tools execute inline inside the single `ShoppingActivity` invocation 
 - **Typed update responses.** `[WorkflowUpdate("Shop")]` returns `ShoppingTurnOutput`, carrying both the assistant's `ChatResponse` and the `IReadOnlyList<CartAction>` mutated during tool calls. The managed `DurableChatSessionClient.SendAsync` API returns `DurableSessionResponse`; use a custom workflow when the update must return additional domain data atomically.
 - **Cart tools are intentionally activity-local.** `ShoppingActivities.GetShoppingResponseAsync` defines `add_to_cart` and `remove_from_cart` as local `AIFunction` instances that close over a per-invocation `List<CartAction>`, then passes them through `ChatOptions.Tools` to a client configured with `UseFunctionInvocation()`. This is valid only because this sample owns its activity and does not call the managed session client. It is not the managed durable-tool contract. For workflow-managed, per-tool activity dispatch, use `AddDurableTools` as shown in the `DurableTools` sample.
 - **`RegisterDefaultWorkflow = false`.** Passing this option to `AddDurableAI` prevents the library from registering `DurableChatWorkflow` on the worker. This avoids a conflict when the custom workflow is registered instead, and signals intent clearly.
+- **Canonical start configuration.** The host resolves `IDurableChatWorkflowInputFactory` before starting the workflow. Its `Create()` result includes the configured retry, timeout, reducer, durable-tool, interceptor, and approval snapshot; the sample uses `with` only to change its one-hour TTL. No DI service is resolved from workflow code.
 - **Base class handles history and continue-as-new.** `DurableChatWorkflowBase<TOutput>` manages conversation history accumulation, the idle TTL loop, continue-as-new transitions, HITL approval handlers, and the `RequestShutdownAsync` signal. The base's `RunAsync` is `protected virtual` and is **not** annotated with `[WorkflowRun]` (see `DurableChatWorkflowBase.cs` line 183), so the subclass must declare its own `[WorkflowRun] public new Task RunAsync(DurableChatWorkflowInput input)` that delegates to `base.RunAsync(input)`. Beyond that, the subclass implements the three abstract members — `ExecuteTurnAsync`, `BuildResponseEntry`, and `CreateContinueAsNewException` — and calls `RunTurnAsync` from its own `[WorkflowUpdate]` handler.
 
 ## Getting Started

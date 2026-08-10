@@ -4,6 +4,9 @@
 
 - Fixed continue-as-new input cloning so `HistoryReducerKey`, retry/tool/interceptor settings, and
   derived workflow input fields are preserved without field-by-field reconstruction.
+- Added `IDurableChatWorkflowInputFactory` so application-owned workflows can create the same
+  replay-frozen start configuration as the built-in managed session client, including when the
+  default workflow is disabled.
 
 ## [0.10.4] - 2026-08-09
 

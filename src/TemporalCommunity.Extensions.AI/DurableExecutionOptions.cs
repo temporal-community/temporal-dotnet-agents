@@ -175,8 +175,9 @@ public sealed class DurableExecutionOptions
     /// </para>
     /// <para>
     /// Disabling this only skips the default workflow and session client registration.
-    /// All supporting infrastructure (options, DataConverter, activities, embeddings) is
-    /// still registered regardless of this setting.
+    /// All supporting infrastructure (options, DataConverter, activities, embeddings, and
+    /// <see cref="IDurableChatWorkflowInputFactory"/>) is still registered regardless of this
+    /// setting.
     /// </para>
     /// </remarks>
     public bool RegisterDefaultWorkflow { get; set; } = true;

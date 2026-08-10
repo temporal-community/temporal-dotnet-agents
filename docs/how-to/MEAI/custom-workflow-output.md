@@ -127,7 +127,7 @@ builder.Services
     .AddSingletonActivities<ShoppingActivities>();
 ```
 
-The `RegisterDefaultWorkflow = false` setting tells `AddDurableAI()` to skip registering `DurableChatWorkflow` and `DurableChatSessionClient` since your custom workflow handles session management instead. All other supporting infrastructure (options, DataConverter, activities, embeddings) is still registered.
+The `RegisterDefaultWorkflow = false` setting tells `AddDurableAI()` to skip registering `DurableChatWorkflow` and `DurableChatSessionClient` since your custom workflow handles session management instead. All other supporting infrastructure (options, DataConverter, activities, embeddings) is still registered, including `IDurableChatWorkflowInputFactory`.
 
 `RunTurnAsync` passes your `ExecuteTurnAsync` implementation the configured `RetryPolicy`, or the
 library's bounded default (five attempts) when none is configured. For a non-idempotent custom
@@ -135,12 +135,15 @@ activity, replace it with a stricter policy such as `new RetryPolicy { MaximumAt
 
 ```csharp
 // Start the workflow
-var handle = await temporalClient.StartWorkflowAsync(
-    (ShoppingAssistantWorkflow wf) => wf.RunAsync(new DurableChatWorkflowInput
+var workflowInput = host.Services
+    .GetRequiredService<IDurableChatWorkflowInputFactory>()
+    .Create() with
     {
-        ActivityTimeout = TimeSpan.FromMinutes(5),
         TimeToLive = TimeSpan.FromHours(1),
-    }),
+    };
+
+var handle = await temporalClient.StartWorkflowAsync(
+    (ShoppingAssistantWorkflow wf) => wf.RunAsync(workflowInput),
     new WorkflowOptions(workflowId, taskQueue)
     {
         IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
@@ -155,6 +158,12 @@ Console.WriteLine(output.Response.Messages.Last().Text);
 foreach (var action in output.CartActions)
     Console.WriteLine($"[{action.Action}] {action.ProductName}");
 ```
+
+Resolve the factory in client/host code, never inside a workflow. It snapshots the same retry,
+timeout, history-reducer, tool, interceptor, and approval configuration as the stock session
+client. In split client and worker deployments, both processes must register matching durable AI
+configuration before the client creates the start input; the serialized input, not worker DI,
+becomes the replay-frozen authority for that session.
 
 ---
 

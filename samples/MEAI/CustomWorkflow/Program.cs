@@ -89,16 +89,22 @@ Console.WriteLine("════════════════════�
 var workflowId = $"shopping-{Guid.NewGuid():N}";
 Console.WriteLine($" Session ID: {workflowId}\n");
 
+// Resolve the canonical workflow-input factory outside workflow code. It freezes the same
+// retry, timeout, reducer, durable-tool, interceptor, and approval settings used by the stock
+// session client. Override only sample-specific start values with a record clone.
+var workflowInput = host.Services
+    .GetRequiredService<IDurableChatWorkflowInputFactory>()
+    .Create() with
+    {
+        TimeToLive = TimeSpan.FromHours(1),
+    };
+
 // Start the ShoppingAssistantWorkflow. The base session loop runs until idle TTL elapses,
 // the Shutdown signal arrives, history reaches MaxEntryCount, or Workflow.ContinueAsNewSuggested
 // fires — see DurableChatWorkflowBase.RunAsync (lines 213-247). The latter two exits
 // continue-as-new into a fresh run with carried history.
 var handle = await temporalClient.StartWorkflowAsync(
-    (ShoppingAssistantWorkflow wf) => wf.RunAsync(new DurableChatWorkflowInput
-    {
-        ActivityTimeout = TimeSpan.FromMinutes(5),
-        TimeToLive = TimeSpan.FromHours(1),
-    }),
+    (ShoppingAssistantWorkflow wf) => wf.RunAsync(workflowInput),
     new WorkflowOptions(workflowId, taskQueue)
     {
         IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,

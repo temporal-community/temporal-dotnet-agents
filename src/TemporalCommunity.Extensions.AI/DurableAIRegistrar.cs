@@ -78,6 +78,15 @@ internal static class DurableAIRegistrar
         services.TryAddSingleton<IReadOnlyDictionary<string, AIFunction>>(
             sp => sp.GetRequiredService<DurableFunctionRegistry>());
 
+        // The canonical workflow-input factory is available even when the built-in workflow and
+        // session client are disabled. Application-owned workflows resolve it in client/host code
+        // to freeze the same tool/interceptor/retry configuration as the stock client.
+        services.TryAddSingleton<IDurableChatWorkflowInputFactory>(sp =>
+            new DurableChatWorkflowInputFactory(
+                options,
+                sp.GetService<DurableFunctionRegistry>(),
+                sp.GetService<DurableChatToolOptionsRegistry>()));
+
         // Register the session client and default workflow only if enabled.
         if (options.RegisterDefaultWorkflow)
         {
@@ -88,9 +97,8 @@ internal static class DurableAIRegistrar
                 new DurableChatSessionClient(
                     sp.GetRequiredService<ITemporalClient>(),
                     options,
-                    sp.GetService<ILogger<DurableChatSessionClient>>(),
-                    sp.GetService<DurableFunctionRegistry>(),
-                    sp.GetService<DurableChatToolOptionsRegistry>()));
+                    sp.GetRequiredService<IDurableChatWorkflowInputFactory>(),
+                    sp.GetService<ILogger<DurableChatSessionClient>>()));
             services.TryAddSingleton<IDurableChatSessionClient>(
                 sp => sp.GetRequiredService<DurableChatSessionClient>());
 
