@@ -19,6 +19,44 @@ public class ExtensibleDurableTurnIntegrationTests
     private const string InvokeFunctionActivity = "TemporalCommunity.Extensions.AI.InvokeFunction";
 
     [Fact]
+    public async Task StateCompletionFailure_FailsTurnWithoutRepeatingOrdinaryFunction()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var chatClient = ScriptedChatClient.WithRepeatingToolThenFinal(
+            index => new FunctionCallContent(
+                $"state-failure-{index}",
+                "state_failure",
+                new Dictionary<string, object?>()),
+            repeatCount: 2,
+            finalText: "The model should never reach this response.");
+        var invocationCount = 0;
+        var taskQueue = $"extensible-state-failure-{Guid.NewGuid():N}";
+        using var host = BuildStateCompletionFailureHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            () => Interlocked.Increment(ref invocationCount));
+        await host.StartAsync();
+
+        var handle = await StartWorkflowAsync(env.Client, host.Services, taskQueue);
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+                workflow => workflow.TurnAsync(CreateRequest()),
+                new WorkflowUpdateOptions { Id = "state-completion-failure" }));
+
+        Assert.Equal(1, invocationCount);
+        Assert.Equal(1, chatClient.CallCount);
+        var history = await handle.QueryAsync<IntegrationDurableTurnWorkflow, IReadOnlyList<DurableSessionEntry>>(
+            workflow => workflow.GetHistory());
+        Assert.Empty(history);
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+    [Fact]
     public async Task FailedTurn_RollsBackHistoryAndTurnCountBeforeNextUpdate()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
@@ -368,6 +406,52 @@ public class ExtensibleDurableTurnIntegrationTests
 
         RegisterTool(worker, "apply_first", observations, externalEffects, failFirstAttempt: true);
         RegisterTool(worker, "apply_second", observations, externalEffects, failFirstAttempt: false);
+        return builder.Build();
+    }
+
+    private static IHost BuildStateCompletionFailureHost(
+        ITemporalClient client,
+        string taskQueue,
+        IChatClient chatClient,
+        Action onInvoke)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton(client);
+        builder.Services.AddChatClient(chatClient).Build();
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new NoopEmbeddingGenerator());
+
+        var worker = builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options =>
+            {
+                options.RegisterDefaultWorkflow = false;
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+                options.HeartbeatTimeout = TimeSpan.FromSeconds(10);
+            })
+            .AddWorkflow<IntegrationDurableTurnWorkflow>();
+
+        var declaration = AIFunctionFactory.Create(
+            () => string.Empty,
+            "state_failure",
+            "Produces an ordinary effect before state completion fails.").AsDeclarationOnly();
+        worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
+            declaration,
+            _ => new DurableToolActivation<IntegrationTurnState>
+            {
+                Function = AIFunctionFactory.Create(
+                    () =>
+                    {
+                        onInvoke();
+                        return "ordinary effect completed";
+                    },
+                    declaration.Name,
+                    declaration.Description),
+                CompleteState = (_, _) =>
+                    throw new InvalidOperationException("Injected state-completion failure."),
+            },
+            options => options.WithMaxAttempts(1));
+
         return builder.Build();
     }
 

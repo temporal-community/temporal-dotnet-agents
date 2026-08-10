@@ -398,8 +398,22 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 }
                 else
                 {
-                    hadError = true;
                     var ex = task.Exception?.InnerException ?? task.Exception;
+                    var fatalConfigurationFailure =
+                        Internal.TemporalFailureInspector.FindNonRetryableApplicationFailure(
+                            ex,
+                            nameof(Exceptions.DurableConfigurationException));
+                    if (fatalConfigurationFailure is not null)
+                    {
+                        throw new ApplicationFailureException(
+                            $"Durable tool '{tc.Name}' failed with a non-recoverable " +
+                            "configuration or state-completion error.",
+                            fatalConfigurationFailure,
+                            errorType: nameof(Exceptions.DurableConfigurationException),
+                            nonRetryable: true);
+                    }
+
+                    hadError = true;
                     var includeDetails = RequiredInput.IncludeDetailedErrors;
                     var errorMessage =
                         includeDetails && ex is ApplicationFailureException afe

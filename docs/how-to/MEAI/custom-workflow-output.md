@@ -55,7 +55,9 @@ is an explicit replacement, not “unchanged.” The callback receives the succe
 MEAI function result; with MEAI's normal reflected-function marshaller this is commonly a
 `JsonElement`, even when the source method returned a .NET scalar. The completion operation must be
 side-effect free. Deterministic callback or state-normalization failures are non-retryable so the
-ordinary function is not automatically repeated solely because post-processing failed.
+ordinary function is not automatically repeated solely because post-processing failed. They also
+fail the turn immediately; the workflow does not convert a library-owned configuration or state-
+completion failure into a model-visible tool result and ask the model to invoke the tool again.
 
 MEAI chat-client middleware runs around model calls. `DelegatingAIFunction` runs inside an already
 scheduled tool activity. The existing `IDurableToolInterceptor` remains the workflow-controlled
