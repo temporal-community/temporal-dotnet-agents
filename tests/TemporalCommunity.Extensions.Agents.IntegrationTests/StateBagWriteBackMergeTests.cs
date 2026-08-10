@@ -171,6 +171,59 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
         }
     }
 
+    [Fact]
+    public async Task FailedTurn_ContextProviderStateBagWrite_DoesNotLeakIntoNextTurn()
+    {
+        const string toolName = "failing_tool";
+        const string failedTurnKey = "failed-turn.provider-state";
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("fail-1", toolName, new Dictionary<string, object?>())])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Recovered.")),
+        ]);
+        var provider = new FailedTurnWritingProvider(failedTurnKey);
+        var tool = AIFunctionFactory.Create(
+            FailTool,
+            new AIFunctionFactoryOptions { Name = toolName });
+
+        var taskQueue = $"failed-turn-statebag-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(Env.Client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(opts =>
+            {
+                opts.AddDurableAgent("FailedTurnStateAgent", agent =>
+                {
+                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+                    agent.AddContextProvider(provider);
+                    agent.AddTool(tool, toolOptions => toolOptions.NoRetry());
+                });
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("FailedTurnStateAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+
+            await Assert.ThrowsAnyAsync<Exception>(() => proxy.RunAsync("fail", session));
+
+            var response = await proxy.RunAsync("recover", session);
+
+            Assert.Equal("Recovered.", response.Messages[^1].Text);
+            Assert.False(provider.SecondTurnObservedFailedState,
+                "StateBag changes from a failed turn must not be visible to the next turn.");
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     public sealed class Fixture : IAsyncLifetime
     {
         public WorkflowEnvironment Environment { get; private set; } = null!;
@@ -224,4 +277,38 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             return Task.FromResult(DurableToolDecision.Proceed());
         }
     }
+
+    private sealed class FailedTurnWritingProvider(string key) : AIContextProvider
+    {
+        private int _callCount;
+
+        public bool SecondTurnObservedFailedState { get; private set; }
+
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context, CancellationToken cancellationToken = default)
+        {
+            if (context.Session is not TemporalAgentSession session)
+                return new ValueTask<AIContext>(new AIContext());
+
+            var call = Interlocked.Increment(ref _callCount);
+            if (call == 1)
+            {
+                session.StateBag.SetValue(
+                    key,
+                    "must-be-rolled-back",
+                    System.Text.Json.JsonSerializerOptions.Default);
+            }
+            else if (call == 2)
+            {
+                SecondTurnObservedFailedState = session.StateBag.TryGetValue<string>(
+                    key,
+                    out _,
+                    System.Text.Json.JsonSerializerOptions.Default);
+            }
+
+            return new ValueTask<AIContext>(new AIContext());
+        }
+    }
+
+    private static string FailTool() => throw new InvalidOperationException("Expected tool failure.");
 }

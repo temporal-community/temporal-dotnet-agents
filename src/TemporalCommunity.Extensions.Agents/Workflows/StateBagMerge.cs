@@ -124,19 +124,7 @@ internal static class StateBagMerge
             return current;
         }
 
-        using var stream = new System.IO.MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            foreach (var key in merged.Keys.OrderBy(k => k, StringComparer.Ordinal))
-            {
-                writer.WritePropertyName(key);
-                merged[key].WriteTo(writer);
-            }
-            writer.WriteEndObject();
-        }
-
-        return JsonSerializer.Deserialize<JsonElement>(stream.ToArray());
+        return SerializeSorted(merged);
     }
 
     /// <summary>
@@ -201,14 +189,59 @@ internal static class StateBagMerge
             merged[prop.Name] = prop.Value.Clone();
         }
 
+        return SerializeSorted(merged);
+    }
+
+    /// <summary>
+    /// Restores application-, provider-, interceptor-, and tool-owned StateBag entries to their
+    /// pre-turn values after a failed turn, while preserving approval-scope records committed by
+    /// independent approval updates during that turn.
+    /// </summary>
+    /// <remarks>
+    /// Both inputs are trusted workflow state. This operation is deterministic and replay-safe.
+    /// It intentionally preserves only the reserved approval-scope namespace (including a custom
+    /// always-scope store key) from <paramref name="afterFailure"/>; every other key comes from
+    /// <paramref name="beforeTurn"/>.
+    /// </remarks>
+    internal static JsonElement? RestoreTurnOwnedState(
+        JsonElement? beforeTurn,
+        JsonElement? afterFailure,
+        string? alwaysScopesStoreKey)
+    {
+        var restored = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+
+        if (beforeTurn is { ValueKind: JsonValueKind.Object } beforeObj)
+        {
+            foreach (var prop in beforeObj.EnumerateObject())
+            {
+                restored[prop.Name] = prop.Value.Clone();
+            }
+        }
+
+        if (afterFailure is { ValueKind: JsonValueKind.Object } failedObj)
+        {
+            foreach (var prop in failedObj.EnumerateObject())
+            {
+                if (IsReservedApprovalScopeKey(prop.Name, alwaysScopesStoreKey))
+                {
+                    restored[prop.Name] = prop.Value.Clone();
+                }
+            }
+        }
+
+        return restored.Count == 0 ? null : SerializeSorted(restored);
+    }
+
+    private static JsonElement SerializeSorted(Dictionary<string, JsonElement> properties)
+    {
         using var stream = new System.IO.MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            foreach (var key in merged.Keys.OrderBy(k => k, StringComparer.Ordinal))
+            foreach (var key in properties.Keys.OrderBy(k => k, StringComparer.Ordinal))
             {
                 writer.WritePropertyName(key);
-                merged[key].WriteTo(writer);
+                properties[key].WriteTo(writer);
             }
             writer.WriteEndObject();
         }

@@ -816,7 +816,10 @@ AgentWorkflow → ExecuteActivityAsync → AgentActivities running → [WORKER D
 (reconstructed during replay from activity results in the event history). Activity retries happen
 inside the same turn. If the turn ultimately fails, the base workflow rolls back the request entry
 and turn count before the Update failure is returned. A later turn therefore cannot accidentally
-send the failed request to the model as conversation history.
+send the failed request to the model as conversation history. `AgentWorkflow` also restores the
+StateBag snapshot from before the turn, so application-, provider-, interceptor-, and tool-owned
+mutations from that failed turn do not leak forward. Reserved approval-scope records are retained:
+their decisions were committed through independent approval updates while the turn was parked.
 
 #### Scenario B: Worker Crashes Between Activities (Workflow Code Running)
 

@@ -332,4 +332,51 @@ public class StateBagMergeTests
             Bag(("zebra", "1"), ("mango", "2")), Bag(("alpha", "3")));
         Assert.Equal(result!.Value.GetRawText(), again!.Value.GetRawText());
     }
+
+    // ── Failed-turn rollback ────────────────────────────────────────────────────
+
+    [Fact]
+    public void RestoreTurnOwnedState_RevertsChangedAndNewOrdinaryKeys()
+    {
+        var before = Bag(("existing", "before"), ("untouched", "keep"));
+        var afterFailure = Bag(
+            ("existing", "changed"),
+            ("untouched", "keep"),
+            ("new-tool-key", "discard"));
+
+        var result = StateBagMerge.RestoreTurnOwnedState(before, afterFailure, null);
+
+        Assert.Equal("before", GetString(result, "existing"));
+        Assert.Equal("keep", GetString(result, "untouched"));
+        Assert.False(HasKey(result, "new-tool-key"));
+    }
+
+    [Fact]
+    public void RestoreTurnOwnedState_PreservesApprovalRecordsCommittedDuringFailedTurn()
+    {
+        const string customAlwaysKey = "approval.custom.always";
+        var before = Bag(
+            ("application", "before"),
+            ("temporal.approval_scopes.session", "old-session"));
+        var afterFailure = Bag(
+            ("application", "failed-turn-change"),
+            ("temporal.approval_scopes.session", "new-session"),
+            ("temporal.approval_scopes.tool.send", "new-tool-scope"),
+            (customAlwaysKey, "new-always"));
+
+        var result = StateBagMerge.RestoreTurnOwnedState(before, afterFailure, customAlwaysKey);
+
+        Assert.Equal("before", GetString(result, "application"));
+        Assert.Equal("new-session", GetString(result, "temporal.approval_scopes.session"));
+        Assert.Equal("new-tool-scope", GetString(result, "temporal.approval_scopes.tool.send"));
+        Assert.Equal("new-always", GetString(result, customAlwaysKey));
+    }
+
+    [Fact]
+    public void RestoreTurnOwnedState_EmptyInputs_ReturnsNull()
+    {
+        var result = StateBagMerge.RestoreTurnOwnedState(null, Bag(("failed", "discard")), null);
+
+        Assert.Null(result);
+    }
 }

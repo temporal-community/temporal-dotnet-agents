@@ -110,7 +110,7 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
     {
         var requestEntry = AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow);
 
-        var (output, _) = await RunTurnAsync(requestEntry, chatOptions: null);
+        var (output, _) = await RunAgentTurnWithStateRollbackAsync(requestEntry);
 
         Workflow.Logger.LogWorkflowUpdateCompleted(
             _input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId ?? string.Empty);
@@ -1096,13 +1096,39 @@ internal class AgentWorkflow : DurableChatWorkflowBase<AgentResponse>
         try
         {
             var requestEntry = AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow);
-            await RunTurnAsync(requestEntry, chatOptions: null).ConfigureAwait(true);
+            await RunAgentTurnWithStateRollbackAsync(requestEntry).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
             Workflow.Logger.LogFireAndForgetActivityFailed(
                 _input?.AgentName ?? "unknown", Workflow.Info.WorkflowId, ex);
             // Swallow — fire-and-forget errors must not crash the session.
+        }
+    }
+
+    private async Task<(AgentResponse Output, DurableSessionResponse ResponseEntry)>
+        RunAgentTurnWithStateRollbackAsync(AgentSessionRequest requestEntry)
+    {
+        var stateBagBeforeTurn = _currentStateBag;
+        try
+        {
+            return await RunTurnAsync(requestEntry, chatOptions: null).ConfigureAwait(true);
+        }
+        catch
+        {
+            // Application/provider/tool StateBag changes belong to the failed turn and must not
+            // leak into a later update. Approval-scope records are different: they are committed
+            // by independent approval updates while the turn is parked, so retain those reserved
+            // records even though the surrounding turn failed.
+            _currentStateBag = StateBagMerge.RestoreTurnOwnedState(
+                stateBagBeforeTurn,
+                _currentStateBag,
+                _input?.AlwaysScopesStoreKey);
+
+            // The dispatch hash may describe the now-discarded bag. Invalidate it so the next
+            // activity receives the restored state rather than a hash-gated null payload.
+            _lastSentStateBagHash = null;
+            throw;
         }
     }
 }

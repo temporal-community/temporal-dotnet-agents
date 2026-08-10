@@ -222,6 +222,14 @@ The restored `TemporalAgentSession` is also the exact `AgentSession` passed thro
 same object. Middleware may write retry-safe values to its `StateBag`; the activity serializes
 those changes into `AgentStepResult.UpdatedStateBag`, so the next step restores them.
 
+StateBag persistence is committed at the **turn** boundary. If a model, provider, interceptor,
+tool, response projection, or workflow update fails the turn after its activity retries are
+exhausted, the workflow restores application-, provider-, interceptor-, and tool-owned StateBag
+entries to their pre-turn values. A later turn therefore never observes partial state from the
+failed turn. Approval-scope records are the exception: an approval is resolved by a separate
+workflow update, so its reserved `temporal.approval_scopes.*` record (and a configured custom
+always-scope store key) remains committed even if the agent turn that requested it later fails.
+
 The library inserts an innermost session boundary immediately above `ChatClientAgent`.
 `ChatClientAgent` accepts only its own sealed `ChatClientAgentSession`, so the boundary forwards
 `null` only at that final leaf and MAF creates a transient leaf session. Middleware outside the
