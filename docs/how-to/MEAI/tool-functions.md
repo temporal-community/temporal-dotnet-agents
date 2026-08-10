@@ -47,6 +47,18 @@ The workflow executes this sequence until the model returns a final response:
   `tool.NoRetry()` when a retry would repeat an unsafe operation.
 - `MaxToolCallsPerTurn` caps a runaway model/tool loop. Set it for your cost and risk budget.
 
+## Upgrading live 0.10.4 tool sessions
+
+Do not carry a live managed tool session started by version 0.10.4 across this upgrade. New
+sessions freeze their model-facing tool declarations into the workflow start input; a 0.10.4
+workflow history does not contain that field. After an upgraded worker replays such a session,
+replay can succeed, but a later turn cannot offer the registered tools to the model.
+
+Before deploying the upgraded worker, stop new turns on those sessions and let them expire or call
+`DurableChatSessionClient.ShutdownAsync(conversationId)`. Start replacement sessions after the
+upgrade. Replay compatibility for recorded commands does not imply forward-operation compatibility
+for new turns on an older live session.
+
 ## Invocation-scoped tools for typed turns
 
 Keep ordinary functions as the default. Use an invocation-scoped factory only when a tool genuinely

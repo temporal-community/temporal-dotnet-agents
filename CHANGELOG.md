@@ -23,6 +23,14 @@
   invocation-scoped MEAI decoration, authoritative authorization, sequential typed state,
   per-tool activities, and an idempotent retry after an injected post-write failure.
 - Added worker-free declaration and workflow-input registration for split client/worker hosts.
+- Failed durable turns now roll back their request, partial response, and turn count so a later
+  turn cannot inherit an unsuccessful request as conversation history.
+- Library-owned durable-tool configuration and state-completion failures now fail the turn
+  immediately instead of being returned to the model as recoverable tool output.
+- Failed model activities use the consecutive-error allowance without consuming the successful
+  model/tool iteration budget; permanent provider errors fail immediately.
+- Documented that managed tool sessions started on 0.10.4 must be drained before upgrading because
+  they do not contain the frozen tool declarations required by this release.
 
 ## [0.10.4] - 2026-08-09
 
