@@ -16,7 +16,7 @@ namespace TemporalCommunity.Extensions.AI;
 /// entries that get appended to history.
 /// </summary>
 /// <typeparam name="TOutput">The type returned from each completed chat turn.</typeparam>
-public abstract class DurableChatWorkflowBase<TOutput>
+public abstract partial class DurableChatWorkflowBase<TOutput>
 {
     /// <summary>
     /// The name of the workflow signal used to request graceful shutdown of a session.

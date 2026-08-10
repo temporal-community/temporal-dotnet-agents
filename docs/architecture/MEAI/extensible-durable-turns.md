@@ -64,3 +64,15 @@ cannot use invocation-scoped durable tools in the first version.
 The durable orchestration layer owns scheduling, approvals, retries, and state threading. MEAI
 function decorators remain the activity-local extension point for validation, authorization,
 telemetry, and other function behavior.
+
+## Package-owned orchestration boundary
+
+The stock managed workflow and the forthcoming typed specialization share one loop implementation
+on `DurableChatWorkflowBase<TOutput>`. The operation remains internal until the typed request,
+result, dispatch, and completion contracts are complete.
+
+This extraction does not alter the shipped command sequence. The loop still performs one model
+activity per iteration, resolves every interceptor and approval decision before starting any tool,
+fans approved tools out in parallel, records one activity per real tool call, and reassembles
+synthetic and real results in original model-call order. It performs no workflow-side service
+resolution, I/O, or application delegate invocation.
