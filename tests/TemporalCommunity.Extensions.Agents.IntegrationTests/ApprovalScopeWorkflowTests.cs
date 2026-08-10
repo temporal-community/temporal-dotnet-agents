@@ -128,6 +128,64 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         await host.StopAsync();
     }
 
+    [Fact]
+    public async Task SessionScope_ResolvedWhileTurnIsParked_SurvivesTurnFailure()
+    {
+        const string toolName = "unstable_write_file";
+        const string path = "/tmp/approval-survives-failure.txt";
+        var scriptedClient = new ScriptedChatClient([
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("failed-call", toolName,
+                    new Dictionary<string, object?> { ["path"] = path })])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("recovery-call", toolName,
+                    new Dictionary<string, object?> { ["path"] = path })])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Recovered without another approval.")),
+        ]);
+        var toolCallCount = 0;
+
+        using var host = BuildFailOnceScopeAwareHost(
+            scriptedClient,
+            toolName,
+            () => Interlocked.Increment(ref toolCallCount));
+        await host.StartAsync();
+
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("FailedTurnScopeAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+            var handle = _env.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
+
+            var failedTurn = proxy.RunAsync("Write the file", session);
+            var pending = await WaitForPendingApprovalAsync(handle);
+
+            await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(
+                new DurableAgentApprovalDecision
+                {
+                    RequestId = pending.RequestId,
+                    Approved = true,
+                    Scope = ApprovalScope.Session,
+                }));
+
+            await Assert.ThrowsAnyAsync<Exception>(() => failedTurn);
+
+            // The first tool invocation failed after the independent approval Update committed
+            // its session-scope record. The next turn must consume that record rather than park
+            // for a second approval.
+            var recovered = await proxy.RunAsync("Try the same write again", session)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+
+            Assert.Equal("Recovered without another approval.", recovered.Messages[^1].Text);
+            Assert.Equal(2, toolCallCount);
+            Assert.Null(await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
+                wf => wf.GetPendingApproval()));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     // ── Task 8.7.4 — Non-scope-aware tool with Session scope → LogWarning only ─
 
     /// <summary>
@@ -326,6 +384,23 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         return names;
     }
 
+    private static async Task<DurableApprovalRequest> WaitForPendingApprovalAsync(
+        WorkflowHandle<AgentWorkflow> handle)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            var pending = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
+                wf => wf.GetPendingApproval());
+            if (pending is not null)
+                return pending;
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100));
+        }
+
+        throw new TimeoutException("Timed out waiting for the agent approval request.");
+    }
+
     /// <summary>
     /// Builds a host with a scope-aware required tool that uses UseApprovalScopes()
     /// but no IApprovalScopeStore (no always-scope persistence).
@@ -349,6 +424,41 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
                 {
                     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
                     agent.AddTool(tool, o => o.RequireApproval().ScopeAware());
+                    agent.UseApprovalScopes();
+                });
+            });
+
+        return builder.Build();
+    }
+
+    private IHost BuildFailOnceScopeAwareHost(
+        IChatClient client,
+        string toolName,
+        Func<int> nextToolCall)
+    {
+        var taskQueue = $"failed-turn-scope-agent-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(_env.Client);
+        builder.Services.AddSingleton(client);
+
+        var tool = AIFunctionFactory.Create(
+            ([System.ComponentModel.Description("Path to write.")] string path) =>
+            {
+                if (nextToolCall() == 1)
+                    throw new InvalidOperationException("Expected first tool invocation failure.");
+                return $"Wrote {path}";
+            },
+            new AIFunctionFactoryOptions { Name = toolName });
+
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(opts =>
+            {
+                opts.AddDurableAgent("FailedTurnScopeAgent", agent =>
+                {
+                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+                    agent.AddTool(tool, options =>
+                        options.NoRetry().RequireApproval().ScopeAware());
                     agent.UseApprovalScopes();
                 });
             });

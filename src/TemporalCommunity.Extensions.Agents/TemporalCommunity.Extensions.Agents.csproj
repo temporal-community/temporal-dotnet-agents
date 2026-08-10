@@ -61,6 +61,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="TemporalCommunity.Extensions.Agents.Tests" />
     <InternalsVisibleTo Include="TemporalCommunity.Extensions.Agents.IntegrationTests" />
+    <InternalsVisibleTo Include="TemporalCommunity.Extensions.Agents.Benchmarks" />
   </ItemGroup>
 
 </Project>

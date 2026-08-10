@@ -29,6 +29,8 @@
   StateBag mutations inside the serialized turn boundary while retaining approval-scope records
   committed by approval updates; queued failed turns cannot erase a preceding turn's committed
   StateBag changes.
+- Added parked-approval, fire-and-forget rollback, and checked-in AgentWorkflow replay regressions,
+  plus a locally runnable StateBag rollback timing/allocation benchmark.
 - Library-owned durable-tool configuration and state-completion failures now fail the turn
   immediately instead of being returned to the model as recoverable tool output.
 - Sequential typed turns now stop before scheduling later tools in the same model batch after a

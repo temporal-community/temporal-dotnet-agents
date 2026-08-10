@@ -130,6 +130,7 @@ test-integration: build
     dotnet test {{integration_tests_dir}} \
         --configuration {{configuration}} \
         --no-build \
+        --filter "Category!=HistoryCapture" \
         --logger "console;verbosity=normal"
 
 # Run integration tests only — AI library (uses in-process test server)
@@ -150,6 +151,15 @@ capture-histories: build
         --filter "Category=HistoryCapture" \
         --logger "console;verbosity=normal"
 
+# Regenerate the checked-in AgentWorkflow replay history. Run this only when the
+# AgentWorkflow command sequence intentionally changes, then commit the updated JSON.
+capture-agent-histories: build
+    dotnet test {{integration_tests_dir}} \
+        --configuration {{configuration}} \
+        --no-build \
+        --filter "Category=HistoryCapture" \
+        --logger "console;verbosity=normal"
+
 # Run both unit and integration tests (all libraries)
 test: test-unit-all test-integration test-integration-ai
 
@@ -163,6 +173,7 @@ test-coverage: build
         --results-directory {{coverage_dir}}/agents \
         --logger "console;verbosity=normal" \
         -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[TemporalCommunity.Extensions.AI]TemporalCommunity.Extensions.AI.DurableAIJsonContext,[TemporalCommunity.Extensions.AI]TemporalCommunity.Extensions.AI.DurableAIJsonUtilities"
+
     dotnet test {{unit_tests_ai_dir}} \
         --configuration {{configuration}} \
         --no-build \
@@ -173,10 +184,12 @@ test-coverage: build
     dotnet test {{integration_tests_dir}} \
         --configuration {{configuration}} \
         --no-build \
+        --filter "Category!=HistoryCapture" \
         --collect "XPlat Code Coverage" \
         --results-directory {{coverage_dir}}/agents-integration \
         --logger "console;verbosity=normal" \
         -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[TemporalCommunity.Extensions.AI]TemporalCommunity.Extensions.AI.DurableAIJsonContext,[TemporalCommunity.Extensions.AI]TemporalCommunity.Extensions.AI.DurableAIJsonUtilities"
+
     dotnet test {{integration_tests_ai_dir}} \
         --configuration {{configuration}} \
         --no-build \
@@ -185,6 +198,13 @@ test-coverage: build
         --results-directory {{coverage_dir}}/ai-integration \
         --logger "console;verbosity=normal" \
         -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Exclude="[TemporalCommunity.Extensions.AI]TemporalCommunity.Extensions.AI.DurableAIJsonContext,[TemporalCommunity.Extensions.AI]TemporalCommunity.Extensions.AI.DurableAIJsonUtilities"
+
+# Measure failed-turn StateBag rollback locally in Release mode. Benchmark results include
+# timing and managed allocations under BenchmarkDotNet-artifacts/results/.
+benchmark-statebag: restore
+    dotnet run --project benchmarks/TemporalCommunity.Extensions.Agents.Benchmarks \
+        --configuration Release --no-restore -- \
+        --filter "*StateBagRollbackBenchmarks*"
 
 # Merge all coverage XML files into an HTML report and print line/branch summary
 coverage-report: test-coverage

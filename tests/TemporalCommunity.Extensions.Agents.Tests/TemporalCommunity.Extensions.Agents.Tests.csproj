@@ -19,6 +19,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Checked-in AgentWorkflow histories captured by the Agents integration tests and
+         replayed locally in the server-free unit-test lane. -->
+    <None Update="Compat/Histories/**/*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio">

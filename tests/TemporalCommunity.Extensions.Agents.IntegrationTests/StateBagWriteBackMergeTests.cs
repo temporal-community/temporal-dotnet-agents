@@ -5,6 +5,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
@@ -228,7 +229,82 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
     }
 
     [Fact]
-    public async Task QueuedFailedTurn_DoesNotRestoreStateFromBeforePrecedingSuccessfulTurn()
+    public async Task FailedFireAndForgetTurn_StateBagWrite_DoesNotLeakIntoNextUpdate()
+    {
+        const string toolName = "fire_and_forget_failing_tool";
+        const string failedTurnKey = "fire-and-forget.failed-state";
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("fire-and-forget-fail", toolName,
+                    new Dictionary<string, object?>())])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Recovered after background failure.")),
+        ]);
+        var provider = new FailedTurnWritingProvider(failedTurnKey);
+        var toolInvoked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tool = AIFunctionFactory.Create(
+            () =>
+            {
+                toolInvoked.TrySetResult();
+                return FailTool();
+            },
+            new AIFunctionFactoryOptions { Name = toolName });
+
+        var taskQueue = $"failed-fire-and-forget-statebag-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(Env.Client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(opts =>
+            {
+                opts.AddDurableAgent("FailedFireAndForgetStateAgent", agent =>
+                {
+                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+                    agent.AddContextProvider(provider);
+                    agent.AddTool(tool, toolOptions => toolOptions.NoRetry());
+                });
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("FailedFireAndForgetStateAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+
+            var fireAndForgetResponse = await proxy.RunAsync(
+                "fail in the background",
+                session,
+                new TemporalAgentRunOptions { IsFireAndForget = true });
+            Assert.Empty(fireAndForgetResponse.Messages);
+
+            // Wait until the failing tool actually starts. The following synchronous Update then
+            // queues behind the background turn's gate and cannot proceed until rollback finishes.
+            await toolInvoked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var response = await proxy.RunAsync("recover", session)
+                .WaitAsync(TimeSpan.FromSeconds(15));
+
+            Assert.Equal("Recovered after background failure.", response.Messages[^1].Text);
+            Assert.False(provider.SecondTurnObservedFailedState,
+                "StateBag changes from a failed fire-and-forget turn must not reach the next Update.");
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public Task QueuedFailedTurn_DoesNotRestoreStateFromBeforePrecedingSuccessfulTurn() =>
+        RunQueuedFailedTurnScenarioAsync(captureHistory: false);
+
+    [Fact]
+    [Trait("Category", "HistoryCapture")]
+    public Task Capture_QueuedFailedTurnStateBagRollbackHistory() =>
+        RunQueuedFailedTurnScenarioAsync(captureHistory: true);
+
+    private async Task RunQueuedFailedTurnScenarioAsync(bool captureHistory)
     {
         const string toolName = "queued_failing_tool";
         const string committedKey = "concurrent-turn.committed";
@@ -298,12 +374,31 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
                 "The successful preceding turn's committed StateBag value must survive rollback of a queued turn.");
             Assert.False(provider.ThirdTurnObservedFailedState,
                 "The queued failed turn's StateBag value must be rolled back.");
+
+            if (captureHistory)
+            {
+                var history = await workflowHandle.FetchHistoryAsync();
+                await SaveAgentHistoryAsync("queued-statebag-rollback.json", history);
+            }
         }
         finally
         {
             blockingClient.ReleaseFirstCall();
             await host.StopAsync();
         }
+    }
+
+    private static async Task SaveAgentHistoryAsync(string filename, WorkflowHistory history)
+    {
+        var directory = Path.GetFullPath(
+            Path.Combine(
+                AppContext.BaseDirectory,
+                "..", "..", "..", "..",
+                "TemporalCommunity.Extensions.Agents.Tests",
+                "Compat",
+                "Histories"));
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, filename), history.ToJson());
     }
 
     public sealed class Fixture : IAsyncLifetime

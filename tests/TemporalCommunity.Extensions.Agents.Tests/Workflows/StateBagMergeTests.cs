@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.Agents.Workflows;
@@ -378,5 +379,26 @@ public class StateBagMergeTests
         var result = StateBagMerge.RestoreTurnOwnedState(null, Bag(("failed", "discard")), null);
 
         Assert.Null(result);
+    }
+
+    [Fact]
+    public void RestoreTurnOwnedState_OneMegabyte_CompletesWithinOneSecond()
+    {
+        var properties = Enumerable.Range(0, 1024)
+            .Select(index => ($"key-{index:D4}", new string('x', 1024)))
+            .ToArray();
+        var before = Bag(properties);
+        var afterFailure = Bag(
+            [.. properties, ("failed-turn-only", "discard")]);
+
+        var stopwatch = Stopwatch.StartNew();
+        var result = StateBagMerge.RestoreTurnOwnedState(before, afterFailure, null);
+        stopwatch.Stop();
+
+        Assert.NotNull(result);
+        Assert.False(HasKey(result, "failed-turn-only"));
+        Assert.True(
+            stopwatch.Elapsed < TimeSpan.FromSeconds(1),
+            $"Restoring a one-megabyte StateBag took {stopwatch.Elapsed}; possible performance regression.");
     }
 }

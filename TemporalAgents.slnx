@@ -10,6 +10,9 @@
     <Project Path="tests/TemporalCommunity.Extensions.AI.Tests/TemporalCommunity.Extensions.AI.Tests.csproj" />
     <Project Path="tests/TemporalCommunity.Extensions.AI.IntegrationTests/TemporalCommunity.Extensions.AI.IntegrationTests.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/TemporalCommunity.Extensions.Agents.Benchmarks/TemporalCommunity.Extensions.Agents.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/samples/MEAI/">
     <Project Path="samples/MEAI/DurableChat/DurableChat.csproj" />
     <Project Path="samples/MEAI/DurableTools/DurableTools.csproj" />

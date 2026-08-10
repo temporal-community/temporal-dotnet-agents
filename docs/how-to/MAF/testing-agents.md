@@ -530,6 +530,29 @@ just test-filter "FullyQualifiedName~Router"
 just test-coverage
 ```
 
+StateBag rollback performance can be measured locally without a Temporal server or model:
+
+```bash
+just benchmark-statebag
+```
+
+This runs a short Release-mode BenchmarkDotNet matrix for empty, approximately 64 KB, and
+approximately 1 MB StateBags across different top-level key counts. Results include timing and
+managed allocations. They are intentionally separate from `just test`: benchmark results should
+be compared on the same machine rather than enforced as a cross-machine wall-clock threshold.
+
+The ordinary unit suite retains a broad one-second guard for a one-megabyte rollback to catch
+catastrophic algorithmic regressions without treating workstation-level timing noise as a precise
+performance contract.
+
+`AgentWorkflow` replay compatibility is checked without a running server by the ordinary unit
+suite. Its checked-in queued-Update/StateBag history is regenerated only when the workflow command
+sequence intentionally changes:
+
+```bash
+just capture-agent-histories
+```
+
 > **Integration tests** use `TestEnvironmentHelper.StartLocalAsync()`; no external server is
 > required. The helper pins Temporal CLI `v1.8.0` (embedded Temporal Server 1.31.2), verifies the
 > reported version through `GetSystemInfo`, and pre-registers the `AgentName`, `SessionCreatedAt`,
