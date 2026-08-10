@@ -40,6 +40,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         List<ChatMessage> allTurnMessages = [];
         UsageDetails? totalUsage = null;
         var consecutiveErrors = 0;
+        var currentTurnState = initialTurnState;
 
         var maxIterations = RequiredInput.MaxToolCallsPerTurn;
 
@@ -111,7 +112,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             {
                 return new DurableManagedLoopResult(
                     new ChatResponse(allTurnMessages) { Usage = totalUsage },
-                    DurableTurnCompletionReason.FinalResponse);
+                    DurableTurnCompletionReason.FinalResponse,
+                    currentTurnState);
             }
 
             var toolCalls = stepResult.ToolCalls;
@@ -196,7 +198,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                             Declaration = RequiredInput.ToolDeclarations?.FirstOrDefault(
                                 declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
                             RequestData = requestData,
-                            TurnState = initialTurnState,
+                            TurnState = currentTurnState,
                             DispatchMode = dispatchMode,
                             ToolCallId = tc.CallId,
                             ModelIteration = iteration,
@@ -246,7 +248,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                                 Declaration = RequiredInput.ToolDeclarations?.FirstOrDefault(
                                     declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
                                 RequestData = requestData,
-                                TurnState = initialTurnState,
+                                TurnState = currentTurnState,
                                 DispatchMode = dispatchMode,
                                 ToolCallId = tc.CallId,
                                 ModelIteration = iteration,
@@ -280,11 +282,43 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
             // ── Phase 2.5: Dispatch all buffered tool activities ──────────────────────────
             // All approval waits are resolved before any InvokeFunction activity starts.
-            foreach (var (idx, funcInput, opts) in pendingToolDispatches)
+            if (dispatchMode == DurableToolDispatchMode.Sequential)
             {
-                toolTasks[idx] = Workflow.ExecuteActivityAsync(
-                    (DurableFunctionActivities a) => a.InvokeFunctionAsync(funcInput),
-                    opts);
+                foreach (var (idx, funcInput, opts) in pendingToolDispatches)
+                {
+                    funcInput.TurnState = currentTurnState;
+                    var task = Workflow.ExecuteActivityAsync(
+                        (DurableFunctionActivities a) => a.InvokeFunctionAsync(funcInput),
+                        opts);
+                    toolTasks[idx] = task;
+
+                    try
+                    {
+                        var output = await task.ConfigureAwait(true);
+                        if (output.HasStateReplacement)
+                        {
+                            currentTurnState = output.StateReplacement;
+                        }
+                    }
+                    catch (ActivityFailureException) when (Workflow.CancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch
+                    {
+                        // Preserve the last successful state. Phase 3 classifies this task and
+                        // supplies the existing synthetic tool-error result to the model.
+                    }
+                }
+            }
+            else
+            {
+                foreach (var (idx, funcInput, opts) in pendingToolDispatches)
+                {
+                    toolTasks[idx] = Workflow.ExecuteActivityAsync(
+                        (DurableFunctionActivities a) => a.InvokeFunctionAsync(funcInput),
+                        opts);
+                }
             }
 
             // ── Phase 3: Wait for all dispatched tool activities ──────────────────────────
@@ -414,7 +448,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         return new DurableManagedLoopResult(
             new ChatResponse(allTurnMessages) { Usage = totalUsage },
-            DurableTurnCompletionReason.IterationLimitReached);
+            DurableTurnCompletionReason.IterationLimitReached,
+            currentTurnState);
     }
 
     /// <summary>
@@ -466,4 +501,5 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
 internal sealed record DurableManagedLoopResult(
     ChatResponse Response,
-    DurableTurnCompletionReason CompletionReason);
+    DurableTurnCompletionReason CompletionReason,
+    System.Text.Json.JsonElement? FinalTurnState);

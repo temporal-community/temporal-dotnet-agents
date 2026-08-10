@@ -21,7 +21,7 @@ internal sealed class DurableFunctionInput
 
     public JsonElement? RequestData { get; init; }
 
-    public JsonElement? TurnState { get; init; }
+    public JsonElement? TurnState { get; set; }
 
     public DurableToolDispatchMode DispatchMode { get; init; } = DurableToolDispatchMode.Parallel;
 

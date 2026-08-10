@@ -40,6 +40,34 @@ The specialized base defaults to `Sequential` dispatch. `Parallel` is an explici
 for read-only turn state. The stock `DurableChatWorkflow` remains parallel by default, preserving
 its existing command history.
 
+| Mode | Same model-response batch | Turn-state rule |
+|---|---|---|
+| `Sequential` (default) | All interceptors and approvals resolve first; approved tools then run one at a time in original order | Each successful complete replacement is passed to the next tool |
+| `Parallel` (explicit) | All approvals resolve first; approved tools fan out using the existing scheduling shape | Every tool sees batch-start state; an activation with `CompleteState` is rejected before its function runs |
+
+`TTurnState` is both working state for later sequential tools and the structured application output
+returned after the turn. Put application-owned actions, receipts, or other completed-turn data in
+that state when needed; there is no second application-item collection.
+
+An invocation activation may supply `CompleteState`. It runs only after its ordinary MEAI function
+succeeds and returns either `DurableStateUpdate<T>.Unchanged` or `Replace(value)`. `Replace(null)`
+is an explicit replacement, not “unchanged.” The callback receives the successfully marshalled
+MEAI function result; with MEAI's normal reflected-function marshaller this is commonly a
+`JsonElement`, even when the source method returned a .NET scalar. The completion operation must be
+side-effect free. Deterministic callback or state-normalization failures are non-retryable so the
+ordinary function is not automatically repeated solely because post-processing failed.
+
+MEAI chat-client middleware runs around model calls. `DelegatingAIFunction` runs inside an already
+scheduled tool activity. The existing `IDurableToolInterceptor` remains the workflow-controlled
+pre-dispatch mechanism for proceed, skip, block, argument rewrite, and durable approval. Function
+decoration cannot park a workflow for approval because it begins after dispatch. `.RequireApproval()`
+is the supported unconditional approval floor; request/state-aware dynamic pre-dispatch approval is
+not added by this feature.
+
+Approval is not authorization. Request data, initial or derived turn state, and approval metadata
+are not trusted permission evidence. A write tool must reauthorize immediately before every high-
+risk external effect using an authoritative service, regardless of whether approval occurred.
+
 `DurableTurnCompletionReason` has exactly two outcomes: `FinalResponse` and
 `IterationLimitReached`. Approval denial/timeout and recoverable tool failures can become model-
 visible synthetic results before a later final response. Workflow cancellation and the configured

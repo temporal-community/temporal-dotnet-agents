@@ -106,7 +106,9 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
         {
             Response = loopResult.Response,
             CompletionReason = loopResult.CompletionReason,
-            FinalTurnState = request.InitialTurnState,
+            FinalTurnState = loopResult.FinalTurnState is { } state
+                ? state.Deserialize<TTurnState>(DurableAIJsonUtilities.DefaultOptions)
+                : default,
         };
     }
 
