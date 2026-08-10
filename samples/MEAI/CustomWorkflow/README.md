@@ -34,6 +34,12 @@ Program.cs
 
 Note: cart tools execute inline inside the single `ShoppingActivity` invocation via `UseFunctionInvocation()`. They are NOT dispatched as separate Temporal activities. For per-tool activity dispatch with retry/timeout isolation, see `samples/MEAI/DurableTools/`.
 
+For a typed custom Update that reuses the package-managed model/tool loop, passes application
+request/state values to invocation-scoped tools, and retains a separate activity per tool, see
+[`samples/MEAI/ExtensibleDurableTurns`](../ExtensibleDurableTurns/README.md). That additive path uses
+`DurableToolWorkflowBase<TRequestData, TTurnState>`; this sample remains the lower-level
+application-owned orchestration path.
+
 ## Highlights
 
 - **Typed update responses.** `[WorkflowUpdate("Shop")]` returns `ShoppingTurnOutput`, carrying both the assistant's `ChatResponse` and the `IReadOnlyList<CartAction>` mutated during tool calls. The managed `DurableChatSessionClient.SendAsync` API returns `DurableSessionResponse`; use a custom workflow when the update must return additional domain data atomically.

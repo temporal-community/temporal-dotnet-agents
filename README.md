@@ -86,6 +86,7 @@ down-level limitations.
 | [DurableEmbeddings](samples/MEAI/DurableEmbeddings) | `Extensions.AI` | `IEmbeddingGenerator` wrapped for durable per-chunk activity dispatch |
 | [ToolInterceptor](samples/MEAI/ToolInterceptor) | `Extensions.AI` | Intercept, pause, skip, or block tool calls |
 | [CustomWorkflow](samples/MEAI/CustomWorkflow) | `Extensions.AI` | Extend the durable chat workflow with a domain-typed result |
+| [ExtensibleDurableTurns](samples/MEAI/ExtensibleDurableTurns) | `Extensions.AI` | Typed request/state with package-managed model and per-tool activities |
 
 ### `TemporalCommunity.Extensions.Agents`
 

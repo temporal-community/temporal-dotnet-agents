@@ -58,41 +58,7 @@ internal static class DurableAIRegistrar
                 "AddTemporalClient is required separately.");
         }
 
-        // Register options as singleton.
-        services.TryAddSingleton(options);
-
-        // Register the function registry (populated by AddDurableTools calls).
-        services.TryAddSingleton<DurableFunctionRegistry>();
-        services.TryAddSingleton<Internal.DurableFunctionDeclarationRegistry>(sp =>
-            new Internal.DurableFunctionDeclarationRegistry(
-                sp.GetServices<Action<Internal.DurableFunctionDeclarationRegistry>>()));
-        services.TryAddSingleton<Internal.DurableToolFactoryRegistry>(sp =>
-            new Internal.DurableToolFactoryRegistry(
-                sp.GetServices<Action<Internal.DurableToolFactoryRegistry>>()));
-
-        // Register the per-tool options registry (populated by AddDurableTools calls).
-        // Every tool registered via AddDurableTools has an entry here, even if the caller
-        // didn't supply an explicit configure callback — this guarantees the session client
-        // sees a complete picture when it builds the workflow's ToolActivityOptions dict.
-        // Explicit factory: the only ctor is internal and takes the configurators, so the
-        // default DI activator (which needs a public ctor) cannot construct it. A factory
-        // lambda in this assembly can invoke the internal ctor with the resolved configurators.
-        services.TryAddSingleton<DurableChatToolOptionsRegistry>(sp =>
-            new DurableChatToolOptionsRegistry(sp.GetServices<Action<DurableChatToolOptionsRegistry>>()));
-
-        // Register the function registry as IReadOnlyDictionary for activity resolution.
-        services.TryAddSingleton<IReadOnlyDictionary<string, AIFunction>>(
-            sp => sp.GetRequiredService<DurableFunctionRegistry>());
-
-        // The canonical workflow-input factory is available even when the built-in workflow and
-        // session client are disabled. Application-owned workflows resolve it in client/host code
-        // to freeze the same tool/interceptor/retry configuration as the stock client.
-        services.TryAddSingleton<IDurableChatWorkflowInputFactory>(sp =>
-            new DurableChatWorkflowInputFactory(
-                options,
-                sp.GetService<DurableFunctionRegistry>(),
-                sp.GetService<DurableChatToolOptionsRegistry>(),
-                sp.GetService<Internal.DurableFunctionDeclarationRegistry>()));
+        RegisterWorkflowInputServices(services, options);
 
         // Register the session client and default workflow only if enabled.
         if (options.RegisterDefaultWorkflow)
@@ -148,5 +114,37 @@ internal static class DurableAIRegistrar
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             Internal.DurableMixedPatternValidator>());
+    }
+
+    /// <summary>
+    /// Registers the replay-frozen workflow-input services without registering a worker, client,
+    /// workflow, or activities. Used by declaration-only workflow starters.
+    /// </summary>
+    internal static void RegisterWorkflowInputServices(
+        IServiceCollection services,
+        DurableExecutionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(options);
+
+        services.TryAddSingleton(options);
+        services.TryAddSingleton<DurableFunctionRegistry>();
+        services.TryAddSingleton<Internal.DurableFunctionDeclarationRegistry>(sp =>
+            new Internal.DurableFunctionDeclarationRegistry(
+                sp.GetServices<Action<Internal.DurableFunctionDeclarationRegistry>>()));
+        services.TryAddSingleton<Internal.DurableToolFactoryRegistry>(sp =>
+            new Internal.DurableToolFactoryRegistry(
+                sp.GetServices<Action<Internal.DurableToolFactoryRegistry>>()));
+        services.TryAddSingleton<DurableChatToolOptionsRegistry>(sp =>
+            new DurableChatToolOptionsRegistry(
+                sp.GetServices<Action<DurableChatToolOptionsRegistry>>()));
+        services.TryAddSingleton<IReadOnlyDictionary<string, AIFunction>>(
+            sp => sp.GetRequiredService<DurableFunctionRegistry>());
+        services.TryAddSingleton<IDurableChatWorkflowInputFactory>(sp =>
+            new DurableChatWorkflowInputFactory(
+                options,
+                sp.GetService<DurableFunctionRegistry>(),
+                sp.GetService<DurableChatToolOptionsRegistry>(),
+                sp.GetService<Internal.DurableFunctionDeclarationRegistry>()));
     }
 }

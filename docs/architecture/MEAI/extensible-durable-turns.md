@@ -8,8 +8,8 @@ a mandatory tool-result wrapper, ambient application state, or an application-re
 ## Declaration before implementation
 
 The model activity needs a function declaration before any tool is invoked. An implementation
-factory, by contrast, must run inside the tool activity so it can use that activity attempt's DI
-scope and application request/state values. Therefore the durable workflow freezes a declaration
+factory, by contrast, must run inside the tool activity so it can use that activity attempt's
+application request/state values. Therefore the durable workflow freezes a declaration
 snapshot separately from the activity-local implementation.
 
 The snapshot contains the function name, description, parameter schema, return schema, and
@@ -20,6 +20,11 @@ JSON Schema equivalence algorithm.
 The factory-created implementation must have the same ordinal name and the same parameter and
 return fingerprints. A mismatch is a non-retryable configuration failure and the function is not
 invoked.
+
+The registered factory delegate is invoked once per activity attempt; it is not a DI service
+factory and receives no service provider. Dependencies captured by that delegate retain the
+lifetimes chosen by the application. Use ordinary MEAI function decoration for activity-local
+behavior, and do not treat factory or wrapper fields as durable session state.
 
 ## Ordinary functions remain ordinary
 

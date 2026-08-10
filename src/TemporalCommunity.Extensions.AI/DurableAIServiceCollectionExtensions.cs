@@ -11,6 +11,44 @@ namespace TemporalCommunity.Extensions.AI;
 public static class DurableAIServiceCollectionExtensions
 {
     /// <summary>
+    /// Registers only the services needed to create replay-frozen workflow input in a process
+    /// that starts workflows but does not host a Temporal worker.
+    /// </summary>
+    /// <param name="services">The workflow-starting process service collection.</param>
+    /// <param name="taskQueue">The task queue used by the implementation-bearing worker.</param>
+    /// <param name="configure">Optional durable execution configuration.</param>
+    /// <returns>The same service collection for declaration registration.</returns>
+    /// <remarks>
+    /// Follow this call with the <see cref="AddDurableToolDeclaration(IServiceCollection,AIFunctionDeclaration,Action{DurableChatToolOptions}?)"/>
+    /// overload, then resolve <see cref="IDurableChatWorkflowInputFactory"/> outside workflow code.
+    /// This method does not register workflows, activities, or <see cref="DurableChatSessionClient"/>.
+    /// </remarks>
+    public static IServiceCollection AddDurableChatWorkflowInputFactory(
+        this IServiceCollection services,
+        string taskQueue,
+        Action<DurableExecutionOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskQueue);
+
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = taskQueue,
+            RegisterDefaultWorkflow = false,
+        };
+        configure?.Invoke(options);
+
+        // These two values define this deliberately worker-free registration path and cannot be
+        // changed by the optional callback.
+        options.TaskQueue = taskQueue;
+        options.RegisterDefaultWorkflow = false;
+        options.Validate();
+
+        DurableAIRegistrar.RegisterWorkflowInputServices(services, options);
+        return services;
+    }
+
+    /// <summary>
     /// Registers the durable AI workflow, activities, and support services on a Temporal worker.
     /// </summary>
     /// <param name="builder">The worker options builder returned by AddHostedTemporalWorker.</param>
@@ -178,6 +216,38 @@ public static class DurableAIServiceCollectionExtensions
         builder.Services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
             registry => registry[snapshot.Name] = perToolOptions);
         return builder;
+    }
+
+    /// <summary>
+    /// Registers a stable model-facing declaration in a workflow-starting process that does not
+    /// host a Temporal worker.
+    /// </summary>
+    /// <remarks>
+    /// Call <see cref="AddDurableChatWorkflowInputFactory(IServiceCollection,string,Action{DurableExecutionOptions}?)"/>
+    /// first. The implementation-bearing worker registers the matching named factory with
+    /// <see cref="AddDurableToolImplementation{TRequestData,TTurnState}"/>.
+    /// </remarks>
+    public static IServiceCollection AddDurableToolDeclaration(
+        this IServiceCollection services,
+        AIFunctionDeclaration declaration,
+        Action<DurableChatToolOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(declaration);
+        if (!services.Any(descriptor => descriptor.ServiceType == typeof(DurableExecutionOptions)))
+        {
+            throw new InvalidOperationException(
+                "AddDurableToolDeclaration requires AddDurableChatWorkflowInputFactory to be called first.");
+        }
+
+        var snapshot = DurableFunctionDeclarationSnapshot.Create(declaration);
+        var perToolOptions = new DurableChatToolOptions();
+        configure?.Invoke(perToolOptions);
+        services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
+            registry => registry[snapshot.Name] = snapshot);
+        services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
+            registry => registry[snapshot.Name] = perToolOptions);
+        return services;
     }
 
     /// <summary>

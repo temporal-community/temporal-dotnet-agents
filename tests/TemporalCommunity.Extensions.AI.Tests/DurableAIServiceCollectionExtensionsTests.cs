@@ -86,6 +86,50 @@ public class DurableAIServiceCollectionExtensionsTests
         Assert.NotNull(provider.GetRequiredService<DurableToolFactoryRegistry>()["contextual_tool"]);
     }
 
+    [Fact]
+    public void ClientOnlyRegistration_FreezesDeclarationWithoutWorkerOrImplementation()
+    {
+        var services = new ServiceCollection();
+        var declaration = AIFunctionFactory.Create(
+            (string value) => string.Empty,
+            "client_tool").AsDeclarationOnly();
+
+        services
+            .AddDurableChatWorkflowInputFactory("implementation-queue")
+            .AddDurableToolDeclaration(
+                declaration,
+                options => options.WithMaxAttempts(2));
+
+        using var provider = services.BuildServiceProvider();
+        var input = provider.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
+        var frozen = Assert.Single(input.ToolDeclarations!);
+
+        Assert.Equal("client_tool", frozen.Name);
+        Assert.Equal(2, input.ToolActivityOptions!["client_tool"].RetryPolicy!.MaximumAttempts);
+        Assert.Empty(provider.GetRequiredService<DurableToolFactoryRegistry>());
+        Assert.DoesNotContain(
+            services,
+            descriptor => descriptor.ServiceType.FullName?.Contains(
+                "IHostedService",
+                StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void ClientDeclaration_RequiresWorkflowInputRegistration()
+    {
+        var services = new ServiceCollection();
+        var declaration = AIFunctionFactory.Create(
+            (string value) => string.Empty,
+            "client_tool").AsDeclarationOnly();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => services.AddDurableToolDeclaration(declaration));
+
+        Assert.Equal(
+            "AddDurableToolDeclaration requires AddDurableChatWorkflowInputFactory to be called first.",
+            exception.Message);
+    }
+
     private sealed record RequestData(string Tenant);
     private sealed record TurnState(int Count);
 }

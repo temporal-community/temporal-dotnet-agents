@@ -19,6 +19,10 @@
 - Added versioned, retry-stable activity idempotency metadata using a fixed domain-separated,
   length-prefixed strict-UTF-8 SHA-256 v1 algorithm, with unknown versions rejected before tool
   construction or invocation.
+- Added a domain-neutral `ExtensibleDurableTurns` sample covering ordinary functions,
+  invocation-scoped MEAI decoration, authoritative authorization, sequential typed state,
+  per-tool activities, and an idempotent retry after an injected post-write failure.
+- Added worker-free declaration and workflow-input registration for split client/worker hosts.
 
 ## [0.10.4] - 2026-08-09
 

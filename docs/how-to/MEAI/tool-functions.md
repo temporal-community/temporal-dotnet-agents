@@ -86,10 +86,18 @@ are arbitrary `object?` instances; silently dropping them could change provider 
 JSON-normalizing them could change their CLR types. Registration reports the tool and sorted keys.
 If application behavior depends on those properties, this path is not supported yet.
 
-For split processes, call `AddDurableToolDeclaration` in the workflow-starting process and
-`AddDurableToolImplementation<TRequestData, TTurnState>` in the worker. The worker hosting the
-session queue must host both model and tool activities. The frozen workflow input, not the live
-worker registry, is the model-facing declaration authority.
+For split processes, configure the workflow-starting process without creating a worker builder:
+
+```csharp
+services
+    .AddDurableChatWorkflowInputFactory(taskQueue)
+    .AddDurableToolDeclaration(declaration, configure: ...);
+```
+
+Resolve `IDurableChatWorkflowInputFactory` outside workflow code and use its result as the workflow
+start input. Call `AddDurableToolImplementation<TRequestData, TTurnState>` in the worker. That
+implementation-bearing worker hosts both model and tool activities on the session queue. The
+frozen workflow input, not the live worker registry, is the model-facing declaration authority.
 
 The invocation context includes request data, current turn state, dispatch mode, and activity-local
 metadata: namespace, workflow/run/activity identities, attempt, task queue, tool/call identities,

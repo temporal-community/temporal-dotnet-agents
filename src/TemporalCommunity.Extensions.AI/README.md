@@ -179,6 +179,7 @@ for inline function invocation or caller-supplied session tools.
 - [Pipeline architecture](../../docs/architecture/MEAI/durable-chat-pipeline.md)
 - [DurableChat sample](../../samples/MEAI/DurableChat)
 - [DurableTools sample](../../samples/MEAI/DurableTools)
+- [ExtensibleDurableTurns sample](../../samples/MEAI/ExtensibleDurableTurns)
 
 ## License
 
