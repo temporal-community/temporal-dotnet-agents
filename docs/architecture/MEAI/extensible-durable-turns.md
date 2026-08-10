@@ -12,6 +12,11 @@ factory, by contrast, must run inside the tool activity so it can use that activ
 application request/state values. Therefore the durable workflow freezes a declaration
 snapshot separately from the activity-local implementation.
 
+`AddDurableChatWorkflowInputFactory` installs the same default-preserving client converter
+configuration as `AddDurableAI`. This affects clients built through `AddTemporalClient` regardless
+of registration order. Manually connected clients remain outside that options pipeline and must
+set `DurableAIDataConverter.Instance` themselves.
+
 The snapshot contains the function name, description, parameter schema, return schema, and
 deterministic structural fingerprints. Object-property order is normalized ordinally; array order
 and scalar values remain significant. This is deliberately a structural comparison, not a general

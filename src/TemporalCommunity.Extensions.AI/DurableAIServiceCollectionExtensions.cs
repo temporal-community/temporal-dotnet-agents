@@ -21,7 +21,11 @@ public static class DurableAIServiceCollectionExtensions
     /// <remarks>
     /// Follow this call with the <see cref="AddDurableToolDeclaration(IServiceCollection,AIFunctionDeclaration,Action{DurableChatToolOptions}?)"/>
     /// overload, then resolve <see cref="IDurableChatWorkflowInputFactory"/> outside workflow code.
-    /// This method does not register workflows, activities, or <see cref="DurableChatSessionClient"/>.
+    /// Clients created through <c>AddTemporalClient</c> are configured to use
+    /// <see cref="DurableAIDataConverter.Instance"/> when their converter is still the SDK default.
+    /// A custom converter is preserved. Manually constructed clients must set the durable converter
+    /// explicitly. This method does not register workflows, activities, worker configuration, or
+    /// <see cref="DurableChatSessionClient"/>.
     /// </remarks>
     public static IServiceCollection AddDurableChatWorkflowInputFactory(
         this IServiceCollection services,

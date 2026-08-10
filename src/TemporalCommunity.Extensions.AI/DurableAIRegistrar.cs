@@ -96,12 +96,6 @@ internal static class DurableAIRegistrar
             "tags",
             (sp, _) => new Internal.TagsChatClientDecorator(sp.GetService<ILoggerFactory>()));
 
-        // Auto-wire DurableAIDataConverter for both client registration patterns.
-        // TryAddEnumerable deduplicates if registration happens more than once.
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<
-            IConfigureOptions<TemporalClientConnectOptions>,
-            DurableAIClientOptionsConfigurator>());
-
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             DurableAIWorkerClientConfigurator>());
@@ -127,6 +121,8 @@ internal static class DurableAIRegistrar
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
 
+        RegisterClientDataConverterServices(services);
+
         services.TryAddSingleton(options);
         services.TryAddSingleton<DurableFunctionRegistry>();
         services.TryAddSingleton<Internal.DurableFunctionDeclarationRegistry>(sp =>
@@ -146,5 +142,14 @@ internal static class DurableAIRegistrar
                 sp.GetService<DurableFunctionRegistry>(),
                 sp.GetService<DurableChatToolOptionsRegistry>(),
                 sp.GetService<Internal.DurableFunctionDeclarationRegistry>()));
+    }
+
+    private static void RegisterClientDataConverterServices(IServiceCollection services)
+    {
+        // Applies to clients created through AddTemporalClient. TryAddEnumerable makes the
+        // registration order-independent and deduplicates full plus client-only registration.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IConfigureOptions<TemporalClientConnectOptions>,
+            DurableAIClientOptionsConfigurator>());
     }
 }

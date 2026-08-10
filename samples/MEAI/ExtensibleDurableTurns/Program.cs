@@ -13,6 +13,7 @@ var builder = Host.CreateApplicationBuilder(args);
 var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions("localhost:7233")
 {
     Namespace = "default",
+    // This client is created manually, so DI option configurators cannot apply the converter.
     DataConverter = DurableAIDataConverter.Instance,
 });
 builder.Services.AddSingleton<ITemporalClient>(temporalClient);

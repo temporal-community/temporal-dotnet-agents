@@ -6,8 +6,9 @@ calls and registered tool calls execute as activities.
 
 ## Worker setup
 
-Both worker and caller must use `DurableAIDataConverter.Instance` when connecting a Temporal
-client manually.
+Both worker and caller must use `DurableAIDataConverter.Instance`. Registration through
+`AddTemporalClient` applies it automatically when the converter is still the SDK default. A custom
+converter is never replaced. When connecting a Temporal client manually, set it explicitly:
 
 ```csharp
 var client = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions("localhost:7233")

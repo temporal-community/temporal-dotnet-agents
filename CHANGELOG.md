@@ -15,6 +15,8 @@
   support, and explicit combined or split-process registration.
 - Durable tool implementation factories now receive an activity-attempt scoped service provider;
   retries create fresh scopes and dispose scoped dependencies after each attempt.
+- Client-only workflow-input registration now applies the durable data converter to clients created
+  through `AddTemporalClient` while preserving explicitly configured converters.
 - Added sequential typed-turn dispatch as the specialized-base default, threading successful
   explicit state replacements in model-call order while preserving the stock session's parallel
   behavior and the all-approvals-before-tools safety barrier.

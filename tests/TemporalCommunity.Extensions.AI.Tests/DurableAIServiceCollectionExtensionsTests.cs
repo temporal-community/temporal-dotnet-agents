@@ -2,7 +2,10 @@ using System.Reflection;
 using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Temporalio.Client;
+using Temporalio.Converters;
+using Temporalio.Extensions.Hosting;
 using TemporalCommunity.Extensions.AI.Internal;
 using Xunit;
 
@@ -143,6 +146,107 @@ public class DurableAIServiceCollectionExtensionsTests
             descriptor => descriptor.ServiceType.FullName?.Contains(
                 "IHostedService",
                 StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public void ClientOnlyRegistration_RegistersClientConfiguratorExactlyOnce()
+    {
+        var services = new ServiceCollection();
+
+        services.AddDurableChatWorkflowInputFactory("implementation-queue");
+        services.AddDurableChatWorkflowInputFactory("implementation-queue");
+
+        Assert.Single(
+            services,
+            descriptor =>
+                descriptor.ServiceType == typeof(IConfigureOptions<TemporalClientConnectOptions>) &&
+                descriptor.ImplementationType == typeof(DurableAIClientOptionsConfigurator));
+        Assert.DoesNotContain(
+            services,
+            descriptor =>
+                descriptor.ServiceType == typeof(IPostConfigureOptions<TemporalWorkerServiceOptions>) &&
+                descriptor.ImplementationType == typeof(DurableAIWorkerClientConfigurator));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ClientOnlyRegistration_ConfiguresDefaultConverter_RegardlessOfOrder(
+        bool addTemporalClientFirst)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        if (addTemporalClientFirst)
+        {
+            services.AddTemporalClient("localhost:7233", "default");
+        }
+
+        services.AddDurableChatWorkflowInputFactory("implementation-queue");
+
+        if (!addTemporalClientFirst)
+        {
+            services.AddTemporalClient("localhost:7233", "default");
+        }
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider
+            .GetRequiredService<IOptions<TemporalClientConnectOptions>>()
+            .Value;
+
+        Assert.Same(DurableAIDataConverter.Instance, options.DataConverter);
+    }
+
+    [Fact]
+    public void ClientOnlyRegistration_PreservesCustomConverter()
+    {
+        var customConverter = new DataConverter(
+            new DefaultPayloadConverter(),
+            new DefaultFailureConverter());
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTemporalClient(options => options.DataConverter = customConverter);
+        services.AddDurableChatWorkflowInputFactory("implementation-queue");
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider
+            .GetRequiredService<IOptions<TemporalClientConnectOptions>>()
+            .Value;
+
+        Assert.Same(customConverter, options.DataConverter);
+    }
+
+    [Fact]
+    public void ClientOnlyRegistration_SelectedConverter_RoundTripsFrozenWorkflowInput()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTemporalClient("localhost:7233", "default");
+        var declaration = AIFunctionFactory.Create(
+            (string value) => string.Empty,
+            "client_tool").AsDeclarationOnly();
+        services
+            .AddDurableChatWorkflowInputFactory("implementation-queue")
+            .AddDurableToolDeclaration(
+                declaration,
+                options => options.WithMaxAttempts(2));
+
+        using var provider = services.BuildServiceProvider();
+        var input = provider.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
+        var converter = provider
+            .GetRequiredService<IOptions<TemporalClientConnectOptions>>()
+            .Value
+            .DataConverter
+            .PayloadConverter;
+
+        var payload = converter.ToPayload(input);
+        var actual = (DurableChatWorkflowInput)converter.ToValue(
+            payload,
+            typeof(DurableChatWorkflowInput))!;
+
+        var frozen = Assert.Single(actual.ToolDeclarations!);
+        Assert.Equal("client_tool", frozen.Name);
+        Assert.Equal(2, actual.ToolActivityOptions!["client_tool"].RetryPolicy!.MaximumAttempts);
     }
 
     [Fact]

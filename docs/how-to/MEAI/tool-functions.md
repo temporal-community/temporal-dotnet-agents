@@ -113,6 +113,11 @@ services
     .AddDurableToolDeclaration(declaration, configure: ...);
 ```
 
+`AddDurableChatWorkflowInputFactory` configures clients created through `AddTemporalClient` to use
+`DurableAIDataConverter.Instance` when they still use the SDK default converter. A custom converter
+is preserved. A client constructed directly with `TemporalClient.ConnectAsync` bypasses DI options
+and must set the durable converter explicitly.
+
 Resolve `IDurableChatWorkflowInputFactory` outside workflow code and use its result as the workflow
 start input. Call `AddDurableToolImplementation<TRequestData, TTurnState>` in the worker. That
 implementation-bearing worker hosts both model and tool activities on the session queue. The

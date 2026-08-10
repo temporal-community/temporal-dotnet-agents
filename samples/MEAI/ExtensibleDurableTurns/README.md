@@ -32,6 +32,10 @@ activity-scoped key, so the sink records one write. The retry receives a new DI 
 its Temporal activity identity remains stable. DI-scoped objects are ordinary process-local
 dependencies; they are not durable turn state and are never serialized into workflow history.
 
+The sample creates its Temporal client manually, so it sets `DurableAIDataConverter.Instance`
+explicitly. A client registered through `AddTemporalClient` is configured automatically by
+`AddDurableChatWorkflowInputFactory` unless the application supplied a custom converter.
+
 `RequestData` and `TTurnState` are application-supplied history payloads, not authorization proof.
 The decorator uses them only to locate subject/resource and obtains the current decision from the
 authoritative service immediately before each stateful function.
