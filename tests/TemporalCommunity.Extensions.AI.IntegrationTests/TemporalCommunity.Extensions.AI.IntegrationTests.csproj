@@ -13,6 +13,8 @@
     <ProjectReference Include="../TemporalCommunity.Extensions.Tests.Shared/TemporalCommunity.Extensions.Tests.Shared.csproj" />
     <Compile Include="../TemporalCommunity.Extensions.AI.Tests/Compat/DurableChatClientWorkflow.cs"
              Link="Compat/DurableChatClientWorkflow.cs" />
+    <Compile Include="../TemporalCommunity.Extensions.AI.Tests/Compat/TypedDurableTurnWorkflow.cs"
+             Link="Compat/TypedDurableTurnWorkflow.cs" />
   </ItemGroup>
 
   <ItemGroup>

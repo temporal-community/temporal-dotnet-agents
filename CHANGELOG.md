@@ -19,6 +19,8 @@
   through `AddTemporalClient` while preserving explicitly configured converters.
 - Activity-only durable AI workers can use the hosted worker's connection without registering an
   otherwise unused `ITemporalClient` when the stock workflow is disabled.
+- Added specialized-workflow Continue-as-New, one-turn-per-Update, and checked-in typed-history
+  replay coverage; duplicate managed-turn calls now fail the Update non-retryably.
 - Added sequential typed-turn dispatch as the specialized-base default, threading successful
   explicit state replacements in model-call order while preserving the stock session's parallel
   behavior and the all-approvals-before-tools safety barrier.

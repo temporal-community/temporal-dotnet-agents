@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;
+using Temporalio.Exceptions;
 using Temporalio.Workflows;
 
 namespace TemporalCommunity.Extensions.AI;
@@ -35,8 +36,10 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
 
         if (!_managedUpdateIds.Add(updateInfo.Id))
         {
-            throw new InvalidOperationException(
-                $"Workflow Update '{updateInfo.Id}' already started a durable turn in this run.");
+            throw new ApplicationFailureException(
+                $"Workflow Update '{updateInfo.Id}' already started a durable turn in this run.",
+                errorType: "DurableTurnAlreadyStarted",
+                nonRetryable: true);
         }
 
         if (request.Messages is null or { Count: 0 })

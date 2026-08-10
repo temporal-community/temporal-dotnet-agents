@@ -52,6 +52,10 @@ workflow. The executable sample remains a single-process demonstration.
 The decorator uses them only to locate subject/resource and obtains the current decision from the
 authoritative service immediately before each stateful function.
 
+The `Turn` Update calls `RunDurableTurnAsync` exactly once. The specialized base rejects a second
+managed turn from the same Update before it can schedule another model or tool activity. Use a new
+Update ID for each turn; Continue-as-New starts a new run and resets the run-local guard.
+
 For application-owned single-activity turns instead, see
 [`samples/MEAI/CustomWorkflow`](../CustomWorkflow/README.md). That sample uses the lower-level
 `DurableChatWorkflowBase<TOutput>` and intentionally owns its own orchestration.

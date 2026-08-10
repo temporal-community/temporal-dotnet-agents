@@ -11,6 +11,25 @@ Durable AI code has two distinct testing concerns, and they call for different t
 
 The rule of thumb: if your code just *calls* `SendAsync` or `GetHistoryAsync`, unit test it with a stub. If you are verifying that conversation history accumulates correctly or that `ContinueAsNew` works, use an integration test.
 
+For `DurableToolWorkflowBase`, integration tests should separately prove the one-managed-turn-per-
+Update guard and Continue-as-New preservation of the concrete workflow plus frozen declaration and
+policy snapshot. The repository's `TypedDurableTurnLifecycleTests` is the reference shape.
+
+Workflow-command compatibility is covered by checked-in histories. Capture the typed history only
+when its command sequence intentionally changes:
+
+```bash
+dotnet test tests/TemporalCommunity.Extensions.AI.IntegrationTests \
+  --filter "FullyQualifiedName~HistoryCaptureTests.Capture_TypedDurableTurn"
+dotnet test tests/TemporalCommunity.Extensions.AI.Tests \
+  --filter "FullyQualifiedName~WorkflowReplayTests"
+```
+
+Inspect the captured history before committing it. The typed fixture must contain one model
+activity, one real tool activity with state completion, a final model activity, and one accepted and
+completed Update. Ordinary test runs exclude `Category=HistoryCapture` so they never rewrite the
+checked-in corpus.
+
 ---
 
 ## Unit Testing Application Code

@@ -82,6 +82,7 @@ public class WorkflowReplayTests
         var plugin = new DurableAIPlugin();
         plugin.ConfigureReplayer(opts);
         opts.AddWorkflow<DurableChatClientWorkflow>();
+        opts.AddWorkflow<TypedDurableTurnWorkflow>();
         return new WorkflowReplayer(opts);
     }
 
@@ -115,6 +116,17 @@ public class WorkflowReplayTests
     {
         var replayer = BuildReplayer();
         var history = LoadHistory("direct-middleware-options-v1.json");
+
+        var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
+    [Fact]
+    public async Task TypedDurableTurnV1_ReplaysWithoutError()
+    {
+        var replayer = BuildReplayer();
+        var history = LoadHistory("typed-durable-turn-v1.json");
 
         var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
 

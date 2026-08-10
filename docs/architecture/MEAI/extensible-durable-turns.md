@@ -85,12 +85,27 @@ telemetry, and other function behavior.
 
 ## Package-owned orchestration boundary
 
-The stock managed workflow and the forthcoming typed specialization share one loop implementation
-on `DurableChatWorkflowBase<TOutput>`. The operation remains internal until the typed request,
-result, dispatch, and completion contracts are complete.
+The stock managed workflow and the typed specialization share one loop implementation on
+`DurableChatWorkflowBase<TOutput>`. The loop itself remains internal; the public typed base and its
+request, result, dispatch, activation, and state-completion contracts are the supported seam.
 
 This extraction does not alter the shipped command sequence. The loop still performs one model
 activity per iteration, resolves every interceptor and approval decision before starting any tool,
 fans approved tools out in parallel, records one activity per real tool call, and reassembles
 synthetic and real results in original model-call order. It performs no workflow-side service
 resolution, I/O, or application delegate invocation.
+
+## Specialized workflow lifecycle
+
+`DurableToolWorkflowBase<TRequestData, TTurnState>` owns the managed-turn lifecycle in addition to
+the model/tool loop. One workflow Update may call `RunDurableTurnAsync` exactly once. A second call
+from the same Update fails that Update non-retryably before another model or tool activity is
+scheduled. The Update remains consumed even when its first managed turn failed and application
+code caught that failure. Different Update IDs in the same run may each execute one turn.
+
+Continue-as-New preserves the concrete workflow type and the canonical frozen
+`DurableChatWorkflowInput`, including declaration snapshots, keyed reducer selection, tool and
+interceptor activity policies, approval policy, and model/tool limits. Update IDs are scoped to one
+run, so the one-turn guard starts with an empty set after Continue-as-New. A checked-in typed-turn
+history containing `GetChatStep`, `InvokeFunction`, state completion, and a final `GetChatStep`
+replays against the source-linked compatibility workflow in the server-free unit lane.

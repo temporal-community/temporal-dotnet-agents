@@ -161,6 +161,51 @@ public class HistoryCaptureTests
         await host.StopAsync();
     }
 
+    // ── Typed durable turn ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Captures the public typed workflow surface with a model step, one real tool activity,
+    /// explicit state completion, and a final model response.
+    /// </summary>
+    [Fact]
+    public async Task Capture_TypedDurableTurn()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent(
+                "typed-call-1",
+                "state_tool",
+                new Dictionary<string, object?> { ["value"] = "captured" })],
+            "typed turn complete");
+        var taskQueue = $"capture-typed-turn-{Guid.NewGuid():N}";
+        using var host = BuildTypedTurnHost(env.Client, scripted, taskQueue);
+        await host.StartAsync();
+
+        var input = host.Services.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
+        var workflowId = $"capture-typed-turn-{Guid.NewGuid():N}";
+        var handle = await env.Client.StartWorkflowAsync(
+            (TypedDurableTurnWorkflow workflow) => workflow.RunAsync(input),
+            new WorkflowOptions(workflowId, taskQueue));
+        var request = new DurableTurnRequest<TypedTurnRequestData, TypedTurnState>
+        {
+            Messages = [new ChatMessage(ChatRole.User, "capture typed turn")],
+            RequestData = new TypedTurnRequestData("capture-operation"),
+            InitialTurnState = new TypedTurnState(0, []),
+            CorrelationId = "capture-correlation",
+        };
+        var result = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(request),
+            new WorkflowUpdateOptions { Id = "capture-typed-update" });
+
+        Assert.Equal(1, result.FinalTurnState!.Revision);
+        var history = await handle.FetchHistoryAsync();
+        await SaveHistoryAsync("typed-durable-turn-v1.json", history);
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
     // ── CAN transition ─────────────────────────────────────────────────────
 
     /// <summary>
@@ -361,6 +406,45 @@ public class HistoryCaptureTests
                 opts.SessionTimeToLive = TimeSpan.FromMinutes(5);
             });
 
+        return builder.Build();
+    }
+
+    private static IHost BuildTypedTurnHost(
+        ITemporalClient client,
+        IChatClient chatClient,
+        string taskQueue)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton(client);
+        builder.Services.AddChatClient(chatClient).Build();
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new NoopEmbeddingGenerator());
+        var worker = builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options =>
+            {
+                options.RegisterDefaultWorkflow = false;
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+            })
+            .AddWorkflow<TypedDurableTurnWorkflow>();
+        var declaration = AIFunctionFactory.Create(
+            (string value) => string.Empty,
+            "state_tool",
+            "Updates captured typed state.").AsDeclarationOnly();
+        worker.AddDurableTool<TypedTurnRequestData, TypedTurnState>(
+            declaration,
+            (_, context) => new DurableToolActivation<TypedTurnState>
+            {
+                Function = AIFunctionFactory.Create(
+                    (string value) => value,
+                    "state_tool",
+                    "Updates captured typed state."),
+                CompleteState = (_, _) => ValueTask.FromResult(
+                    DurableStateUpdate<TypedTurnState>.Replace(
+                        new TypedTurnState(
+                            (context.TurnState?.Revision ?? 0) + 1,
+                            ["captured"]))),
+            });
         return builder.Build();
     }
 

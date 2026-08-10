@@ -83,8 +83,11 @@ uses the consecutive-error allowance but does not consume a successful model/too
 provider errors classified as permanent fail the turn immediately.
 
 `RunDurableTurnAsync` must be called from a workflow Update and permits one managed turn per Update
-ID in the current workflow run. The SDK Update ID is client retry metadata; it is not copied into
-the turn or tool contracts. Continue-as-New starts a new run, so applications that need cross-run
+ID in the current workflow run. A second call fails the Update before another model/tool dispatch,
+including when application code caught a failure from the first call. Each Update handler should
+therefore call it exactly once. The SDK Update ID is client retry metadata; it is not copied into
+the turn or tool contracts. Continue-as-New starts a new run and resets this guard, so applications
+that need cross-run
 effect deduplication put a stable business operation identifier in their own `RequestData` and use
 it at the downstream system. That can deduplicate an external effect, but it does not prevent a
 new model/tool execution or guarantee the same response or final state.
