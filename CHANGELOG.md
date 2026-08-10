@@ -16,6 +16,9 @@
 - Added sequential typed-turn dispatch as the specialized-base default, threading successful
   explicit state replacements in model-call order while preserving the stock session's parallel
   behavior and the all-approvals-before-tools safety barrier.
+- Added versioned, retry-stable activity idempotency metadata using a fixed domain-separated,
+  length-prefixed strict-UTF-8 SHA-256 v1 algorithm, with unknown versions rejected before tool
+  construction or invocation.
 
 ## [0.10.4] - 2026-08-09
 

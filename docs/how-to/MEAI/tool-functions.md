@@ -102,6 +102,38 @@ approval evidence, or authorization grants. A high-risk tool must obtain the cur
 decision from an authoritative service inside the activity immediately before every external
 effect.
 
+### Activity idempotency key
+
+`Metadata.IdempotencyKey` identifies one scheduled tool activity across its activity retries. The
+v1 algorithm is fixed:
+
+1. Write the strict UTF-8 bytes of
+   `TemporalCommunity.Extensions.AI/IdempotencyKey/v1\0`.
+2. In order, encode namespace, workflow ID, workflow run ID, and activity ID. For each component,
+   write its strict UTF-8 byte length as unsigned 32-bit big-endian, then its bytes. Do not trim,
+   normalize, or case-fold.
+3. SHA-256 hash the complete preimage and return `tai-v1:` plus the lowercase 64-character hex
+   digest.
+
+The fixed vector `default`, `workflow-123`,
+`01234567-89ab-cdef-0123-456789abcdef`, `7` produces
+`tai-v1:4fd719d1966cbf5585d884d8c0dd3c791d9c0737decebd0caa765ad467d36139`.
+The activity input carries the algorithm version; unknown or missing versions fail non-retryably
+before the factory or function runs. A future algorithm requires a new carried version and output
+prefix while workers retain old calculators for supported in-flight activities.
+
+Attempt is diagnostic only and is not part of the key. The key is stable for retries of one
+scheduled activity and ordinary replay. It is not promised across Continue-as-New, workflow reset,
+a different run, or an application-created replacement operation. Activities—including `NoRetry()`
+activities—do not provide exactly-once external effects. Supply this key to downstream idempotency
+storage for activity-retry protection, and carry a separate application business-operation ID in
+`RequestData` when an effect must deduplicate across workflow runs.
+
+The SDK workflow Update ID is a third, separate identifier: it deduplicates an ambiguous Update
+submission only within one workflow run. A cross-run business key can prevent a duplicate external
+effect, but it does not suppress the new model/tool loop or guarantee the same `ChatResponse` or
+`FinalTurnState`.
+
 ## Custom workflow tools
 
 `AIFunction.AsDurable()` remains available for a custom workflow that explicitly invokes a known
