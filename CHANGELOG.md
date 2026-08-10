@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Fixed continue-as-new input cloning so `HistoryReducerKey`, retry/tool/interceptor settings, and
+  derived workflow input fields are preserved without field-by-field reconstruction.
+
 ## [0.10.4] - 2026-08-09
 
 - Updated the tested dependency baseline to Microsoft.Extensions.AI 10.8.3 and

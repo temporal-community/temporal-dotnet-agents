@@ -212,6 +212,13 @@ protected override ContinueAsNewException CreateContinueAsNewException(
 
 The concrete type in the lambda must match the actual workflow class — if you use the wrong type, Temporal will start a workflow of the wrong kind on the next run.
 
+The `input` supplied to this hook is a record clone of the workflow's original frozen session
+configuration. The base replaces only run-scoped values such as carried history, resolved approval
+history, and the original creation time. Retry policies, keyed history reducers, per-tool options,
+interceptor settings, and future frozen settings are preserved automatically. Pass this object
+through unchanged unless your derived workflow has an explicitly documented run-scoped field to
+replace; rebuilding it property-by-property can silently drop configuration.
+
 ---
 
 ## What You Inherit
@@ -222,7 +229,7 @@ By extending `DurableChatWorkflowBase<TOutput>` you get the following at no cost
 - **Conversation history** — full `List<DurableSessionEntry>` persisted in workflow state, restored on continue-as-new. Each turn appends a `DurableSessionRequest` followed by a `DurableSessionResponse`.
 - **Turn serialization** — `WaitConditionAsync(() => !_isProcessing)` prevents concurrent turns from corrupting history.
 - **HITL** — `[WorkflowUpdate("RequestApproval")]`, `[WorkflowUpdate("ResolveApproval")]`, and `[WorkflowQuery("GetPendingApproval")]` are wired to `DurableApprovalMixin` automatically.
-- **Continue-as-new** — history is carried forward when workflow history grows large; search attributes are preserved.
+- **Continue-as-new** — history is carried forward when workflow history grows large; search attributes and the complete frozen session configuration are preserved.
 - **Search attributes** — optional `TurnCount` and `SessionCreatedAt` upserts via `DurableSessionAttributes` when `input.EnableSearchAttributes` is `true`.
 - **`[WorkflowQuery("GetHistory")]`** — returns the current conversation history.
 - **`[WorkflowSignal("Shutdown")]`** — sets `IsShutdownRequested` and unblocks the session loop.

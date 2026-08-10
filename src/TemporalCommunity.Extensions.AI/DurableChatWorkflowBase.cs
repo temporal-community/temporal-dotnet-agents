@@ -323,20 +323,11 @@ public abstract class DurableChatWorkflowBase<TOutput>
                 carriedHistory = DefaultBoundedTrim(_history, input.MaxEntryCount);
             }
 
-            var carriedInput = new DurableChatWorkflowInput
-            {
-                TimeToLive = input.TimeToLive,
-                CarriedHistory = carriedHistory,
-                ActivityTimeout = input.ActivityTimeout,
-                HeartbeatTimeout = input.HeartbeatTimeout,
-                ApprovalTimeout = input.ApprovalTimeout,
-                ApprovalResolutionHistory = _approvalMixin.GetResolvedApprovals(),
-                EnableSearchAttributes = input.EnableSearchAttributes,
-                MaxEntryCount = input.MaxEntryCount,
-                HistoryReducer = input.HistoryReducer,
-                HistoryReducerKey = input.HistoryReducerKey,
-                OriginalCreatedAt = sessionCreatedAt,
-            };
+            var carriedInput = CreateContinueAsNewInput(
+                input,
+                carriedHistory,
+                _approvalMixin.GetResolvedApprovals(),
+                sessionCreatedAt);
             // Drain in-flight update/signal handlers before completing-as-new. _isProcessing is a
             // turn-serialization mutex that clears in RunTurnAsync's finally BEFORE the update handler's
             // continuation (logging + result delivery) finishes, so gating CAN on !_isProcessing alone
@@ -345,6 +336,33 @@ public abstract class DurableChatWorkflowBase<TOutput>
             await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished).ConfigureAwait(true);
             throw CreateContinueAsNewException(carriedInput);
         }
+    }
+
+    /// <summary>
+    /// Clones frozen workflow configuration for continue-as-new while replacing only the
+    /// run-scoped values that intentionally change at the boundary.
+    /// </summary>
+    /// <remarks>
+    /// Record cloning preserves every current and future frozen setting and retains the runtime
+    /// input type used by derived packages. Keeping this operation centralized prevents a newly
+    /// added setting from being silently dropped by field-by-field reconstruction.
+    /// </remarks>
+    internal static DurableChatWorkflowInput CreateContinueAsNewInput(
+        DurableChatWorkflowInput input,
+        List<DurableSessionEntry> carriedHistory,
+        IReadOnlyList<DurableApprovalDecision> approvalResolutionHistory,
+        DateTimeOffset originalCreatedAt)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(carriedHistory);
+        ArgumentNullException.ThrowIfNull(approvalResolutionHistory);
+
+        return input with
+        {
+            CarriedHistory = carriedHistory,
+            ApprovalResolutionHistory = approvalResolutionHistory,
+            OriginalCreatedAt = originalCreatedAt,
+        };
     }
 
     /// <summary>

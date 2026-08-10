@@ -526,38 +526,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     }
 
     protected override ContinueAsNewException CreateContinueAsNewException(
-        DurableChatWorkflowInput input)
-    {
-        // Carry the per-tool options and iteration cap forward so the next run preserves the
-        // session's configured durable-tool behavior. Interceptor config is also carried
-        // forward verbatim.
-        var carried = new DurableChatWorkflowInput
-        {
-            TimeToLive = input.TimeToLive,
-            CarriedHistory = input.CarriedHistory,
-            ActivityTimeout = input.ActivityTimeout,
-            HeartbeatTimeout = input.HeartbeatTimeout,
-            RetryPolicy = input.RetryPolicy,
-            ApprovalTimeout = input.ApprovalTimeout,
-            // The base workflow has just snapshotted the current mixin state into input.
-            // Prefer that new snapshot over Input, which is the immutable start-of-run value.
-            ApprovalResolutionHistory = input.ApprovalResolutionHistory,
-            EnableSearchAttributes = input.EnableSearchAttributes,
-            MaxEntryCount = input.MaxEntryCount,
-            HistoryReducer = input.HistoryReducer,
-            OriginalCreatedAt = input.OriginalCreatedAt,
-            ToolActivityOptions = Input?.ToolActivityOptions ?? input.ToolActivityOptions,
-            MaxToolCallsPerTurn = Input?.MaxToolCallsPerTurn ?? input.MaxToolCallsPerTurn,
-            MaximumConsecutiveErrorsPerRequest =
-                Input?.MaximumConsecutiveErrorsPerRequest ?? input.MaximumConsecutiveErrorsPerRequest,
-            IncludeDetailedErrors = Input?.IncludeDetailedErrors ?? input.IncludeDetailedErrors,
-            InterceptorActivityOptions = Input?.InterceptorActivityOptions ?? input.InterceptorActivityOptions,
-            InterceptorToolActivityOptions = Input?.InterceptorToolActivityOptions ?? input.InterceptorToolActivityOptions,
-            InterceptorSkippedTools = Input?.InterceptorSkippedTools ?? input.InterceptorSkippedTools,
-            RequiresApprovalTools = Input?.RequiresApprovalTools ?? input.RequiresApprovalTools,
-            ToolApprovalTimeouts = Input?.ToolApprovalTimeouts ?? input.ToolApprovalTimeouts,
-        };
-        return Workflow.CreateContinueAsNewException(
-            (DurableChatWorkflow wf) => wf.RunAsync(carried));
-    }
+        DurableChatWorkflowInput input) =>
+        Workflow.CreateContinueAsNewException(
+            (DurableChatWorkflow wf) => wf.RunAsync(input));
 }
