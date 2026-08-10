@@ -10,6 +10,9 @@ namespace TemporalCommunity.Extensions.AI;
 /// </summary>
 public record class DurableChatWorkflowInput
 {
+    [JsonInclude]
+    internal IReadOnlyList<Internal.DurableFunctionDeclarationSnapshot>? ToolDeclarations { get; init; }
+
     /// <summary>
     /// The session time-to-live. The workflow completes when idle for this duration.
     /// </summary>

@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace TemporalCommunity.Extensions.AI;
 
 /// <summary>
@@ -14,5 +16,25 @@ internal sealed class DurableFunctionInput
     /// The arguments to pass to the function.
     /// </summary>
     public IDictionary<string, object?>? Arguments { get; init; }
+
+    public Internal.DurableFunctionDeclarationSnapshot? Declaration { get; init; }
+
+    public JsonElement? RequestData { get; init; }
+
+    public JsonElement? TurnState { get; init; }
+
+    public DurableToolDispatchMode DispatchMode { get; init; } = DurableToolDispatchMode.Parallel;
+
+    public string? ToolCallId { get; init; }
+
+    public int ModelIteration { get; init; }
+
+    public int CallIndex { get; init; }
+
+    public string? ConversationId { get; init; }
+
+    public string? CorrelationId { get; init; }
+
+    public int IdempotencyKeyVersion { get; init; }
 
 }

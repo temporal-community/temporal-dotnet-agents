@@ -22,4 +22,8 @@ internal sealed class DurableFunctionOutput
     /// <see cref="System.Text.Json.JsonElement"/> explicitly.
     /// </remarks>
     public object? Result { get; init; }
+
+    public bool HasStateReplacement { get; init; }
+
+    public System.Text.Json.JsonElement? StateReplacement { get; init; }
 }

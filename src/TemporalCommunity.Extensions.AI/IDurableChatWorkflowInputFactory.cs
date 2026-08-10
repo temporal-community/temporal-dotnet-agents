@@ -25,6 +25,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
     private readonly DurableExecutionOptions _options;
     private readonly DurableFunctionRegistry? _functionRegistry;
     private readonly DurableChatToolOptionsRegistry? _toolOptionsRegistry;
+    private readonly Internal.DurableFunctionDeclarationRegistry? _declarationRegistry;
     private readonly Lazy<IReadOnlyDictionary<string, ActivityOptions>?> _toolActivityOptions;
     private readonly Lazy<ActivityOptions?> _interceptorActivityOptions;
     private readonly Lazy<IReadOnlyDictionary<string, ActivityOptions>?> _interceptorToolActivityOptions;
@@ -35,7 +36,8 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
     internal DurableChatWorkflowInputFactory(
         DurableExecutionOptions options,
         DurableFunctionRegistry? functionRegistry,
-        DurableChatToolOptionsRegistry? toolOptionsRegistry)
+        DurableChatToolOptionsRegistry? toolOptionsRegistry,
+        Internal.DurableFunctionDeclarationRegistry? declarationRegistry = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
@@ -43,6 +45,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         _options = options;
         _functionRegistry = functionRegistry;
         _toolOptionsRegistry = toolOptionsRegistry;
+        _declarationRegistry = declarationRegistry;
         _toolActivityOptions = new(BuildToolActivityOptions, LazyThreadSafetyMode.ExecutionAndPublication);
         _interceptorActivityOptions = new(BuildInterceptorActivityOptions, LazyThreadSafetyMode.ExecutionAndPublication);
         _interceptorToolActivityOptions = new(
@@ -79,6 +82,9 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         InterceptorSkippedTools = _interceptorSkippedTools.Value,
         RequiresApprovalTools = _requiresApprovalTools.Value,
         ToolApprovalTimeouts = _toolApprovalTimeouts.Value,
+        ToolDeclarations = _declarationRegistry is { Count: > 0 }
+            ? _declarationRegistry.Values.ToList()
+            : null,
     };
 
     private Temporalio.Common.RetryPolicy EffectiveRetryPolicy =>
@@ -86,26 +92,28 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
 
     private IReadOnlyDictionary<string, ActivityOptions>? BuildToolActivityOptions()
     {
-        if (_functionRegistry is null || _functionRegistry.Count == 0)
+        var toolNames = _declarationRegistry?.Keys
+            ?? (IEnumerable<string>?)_functionRegistry?.Keys;
+        if (toolNames is null)
         {
             return null;
         }
 
         var result = new Dictionary<string, ActivityOptions>(
-            _functionRegistry.Count,
+            _declarationRegistry?.Count ?? _functionRegistry?.Count ?? 0,
             StringComparer.OrdinalIgnoreCase);
 
-        foreach (var kvp in _functionRegistry)
+        foreach (var toolName in toolNames)
         {
             DurableChatToolOptions? perTool = null;
-            _toolOptionsRegistry?.TryGetValue(kvp.Key, out perTool);
+            _toolOptionsRegistry?.TryGetValue(toolName, out perTool);
 
-            result[kvp.Key] = new ActivityOptions
+            result[toolName] = new ActivityOptions
             {
                 StartToCloseTimeout = perTool?.StartToCloseTimeout ?? _options.ActivityTimeout,
                 HeartbeatTimeout = perTool?.HeartbeatTimeout ?? _options.HeartbeatTimeout,
                 RetryPolicy = perTool?.RetryPolicy ?? EffectiveRetryPolicy,
-                Summary = kvp.Key,
+                Summary = toolName,
             };
         }
 

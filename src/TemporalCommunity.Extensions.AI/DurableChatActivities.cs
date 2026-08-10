@@ -112,7 +112,9 @@ internal sealed class DurableChatActivities(
             }
 
             var registry = services.GetService<DurableFunctionRegistry>();
-            if (registry is null || registry.Count == 0)
+            var declarations = services.GetService<Internal.DurableFunctionDeclarationRegistry>();
+            if ((registry is null || registry.Count == 0)
+                && (declarations is null || declarations.Count == 0))
             {
                 // No durable tools → no conflict possible. Cache anyway so repeat calls skip.
                 _mixedPatternCheckedClients.Add(chatClient);
@@ -152,11 +154,10 @@ internal sealed class DurableChatActivities(
         // Caller-supplied tools cannot cross the durable boundary. The workflow activity owns
         // the model-facing schema and builds it from the registered durable-tool registry.
         EnsureNoCallerSuppliedTools(input.Options);
-        var registry = services.GetService<DurableFunctionRegistry>();
         var effectiveOptions = input.Options?.Clone() ?? new ChatOptions();
-        if (registry is { Count: > 0 })
+        if (input.ToolDeclarations is { Count: > 0 })
         {
-            effectiveOptions.Tools = [.. registry.Values];
+            effectiveOptions.Tools = [.. input.ToolDeclarations.Select(d => d.ToDeclaration())];
         }
         else
         {

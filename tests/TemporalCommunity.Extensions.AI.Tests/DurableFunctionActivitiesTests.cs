@@ -1,4 +1,7 @@
 using Microsoft.Extensions.AI;
+using System.Text.Json;
+using TemporalCommunity.Extensions.AI.Internal;
+using Temporalio.Activities;
 using Temporalio.Testing;
 using Xunit;
 
@@ -56,4 +59,83 @@ public class DurableFunctionActivitiesTests
 
         Assert.Equal("boom", ex.Message);
     }
+
+    [Fact]
+    public async Task InvokeFunctionAsync_InvocationFactoryReceivesTypedContextAndRuntimeMetadata()
+    {
+        DurableToolInvocationContext<RequestData, TurnState>? received = null;
+        var declarationFunction = AIFunctionFactory.Create(
+            (string value) => string.Empty,
+            "contextual_tool");
+        var declaration = DurableFunctionDeclarationSnapshot.Create(
+            declarationFunction.AsDeclarationOnly());
+        var factories = new DurableToolFactoryRegistry(
+        [
+            registry => registry["contextual_tool"] =
+                new DurableToolActivationFactory<RequestData, TurnState>(context =>
+                {
+                    received = context;
+                    return new DurableToolActivation<TurnState>
+                    {
+                        Function = AIFunctionFactory.Create(
+                            (string value) => $"{context.RequestData.Tenant}:{context.TurnState!.Count}:{value}",
+                            "contextual_tool"),
+                    };
+                }),
+        ]);
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction>(),
+            loggerFactory: null,
+            factories);
+        var input = new DurableFunctionInput
+        {
+            FunctionName = "contextual_tool",
+            Arguments = new Dictionary<string, object?> { ["value"] = "model" },
+            Declaration = declaration,
+            RequestData = JsonSerializer.SerializeToElement(new RequestData("tenant-a")),
+            TurnState = JsonSerializer.SerializeToElement(new TurnState(3)),
+            DispatchMode = DurableToolDispatchMode.Sequential,
+            ToolCallId = "call-7",
+            ModelIteration = 2,
+            CallIndex = 4,
+            ConversationId = "conversation",
+            CorrelationId = "correlation",
+            IdempotencyKeyVersion = DurableToolIdempotencyKey.CurrentVersion,
+        };
+        var env = new ActivityEnvironment
+        {
+            Info = ActivityEnvironment.DefaultInfo with
+            {
+                Namespace = "namespace-a",
+                WorkflowId = "workflow-a",
+                WorkflowRunId = "run-a",
+                ActivityId = "activity-a",
+                Attempt = 3,
+                TaskQueue = "queue-a",
+            },
+        };
+
+        var output = await env.RunAsync(() => activities.InvokeFunctionAsync(input));
+
+        Assert.Equal("tenant-a", received!.RequestData.Tenant);
+        Assert.Equal(3, received.TurnState!.Count);
+        Assert.Equal(DurableToolDispatchMode.Sequential, received.DispatchMode);
+        Assert.Equal("namespace-a", received.Metadata.Namespace);
+        Assert.Equal("workflow-a", received.Metadata.WorkflowId);
+        Assert.Equal("run-a", received.Metadata.WorkflowRunId);
+        Assert.Equal("activity-a", received.Metadata.ActivityId);
+        Assert.Equal(3, received.Metadata.Attempt);
+        Assert.Equal("queue-a", received.Metadata.TaskQueue);
+        Assert.Equal("call-7", received.Metadata.ToolCallId);
+        Assert.Equal(2, received.Metadata.ModelIteration);
+        Assert.Equal(4, received.Metadata.CallIndex);
+        Assert.Equal("conversation", received.Metadata.ConversationId);
+        Assert.Equal("correlation", received.Metadata.CorrelationId);
+        Assert.StartsWith("tai-v1:", received.Metadata.IdempotencyKey, StringComparison.Ordinal);
+        Assert.Equal("tenant-a:3:model", Assert.IsType<JsonElement>(output.Result).GetString());
+        Assert.False(output.HasStateReplacement);
+    }
+
+    private sealed record RequestData(string Tenant);
+    private sealed record TurnState(int Count);
 }

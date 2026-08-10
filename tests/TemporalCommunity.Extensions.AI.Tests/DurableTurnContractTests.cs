@@ -101,6 +101,33 @@ public class DurableTurnContractTests
             turn.ReturnType);
     }
 
+    [Fact]
+    public void InvocationMetadata_PublicSurfaceIsCompleteAndExcludesUpdateAndApprovalWait()
+    {
+        var names = typeof(DurableToolInvocationMetadata)
+            .GetProperties(BindingFlags.Instance | BindingFlags.Public)
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(
+        [
+            "ActivityId",
+            "Attempt",
+            "CallIndex",
+            "ConversationId",
+            "CorrelationId",
+            "IdempotencyKey",
+            "ModelIteration",
+            "Namespace",
+            "TaskQueue",
+            "ToolCallId",
+            "ToolName",
+            "WorkflowId",
+            "WorkflowRunId",
+        ], names);
+    }
+
     private sealed record RequestData(string OperationId, int TenantNumber);
 
     private sealed record TurnState(string Status, IReadOnlyList<string> Actions);

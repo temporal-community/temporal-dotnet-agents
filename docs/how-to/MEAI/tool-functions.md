@@ -47,6 +47,61 @@ The workflow executes this sequence until the model returns a final response:
   `tool.NoRetry()` when a retry would repeat an unsafe operation.
 - `MaxToolCallsPerTurn` caps a runaway model/tool loop. Set it for your cost and risk budget.
 
+## Invocation-scoped tools for typed turns
+
+Keep ordinary functions as the default. Use an invocation-scoped factory only when a tool genuinely
+needs the `RequestData` or current `TurnState` supplied to a `DurableToolWorkflowBase` Update.
+The declaration is frozen before workflow start; the implementation is created inside each tool
+activity attempt:
+
+```csharp
+var declaration = AIFunctionFactory.Create(
+    (string itemId) => string.Empty,
+    name: "process_item",
+    description: "Processes one item.").AsDeclarationOnly();
+
+worker.AddDurableTool<ApplicationRequest, ApplicationTurnState>(
+    declaration,
+    context => new DurableToolActivation<ApplicationTurnState>
+    {
+        Function = AIFunctionFactory.Create(
+            (string itemId) => ProcessItem(
+                context.RequestData,
+                context.TurnState,
+                itemId),
+            name: "process_item"),
+    });
+```
+
+`ProcessItem` remains a regular .NET method. Only `itemId` appears in the model schema. The factory
+runs in the tool activity, never in workflow or model code, and may return an ordinary function
+wrapped by existing MEAI `DelegatingAIFunction` decorators.
+
+The implementation name, parameter schema, and return schema must structurally match the frozen
+declaration. A mismatch fails non-retryably before invocation. Object-property ordering is ignored,
+but array order and scalar values are significant.
+
+Declaration and implementation `AdditionalProperties` must be empty in this version. The values
+are arbitrary `object?` instances; silently dropping them could change provider behavior, while
+JSON-normalizing them could change their CLR types. Registration reports the tool and sorted keys.
+If application behavior depends on those properties, this path is not supported yet.
+
+For split processes, call `AddDurableToolDeclaration` in the workflow-starting process and
+`AddDurableToolImplementation<TRequestData, TTurnState>` in the worker. The worker hosting the
+session queue must host both model and tool activities. The frozen workflow input, not the live
+worker registry, is the model-facing declaration authority.
+
+The invocation context includes request data, current turn state, dispatch mode, and activity-local
+metadata: namespace, workflow/run/activity identities, attempt, task queue, tool/call identities,
+zero-based model iteration and call index, conversation/correlation metadata, and the activity-
+scoped idempotency key. It deliberately contains neither the SDK Update ID nor approval-wait
+duration.
+
+Request data and turn state are application-supplied lookup inputs, not authenticated claims,
+approval evidence, or authorization grants. A high-risk tool must obtain the current authorization
+decision from an authoritative service inside the activity immediately before every external
+effect.
+
 ## Custom workflow tools
 
 `AIFunction.AsDurable()` remains available for a custom workflow that explicitly invokes a known

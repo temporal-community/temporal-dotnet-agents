@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 
 namespace TemporalCommunity.Extensions.AI;
@@ -8,6 +9,9 @@ namespace TemporalCommunity.Extensions.AI;
 /// </summary>
 public sealed class DurableChatInput
 {
+    [JsonInclude]
+    internal IReadOnlyList<Internal.DurableFunctionDeclarationSnapshot>? ToolDeclarations { get; init; }
+
     /// <summary>
     /// The chat messages to send to the LLM.
     /// </summary>

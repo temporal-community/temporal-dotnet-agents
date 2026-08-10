@@ -4,6 +4,11 @@ override sealed TemporalCommunity.Extensions.AI.DurableToolWorkflowBase<TRequest
 override sealed TemporalCommunity.Extensions.AI.DurableToolWorkflowBase<TRequestData, TTurnState>.BuildResponseEntry(string! correlationId, TemporalCommunity.Extensions.AI.DurableTurnResult<TTurnState>! output, System.DateTimeOffset createdAt) -> TemporalCommunity.Extensions.AI.Session.DurableSessionResponse!
 override sealed TemporalCommunity.Extensions.AI.DurableToolWorkflowBase<TRequestData, TTurnState>.CreateContinueAsNewException(TemporalCommunity.Extensions.AI.DurableChatWorkflowInput! input) -> Temporalio.Workflows.ContinueAsNewException!
 override sealed TemporalCommunity.Extensions.AI.DurableToolWorkflowBase<TRequestData, TTurnState>.ExecuteTurnAsync(Temporalio.Workflows.ActivityOptions! activityOptions, TemporalCommunity.Extensions.AI.Session.DurableSessionRequest! requestEntry, Microsoft.Extensions.AI.ChatOptions? chatOptions) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.DurableTurnResult<TTurnState>!>!
+static TemporalCommunity.Extensions.AI.DurableAIServiceCollectionExtensions.AddDurableTool<TRequestData, TTurnState>(this Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder! builder, Microsoft.Extensions.AI.AIFunctionDeclaration! declaration, System.Func<TemporalCommunity.Extensions.AI.DurableToolInvocationContext<TRequestData, TTurnState>!, TemporalCommunity.Extensions.AI.DurableToolActivation<TTurnState>!>! factory, System.Action<TemporalCommunity.Extensions.AI.DurableChatToolOptions!>? configure = null) -> Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder!
+static TemporalCommunity.Extensions.AI.DurableAIServiceCollectionExtensions.AddDurableToolDeclaration(this Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder! builder, Microsoft.Extensions.AI.AIFunctionDeclaration! declaration, System.Action<TemporalCommunity.Extensions.AI.DurableChatToolOptions!>? configure = null) -> Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder!
+static TemporalCommunity.Extensions.AI.DurableAIServiceCollectionExtensions.AddDurableToolImplementation<TRequestData, TTurnState>(this Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder! builder, string! name, System.Func<TemporalCommunity.Extensions.AI.DurableToolInvocationContext<TRequestData, TTurnState>!, TemporalCommunity.Extensions.AI.DurableToolActivation<TTurnState>!>! factory) -> Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder!
+static TemporalCommunity.Extensions.AI.DurableStateUpdate<TTurnState>.Replace(TTurnState? value) -> TemporalCommunity.Extensions.AI.DurableStateUpdate<TTurnState>
+static TemporalCommunity.Extensions.AI.DurableStateUpdate<TTurnState>.Unchanged.get -> TemporalCommunity.Extensions.AI.DurableStateUpdate<TTurnState>
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.ResolveApprovalAsync(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision! decision) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalResolutionResult!>!
 abstract TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.ExecuteTurnAsync(Temporalio.Workflows.ActivityOptions! activityOptions, TemporalCommunity.Extensions.AI.Session.DurableSessionRequest! requestEntry, Microsoft.Extensions.AI.ChatOptions? chatOptions) -> System.Threading.Tasks.Task<TOutput>!
 const TemporalCommunity.Extensions.AI.DurableAIPlugin.PluginName = "TemporalCommunity.Extensions.AI.DurableAIPlugin" -> string!
@@ -170,6 +175,35 @@ TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.RequestApproval
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.RequestShutdownAsync() -> System.Threading.Tasks.Task!
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.RequiredInput.get -> TemporalCommunity.Extensions.AI.DurableChatWorkflowInput!
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.RunTurnAsync(TemporalCommunity.Extensions.AI.Session.DurableSessionRequest! requestEntry, Microsoft.Extensions.AI.ChatOptions? chatOptions = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<(TOutput Output, TemporalCommunity.Extensions.AI.Session.DurableSessionResponse! ResponseEntry)>!
+TemporalCommunity.Extensions.AI.DurableStateUpdate<TTurnState>
+TemporalCommunity.Extensions.AI.DurableStateUpdate<TTurnState>.DurableStateUpdate() -> void
+TemporalCommunity.Extensions.AI.DurableStateUpdate<TTurnState>.HasReplacement.get -> bool
+TemporalCommunity.Extensions.AI.DurableStateUpdate<TTurnState>.Value.get -> TTurnState?
+TemporalCommunity.Extensions.AI.DurableToolActivation<TTurnState>
+TemporalCommunity.Extensions.AI.DurableToolActivation<TTurnState>.CompleteState.get -> System.Func<object?, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask<TemporalCommunity.Extensions.AI.DurableStateUpdate<TTurnState>>>?
+TemporalCommunity.Extensions.AI.DurableToolActivation<TTurnState>.CompleteState.init -> void
+TemporalCommunity.Extensions.AI.DurableToolActivation<TTurnState>.DurableToolActivation() -> void
+TemporalCommunity.Extensions.AI.DurableToolActivation<TTurnState>.Function.get -> Microsoft.Extensions.AI.AIFunction!
+TemporalCommunity.Extensions.AI.DurableToolActivation<TTurnState>.Function.init -> void
+TemporalCommunity.Extensions.AI.DurableToolInvocationContext<TRequestData, TTurnState>
+TemporalCommunity.Extensions.AI.DurableToolInvocationContext<TRequestData, TTurnState>.DispatchMode.get -> TemporalCommunity.Extensions.AI.DurableToolDispatchMode
+TemporalCommunity.Extensions.AI.DurableToolInvocationContext<TRequestData, TTurnState>.Metadata.get -> TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata!
+TemporalCommunity.Extensions.AI.DurableToolInvocationContext<TRequestData, TTurnState>.RequestData.get -> TRequestData
+TemporalCommunity.Extensions.AI.DurableToolInvocationContext<TRequestData, TTurnState>.TurnState.get -> TTurnState?
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.ActivityId.get -> string!
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.Attempt.get -> int
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.CallIndex.get -> int
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.ConversationId.get -> string?
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.CorrelationId.get -> string?
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.IdempotencyKey.get -> string!
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.ModelIteration.get -> int
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.Namespace.get -> string!
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.TaskQueue.get -> string!
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.ToolCallId.get -> string?
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.ToolName.get -> string!
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.WorkflowId.get -> string!
+TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.WorkflowRunId.get -> string!
 virtual TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.OnApprovalResolutionAccepted(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision! decision) -> void
 virtual TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.OnApprovalRequestResolved(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision! decision) -> void
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.ValidateRequestApproval(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest! request) -> void

@@ -63,6 +63,12 @@ internal static class DurableAIRegistrar
 
         // Register the function registry (populated by AddDurableTools calls).
         services.TryAddSingleton<DurableFunctionRegistry>();
+        services.TryAddSingleton<Internal.DurableFunctionDeclarationRegistry>(sp =>
+            new Internal.DurableFunctionDeclarationRegistry(
+                sp.GetServices<Action<Internal.DurableFunctionDeclarationRegistry>>()));
+        services.TryAddSingleton<Internal.DurableToolFactoryRegistry>(sp =>
+            new Internal.DurableToolFactoryRegistry(
+                sp.GetServices<Action<Internal.DurableToolFactoryRegistry>>()));
 
         // Register the per-tool options registry (populated by AddDurableTools calls).
         // Every tool registered via AddDurableTools has an entry here, even if the caller
@@ -85,7 +91,8 @@ internal static class DurableAIRegistrar
             new DurableChatWorkflowInputFactory(
                 options,
                 sp.GetService<DurableFunctionRegistry>(),
-                sp.GetService<DurableChatToolOptionsRegistry>()));
+                sp.GetService<DurableChatToolOptionsRegistry>(),
+                sp.GetService<Internal.DurableFunctionDeclarationRegistry>()));
 
         // Register the session client and default workflow only if enabled.
         if (options.RegisterDefaultWorkflow)

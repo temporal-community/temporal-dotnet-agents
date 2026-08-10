@@ -10,6 +10,9 @@
 - Added the provisional `DurableToolWorkflowBase<TRequestData, TTurnState>` typed-turn contract,
   numeric dispatch/completion wire values, and package-owned model/tool loop composition while
   retaining `DurableChatWorkflowBase<TOutput>` as the low-level custom orchestration base.
+- Added frozen model-facing function declarations and invocation-scoped implementation factories
+  with typed request/state context, structural schema validation, ordinary MEAI function/decorator
+  support, and explicit combined or split-process registration.
 
 ## [0.10.4] - 2026-08-09
 

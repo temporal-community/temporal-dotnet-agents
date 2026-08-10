@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using TemporalCommunity.Extensions.AI.Internal;
 using Temporalio.Extensions.Hosting;
 
 namespace TemporalCommunity.Extensions.AI;
@@ -131,10 +132,80 @@ public static class DurableAIServiceCollectionExtensions
 
         services.AddSingleton<Action<DurableFunctionRegistry>>(
             registry => registry.Register(tool));
+        var declaration = DurableFunctionDeclarationSnapshot.Create(tool.AsDeclarationOnly());
+        services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
+            registry => registry[declaration.Name] = declaration);
         services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
             registry => registry[tool.Name] = perToolOptions);
 
         return builder;
+    }
+
+    /// <summary>
+    /// Registers a stable model-facing declaration and an activity-local implementation factory
+    /// for a durable tool that needs typed request data or turn state.
+    /// </summary>
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableTool<TRequestData, TTurnState>(
+        this ITemporalWorkerServiceOptionsBuilder builder,
+        AIFunctionDeclaration declaration,
+        Func<DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory,
+        Action<DurableChatToolOptions>? configure = null)
+    {
+        AddDurableToolDeclaration(builder, declaration, configure);
+        AddDurableToolImplementation(builder, declaration.Name, factory);
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers only a stable model-facing declaration. Use this in a client process that starts
+    /// workflows but does not host executable tool implementations.
+    /// </summary>
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableToolDeclaration(
+        this ITemporalWorkerServiceOptionsBuilder builder,
+        AIFunctionDeclaration declaration,
+        Action<DurableChatToolOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(declaration);
+        EnsureDurableAIRegistered(builder);
+
+        var snapshot = DurableFunctionDeclarationSnapshot.Create(declaration);
+        var perToolOptions = new DurableChatToolOptions();
+        configure?.Invoke(perToolOptions);
+
+        builder.Services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
+            registry => registry[snapshot.Name] = snapshot);
+        builder.Services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
+            registry => registry[snapshot.Name] = perToolOptions);
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers only the invocation-scoped implementation factory for a named declaration. Use
+    /// this in an implementation-bearing worker process.
+    /// </summary>
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableToolImplementation<TRequestData, TTurnState>(
+        this ITemporalWorkerServiceOptionsBuilder builder,
+        string name,
+        Func<DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(factory);
+        EnsureDurableAIRegistered(builder);
+
+        builder.Services.AddSingleton<Action<DurableToolFactoryRegistry>>(
+            registry => registry[name] = new DurableToolActivationFactory<TRequestData, TTurnState>(factory));
+        return builder;
+    }
+
+    private static void EnsureDurableAIRegistered(ITemporalWorkerServiceOptionsBuilder builder)
+    {
+        if (!builder.Services.Any(d => d.ServiceType == typeof(DurableExecutionOptions)))
+        {
+            throw new InvalidOperationException(
+                "Durable tool registration requires AddDurableAI to be called first on the same worker builder.");
+        }
     }
 }
 

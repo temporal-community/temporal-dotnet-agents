@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;
 using Temporalio.Workflows;
@@ -92,7 +93,14 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
             requestEntry,
             chatOptions,
             clientKey: null,
-            request.ConversationId).ConfigureAwait(true);
+            request.ConversationId,
+            JsonSerializer.SerializeToElement(
+                request.RequestData,
+                DurableAIJsonUtilities.DefaultOptions),
+            JsonSerializer.SerializeToElement(
+                request.InitialTurnState,
+                DurableAIJsonUtilities.DefaultOptions),
+            request.Options.DispatchMode).ConfigureAwait(true);
 
         return new DurableTurnResult<TTurnState>
         {

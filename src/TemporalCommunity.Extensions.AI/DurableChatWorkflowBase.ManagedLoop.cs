@@ -25,7 +25,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions,
         string? clientKey,
-        string? conversationId)
+        string? conversationId,
+        System.Text.Json.JsonElement? requestData = null,
+        System.Text.Json.JsonElement? initialTurnState = null,
+        DurableToolDispatchMode dispatchMode = DurableToolDispatchMode.Parallel)
     {
         // Seed the LLM with the flattened conversation transcript: prior turns from
         // history + the request that was just appended (which is the last entry in History
@@ -50,6 +53,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 TurnNumber = CurrentTurnNumber,
                 ClientKey = clientKey,
                 CorrelationId = requestEntry.CorrelationId,
+                ToolDeclarations = RequiredInput.ToolDeclarations,
             };
 
             DurableChatStepResult stepResult;
@@ -189,6 +193,17 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         {
                             FunctionName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
+                            Declaration = RequiredInput.ToolDeclarations?.FirstOrDefault(
+                                declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
+                            RequestData = requestData,
+                            TurnState = initialTurnState,
+                            DispatchMode = dispatchMode,
+                            ToolCallId = tc.CallId,
+                            ModelIteration = iteration,
+                            CallIndex = i,
+                            ConversationId = conversationId,
+                            CorrelationId = requestEntry.CorrelationId,
+                            IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
                         }, ResolveToolActivityOptions(tc.Name)));
                         break;
                     }
@@ -228,6 +243,17 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                             {
                                 FunctionName = tc.Name,
                                 Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
+                                Declaration = RequiredInput.ToolDeclarations?.FirstOrDefault(
+                                    declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
+                                RequestData = requestData,
+                                TurnState = initialTurnState,
+                                DispatchMode = dispatchMode,
+                                ToolCallId = tc.CallId,
+                                ModelIteration = iteration,
+                                CallIndex = i,
+                                ConversationId = conversationId,
+                                CorrelationId = requestEntry.CorrelationId,
+                                IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
                             }, ResolveToolActivityOptions(tc.Name)));
                         }
                         else

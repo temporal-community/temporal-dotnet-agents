@@ -112,7 +112,8 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             requestEntry,
             chatOptions,
             metadata.ClientKey,
-            metadata.ConversationId).ConfigureAwait(true);
+            metadata.ConversationId,
+            dispatchMode: DurableToolDispatchMode.Parallel).ConfigureAwait(true);
         return result.Response;
     }
 

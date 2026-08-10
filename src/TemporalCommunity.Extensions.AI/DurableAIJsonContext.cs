@@ -45,6 +45,8 @@ namespace TemporalCommunity.Extensions.AI;
 [JsonSerializable(typeof(DurableToolDispatchMode))]
 [JsonSerializable(typeof(DurableTurnCompletionReason))]
 [JsonSerializable(typeof(DurableTurnOptions))]
+[JsonSerializable(typeof(Internal.DurableFunctionDeclarationSnapshot))]
+[JsonSerializable(typeof(IReadOnlyList<Internal.DurableFunctionDeclarationSnapshot>))]
 internal partial class DurableAIJsonContext : JsonSerializerContext;
 
 /// <summary>
