@@ -50,6 +50,22 @@ internal sealed class AuthoritativeAuthorizationService : IAuthoritativeAuthoriz
             && !string.IsNullOrWhiteSpace(resourceId));
 }
 
+internal sealed class ProcessingAttemptServices : IDisposable
+{
+    public ProcessingAttemptServices(
+        IHttpClientFactory httpClientFactory,
+        IAuthoritativeAuthorizationService authorization)
+    {
+        Client = httpClientFactory.CreateClient("processing-attempt");
+        Authorization = authorization;
+    }
+
+    public HttpClient Client { get; }
+    public IAuthoritativeAuthorizationService Authorization { get; }
+
+    public void Dispose() => Client.Dispose();
+}
+
 internal sealed class IdempotentExternalSink
 {
     private readonly HashSet<string> _recordedKeys = new(StringComparer.Ordinal);

@@ -13,6 +13,8 @@
 - Added frozen model-facing function declarations and invocation-scoped implementation factories
   with typed request/state context, structural schema validation, ordinary MEAI function/decorator
   support, and explicit combined or split-process registration.
+- Durable tool implementation factories now receive an activity-attempt scoped service provider;
+  retries create fresh scopes and dispose scoped dependencies after each attempt.
 - Added sequential typed-turn dispatch as the specialized-base default, threading successful
   explicit state replacements in model-call order while preserving the stock session's parallel
   behavior and the all-approvals-before-tools safety barrier.

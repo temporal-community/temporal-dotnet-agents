@@ -7,6 +7,8 @@ This domain-neutral sample demonstrates `DurableToolWorkflowBase<TRequestData, T
 - an unchanged ordinary .NET function registered with `AddDurableTools`;
 - two invocation-scoped functions that receive request data and current turn state without adding
   either value to their model schema;
+- activity-attempt DI scopes containing a scoped authorization service and an
+  `IHttpClientFactory`-created client, disposed after every attempt;
 - sequential state replacement, where the second tool observes the first tool's completed state;
 - a workflow-owned approval wait before the first stateful tool is dispatched;
 - an existing MEAI `DelegatingAIFunction` that checks an authoritative service and ignores a forged
@@ -26,7 +28,9 @@ polls the workflow's approval query and auto-approves the first stateful tool. I
 in Temporal Web to see the model activity, the durable approval wait, and three separate tool
 activities.
 Each stateful tool intentionally fails after its first external write. Its retry receives the same
-activity-scoped key, so the sink records one write.
+activity-scoped key, so the sink records one write. The retry receives a new DI scope even though
+its Temporal activity identity remains stable. DI-scoped objects are ordinary process-local
+dependencies; they are not durable turn state and are never serialized into workflow history.
 
 `RequestData` and `TTurnState` are application-supplied history payloads, not authorization proof.
 The decorator uses them only to locate subject/resource and obtains the current decision from the

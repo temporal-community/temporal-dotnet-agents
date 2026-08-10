@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Internal;
 using Temporalio.Exceptions;
@@ -62,7 +63,7 @@ public class DurableToolIdempotencyKeyTests
         var factories = new DurableToolFactoryRegistry(
         [
             registry => registry["tool"] =
-                new DurableToolActivationFactory<RequestData, object?>(_ =>
+                new DurableToolActivationFactory<RequestData, object?>((_, _) =>
                 {
                     factoryCount++;
                     return new DurableToolActivation<object?>
@@ -77,10 +78,12 @@ public class DurableToolIdempotencyKeyTests
                     };
                 }),
         ]);
+        using var serviceProvider = new ServiceCollection().BuildServiceProvider();
         var activities = new DurableFunctionActivities(
             new Dictionary<string, AIFunction>(),
             loggerFactory: null,
-            factories);
+            factories,
+            serviceProvider);
         var input = new DurableFunctionInput
         {
             FunctionName = "tool",

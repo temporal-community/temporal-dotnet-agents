@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Internal;
 using Temporalio.Exceptions;
@@ -74,7 +75,7 @@ public class DurableFunctionStateCompletionTests
         var factories = new DurableToolFactoryRegistry(
         [
             registry => registry["stateful_tool"] =
-                new DurableToolActivationFactory<RequestData, TurnState>(_ =>
+                new DurableToolActivationFactory<RequestData, TurnState>((_, _) =>
                     new DurableToolActivation<TurnState>
                     {
                         Function = AIFunctionFactory.Create(
@@ -87,10 +88,12 @@ public class DurableFunctionStateCompletionTests
                         CompleteState = completion,
                     }),
         ]);
+        using var serviceProvider = new ServiceCollection().BuildServiceProvider();
         var activities = new DurableFunctionActivities(
             new Dictionary<string, AIFunction>(),
             loggerFactory: null,
-            factories);
+            factories,
+            serviceProvider);
         var input = new DurableFunctionInput
         {
             FunctionName = "stateful_tool",

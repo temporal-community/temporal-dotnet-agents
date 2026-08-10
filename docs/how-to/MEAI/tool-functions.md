@@ -74,20 +74,27 @@ var declaration = AIFunctionFactory.Create(
 
 worker.AddDurableTool<ApplicationRequest, ApplicationTurnState>(
     declaration,
-    context => new DurableToolActivation<ApplicationTurnState>
+    (services, context) =>
     {
-        Function = AIFunctionFactory.Create(
-            (string itemId) => ProcessItem(
-                context.RequestData,
-                context.TurnState,
-                itemId),
-            name: "process_item"),
+        var processor = services.GetRequiredService<ScopedItemProcessor>();
+        return new DurableToolActivation<ApplicationTurnState>
+        {
+            Function = AIFunctionFactory.Create(
+                (string itemId) => processor.ProcessItem(
+                    context.RequestData,
+                    context.TurnState,
+                    itemId),
+                name: "process_item"),
+        };
     });
 ```
 
 `ProcessItem` remains a regular .NET method. Only `itemId` appears in the model schema. The factory
 runs in the tool activity, never in workflow or model code, and may return an ordinary function
-wrapped by existing MEAI `DelegatingAIFunction` decorators.
+wrapped by existing MEAI `DelegatingAIFunction` decorators. The supplied `IServiceProvider` belongs
+to that activity attempt. Resolve scoped services inside the factory; a retry receives a fresh
+scope, and disposable scoped services are disposed when the attempt ends. Do not capture that
+provider or its scoped services in singleton state.
 
 The implementation name, parameter schema, and return schema must structurally match the frozen
 declaration. A mismatch fails non-retryably before invocation. Object-property ordering is ignored,

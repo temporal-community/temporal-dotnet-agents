@@ -17,10 +17,11 @@ var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnect
 });
 builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 builder.Services.AddSingleton<IChatClient>(new ScriptedChatClient());
-var authorization = new AuthoritativeAuthorizationService();
-builder.Services.AddSingleton<IAuthoritativeAuthorizationService>(authorization);
-var externalSink = new IdempotentExternalSink();
-builder.Services.AddSingleton(externalSink);
+builder.Services.AddHttpClient("processing-attempt", client =>
+    client.BaseAddress = new Uri("https://activity-attempt.invalid/"));
+builder.Services.AddScoped<IAuthoritativeAuthorizationService, AuthoritativeAuthorizationService>();
+builder.Services.AddScoped<ProcessingAttemptServices>();
+builder.Services.AddSingleton<IdempotentExternalSink>();
 
 var worker = builder.Services
     .AddHostedTemporalWorker(taskQueue)
@@ -108,8 +109,10 @@ void RegisterStatefulTool(
 {
     workerBuilder.AddDurableTool<ProcessingRequest, ProcessingState>(
         declaration,
-        context =>
+        (services, context) =>
         {
+            var attemptServices = services.GetRequiredService<ProcessingAttemptServices>();
+            var externalSink = services.GetRequiredService<IdempotentExternalSink>();
             var inner = AIFunctionFactory.Create(
                 (string value) =>
                 {
@@ -130,7 +133,7 @@ void RegisterStatefulTool(
             {
                 Function = new AuthorizingFunction(
                     inner,
-                    authorization,
+                    attemptServices.Authorization,
                     context.RequestData.SubjectId,
                     context.RequestData.ResourceId),
                 CompleteState = (_, _) => ValueTask.FromResult(

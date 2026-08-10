@@ -21,10 +21,12 @@ The factory-created implementation must have the same ordinal name and the same 
 return fingerprints. A mismatch is a non-retryable configuration failure and the function is not
 invoked.
 
-The registered factory delegate is invoked once per activity attempt; it is not a DI service
-factory and receives no service provider. Dependencies captured by that delegate retain the
-lifetimes chosen by the application. Use ordinary MEAI function decoration for activity-local
-behavior, and do not treat factory or wrapper fields as durable session state.
+The registered factory delegate is invoked once per activity attempt and receives that attempt's
+scoped `IServiceProvider`. Services resolved from it follow ordinary .NET DI lifetimes, and the
+scope—including disposable scoped dependencies—is disposed when the attempt ends. A retry creates
+a new scope and a new function/decorator chain. Do not capture the provider or a scoped dependency
+beyond that invocation. Use ordinary MEAI function decoration for activity-local behavior, and do
+not treat factory or wrapper fields as durable session state.
 
 ## Ordinary functions remain ordinary
 

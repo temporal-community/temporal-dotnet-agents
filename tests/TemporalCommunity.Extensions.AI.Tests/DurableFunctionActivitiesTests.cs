@@ -1,5 +1,6 @@
-using Microsoft.Extensions.AI;
 using System.Text.Json;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using TemporalCommunity.Extensions.AI.Internal;
 using Temporalio.Activities;
 using Temporalio.Testing;
@@ -64,6 +65,7 @@ public class DurableFunctionActivitiesTests
     public async Task InvokeFunctionAsync_InvocationFactoryReceivesTypedContextAndRuntimeMetadata()
     {
         DurableToolInvocationContext<RequestData, TurnState>? received = null;
+        IServiceProvider? receivedServices = null;
         var declarationFunction = AIFunctionFactory.Create(
             (string value) => string.Empty,
             "contextual_tool");
@@ -72,8 +74,9 @@ public class DurableFunctionActivitiesTests
         var factories = new DurableToolFactoryRegistry(
         [
             registry => registry["contextual_tool"] =
-                new DurableToolActivationFactory<RequestData, TurnState>(context =>
+                new DurableToolActivationFactory<RequestData, TurnState>((services, context) =>
                 {
+                    receivedServices = services;
                     received = context;
                     return new DurableToolActivation<TurnState>
                     {
@@ -83,10 +86,12 @@ public class DurableFunctionActivitiesTests
                     };
                 }),
         ]);
+        using var serviceProvider = new ServiceCollection().BuildServiceProvider();
         var activities = new DurableFunctionActivities(
             new Dictionary<string, AIFunction>(),
             loggerFactory: null,
-            factories);
+            factories,
+            serviceProvider);
         var input = new DurableFunctionInput
         {
             FunctionName = "contextual_tool",
@@ -117,6 +122,7 @@ public class DurableFunctionActivitiesTests
 
         var output = await env.RunAsync(() => activities.InvokeFunctionAsync(input));
 
+        Assert.Same(serviceProvider, receivedServices);
         Assert.Equal("tenant-a", received!.RequestData.Tenant);
         Assert.Equal(3, received.TurnState!.Count);
         Assert.Equal(DurableToolDispatchMode.Sequential, received.DispatchMode);

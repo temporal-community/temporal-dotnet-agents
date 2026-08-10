@@ -6,6 +6,7 @@ namespace TemporalCommunity.Extensions.AI.Internal;
 internal interface IDurableToolActivationFactory
 {
     DurableToolFactoryActivation Create(
+        IServiceProvider services,
         DurableFunctionInput input,
         DurableToolInvocationMetadata metadata);
 }
@@ -24,10 +25,11 @@ internal sealed class DurableToolFactoryActivation
 internal readonly record struct DurableStateUpdateJson(bool HasReplacement, JsonElement? Value);
 
 internal sealed class DurableToolActivationFactory<TRequestData, TTurnState>(
-    Func<DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory)
+    Func<IServiceProvider, DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory)
     : IDurableToolActivationFactory
 {
     public DurableToolFactoryActivation Create(
+        IServiceProvider services,
         DurableFunctionInput input,
         DurableToolInvocationMetadata metadata)
     {
@@ -46,7 +48,7 @@ internal sealed class DurableToolActivationFactory<TRequestData, TTurnState>(
             turnState,
             input.DispatchMode,
             metadata);
-        var activation = factory(context)
+        var activation = factory(services, context)
             ?? throw new InvalidOperationException(
                 $"The invocation factory for '{input.FunctionName}' returned null.");
 

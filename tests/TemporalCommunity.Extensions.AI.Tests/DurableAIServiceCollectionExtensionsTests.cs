@@ -1,3 +1,4 @@
+using System.Reflection;
 using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,6 +10,36 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 
 public class DurableAIServiceCollectionExtensionsTests
 {
+    [Fact]
+    public void DurableToolFactories_ReceiveServiceProvider_AndFunctionActivitiesAreScoped()
+    {
+        var factoryMethods = typeof(DurableAIServiceCollectionExtensions)
+            .GetMethods(BindingFlags.Public | BindingFlags.Static)
+            .Where(method => method.Name is nameof(DurableAIServiceCollectionExtensions.AddDurableTool)
+                or nameof(DurableAIServiceCollectionExtensions.AddDurableToolImplementation))
+            .ToArray();
+
+        Assert.Equal(2, factoryMethods.Length);
+        Assert.All(factoryMethods, method =>
+        {
+            var factoryParameter = Assert.Single(
+                method.GetParameters(),
+                parameter => parameter.Name == "factory");
+            var genericArguments = factoryParameter.ParameterType.GetGenericArguments();
+            Assert.Equal(3, genericArguments.Length);
+            Assert.Equal(typeof(IServiceProvider), genericArguments[0]);
+        });
+
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+
+        var activityRegistration = Assert.Single(
+            services,
+            descriptor => descriptor.ServiceType == typeof(DurableFunctionActivities));
+        Assert.Equal(ServiceLifetime.Scoped, activityRegistration.Lifetime);
+    }
+
     [Fact]
     public void AddDurableTools_ThrowsOnNullBuilder()
     {
@@ -66,7 +97,7 @@ public class DurableAIServiceCollectionExtensionsTests
 
         worker.AddDurableTool<RequestData, TurnState>(
             declaration,
-            context =>
+            (_, context) =>
             {
                 factoryCalls++;
                 return new DurableToolActivation<TurnState>

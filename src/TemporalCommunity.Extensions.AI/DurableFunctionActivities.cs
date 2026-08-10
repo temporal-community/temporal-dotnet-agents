@@ -13,7 +13,8 @@ namespace TemporalCommunity.Extensions.AI;
 internal sealed class DurableFunctionActivities(
     IReadOnlyDictionary<string, AIFunction> functionRegistry,
     ILoggerFactory? loggerFactory = null,
-    Internal.DurableToolFactoryRegistry? factoryRegistry = null)
+    Internal.DurableToolFactoryRegistry? factoryRegistry = null,
+    IServiceProvider? serviceProvider = null)
 {
     private readonly ILogger _logger = (loggerFactory ?? NullLoggerFactory.Instance)
         .CreateLogger<DurableFunctionActivities>();
@@ -63,7 +64,11 @@ internal sealed class DurableFunctionActivities(
                 input.ConversationId,
                 input.CorrelationId,
                 idempotencyKey);
-            activation = activationFactory.Create(input, metadata);
+            activation = activationFactory.Create(
+                serviceProvider ?? throw new InvalidOperationException(
+                    "Invocation-scoped durable tools require an activity service provider."),
+                input,
+                metadata);
             function = activation.Function;
             input.Declaration?.ValidateImplementation(function);
 

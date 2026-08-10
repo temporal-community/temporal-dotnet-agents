@@ -177,6 +177,7 @@ public class ExtensibleDurableTurnIntegrationTests
             "The durable turn completed.");
         var observations = new ConcurrentBag<ToolObservation>();
         var externalEffects = new ConcurrentDictionary<string, byte>(StringComparer.Ordinal);
+        var attemptScopes = new AttemptScopeTracker();
         var taskQueue = $"extensible-turn-{Guid.NewGuid():N}";
 
         using var host = BuildHost(
@@ -184,7 +185,8 @@ public class ExtensibleDurableTurnIntegrationTests
             taskQueue,
             chatClient,
             observations,
-            externalEffects);
+            externalEffects,
+            attemptScopes: attemptScopes);
         await host.StartAsync();
 
         var input = host.Services.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
@@ -217,10 +219,18 @@ public class ExtensibleDurableTurnIntegrationTests
         Assert.All(firstAttempts, observation => Assert.Equal("operation-1", observation.OperationId));
         Assert.Equal(0, firstAttempts[0].ObservedRevision);
         Assert.Equal(0, firstAttempts[1].ObservedRevision);
+        Assert.Equal(2, firstAttempts.Select(observation => observation.ScopeId).Distinct().Count());
 
         var second = Assert.Single(observations, observation => observation.ToolName == "apply_second");
         Assert.Equal(1, second.ObservedRevision);
         Assert.Equal(2, externalEffects.Count);
+        Assert.DoesNotContain(second.ScopeId, firstAttempts.Select(observation => observation.ScopeId));
+
+        await WaitUntilAsync(
+            () => attemptScopes.Disposed.Count == 3,
+            "activity-attempt scopes to be disposed");
+        Assert.Equal(3, attemptScopes.Created.Count);
+        Assert.Equal(attemptScopes.Created.Order(), attemptScopes.Disposed.Order());
 
         var firstModelCall = Assert.Single(chatClient.Calls.Take(1));
         Assert.NotNull(firstModelCall.Options?.Tools);
@@ -374,6 +384,9 @@ public class ExtensibleDurableTurnIntegrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
         builder.Services.AddChatClient(chatClient).Build();
+        builder.Services.AddHttpClient("durable-tool-attempt");
+        builder.Services.AddSingleton(new AttemptScopeTracker());
+        builder.Services.AddScoped<AttemptScopedToolServices>();
         builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
             new NoopEmbeddingGenerator());
         builder.Services.AddSingleton(interceptor);
@@ -432,11 +445,15 @@ public class ExtensibleDurableTurnIntegrationTests
         IChatClient chatClient,
         ConcurrentBag<ToolObservation> observations,
         ConcurrentDictionary<string, byte> externalEffects,
-        Action<DurableExecutionOptions>? configureOptions = null)
+        Action<DurableExecutionOptions>? configureOptions = null,
+        AttemptScopeTracker? attemptScopes = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
         builder.Services.AddChatClient(chatClient).Build();
+        builder.Services.AddHttpClient("durable-tool-attempt");
+        builder.Services.AddSingleton(attemptScopes ?? new AttemptScopeTracker());
+        builder.Services.AddScoped<AttemptScopedToolServices>();
         builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
             new NoopEmbeddingGenerator());
 
@@ -485,7 +502,7 @@ public class ExtensibleDurableTurnIntegrationTests
             "Produces an ordinary effect before state completion fails.").AsDeclarationOnly();
         worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
             declaration,
-            _ => new DurableToolActivation<IntegrationTurnState>
+            (_, _) => new DurableToolActivation<IntegrationTurnState>
             {
                 Function = AIFunctionFactory.Create(
                     () =>
@@ -508,7 +525,7 @@ public class ExtensibleDurableTurnIntegrationTests
                 "Must not run after a fatal sequential tool failure.").AsDeclarationOnly();
             worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
                 laterDeclaration,
-                _ => new DurableToolActivation<IntegrationTurnState>
+                (_, _) => new DurableToolActivation<IntegrationTurnState>
                 {
                     Function = AIFunctionFactory.Create(
                         () =>
@@ -539,35 +556,82 @@ public class ExtensibleDurableTurnIntegrationTests
 
         worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
             declaration,
-            context => new DurableToolActivation<IntegrationTurnState>
+            (services, context) =>
             {
-                Function = AIFunctionFactory.Create(
-                    (string value) =>
-                    {
-                        observations.Add(new ToolObservation(
-                            name,
-                            context.Metadata.Attempt,
-                            context.Metadata.IdempotencyKey,
-                            context.RequestData.OperationId,
-                            context.TurnState?.Revision ?? 0,
-                            value));
-                        externalEffects.TryAdd(context.Metadata.IdempotencyKey, 0);
-                        if (failFirstAttempt && context.Metadata.Attempt == 1)
+                var attemptServices = services.GetRequiredService<AttemptScopedToolServices>();
+                return new DurableToolActivation<IntegrationTurnState>
+                {
+                    Function = AIFunctionFactory.Create(
+                        (string value) =>
                         {
-                            throw new InvalidOperationException("Injected lost completion.");
-                        }
+                            observations.Add(new ToolObservation(
+                                name,
+                                context.Metadata.Attempt,
+                                context.Metadata.IdempotencyKey,
+                                context.RequestData.OperationId,
+                                context.TurnState?.Revision ?? 0,
+                                value,
+                                attemptServices.InstanceId));
+                            externalEffects.TryAdd(context.Metadata.IdempotencyKey, 0);
+                            if (failFirstAttempt && context.Metadata.Attempt == 1)
+                            {
+                                throw new InvalidOperationException("Injected lost completion.");
+                            }
 
-                        return $"{name}:{value}";
-                    },
-                    name,
-                    declaration.Description),
-                CompleteState = (_, _) => ValueTask.FromResult(
-                    DurableStateUpdate<IntegrationTurnState>.Replace(
-                        new IntegrationTurnState(
-                            (context.TurnState?.Revision ?? 0) + 1,
-                            [.. context.TurnState?.Receipts ?? [], name]))),
+                            return $"{name}:{value}:{attemptServices.Client.BaseAddress}";
+                        },
+                        name,
+                        declaration.Description),
+                    CompleteState = (_, _) => ValueTask.FromResult(
+                        DurableStateUpdate<IntegrationTurnState>.Replace(
+                            new IntegrationTurnState(
+                                (context.TurnState?.Revision ?? 0) + 1,
+                                [.. context.TurnState?.Receipts ?? [], name]))),
+                };
             },
             options => options.WithMaxAttempts(2));
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, string description)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (!condition() && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(25);
+        }
+
+        Assert.True(condition(), $"Timed out waiting for {description}.");
+    }
+
+    private sealed class AttemptScopeTracker
+    {
+        public ConcurrentBag<Guid> Created { get; } = [];
+        public ConcurrentBag<Guid> Disposed { get; } = [];
+    }
+
+    private sealed class AttemptScopedToolServices : IDisposable
+    {
+        private readonly AttemptScopeTracker _tracker;
+
+        public AttemptScopedToolServices(
+            IHttpClientFactory httpClientFactory,
+            AttemptScopeTracker tracker)
+        {
+            _tracker = tracker;
+            Client = httpClientFactory.CreateClient("durable-tool-attempt");
+            Client.BaseAddress = new Uri("https://activity-attempt.invalid/");
+            InstanceId = Guid.NewGuid();
+            _tracker.Created.Add(InstanceId);
+        }
+
+        public Guid InstanceId { get; }
+        public HttpClient Client { get; }
+
+        public void Dispose()
+        {
+            Client.Dispose();
+            _tracker.Disposed.Add(InstanceId);
+        }
     }
 
     private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
@@ -591,7 +655,8 @@ public class ExtensibleDurableTurnIntegrationTests
         string IdempotencyKey,
         string OperationId,
         int ObservedRevision,
-        string Value);
+        string Value,
+        Guid ScopeId);
 
     private sealed record InterceptorOutcome(
         IReadOnlyList<ToolObservation> Observations,

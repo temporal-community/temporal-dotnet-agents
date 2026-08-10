@@ -183,10 +183,14 @@ public static class DurableAIServiceCollectionExtensions
     /// Registers a stable model-facing declaration and an activity-local implementation factory
     /// for a durable tool that needs typed request data or turn state.
     /// </summary>
+    /// <remarks>
+    /// The factory is invoked once per tool activity attempt. Its service provider belongs to that
+    /// attempt's DI scope and must not be captured beyond the returned function's invocation.
+    /// </remarks>
     public static ITemporalWorkerServiceOptionsBuilder AddDurableTool<TRequestData, TTurnState>(
         this ITemporalWorkerServiceOptionsBuilder builder,
         AIFunctionDeclaration declaration,
-        Func<DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory,
+        Func<IServiceProvider, DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory,
         Action<DurableChatToolOptions>? configure = null)
     {
         AddDurableToolDeclaration(builder, declaration, configure);
@@ -254,10 +258,14 @@ public static class DurableAIServiceCollectionExtensions
     /// Registers only the invocation-scoped implementation factory for a named declaration. Use
     /// this in an implementation-bearing worker process.
     /// </summary>
+    /// <remarks>
+    /// The factory is invoked once per tool activity attempt with that attempt's scoped service
+    /// provider. Resolve scoped application services inside the factory rather than at startup.
+    /// </remarks>
     public static ITemporalWorkerServiceOptionsBuilder AddDurableToolImplementation<TRequestData, TTurnState>(
         this ITemporalWorkerServiceOptionsBuilder builder,
         string name,
-        Func<DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory)
+        Func<IServiceProvider, DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
