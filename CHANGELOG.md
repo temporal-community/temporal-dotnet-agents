@@ -26,7 +26,9 @@
 - Failed durable turns now roll back their request, partial response, and turn count so a later
   turn cannot inherit an unsuccessful request as conversation history.
 - Failed durable agent turns now also roll back application, provider, interceptor, and tool
-  StateBag mutations while retaining approval-scope records committed by approval updates.
+  StateBag mutations inside the serialized turn boundary while retaining approval-scope records
+  committed by approval updates; queued failed turns cannot erase a preceding turn's committed
+  StateBag changes.
 - Library-owned durable-tool configuration and state-completion failures now fail the turn
   immediately instead of being returned to the model as recoverable tool output.
 - Sequential typed turns now stop before scheduling later tools in the same model batch after a

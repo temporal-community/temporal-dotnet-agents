@@ -229,6 +229,11 @@ entries to their pre-turn values. A later turn therefore never observes partial 
 failed turn. Approval-scope records are the exception: an approval is resolved by a separate
 workflow update, so its reserved `temporal.approval_scopes.*` record (and a configured custom
 always-scope store key) remains committed even if the agent turn that requested it later fails.
+The workflow captures and restores the StateBag snapshot while holding the same serialized-turn
+gate that protects conversation history. A second Update may be accepted while the first turn is
+waiting on an activity, but it cannot capture its rollback snapshot until the first turn has
+committed. If that queued Update fails, its rollback therefore cannot erase StateBag changes made
+by the preceding successful turn.
 
 The library inserts an innermost session boundary immediately above `ChatClientAgent`.
 `ChatClientAgent` accepts only its own sealed `ChatClientAgentSession`, so the boundary forwards

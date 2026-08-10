@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.AI.Approvals;
@@ -467,9 +468,22 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         var historyCountBeforeTurn = _history.Count;
         var turnCountBeforeTurn = _turnCount;
+        var rollbackParticipant = this as Internal.IDurableTurnRollbackParticipant;
+        JsonElement? participantStateBeforeTurn = null;
+        var participantStateCaptured = false;
 
         try
         {
+            // Capture derived transactional state only after this turn owns the gate. A queued
+            // update may have started while the preceding turn was suspended; capturing outside
+            // this critical section would give it a stale snapshot that could erase the preceding
+            // turn's committed state if the queued turn later failed.
+            if (rollbackParticipant is not null)
+            {
+                participantStateBeforeTurn = rollbackParticipant.CaptureTurnRollbackState();
+                participantStateCaptured = true;
+            }
+
             // Append the request entry for this turn. When external-history mode is on we
             // replace the messages with an empty list so the in-workflow history never holds
             // the raw user prompt — only metadata (CorrelationId, CreatedAt) for turn counting.
@@ -522,6 +536,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
 
             _turnCount = turnCountBeforeTurn;
+
+            // Restore derived state before releasing the same gate that protected the turn.
+            // This keeps the base history and any participant state in one transaction boundary.
+            if (participantStateCaptured)
+            {
+                rollbackParticipant!.RestoreTurnRollbackState(participantStateBeforeTurn);
+            }
+
             throw;
         }
         finally

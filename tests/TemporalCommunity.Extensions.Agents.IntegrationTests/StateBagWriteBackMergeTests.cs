@@ -1,13 +1,16 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
+using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode;
 using TemporalCommunity.Extensions.Agents.Tools;
+using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Tools;
 using Temporalio.Testing;
@@ -224,6 +227,85 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
         }
     }
 
+    [Fact]
+    public async Task QueuedFailedTurn_DoesNotRestoreStateFromBeforePrecedingSuccessfulTurn()
+    {
+        const string toolName = "queued_failing_tool";
+        const string committedKey = "concurrent-turn.committed";
+        const string failedTurnKey = "concurrent-turn.failed";
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "First turn completed.")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("fail-queued", toolName, new Dictionary<string, object?>())])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Observed restored state.")),
+        ]);
+        var blockingClient = new FirstCallBlockingChatClient(scripted);
+        var provider = new QueuedTurnStateProvider(committedKey, failedTurnKey);
+        var tool = AIFunctionFactory.Create(
+            FailTool,
+            new AIFunctionFactoryOptions { Name = toolName });
+
+        var taskQueue = $"queued-failed-turn-statebag-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(Env.Client);
+        builder.Services.AddSingleton<IChatClient>(blockingClient);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(opts =>
+            {
+                opts.AddDurableAgent("QueuedFailedTurnStateAgent", agent =>
+                {
+                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+                    agent.AddContextProvider(provider);
+                    agent.AddTool(tool, toolOptions => toolOptions.NoRetry());
+                });
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("QueuedFailedTurnStateAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+
+            // Hold turn A inside its model activity after its provider has written the value that
+            // will be committed. Queue turn B and wait until Temporal accepts it; its handler has
+            // then run synchronously to the serialized turn gate. This reproduces the old stale-
+            // snapshot window without timing delays.
+            var firstTurn = proxy.RunAsync("commit", session);
+            await blockingClient.FirstCallStarted.WaitAsync(TimeSpan.FromSeconds(10));
+
+            var workflowHandle = Env.Client.GetWorkflowHandle<AgentWorkflow>(
+                session.SessionId.WorkflowId);
+            var queuedTurn = await workflowHandle.StartUpdateAsync<AgentWorkflow, AgentResponse>(
+                wf => wf.RunAgentAsync(new RunRequest("fail")
+                {
+                    CorrelationId = "queued-failed-turn",
+                }),
+                new WorkflowUpdateStartOptions(WorkflowUpdateStage.Accepted));
+
+            blockingClient.ReleaseFirstCall();
+
+            var firstResponse = await firstTurn;
+            Assert.Equal("First turn completed.", firstResponse.Messages[^1].Text);
+            await Assert.ThrowsAnyAsync<Exception>(() => queuedTurn.GetResultAsync());
+
+            var finalResponse = await proxy.RunAsync("observe", session);
+
+            Assert.Equal("Observed restored state.", finalResponse.Messages[^1].Text);
+            Assert.True(provider.ThirdTurnObservedCommittedState,
+                "The successful preceding turn's committed StateBag value must survive rollback of a queued turn.");
+            Assert.False(provider.ThirdTurnObservedFailedState,
+                "The queued failed turn's StateBag value must be rolled back.");
+        }
+        finally
+        {
+            blockingClient.ReleaseFirstCall();
+            await host.StopAsync();
+        }
+    }
+
     public sealed class Fixture : IAsyncLifetime
     {
         public WorkflowEnvironment Environment { get; private set; } = null!;
@@ -307,6 +389,95 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             }
 
             return new ValueTask<AIContext>(new AIContext());
+        }
+    }
+
+    private sealed class QueuedTurnStateProvider(string committedKey, string failedTurnKey) : AIContextProvider
+    {
+        private int _callCount;
+
+        public bool ThirdTurnObservedCommittedState { get; private set; }
+
+        public bool ThirdTurnObservedFailedState { get; private set; }
+
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context, CancellationToken cancellationToken = default)
+        {
+            if (context.Session is not TemporalAgentSession session)
+                return new ValueTask<AIContext>(new AIContext());
+
+            switch (Interlocked.Increment(ref _callCount))
+            {
+                case 1:
+                    session.StateBag.SetValue(
+                        committedKey,
+                        "committed",
+                        System.Text.Json.JsonSerializerOptions.Default);
+                    break;
+                case 2:
+                    session.StateBag.SetValue(
+                        failedTurnKey,
+                        "must-be-rolled-back",
+                        System.Text.Json.JsonSerializerOptions.Default);
+                    break;
+                case 3:
+                    ThirdTurnObservedCommittedState = session.StateBag.TryGetValue<string>(
+                        committedKey,
+                        out var committed,
+                        System.Text.Json.JsonSerializerOptions.Default)
+                        && committed == "committed";
+                    ThirdTurnObservedFailedState = session.StateBag.TryGetValue<string>(
+                        failedTurnKey,
+                        out _,
+                        System.Text.Json.JsonSerializerOptions.Default);
+                    break;
+            }
+
+            return new ValueTask<AIContext>(new AIContext());
+        }
+    }
+
+    private sealed class FirstCallBlockingChatClient(IChatClient innerClient)
+        : DelegatingChatClient(innerClient)
+    {
+        private readonly TaskCompletionSource _firstCallStarted =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseFirstCall =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _callCount;
+
+        public Task FirstCallStarted => _firstCallStarted.Task;
+
+        public void ReleaseFirstCall() => _releaseFirstCall.TrySetResult();
+
+        public override async Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            await WaitForFirstCallReleaseAsync(cancellationToken);
+            return await base.GetResponseAsync(messages, options, cancellationToken);
+        }
+
+        public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await WaitForFirstCallReleaseAsync(cancellationToken);
+            await foreach (var update in base.GetStreamingResponseAsync(messages, options, cancellationToken))
+            {
+                yield return update;
+            }
+        }
+
+        private async Task WaitForFirstCallReleaseAsync(CancellationToken cancellationToken)
+        {
+            if (Interlocked.Increment(ref _callCount) != 1)
+                return;
+
+            _firstCallStarted.TrySetResult();
+            await _releaseFirstCall.Task.WaitAsync(cancellationToken);
         }
     }
 
