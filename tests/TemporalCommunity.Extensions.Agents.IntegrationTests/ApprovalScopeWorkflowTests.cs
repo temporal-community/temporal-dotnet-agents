@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
@@ -390,10 +391,18 @@ public class ApprovalScopeWorkflowTests : IClassFixture<ApprovalScopeEnvironment
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(15);
         while (DateTime.UtcNow < deadline)
         {
-            var pending = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
-                wf => wf.GetPendingApproval());
-            if (pending is not null)
-                return pending;
+            try
+            {
+                var pending = await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
+                    wf => wf.GetPendingApproval());
+                if (pending is not null)
+                    return pending;
+            }
+            catch (RpcException ex) when (ex.Code == RpcException.StatusCode.NotFound)
+            {
+                // RunAsync starts the workflow asynchronously. Under the full suite's worker
+                // load, the first query can reach Temporal before that start is visible.
+            }
 
             await Task.Delay(TimeSpan.FromMilliseconds(100));
         }
