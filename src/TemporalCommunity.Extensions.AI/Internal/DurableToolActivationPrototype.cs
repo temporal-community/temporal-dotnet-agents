@@ -5,12 +5,6 @@ using Temporalio.Exceptions;
 
 namespace TemporalCommunity.Extensions.AI.Internal;
 
-internal enum DurableToolDispatchMode
-{
-    Sequential = 0,
-    Parallel = 1,
-}
-
 internal readonly struct DurableStateUpdate<TState>
 {
     private DurableStateUpdate(bool hasReplacement, TState? value)

@@ -20,7 +20,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// synthesizes a sentinel <see cref="ChatResponse"/> rather than throwing, matching the
     /// behavior of MAF's <c>AgentWorkflow</c>.
     /// </summary>
-    internal async Task<ChatResponse> ExecuteManagedToolLoopTurnAsync(
+    internal async Task<DurableManagedLoopResult> ExecuteManagedToolLoopTurnAsync(
         ActivityOptions stepActivityOptions,
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions,
@@ -105,7 +105,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
             if (stepResult.IsFinal || stepResult.ToolCalls is null || stepResult.ToolCalls.Count == 0)
             {
-                return new ChatResponse(allTurnMessages) { Usage = totalUsage };
+                return new DurableManagedLoopResult(
+                    new ChatResponse(allTurnMessages) { Usage = totalUsage },
+                    DurableTurnCompletionReason.FinalResponse);
             }
 
             var toolCalls = stepResult.ToolCalls;
@@ -384,7 +386,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             "the conversation did not converge on a final answer.");
         allTurnMessages.Add(sentinel);
 
-        return new ChatResponse(allTurnMessages) { Usage = totalUsage };
+        return new DurableManagedLoopResult(
+            new ChatResponse(allTurnMessages) { Usage = totalUsage },
+            DurableTurnCompletionReason.IterationLimitReached);
     }
 
     /// <summary>
@@ -434,3 +438,6 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
 }
 
+internal sealed record DurableManagedLoopResult(
+    ChatResponse Response,
+    DurableTurnCompletionReason CompletionReason);

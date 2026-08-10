@@ -42,6 +42,9 @@ namespace TemporalCommunity.Extensions.AI;
 [JsonSerializable(typeof(DurableToolOutcome))]
 [JsonSerializable(typeof(DurableToolInterceptorInput))]
 [JsonSerializable(typeof(DurableToolInterceptorResult))]
+[JsonSerializable(typeof(DurableToolDispatchMode))]
+[JsonSerializable(typeof(DurableTurnCompletionReason))]
+[JsonSerializable(typeof(DurableTurnOptions))]
 internal partial class DurableAIJsonContext : JsonSerializerContext;
 
 /// <summary>
@@ -64,6 +67,12 @@ public static class DurableAIJsonUtilities
         // AIContent polymorphism (TextContent, FunctionCallContent, etc.)
         var options = new JsonSerializerOptions(AIJsonUtilities.DefaultOptions);
         options.TypeInfoResolverChain.Add(DurableAIJsonContext.Default);
+
+        // MEAI registers a string-enum converter in its shared options. These two values are
+        // Temporal wire contracts, so their numeric representation must win in both reflection
+        // and source-generated paths. Converter-list entries take precedence over attributes.
+        options.Converters.Insert(0, new JsonNumberEnumConverter<DurableTurnCompletionReason>());
+        options.Converters.Insert(0, new JsonNumberEnumConverter<DurableToolDispatchMode>());
 
         // GeneratedEmbeddings<T> implements IList<T>, so both reflection-based and source-gen
         // resolvers treat it as a bare collection and silently drop Usage / AdditionalProperties.

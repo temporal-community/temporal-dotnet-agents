@@ -96,7 +96,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
                 new ReduceHistoryByKeyInput { ReducerKey = reducerKey, History = history }),
             activityOptions);
 
-    protected override Task<ChatResponse> ExecuteTurnAsync(
+    protected override async Task<ChatResponse> ExecuteTurnAsync(
         ActivityOptions activityOptions,
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
@@ -107,12 +107,13 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
                 $"Per-turn metadata missing for request {requestEntry.CorrelationId}. This is a bug.");
         }
 
-        return ExecuteManagedToolLoopTurnAsync(
+        var result = await ExecuteManagedToolLoopTurnAsync(
             activityOptions,
             requestEntry,
             chatOptions,
             metadata.ClientKey,
-            metadata.ConversationId);
+            metadata.ConversationId).ConfigureAwait(true);
+        return result.Response;
     }
 
     protected override ContinueAsNewException CreateContinueAsNewException(

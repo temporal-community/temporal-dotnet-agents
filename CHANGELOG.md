@@ -7,6 +7,9 @@
 - Added `IDurableChatWorkflowInputFactory` so application-owned workflows can create the same
   replay-frozen start configuration as the built-in managed session client, including when the
   default workflow is disabled.
+- Added the provisional `DurableToolWorkflowBase<TRequestData, TTurnState>` typed-turn contract,
+  numeric dispatch/completion wire values, and package-owned model/tool loop composition while
+  retaining `DurableChatWorkflowBase<TOutput>` as the low-level custom orchestration base.
 
 ## [0.10.4] - 2026-08-09
 

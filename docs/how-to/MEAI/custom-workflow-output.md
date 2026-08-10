@@ -1,5 +1,62 @@
 # Custom Workflow Output with `DurableChatWorkflowBase<TOutput>`
 
+There are now two intentionally different custom-workflow bases:
+
+| Base | Choose it when | Tool orchestration owner |
+|---|---|---|
+| `DurableChatWorkflowBase<TOutput>` | Your workflow schedules its own turn activity or orchestration | Your subclass |
+| `DurableToolWorkflowBase<TRequestData, TTurnState>` | You want the package's separate model and tool activities with typed per-turn data/state | `TemporalCommunity.Extensions.AI` |
+
+`DurableToolWorkflowBase` is an additive specialization. It does not replace or deprecate
+`DurableChatWorkflowBase`, and the existing `CustomWorkflow` sample remains the low-level example.
+
+## Package-managed typed turns
+
+Use `DurableToolWorkflowBase<TRequestData, TTurnState>` when one workflow Update should reuse the
+built-in managed tool loop and return a typed result:
+
+```csharp
+[Workflow("ApplicationWorkflow")]
+public sealed class ApplicationWorkflow
+    : DurableToolWorkflowBase<ApplicationRequest, ApplicationTurnState>
+{
+    [WorkflowRun]
+    public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
+
+    [WorkflowUpdate("Turn")]
+    public Task<DurableTurnResult<ApplicationTurnState>> TurnAsync(
+        DurableTurnRequest<ApplicationRequest, ApplicationTurnState> request) =>
+        RunDurableTurnAsync(request);
+}
+```
+
+`RequestData` is immutable application input for one Update. `InitialTurnState` is the state at
+that turn's start, and `FinalTurnState` is the last successfully recorded state returned to the
+caller. Neither value is inserted into model messages, arguments, or schemas, retained in a
+workflow property, or copied to the next Update. If the next turn should start from the previous
+result, the application explicitly passes that value as its next `InitialTurnState`.
+
+The specialized base defaults to `Sequential` dispatch. `Parallel` is an explicit optimization
+for read-only turn state. The stock `DurableChatWorkflow` remains parallel by default, preserving
+its existing command history.
+
+`DurableTurnCompletionReason` has exactly two outcomes: `FinalResponse` and
+`IterationLimitReached`. Approval denial/timeout and recoverable tool failures can become model-
+visible synthetic results before a later final response. Workflow cancellation and the configured
+consecutive-error limit throw instead of returning a completion reason.
+
+`RunDurableTurnAsync` must be called from a workflow Update and permits one managed turn per Update
+ID in the current workflow run. The SDK Update ID is client retry metadata; it is not copied into
+the turn or tool contracts. Continue-as-New starts a new run, so applications that need cross-run
+effect deduplication put a stable business operation identifier in their own `RequestData` and use
+it at the downstream system. That can deduplicate an external effect, but it does not prevent a
+new model/tool execution or guarantee the same response or final state.
+
+Both `RequestData` and turn state are application-supplied history payloads. The library does not
+authenticate them, verify freshness, or treat them as authorization evidence. Use payload codecs
+when history requires encryption, and reauthorize high-risk effects against an authoritative
+service inside the tool activity.
+
 `DurableChatWorkflow` returns a `ChatResponse` from each `[WorkflowUpdate]`. That is the right choice for most applications — it matches what `DurableChatSessionClient` expects and requires no workflow code. But some use cases need something more: a domain-specific type returned atomically from the same Update that drives the LLM turn.
 
 ---
