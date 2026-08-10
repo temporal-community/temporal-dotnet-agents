@@ -92,6 +92,10 @@ effect deduplication put a stable business operation identifier in their own `Re
 it at the downstream system. That can deduplicate an external effect, but it does not prevent a
 new model/tool execution or guarantee the same response or final state.
 
+A null request, empty `Messages`, or null `Options` fails the Update promptly with the stable,
+non-retryable `DurableTurnInvalidRequest` failure type. These failures schedule no model or tool
+activities and do not prevent a later valid Update from running.
+
 Both `RequestData` and turn state are application-supplied history payloads. The library does not
 authenticate them, verify freshness, or treat them as authorization evidence. Use payload codecs
 when history requires encryption, and reauthorize high-risk effects against an authoritative

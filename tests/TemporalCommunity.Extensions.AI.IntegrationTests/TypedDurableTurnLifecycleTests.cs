@@ -186,6 +186,80 @@ public class TypedDurableTurnLifecycleTests
         await host.StopAsync();
     }
 
+    [Fact]
+    public async Task InvalidRequests_FailPromptlyWithoutDispatchAndLaterValidUpdateSucceeds()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "valid-after-rejections")),
+        ]);
+        var taskQueue = $"typed-turn-invalid-request-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, chatClient);
+        await host.StartAsync();
+        var handle = await StartAsync(env.Client, host.Services, taskQueue);
+        DurableTurnRequest<TypedTurnRequestData, TypedTurnState>?[] invalidRequests =
+        [
+            null,
+            new DurableTurnRequest<TypedTurnRequestData, TypedTurnState>
+            {
+                Messages = [],
+                RequestData = new TypedTurnRequestData("empty-messages"),
+                InitialTurnState = new TypedTurnState(0, []),
+                CorrelationId = "empty-messages",
+            },
+        ];
+
+        for (var index = 0; index < invalidRequests.Length; index++)
+        {
+            var request = invalidRequests[index];
+            var exception = await Record.ExceptionAsync(() =>
+                handle.ExecuteUpdateAsync(
+                    workflow => workflow.TurnAsync(request!),
+                    new WorkflowUpdateOptions { Id = $"invalid-request-{index}" })
+                .WaitAsync(TimeSpan.FromSeconds(5)));
+            AssertInvalidRequestFailure(exception, $"invalid request {index}");
+        }
+
+        var nullOptionsException = await Record.ExceptionAsync(() =>
+            handle.ExecuteUpdateAsync(
+                workflow => workflow.TurnWithNullOptionsAsync(CreateRequest("null-options")),
+                new WorkflowUpdateOptions { Id = "invalid-request-null-options" })
+            .WaitAsync(TimeSpan.FromSeconds(5)));
+        AssertInvalidRequestFailure(nullOptionsException, "null options");
+
+        Assert.Equal(0, chatClient.CallCount);
+        Assert.Equal(
+            0,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, GetChatStepActivity));
+        Assert.Equal(
+            0,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+
+        var result = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(CreateRequest("valid-after-rejections")),
+            new WorkflowUpdateOptions { Id = "valid-after-rejections" });
+        Assert.Equal("valid-after-rejections", result.Response.Messages[^1].Text);
+        Assert.Equal(1, chatClient.CallCount);
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+
+        static void AssertInvalidRequestFailure(Exception? exception, string scenario)
+        {
+            Assert.True(exception is not null, $"The {scenario} Update completed successfully.");
+            var failure = Assert.IsType<WorkflowUpdateFailedException>(exception);
+            var applicationFailure = Assert.IsType<ApplicationFailureException>(
+                failure.InnerException);
+            Assert.Equal(
+                DurableToolWorkflowBase<TypedTurnRequestData, TypedTurnState>
+                    .InvalidRequestErrorType,
+                applicationFailure.ErrorType);
+            Assert.True(applicationFailure.NonRetryable);
+        }
+    }
+
     private static IHost BuildHost(
         ITemporalClient client,
         string taskQueue,

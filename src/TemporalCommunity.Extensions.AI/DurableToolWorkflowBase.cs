@@ -15,6 +15,8 @@ namespace TemporalCommunity.Extensions.AI;
 public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
     : DurableChatWorkflowBase<DurableTurnResult<TTurnState>>
 {
+    internal const string InvalidRequestErrorType = "DurableTurnInvalidRequest";
+
     private readonly Dictionary<DurableSessionRequest, DurableTurnRequest<TRequestData, TTurnState>>
         _turnRequests = new(Internal.ReferenceComparer<DurableSessionRequest>.Instance);
     private readonly HashSet<string> _managedUpdateIds = new(StringComparer.Ordinal);
@@ -27,7 +29,11 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
         DurableTurnRequest<TRequestData, TTurnState> request,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(request);
+        if (request is null)
+        {
+            throw CreateInvalidRequestFailure("Durable turn request cannot be null.");
+        }
+
         if (Workflow.CurrentUpdateInfo is not { } updateInfo)
         {
             throw new InvalidOperationException(
@@ -44,12 +50,12 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
 
         if (request.Messages is null or { Count: 0 })
         {
-            throw new ArgumentException("At least one message is required.", nameof(request));
+            throw CreateInvalidRequestFailure("At least one message is required.");
         }
 
         if (request.Options is null)
         {
-            throw new ArgumentException("Turn options cannot be null.", nameof(request));
+            throw CreateInvalidRequestFailure("Turn options cannot be null.");
         }
 
         if (!Enum.IsDefined(typeof(DurableToolDispatchMode), request.Options.DispatchMode))
@@ -78,6 +84,12 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
             _turnRequests.Remove(requestEntry);
         }
     }
+
+    private static ApplicationFailureException CreateInvalidRequestFailure(string message) =>
+        new(
+            message,
+            errorType: InvalidRequestErrorType,
+            nonRetryable: true);
 
     /// <inheritdoc/>
     protected sealed override async Task<DurableTurnResult<TTurnState>> ExecuteTurnAsync(

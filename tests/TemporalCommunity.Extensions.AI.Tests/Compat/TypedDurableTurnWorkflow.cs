@@ -33,6 +33,20 @@ public sealed class TypedDurableTurnWorkflow
         DurableTurnRequest<TypedTurnRequestData, TypedTurnState> request) =>
         RunDurableTurnAsync(request);
 
+    [WorkflowUpdate("TurnWithNullOptions")]
+    public Task<DurableTurnResult<TypedTurnState>> TurnWithNullOptionsAsync(
+        DurableTurnRequest<TypedTurnRequestData, TypedTurnState> request) =>
+        RunDurableTurnAsync(new DurableTurnRequest<TypedTurnRequestData, TypedTurnState>
+        {
+            Messages = request.Messages,
+            RequestData = request.RequestData,
+            InitialTurnState = request.InitialTurnState,
+            CorrelationId = request.CorrelationId,
+            ConversationId = request.ConversationId,
+            ChatOptions = request.ChatOptions,
+            Options = null!,
+        });
+
     [WorkflowUpdate("DoubleTurn")]
     public async Task DoubleTurnAsync(
         DurableTurnRequest<TypedTurnRequestData, TypedTurnState> request)

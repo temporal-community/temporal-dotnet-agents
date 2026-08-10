@@ -60,6 +60,8 @@ authoritative service immediately before each stateful function.
 The `Turn` Update calls `RunDurableTurnAsync` exactly once. The specialized base rejects a second
 managed turn from the same Update before it can schedule another model or tool activity. Use a new
 Update ID for each turn; Continue-as-New starts a new run and resets the run-local guard.
+Malformed turn input (a null request, empty messages, or null options) fails promptly as the
+non-retryable `DurableTurnInvalidRequest` failure and schedules no model or tool activity.
 
 For application-owned single-activity turns instead, see
 [`samples/MEAI/CustomWorkflow`](../CustomWorkflow/README.md). That sample uses the lower-level

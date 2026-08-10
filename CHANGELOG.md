@@ -25,6 +25,8 @@
   package target assets, split client/worker registration, scoped DI, and typed-turn runtime behavior.
 - Unknown numeric durable-tool dispatch values now fail the Update non-retryably before model or
   tool dispatch.
+- Null typed-turn requests, empty message lists, and null turn options now fail the Update
+  non-retryably before model or tool dispatch instead of retrying the workflow task.
 - Added sequential typed-turn dispatch as the specialized-base default, threading successful
   explicit state replacements in model-call order while preserving the stock session's parallel
   behavior and the all-approvals-before-tools safety barrier.

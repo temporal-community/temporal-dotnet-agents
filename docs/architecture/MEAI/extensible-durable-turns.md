@@ -102,6 +102,9 @@ the model/tool loop. One workflow Update may call `RunDurableTurnAsync` exactly 
 from the same Update fails that Update non-retryably before another model or tool activity is
 scheduled. The Update remains consumed even when its first managed turn failed and application
 code caught that failure. Different Update IDs in the same run may each execute one turn.
+Null requests, empty message lists, and null turn options fail terminally as
+`DurableTurnInvalidRequest` before any model or tool activity is scheduled; they are application
+input failures, not workflow-task failures.
 
 Continue-as-New preserves the concrete workflow type and the canonical frozen
 `DurableChatWorkflowInput`, including declaration snapshots, keyed reducer selection, tool and
