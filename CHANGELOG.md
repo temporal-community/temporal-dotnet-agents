@@ -17,6 +17,8 @@
   retries create fresh scopes and dispose scoped dependencies after each attempt.
 - Client-only workflow-input registration now applies the durable data converter to clients created
   through `AddTemporalClient` while preserving explicitly configured converters.
+- Activity-only durable AI workers can use the hosted worker's connection without registering an
+  otherwise unused `ITemporalClient` when the stock workflow is disabled.
 - Added sequential typed-turn dispatch as the specialized-base default, threading successful
   explicit state replacements in model-call order while preserving the stock session's parallel
   behavior and the all-approvals-before-tools safety barrier.

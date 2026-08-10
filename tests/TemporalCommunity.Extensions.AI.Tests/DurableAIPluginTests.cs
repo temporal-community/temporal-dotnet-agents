@@ -125,6 +125,22 @@ public class DurableAIPluginTests
     }
 
     [Fact]
+    public void AddWorkerPlugin_RegisterDefaultWorkflowFalse_DoesNotRequireTemporalClient()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        var builder = services.AddHostedTemporalWorker("activity-only");
+        var plugin = new DurableAIPlugin(options => options.RegisterDefaultWorkflow = false);
+
+        var returned = builder.AddWorkerPlugin(plugin);
+
+        Assert.Same(builder, returned);
+        Assert.DoesNotContain(
+            services,
+            descriptor => descriptor.ServiceType == typeof(ITemporalClient));
+    }
+
+    [Fact]
     public void ConfigureWorker_NullOptions_Throws()
     {
         var plugin = new DurableAIPlugin();

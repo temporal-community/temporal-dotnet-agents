@@ -36,33 +36,24 @@ internal static class DurableAIRegistrar
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
 
-        // Fail fast if no ITemporalClient is registered. The DurableChatSessionClient
-        // factory (below) calls GetRequiredService<ITemporalClient>() at resolution time;
-        // without this check, a missing registration produces a cryptic generic
-        // InvalidOperationException instead of an actionable message.
-        //
-        // Typical root cause: using the 1-arg AddHostedTemporalWorker(taskQueue) without
-        // also calling services.AddTemporalClient(address, namespace). The 3-arg
-        // AddHostedTemporalWorker(address, namespace, queue) stores connection settings on
-        // TemporalWorkerServiceOptions.ClientOptions so the worker creates its own client at
-        // startup — it intentionally does NOT register ITemporalClient in DI. Call
-        // services.AddTemporalClient(address, namespace) before calling AddDurableAI() to
-        // make ITemporalClient available as a DI service.
-        if (!services.Any(d => d.ServiceType == typeof(ITemporalClient)))
-        {
-            throw new InvalidOperationException(
-                "No ITemporalClient registered in DI. " +
-                "Call services.AddTemporalClient(address, namespace) before calling AddDurableAI(). " +
-                "Note: AddHostedTemporalWorker(address, namespace, queue) stores connection settings " +
-                "on the worker service but does not register ITemporalClient in DI — " +
-                "AddTemporalClient is required separately.");
-        }
-
         RegisterWorkflowInputServices(services, options);
 
         // Register the session client and default workflow only if enabled.
         if (options.RegisterDefaultWorkflow)
         {
+            // The stock session client starts workflows through a DI client. An activity-only
+            // worker can instead use AddHostedTemporalWorker(address, namespace, queue), whose
+            // worker-owned client is not registered as ITemporalClient.
+            if (!services.Any(d => d.ServiceType == typeof(ITemporalClient)))
+            {
+                throw new InvalidOperationException(
+                    "No ITemporalClient registered in DI. " +
+                    "Call services.AddTemporalClient(address, namespace) before calling AddDurableAI(). " +
+                    "Note: AddHostedTemporalWorker(address, namespace, queue) stores connection settings " +
+                    "on the worker service but does not register ITemporalClient in DI — " +
+                    "AddTemporalClient is required separately when RegisterDefaultWorkflow is true.");
+            }
+
             // Register the session client (concrete + interface alias share the same instance).
             // Inject both registries so the client can build durable-tool ActivityOptions at
             // session start when durable tools are present.

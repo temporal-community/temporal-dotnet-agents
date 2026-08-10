@@ -17,6 +17,12 @@ configuration as `AddDurableAI`. This affects clients built through `AddTemporal
 of registration order. Manually connected clients remain outside that options pipeline and must
 set `DurableAIDataConverter.Instance` themselves.
 
+In a split deployment, the workflow-starting process needs a Temporal client, while an
+implementation-only worker can use the client created by the three-argument
+`AddHostedTemporalWorker` registration. Disabling `RegisterDefaultWorkflow` means that worker does
+not construct the stock session client and therefore does not require a separate `ITemporalClient`
+service in its container.
+
 The snapshot contains the function name, description, parameter schema, return schema, and
 deterministic structural fingerprints. Object-property order is normalized ordinally; array order
 and scalar values remain significant. This is deliberately a structural comparison, not a general

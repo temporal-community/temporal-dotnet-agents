@@ -86,7 +86,6 @@ public class DurableChatWorkflowInputFactoryTests
     public void RegisterDefaultWorkflowFalse_StillRegistersFactory()
     {
         var services = new ServiceCollection();
-        services.AddSingleton(A.Fake<ITemporalClient>());
         var worker = services
             .AddHostedTemporalWorker("factory-only")
             .AddDurableAI(options => options.RegisterDefaultWorkflow = false);
@@ -97,6 +96,7 @@ public class DurableChatWorkflowInputFactoryTests
         var factory = provider.GetRequiredService<IDurableChatWorkflowInputFactory>();
         Assert.NotNull(factory.Create().ToolActivityOptions);
         Assert.Null(provider.GetService<DurableChatSessionClient>());
+        Assert.Null(provider.GetService<ITemporalClient>());
     }
 
     [Fact]

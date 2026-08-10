@@ -123,6 +123,12 @@ start input. Call `AddDurableToolImplementation<TRequestData, TTurnState>` in th
 implementation-bearing worker hosts both model and tool activities on the session queue. The
 frozen workflow input, not the live worker registry, is the model-facing declaration authority.
 
+An implementation-only worker may use
+`AddHostedTemporalWorker(address, namespace, taskQueue)` and set
+`RegisterDefaultWorkflow = false` without registering a second `ITemporalClient` in DI. The hosted
+worker owns the connection used to poll and complete activities. A process that enables the stock
+workflow/session client still needs `AddTemporalClient` because that client starts workflows.
+
 The invocation context includes request data, current turn state, dispatch mode, and activity-local
 metadata: namespace, workflow/run/activity identities, attempt, task queue, tool/call identities,
 zero-based model iteration and call index, conversation/correlation metadata, and the activity-

@@ -36,6 +36,18 @@ The sample creates its Temporal client manually, so it sets `DurableAIDataConver
 explicitly. A client registered through `AddTemporalClient` is configured automatically by
 `AddDurableChatWorkflowInputFactory` unless the application supplied a custom converter.
 
+For split processes, an implementation-only worker can avoid a duplicate DI client:
+
+```csharp
+services
+    .AddHostedTemporalWorker(address, temporalNamespace, taskQueue)
+    .AddDurableAI(options => options.RegisterDefaultWorkflow = false)
+    .AddWorkflow<ContextualTurnWorkflow>();
+```
+
+The workflow-starting process still registers or constructs the client it uses to start the typed
+workflow. The executable sample remains a single-process demonstration.
+
 `RequestData` and `TTurnState` are application-supplied history payloads, not authorization proof.
 The decorator uses them only to locate subject/resource and obtains the current decision from the
 authoritative service immediately before each stateful function.

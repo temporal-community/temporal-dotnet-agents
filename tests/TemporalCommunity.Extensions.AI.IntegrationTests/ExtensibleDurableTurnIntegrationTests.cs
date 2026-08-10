@@ -19,6 +19,55 @@ public class ExtensibleDurableTurnIntegrationTests
     private const string InvokeFunctionActivity = "TemporalCommunity.Extensions.AI.InvokeFunction";
 
     [Fact]
+    public async Task ActivityOnlyWorker_ExecutesToolWithoutDITemporalClient()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var taskQueue = $"activity-only-durable-tool-{Guid.NewGuid():N}";
+        var observations = new ConcurrentBag<ToolObservation>();
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddChatClient(OneToolThenFinal()).Build();
+        builder.Services.AddHttpClient("durable-tool-attempt");
+        builder.Services.AddSingleton(new AttemptScopeTracker());
+        builder.Services.AddScoped<AttemptScopedToolServices>();
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new NoopEmbeddingGenerator());
+        var worker = builder.Services
+            .AddHostedTemporalWorker(
+                env.Client.Connection.Options.TargetHost
+                    ?? throw new InvalidOperationException("Test server target host is unavailable."),
+                env.Client.Options.Namespace,
+                taskQueue)
+            .AddDurableAI(options => options.RegisterDefaultWorkflow = false)
+            .AddWorkflow<IntegrationDurableTurnWorkflow>();
+        RegisterTool(
+            worker,
+            "decision_tool",
+            observations,
+            new ConcurrentDictionary<string, byte>(StringComparer.Ordinal),
+            failFirstAttempt: false);
+
+        using var host = builder.Build();
+        Assert.Null(host.Services.GetService<ITemporalClient>());
+        await host.StartAsync();
+
+        var handle = await StartWorkflowAsync(env.Client, host.Services, taskQueue);
+        var result = await handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(CreateRequest()),
+            new WorkflowUpdateOptions { Id = "activity-only-worker" });
+
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, result.CompletionReason);
+        Assert.Single(observations);
+        Assert.Equal(
+            1,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+    [Fact]
     public async Task StateCompletionFailure_FailsTurnWithoutRepeatingOrdinaryFunction()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();

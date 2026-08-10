@@ -78,6 +78,12 @@ public static class DurableAIServiceCollectionExtensions
     /// <c>TemporalClient.ConnectAsync</c> and registering it with <c>AddSingleton</c>, you must
     /// still set <c>DataConverter = DurableAIDataConverter.Instance</c> explicitly.
     /// </para>
+    /// <para>
+    /// A DI <see cref="ITemporalClient"/> is required when <see cref="DurableExecutionOptions.RegisterDefaultWorkflow"/>
+    /// is enabled because the stock session client starts workflows. An activity-only implementation
+    /// worker may disable the default workflow and use the client owned by the three-argument
+    /// <c>AddHostedTemporalWorker</c> overload without registering a second DI client.
+    /// </para>
     /// </remarks>
     public static ITemporalWorkerServiceOptionsBuilder AddDurableAI(
         this ITemporalWorkerServiceOptionsBuilder builder,
