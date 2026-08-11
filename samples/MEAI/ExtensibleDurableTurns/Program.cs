@@ -94,6 +94,14 @@ var result = await turnTask;
 
 Console.WriteLine(result.Response.Messages.Last().Text);
 Console.WriteLine($"Completion: {result.CompletionReason}; revision: {result.FinalTurnState?.Revision}");
+if (result.CompletionReason == DurableTurnCompletionReason.IterationLimitReached)
+{
+    Console.WriteLine("The capped turn state is diagnostic only and will not be applied.");
+    await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+    await host.StopAsync();
+    return;
+}
+
 foreach (var receipt in result.FinalTurnState?.Receipts ?? [])
 {
     Console.WriteLine($"{receipt.Step}: {receipt.Value} ({receipt.ActivityIdempotencyKey})");

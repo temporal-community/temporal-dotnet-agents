@@ -106,6 +106,13 @@ Null requests, empty message lists, and null turn options fail terminally as
 `DurableTurnInvalidRequest` before any model or tool activity is scheduled; they are application
 input failures, not workflow-task failures.
 
+When a typed turn reaches the model/tool iteration limit, the immediate `DurableTurnResult`
+contains the complete function-call/function-result protocol and final turn state. That output is
+for caller inspection and explicit commit/discard policy. The workflow persists only the terminal
+assistant sentinel in conversation history, so a later turn cannot observe tool results whose
+typed state the caller discarded. A stable `Workflow.Patched` marker preserves replay of 0.12.0
+histories that stored the complete capped protocol; normal final turns do not emit that marker.
+
 Continue-as-New preserves the concrete workflow type and the canonical frozen
 `DurableChatWorkflowInput`, including declaration snapshots, keyed reducer selection, tool and
 interceptor activity policies, approval policy, and model/tool limits. Update IDs are scoped to one

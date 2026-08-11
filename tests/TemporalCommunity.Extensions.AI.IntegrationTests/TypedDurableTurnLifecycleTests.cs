@@ -260,12 +260,76 @@ public class TypedDurableTurnLifecycleTests
         }
     }
 
+    [Fact]
+    public async Task IterationLimit_PersistsOnlySentinelForTheNextTurn()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+            [
+                new FunctionCallContent(
+                    "discarded-call",
+                    "state_tool",
+                    new Dictionary<string, object?> { ["value"] = "discarded" }),
+            ])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "second turn complete")),
+        ]);
+        var taskQueue = $"typed-turn-limit-history-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            maxToolCallsPerTurn: 1);
+        await host.StartAsync();
+        var handle = await StartAsync(env.Client, host.Services, taskQueue);
+
+        var capped = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(CreateRequest("capped-turn")),
+            new WorkflowUpdateOptions { Id = "capped-turn" });
+
+        Assert.Equal(DurableTurnCompletionReason.IterationLimitReached, capped.CompletionReason);
+        Assert.Contains(
+            capped.Response.Messages.SelectMany(message => message.Contents),
+            content => content is FunctionCallContent);
+        Assert.Contains(
+            capped.Response.Messages.SelectMany(message => message.Contents),
+            content => content is FunctionResultContent);
+        Assert.Equal(1, capped.FinalTurnState!.Revision);
+
+        var history = await handle.QueryAsync(workflow => workflow.GetHistory());
+        var storedResponse = Assert.IsType<DurableSessionResponse>(history[1]);
+        var sentinel = Assert.Single(storedResponse.Messages);
+        Assert.Equal(ChatRole.Assistant, sentinel.Role);
+        Assert.Contains("Maximum tool-call iterations", sentinel.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            storedResponse.Messages.SelectMany(message => message.Contents),
+            content => content is FunctionCallContent or FunctionResultContent);
+
+        var next = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(CreateRequest("next-turn")),
+            new WorkflowUpdateOptions { Id = "next-turn" });
+
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, next.CompletionReason);
+        var nextModelInput = chatClient.Calls[1].Messages;
+        Assert.Contains(nextModelInput, message =>
+            message.Text.Contains("Maximum tool-call iterations", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            nextModelInput.SelectMany(message => message.Contents),
+            content => content is FunctionCallContent or FunctionResultContent);
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
     private static IHost BuildHost(
         ITemporalClient client,
         string taskQueue,
         IChatClient chatClient,
         int maxEntryCount = 1000,
-        int maximumConsecutiveErrors = 2)
+        int maximumConsecutiveErrors = 2,
+        int maxToolCallsPerTurn = 6)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
@@ -283,7 +347,7 @@ public class TypedDurableTurnLifecycleTests
                 options.RegisterDefaultWorkflow = false;
                 options.MaxEntryCount = maxEntryCount;
                 options.DefaultHistoryReducerKey = ReducerKey;
-                options.MaxToolCallsPerTurn = 6;
+                options.MaxToolCallsPerTurn = maxToolCallsPerTurn;
                 options.MaximumConsecutiveErrorsPerRequest = maximumConsecutiveErrors;
                 options.IncludeDetailedErrors = true;
                 options.ApprovalTimeout = TimeSpan.FromSeconds(77);

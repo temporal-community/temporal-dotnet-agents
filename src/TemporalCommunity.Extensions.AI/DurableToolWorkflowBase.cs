@@ -16,6 +16,8 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
     : DurableChatWorkflowBase<DurableTurnResult<TTurnState>>
 {
     internal const string InvalidRequestErrorType = "DurableTurnInvalidRequest";
+    internal const string IterationLimitHistoryPatchId =
+        "durable-tool-iteration-limit-history-v1";
 
     private readonly Dictionary<DurableSessionRequest, DurableTurnRequest<TRequestData, TTurnState>>
         _turnRequests = new(Internal.ReferenceComparer<DurableSessionRequest>.Instance);
@@ -131,8 +133,27 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
     protected sealed override DurableSessionResponse BuildResponseEntry(
         string correlationId,
         DurableTurnResult<TTurnState> output,
-        DateTimeOffset createdAt) =>
-        DurableSessionResponse.FromChatResponse(correlationId, output.Response, createdAt);
+        DateTimeOffset createdAt)
+    {
+        var historyResponse = output.Response;
+        if (output.CompletionReason == DurableTurnCompletionReason.IterationLimitReached &&
+            Workflow.Patched(IterationLimitHistoryPatchId))
+        {
+            // The caller still receives the complete response, including the executed function
+            // protocol. Only persisted conversation history is reduced. This prevents a later
+            // turn from observing successful tool results whose typed turn state the caller
+            // intentionally discarded after the iteration limit was reached.
+            historyResponse = new ChatResponse([output.Response.Messages[^1]])
+            {
+                Usage = output.Response.Usage,
+            };
+        }
+
+        return DurableSessionResponse.FromChatResponse(
+            correlationId,
+            historyResponse,
+            createdAt);
+    }
 
     /// <inheritdoc/>
     protected sealed override Task<List<DurableSessionEntry>> ApplyKeyedHistoryReducerAsync(

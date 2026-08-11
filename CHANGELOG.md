@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-08-10
+
+- Typed durable turns that reach the model/tool iteration limit now persist only the terminal
+  assistant sentinel in conversation history. The immediate result still contains the complete
+  tool protocol and final turn state for explicit caller policy, while later turns no longer
+  inherit tool effects whose application state was discarded. A Temporal patch marker preserves
+  replay compatibility with 0.12.0 histories.
+
+## [0.12.0] - 2026-08-10
+
 - Fixed continue-as-new input cloning so `HistoryReducerKey`, retry/tool/interceptor settings, and
   derived workflow input fields are preserved without field-by-field reconstruction.
 - Added `IDurableChatWorkflowInputFactory` so application-owned workflows can create the same

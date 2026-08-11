@@ -82,6 +82,14 @@ consecutive-error limit throw instead of returning a completion reason. A failed
 uses the consecutive-error allowance but does not consume a successful model/tool iteration;
 provider errors classified as permanent fail the turn immediately.
 
+An iteration-limit result returns the complete model/tool protocol and the last successfully
+recorded turn state so the caller can inspect what happened and apply an explicit application
+policy. Treat that state as uncommitted unless the application deliberately accepts a capped turn.
+For newly executed capped turns, durable conversation history stores only the terminal assistant
+sentinel. Later model calls therefore do not inherit successful tool results whose application
+state the caller may have discarded. Histories created by 0.12.0 remain replayable through a
+Temporal patch marker.
+
 `RunDurableTurnAsync` must be called from a workflow Update and permits one managed turn per Update
 ID in the current workflow run. A second call fails the Update before another model/tool dispatch,
 including when application code caught a failure from the first call. Each Update handler should

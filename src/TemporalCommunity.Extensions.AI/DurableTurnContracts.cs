@@ -46,7 +46,12 @@ public sealed class DurableTurnResult<TTurnState>
     /// <summary>Gets why the managed model/tool loop returned.</summary>
     public required DurableTurnCompletionReason CompletionReason { get; init; }
 
-    /// <summary>Gets the last successfully recorded state for this turn.</summary>
+    /// <summary>
+    /// Gets the last successfully recorded state for this turn. When
+    /// <see cref="CompletionReason"/> is <see cref="DurableTurnCompletionReason.IterationLimitReached"/>,
+    /// the caller must decide whether to commit or discard this state; the package does not carry
+    /// it into the next turn.
+    /// </summary>
     public TTurnState? FinalTurnState { get; init; }
 }
 
@@ -78,6 +83,10 @@ public enum DurableTurnCompletionReason
     /// <summary>The model produced a final response.</summary>
     FinalResponse = 0,
 
-    /// <summary>The configured model/tool iteration limit was exhausted.</summary>
+    /// <summary>
+    /// The configured model/tool iteration limit was exhausted. The returned response and state
+    /// contain the completed work for diagnostics and explicit caller policy, while persisted
+    /// conversation history carries only the terminal limit message into subsequent turns.
+    /// </summary>
     IterationLimitReached = 1,
 }

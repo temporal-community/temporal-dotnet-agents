@@ -63,6 +63,11 @@ Update ID for each turn; Continue-as-New starts a new run and resets the run-loc
 Malformed turn input (a null request, empty messages, or null options) fails promptly as the
 non-retryable `DurableTurnInvalidRequest` failure and schedules no model or tool activity.
 
+The sample accepts state only after `FinalResponse`. An `IterationLimitReached` result still
+contains the complete attempted protocol and last successful state for diagnostics, but the sample
+discards that state. The workflow carries only the terminal limit message into later conversation
+history, so a later turn cannot assume those discarded application changes were committed.
+
 For application-owned single-activity turns instead, see
 [`samples/MEAI/CustomWorkflow`](../CustomWorkflow/README.md). That sample uses the lower-level
 `DurableChatWorkflowBase<TOutput>` and intentionally owns its own orchestration.

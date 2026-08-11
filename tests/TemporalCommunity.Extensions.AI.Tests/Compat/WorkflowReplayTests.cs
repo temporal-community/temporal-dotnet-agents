@@ -133,6 +133,22 @@ public class WorkflowReplayTests
         Assert.Null(result.ReplayFailure);
     }
 
+    /// <summary>
+    /// A 0.12.0 typed-turn history that persisted the complete function protocol after an
+    /// iteration-limit result remains replayable. New executions use a patch marker to persist
+    /// only the sentinel, while replay of this pre-marker history retains the old command path.
+    /// </summary>
+    [Fact]
+    public async Task TypedIterationLimitV0_12_0_ReplaysWithoutError()
+    {
+        var replayer = BuildReplayer();
+        var history = LoadHistory("typed-iteration-limit-v0_12_0.json");
+
+        var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
     // ── Negative test: proves the harness catches nondeterminism ─────────────
 
     /// <summary>
