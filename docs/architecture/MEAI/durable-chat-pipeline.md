@@ -53,7 +53,9 @@ After the activity resolves the provider, it wraps that provider in a boundary c
 applies the selected decorator outside the boundary. The decorator therefore receives the routing
 metadata it needs. When the decorator delegates, the boundary clones the invocation options and
 removes every Temporal-owned key immediately before the provider call. Both `GetResponse` and
-`GetChatStep` use the same boundary.
+`GetChatStep` use the same boundary. Before dispatch, the activity validates the returned decorated
+chain and rejects `FunctionInvokingChatClient` when durable tools are registered, preserving the
+workflow-owned tool loop.
 
 The default converter preserves arbitrary user properties by JSON content. Because
 `AdditionalProperties` values are object-typed, they may deserialize as `JsonElement`; original CLR

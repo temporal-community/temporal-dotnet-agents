@@ -82,6 +82,7 @@ internal sealed class DurableChatActivities(
             var decorator = services.GetKeyedService<IChatClientDecorator>(factoryKey)
                 ?? throw new DurableChatClientFactoryNotFoundException(factoryKey);
             chatClient = decorator.Decorate(chatClient, resolvedOptions);
+            EnsureDecoratedMixedPatternCheck(chatClient);
         }
 
         var response = await StreamAndCollectAsync(
@@ -111,22 +112,47 @@ internal sealed class DurableChatActivities(
                 return;
             }
 
-            var registry = services.GetService<DurableFunctionRegistry>();
-            var declarations = services.GetService<Internal.DurableFunctionDeclarationRegistry>();
-            if ((registry is null || registry.Count == 0)
-                && (declarations is null || declarations.Count == 0))
+            if (!HasDurableToolsRegistered())
             {
                 // No durable tools → no conflict possible. Cache anyway so repeat calls skip.
                 _mixedPatternCheckedClients.Add(chatClient);
                 return;
             }
 
-            if (Internal.AgentChainWalker.Contains<FunctionInvokingChatClient>(chatClient))
-            {
-                throw new DurableMixedPatternException();
-            }
+            ThrowIfMixedPattern(chatClient);
 
             _mixedPatternCheckedClients.Add(chatClient);
+        }
+    }
+
+    /// <summary>
+    /// Validates a per-invocation decorated chain without caching it. Decorators commonly create
+    /// a fresh wrapper for every activity call, so retaining those wrappers in the resolved-client
+    /// cache would grow that cache for the lifetime of this activity instance.
+    /// </summary>
+    private void EnsureDecoratedMixedPatternCheck(IChatClient chatClient)
+    {
+        if (!HasDurableToolsRegistered())
+        {
+            return;
+        }
+
+        ThrowIfMixedPattern(chatClient);
+    }
+
+    private bool HasDurableToolsRegistered()
+    {
+        var registry = services.GetService<DurableFunctionRegistry>();
+        var declarations = services.GetService<Internal.DurableFunctionDeclarationRegistry>();
+        return (registry is not null && registry.Count > 0)
+            || (declarations is not null && declarations.Count > 0);
+    }
+
+    private static void ThrowIfMixedPattern(IChatClient chatClient)
+    {
+        if (Internal.AgentChainWalker.Contains<FunctionInvokingChatClient>(chatClient))
+        {
+            throw new DurableMixedPatternException();
         }
     }
 
@@ -175,6 +201,7 @@ internal sealed class DurableChatActivities(
             var decorator = services.GetKeyedService<IChatClientDecorator>(factoryKey)
                 ?? throw new DurableChatClientFactoryNotFoundException(factoryKey);
             chatClient = decorator.Decorate(chatClient, effectiveOptions);
+            EnsureDecoratedMixedPatternCheck(chatClient);
         }
 
         var response = await StreamAndCollectAsync(

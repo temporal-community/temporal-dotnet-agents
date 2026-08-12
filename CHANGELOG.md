@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Keyed `IChatClientDecorator` results are now checked for inline function-invocation middleware
+  before provider dispatch when durable tools are registered, closing a gap in the managed tool-loop
+  mixed-pattern protection.
+
 ## [0.12.1] - 2026-08-10
 
 - Typed durable turns that reach the model/tool iteration limit now persist only the terminal
