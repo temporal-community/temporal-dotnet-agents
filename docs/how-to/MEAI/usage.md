@@ -29,6 +29,30 @@ builder.Services
     });
 ```
 
+### Sharing a worker with non-AI workflows
+
+Temporal configures a data converter per client or worker, not per workflow. Calling
+`AddDurableAI()` therefore applies `DurableAIDataConverter.Instance` to every workflow and activity
+served by that worker's client, including ordinary application workflows registered on the same
+worker.
+
+Every client that starts, signals, queries, or reads results from those workflows must use a
+compatible converter. This is especially important for a client created directly with
+`TemporalClient.ConnectAsync`, because DI option configuration cannot reach it:
+
+```csharp
+var options = ClientEnvConfig.LoadClientConnectOptions();
+options.DataConverter = DurableAIDataConverter.Instance;
+var client = await TemporalClient.ConnectAsync(options);
+```
+
+An incompatible client can deserialize a payload into an otherwise valid application object whose
+nested members are null or default values; that mismatch need not throw at deserialization time.
+The Temporal service does not retain converter identity, so this library cannot diagnose a converter
+chosen independently by another process. A custom converter is preserved by the registration APIs,
+but it must remain compatible with the MEAI and application payloads used by every participating
+client and worker.
+
 For a keyed client, register it with `AddKeyedChatClient` and set
 `DurableExecutionOptions.DefaultChatClientKey`.
 

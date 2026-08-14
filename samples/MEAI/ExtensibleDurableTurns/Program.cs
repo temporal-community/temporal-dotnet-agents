@@ -26,6 +26,7 @@ builder.Services.AddSingleton<IdempotentExternalSink>();
 
 var worker = builder.Services
     .AddHostedTemporalWorker(taskQueue)
+    .AddWorkflow<SharedWorkerStatusWorkflow>()
     .AddDurableAI(options => options.RegisterDefaultWorkflow = false)
     .AddWorkflow<ContextualTurnWorkflow>();
 
@@ -49,6 +50,14 @@ RegisterStatefulTool(worker, secondDeclaration, "second", requireApproval: false
 
 var host = builder.Build();
 await host.StartAsync();
+
+var statusHandle = await temporalClient.StartWorkflowAsync(
+    (SharedWorkerStatusWorkflow workflow) => workflow.RunAsync(),
+    new WorkflowOptions($"shared-worker-status-{Guid.NewGuid():N}", taskQueue));
+var status = await statusHandle.GetResultAsync<SharedWorkerStatus>();
+Console.WriteLine(
+    $"Shared worker status: {status.Setup.Message}; " +
+    $"{status.Inventory.Categories} categories, {status.Inventory.Products} products ({status.Status})");
 
 var startInput = host.Services.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
 var workflowId = $"extensible-turn-{Guid.NewGuid():N}";

@@ -79,6 +79,13 @@ public static class DurableAIServiceCollectionExtensions
     /// still set <c>DataConverter = DurableAIDataConverter.Instance</c> explicitly.
     /// </para>
     /// <para>
+    /// The converter applies to the worker's entire Temporal payload boundary, not just durable AI
+    /// workflows. Ordinary workflows sharing that worker also write their inputs and results with the
+    /// same converter. Every client that exchanges payloads with those workflows must use a compatible
+    /// converter; a manually constructed client with the SDK default converter can otherwise materialize
+    /// camel-case payloads as null or default application members without throwing.
+    /// </para>
+    /// <para>
     /// A DI <see cref="ITemporalClient"/> is required when <see cref="DurableExecutionOptions.RegisterDefaultWorkflow"/>
     /// is enabled because the stock session client starts workflows. An activity-only implementation
     /// worker may disable the default workflow and use the client owned by the three-argument

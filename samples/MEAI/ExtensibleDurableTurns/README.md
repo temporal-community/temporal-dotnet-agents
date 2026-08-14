@@ -36,6 +36,16 @@ The sample creates its Temporal client manually, so it sets `DurableAIDataConver
 explicitly. A client registered through `AddTemporalClient` is configured automatically by
 `AddDurableChatWorkflowInputFactory` unless the application supplied a custom converter.
 
+## Sharing a worker with ordinary workflows
+
+The sample also registers and runs `SharedWorkerStatusWorkflow`, an ordinary typed workflow, on the
+same worker as `ContextualTurnWorkflow`. `AddDurableAI()` configures the worker's entire Temporal
+payload boundary, so it applies to both workflows. The manually created `temporalClient` uses
+`DurableAIDataConverter.Instance` before either workflow starts, which keeps nested ordinary result
+values compatible with the worker. Every client that reads results from a shared worker must use a
+compatible converter; an independently created default client can otherwise materialize camel-case
+payloads as null or default members without throwing.
+
 For split processes, an implementation-only worker can avoid a duplicate DI client:
 
 ```csharp

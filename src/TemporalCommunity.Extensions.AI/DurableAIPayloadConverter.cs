@@ -31,6 +31,13 @@ namespace TemporalCommunity.Extensions.AI;
 /// });
 /// </code>
 /// </para>
+/// <para>
+/// A data converter belongs to a Temporal client or worker, not to an individual workflow. When a
+/// worker uses this converter, every workflow and activity that worker handles uses its payload
+/// format, including ordinary application workflows. Every client that starts, signals, queries,
+/// or reads results from those workflows must use a compatible converter. Independently constructed
+/// <see cref="Temporalio.Client.TemporalClient"/> instances cannot be configured automatically.
+/// </para>
 /// </remarks>
 public static class DurableAIDataConverter
 {

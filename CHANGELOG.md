@@ -5,6 +5,9 @@
 - Keyed `IChatClientDecorator` results are now checked for inline function-invocation middleware
   before provider dispatch when durable tools are registered, closing a gap in the managed tool-loop
   mixed-pattern protection.
+- Documented that `DurableAIDataConverter` applies to every workflow sharing an AI-enabled worker,
+  added a mixed ordinary-workflow integration regression, and extended the deterministic
+  `ExtensibleDurableTurns` sample with that supported shared-worker configuration.
 
 ## [0.12.1] - 2026-08-10
 

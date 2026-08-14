@@ -81,7 +81,10 @@ SDK would default the activity to the workflow queue; the adapters set it explic
 
 ## Boundary and deployment rules
 
-- The client and all workers need `DurableAIDataConverter.Instance`.
+- The converter belongs to a client or worker, not an individual workflow. A worker configured by
+  `AddDurableAI()` writes payloads for every workflow it serves, including ordinary application
+  workflows; all clients that exchange those payloads need a compatible converter. See
+  [the usage guide](../../how-to/MEAI/usage.md#sharing-a-worker-with-non-ai-workflows).
 - Every worker on the task queue must register the same durable tool names and compatible schemas.
 - Direct-adapter activity workers must poll the queue configured on
   `DurableExecutionOptions.TaskQueue`; workflow workers may poll a different queue.

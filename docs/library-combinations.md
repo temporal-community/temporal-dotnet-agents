@@ -67,7 +67,7 @@ var response = await sessionClient.SendAsync(
 - Managed tool-call durability via `AddDurableTools()` — each tool invocation becomes its own activity with its own retry policy.
 - Durable embedding generation via `DurableEmbeddingGenerator`.
 - HITL approval gates via `DurableApprovalRequest` / `DurableApprovalDecision`.
-- `DurableAIDataConverter` auto-wired when using the managed registration overloads (`AddTemporalClient` + `AddDurableAI`, or the 3-arg `AddHostedTemporalWorker` overload). Manual `TemporalClient.ConnectAsync` callers must set `DataConverter = DurableAIDataConverter.Instance` explicitly.
+- `DurableAIDataConverter` auto-wired when using the managed registration overloads (`AddTemporalClient` + `AddDurableAI`, or the 3-arg `AddHostedTemporalWorker` overload). It applies to every workflow sharing that worker client, including ordinary workflows. Manual `TemporalClient.ConnectAsync` callers that exchange those payloads must set `DataConverter = DurableAIDataConverter.Instance` explicitly; see [the shared-worker guidance](how-to/MEAI/usage.md#sharing-a-worker-with-non-ai-workflows).
 - Custom workflow output — subclass `DurableChatWorkflowBase<TOutput>` to return domain-specific types from workflow Update handlers. The session loop, history, HITL, and continue-as-new are all inherited. See [custom-workflow-output.md](how-to/MEAI/custom-workflow-output.md).
 - Extensible typed turns — subclass `DurableToolWorkflowBase<TRequestData, TTurnState>` to retain
   package-owned per-tool activities while supplying typed request data and sequential turn state.

@@ -102,6 +102,10 @@ var response = await sessionClient.SendAsync(
 Console.WriteLine(response.Text);
 ```
 
+The converter is a worker/client setting, not an AI-workflow setting. If ordinary workflows share
+this worker, their callers must use the same compatible converter too. See
+[the shared-worker guidance](../../docs/how-to/MEAI/usage.md#sharing-a-worker-with-non-ai-workflows).
+
 ## Per-call decorators and metadata
 
 Select a keyed worker decorator and provide its built-in tag metadata from either a managed session
