@@ -91,6 +91,10 @@ errors and cancellation so the activity records failure and Temporal—not the d
 Authorization belongs immediately before the external effect and must consult authoritative,
 current application data; request data and turn state only locate that decision.
 
+Generalized missing-input waits are not part of this API. See the non-shipping
+[deferred-tool research decision](generalized-deferred-tools-research.md) for the evaluated state
+machine and the criteria that must be met before any public design is proposed.
+
 ## Package-owned orchestration boundary
 
 The stock managed workflow and the typed specialization share one loop implementation on
