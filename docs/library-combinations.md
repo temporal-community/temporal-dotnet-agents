@@ -201,7 +201,7 @@ In short:
 
 - [Getting Started — `TemporalCommunity.Extensions.AI`](how-to/MEAI/usage.md)
 - [Usage Guide — `TemporalCommunity.Extensions.Agents`](how-to/MAF/usage.md)
-- [Tool Functions](how-to/MEAI/tool-functions.md) — Model 1 vs Model 2 tool execution
+- [Tool Functions](how-to/MEAI/tool-functions.md) — direct durable calls, managed sessions, and worker-owned toolsets
 - [Human-in-the-Loop Patterns (MEAI)](how-to/MEAI/hitl-patterns.md)
 - [Human-in-the-Loop Patterns (MAF)](how-to/MAF/hitl-patterns.md)
 - [Pre-release MAF Worker Cutover](how-to/MAF/pre-release-cutover.md)

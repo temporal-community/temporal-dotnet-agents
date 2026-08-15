@@ -537,6 +537,11 @@ chatOptions.ResponseFormat = input.Request.ResponseFormat;
 
 `TemporalAgentRunOptions.EnableToolCalls` and `EnableToolNames` are copied onto `RunRequest` by `TemporalAIAgentProxy` / `TemporalAIAgent` before dispatch. Session workflows freeze them on `AgentSessionRequest`, so they survive Temporal serialization and reconstruction; job and containing-workflow paths carry the same `RunRequest` directly. `EnableToolCalls = false` exposes no tools. `EnableToolNames = null` exposes all registered tools, an empty list exposes none, and a non-empty list exposes only case-insensitive registered matches.
 
+MAF durable tool names remain case-insensitive throughout selection and policy application.
+`RequireApproval`, `SkipInterceptor`, interceptor timeout, and per-tool activity retry/timeout
+lookups use ordinal case-insensitive matching explicitly after Temporal deserialization; they do
+not rely on a dictionary comparer surviving the JSON boundary.
+
 Provider filtering is not the security boundary. A model can still return a malformed, unknown, or previously visible function name. Immediately before interceptor fan-out, each of the three workflow loops (`AgentWorkflow`, `AgentJobWorkflow`, and `TemporalAIAgent`) applies the same deterministic policy against the frozen registered names. A blocked call schedules no interceptor, approval, or tool activity and receives the same tenant-visible synthetic result whether its name is unknown or merely excluded.
 
 ### Discovering session context from inside a tool

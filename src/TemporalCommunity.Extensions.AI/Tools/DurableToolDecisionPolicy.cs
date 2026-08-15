@@ -23,7 +23,9 @@ internal static class DurableToolDecisionPolicy
     /// <param name="toolName">The name of the tool being dispatched.</param>
     /// <param name="requiresApprovalTools">
     /// Optional set of tool names that require human approval regardless of interceptor outcome.
-    /// Matched using exact ordinal comparison.
+    /// Matched using ordinal case-insensitive comparison. This preserves MAF's
+    /// case-insensitive tool-name contract after policy collections cross Temporal's JSON
+    /// boundary, which does not preserve a dictionary's comparer instance.
     /// </param>
     /// <returns>The effective <see cref="DurableToolOutcome"/> to act on.</returns>
     internal static DurableToolOutcome GetEffectiveOutcome(
@@ -36,7 +38,7 @@ internal static class DurableToolDecisionPolicy
         // RequireApproval floor: Block is strictly stricter and is always honoured as-is;
         // every other outcome (Proceed, Skip, PauseForApproval) is overridden (BLOCK-3 fix).
         var toolRequiresApproval = requiresApprovalTools is not null
-            && requiresApprovalTools.Contains(toolName, StringComparer.Ordinal);
+            && requiresApprovalTools.Contains(toolName, StringComparer.OrdinalIgnoreCase);
 
         if (toolRequiresApproval && outcome != DurableToolOutcome.Block)
         {
@@ -48,7 +50,7 @@ internal static class DurableToolDecisionPolicy
 
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="toolName"/> is present in
-    /// <paramref name="skippedTools"/> using exact ordinal comparison.
+    /// <paramref name="skippedTools"/> using ordinal case-insensitive comparison.
     /// Returns <see langword="false"/> when <paramref name="skippedTools"/> is
     /// <see langword="null"/> or the tool is not listed.
     /// </summary>
@@ -56,7 +58,32 @@ internal static class DurableToolDecisionPolicy
         string toolName,
         IReadOnlyList<string>? skippedTools) =>
         skippedTools is not null
-        && skippedTools.Contains(toolName, StringComparer.Ordinal);
+        && skippedTools.Contains(toolName, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Looks up a per-tool value using ordinal case-insensitive comparison without relying on
+    /// the runtime comparer of a dictionary reconstructed from workflow history.
+    /// </summary>
+    internal static bool TryGetToolValue<TValue>(
+        IReadOnlyDictionary<string, TValue>? values,
+        string toolName,
+        out TValue value)
+    {
+        if (values is not null)
+        {
+            foreach (var pair in values)
+            {
+                if (string.Equals(pair.Key, toolName, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = pair.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default!;
+        return false;
+    }
 
     /// <summary>
     /// Resolves <see cref="ActivityOptions"/> for the interceptor activity.
@@ -70,8 +97,7 @@ internal static class DurableToolDecisionPolicy
         ActivityOptions sharedOptions,
         IReadOnlyDictionary<string, ActivityOptions>? perToolOptions)
     {
-        var baseOpts = perToolOptions is not null
-            && perToolOptions.TryGetValue(toolName, out var toolSpecific)
+        var baseOpts = TryGetToolValue(perToolOptions, toolName, out var toolSpecific)
                 ? toolSpecific
                 : sharedOptions;
 

@@ -133,6 +133,7 @@ public class DurableMixedPatternValidatorTests
         var registered = provider.GetServices<IPostConfigureOptions<TemporalWorkerServiceOptions>>();
 
         Assert.Contains(registered, r => r is DurableMixedPatternValidator);
+        Assert.Contains(registered, r => r is DurableToolsetConfigurationValidator);
     }
 
     // =====================================================================

@@ -137,4 +137,13 @@ internal static partial class Logs
     [LoggerMessage(EventId = 24, Level = LogLevel.Warning,
         Message = "Durable turn toolset narrowing rejected ({Reason})")]
     public static partial void LogToolsetNarrowingRejected(this ILogger logger, string reason);
+
+    [LoggerMessage(EventId = 25, Level = LogLevel.Warning,
+        Message = "Model requested a function outside the active durable declaration set for workflow {WorkflowId}, turn {TurnNumber}, model iteration {ModelIteration}, call index {CallIndex}; returning the safe blocked result without interceptor, approval, or tool dispatch")]
+    public static partial void LogDurableToolCallNotEnabled(
+        this ILogger logger,
+        string workflowId,
+        int turnNumber,
+        int modelIteration,
+        int callIndex);
 }

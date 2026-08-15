@@ -17,6 +17,7 @@ public class ExtensibleDurableTurnIntegrationTests
 {
     private const string GetChatStepActivity = "TemporalCommunity.Extensions.AI.GetChatStep";
     private const string InvokeFunctionActivity = "TemporalCommunity.Extensions.AI.InvokeFunction";
+    private const string RunToolInterceptorActivity = "TemporalCommunity.Extensions.AI.RunToolInterceptor";
 
     [Fact]
     public async Task WorkerOwnedBaseline_CanBeNarrowedPerTurnWithoutExpansion()
@@ -126,6 +127,113 @@ public class ExtensibleDurableTurnIntegrationTests
             call.Messages.Last(message => message.Role == ChatRole.User).Text == "queued-second");
         Assert.Equal(["first_tool"], firstCall.Options!.Tools!.Select(tool => tool.Name));
         Assert.Equal(["second_tool"], secondCall.Options!.Tools!.Select(tool => tool.Name));
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task CallerOwnedDeclarations_BlockRegisteredButUndeclaredToolBeforePolicyOrImplementation()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("registered-extra", "registered_but_undeclared")])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "registered extra handled")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("unknown", "completely_unknown")])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "unknown handled")),
+        ]);
+        var interceptorCalls = 0;
+        var implementationFactoryCalls = 0;
+        var implementationCalls = 0;
+        var taskQueue = $"typed-caller-membership-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton(env.Client);
+        builder.Services.AddChatClient(chatClient).Build();
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new NoopEmbeddingGenerator());
+        builder.Services.AddSingleton<IDurableToolInterceptor<DurableToolContext>>(
+            new DelegateInterceptor((_, _) =>
+            {
+                Interlocked.Increment(ref interceptorCalls);
+                return Task.FromResult(DurableToolDecision.Proceed());
+            }));
+
+        var worker = builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options =>
+            {
+                options.RegisterDefaultWorkflow = false;
+                options.DefaultToolInterceptor = services =>
+                    services.GetRequiredService<IDurableToolInterceptor<DurableToolContext>>();
+            })
+            .AddWorkflow<IntegrationDurableTurnWorkflow>();
+        var allowedDeclaration = AIFunctionFactory.Create(
+            () => string.Empty,
+            "declared_tool").AsDeclarationOnly();
+        worker.AddDurableToolDeclaration(allowedDeclaration);
+        worker.AddDurableToolImplementation<IntegrationRequestData, IntegrationTurnState>(
+            allowedDeclaration.Name,
+            (_, _) => new DurableToolActivation<IntegrationTurnState>
+            {
+                Function = AIFunctionFactory.Create(() => "allowed", allowedDeclaration.Name),
+            });
+        worker.AddDurableToolImplementation<IntegrationRequestData, IntegrationTurnState>(
+            "registered_but_undeclared",
+            (_, _) =>
+            {
+                Interlocked.Increment(ref implementationFactoryCalls);
+                return new DurableToolActivation<IntegrationTurnState>
+                {
+                    Function = AIFunctionFactory.Create(
+                        () =>
+                        {
+                            Interlocked.Increment(ref implementationCalls);
+                            return "must not execute";
+                        },
+                        "registered_but_undeclared"),
+                };
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        var handle = await StartWorkflowAsync(env.Client, host.Services, taskQueue);
+
+        await handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(CreateRequest("registered extra")),
+            new WorkflowUpdateOptions { Id = "registered-extra" });
+        await handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(CreateRequest("unknown")),
+            new WorkflowUpdateOptions { Id = "unknown" });
+
+        Assert.Equal(0, interceptorCalls);
+        Assert.Equal(0, implementationFactoryCalls);
+        Assert.Equal(0, implementationCalls);
+        Assert.All(chatClient.Calls, call =>
+            Assert.Equal(["declared_tool"], call.Options!.Tools!.Select(tool => tool.Name)));
+        var registeredResult = Assert.Single(
+            chatClient.Calls[1].Messages.SelectMany(message => message.Contents)
+                .OfType<FunctionResultContent>(),
+            result => result.CallId == "registered-extra").Result;
+        var unknownResult = Assert.Single(
+            chatClient.Calls[3].Messages.SelectMany(message => message.Contents)
+                .OfType<FunctionResultContent>(),
+            result => result.CallId == "unknown").Result;
+        Assert.Equal(registeredResult?.ToString(), unknownResult?.ToString());
+        Assert.Equal(
+            0,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(
+                handle,
+                RunToolInterceptorActivity));
+        Assert.Equal(
+            0,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(
+                handle,
+                InvokeFunctionActivity));
 
         await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();

@@ -280,6 +280,11 @@ public class DurableAIServiceCollectionExtensionsTests
             descriptor =>
                 descriptor.ServiceType == typeof(IPostConfigureOptions<TemporalWorkerServiceOptions>) &&
                 descriptor.ImplementationType == typeof(DurableAIWorkerClientConfigurator));
+        Assert.DoesNotContain(
+            services,
+            descriptor =>
+                descriptor.ServiceType == typeof(IPostConfigureOptions<TemporalWorkerServiceOptions>) &&
+                descriptor.ImplementationType == typeof(DurableToolsetConfigurationValidator));
     }
 
     [Theory]

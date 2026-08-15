@@ -337,7 +337,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 ### TemporalCommunity.Extensions.AI (MEAI)
 
 - **Usage Guide**: `docs/how-to/MEAI/usage.md`
-- **Tool Functions**: `docs/how-to/MEAI/tool-functions.md` (Model 1 inline / Model 2 custom workflow / Model 3 durable dispatch loop)
+- **Tool Functions**: `docs/how-to/MEAI/tool-functions.md` (direct durable calls, managed sessions, worker-owned toolsets, and invocation-scoped factories)
 - **Embeddings**: `docs/how-to/MEAI/embeddings.md`
 - **Testing**: `docs/how-to/MEAI/testing.md`
 - **Observability**: `docs/how-to/MEAI/observability.md`

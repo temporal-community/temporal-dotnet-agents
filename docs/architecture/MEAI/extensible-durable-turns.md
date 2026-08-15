@@ -142,6 +142,11 @@ the Update non-retryably before a model activity. Selection preserves baseline o
 caller lists IDs in another order, is fixed across every model iteration in the turn, and is not
 carried into a later turn or Continue-as-New.
 
+`ToolsetIds` arrives with the application Update, so treat it as caller-supplied exposure
+narrowing—not authorization. The workflow intersects it with the already recorded baseline; it
+can remove capabilities but cannot grant a capability absent from that baseline. Effecting tools
+must still authorize against current authoritative application data inside their activity.
+
 When a typed turn reaches the model/tool iteration limit, the immediate `DurableTurnResult`
 contains the complete function-call/function-result protocol and final turn state. That output is
 for caller inspection and explicit commit/discard policy. The workflow persists only the terminal

@@ -138,6 +138,11 @@ public sealed class DurableToolsetTelemetryTests
             () => functionActivities.InvokeFunctionAsync(input)));
         loggerFactory.CreateLogger("workflow-test").LogToolsetNarrowingRejected(
             DurableToolsetValidationReasons.UnknownToolset);
+        loggerFactory.CreateLogger("workflow-test").LogDurableToolCallNotEnabled(
+            "workflow-id",
+            turnNumber: 2,
+            modelIteration: 1,
+            callIndex: 0);
 
         AssertMeasurement(
             capture,
@@ -147,6 +152,7 @@ public sealed class DurableToolsetTelemetryTests
             DurableToolsetValidationReasons.ManifestMismatch);
         AssertLog(logs, 23, "LogToolsetValidationRejected", LogLevel.Warning);
         AssertLog(logs, 24, "LogToolsetNarrowingRejected", LogLevel.Warning);
+        AssertLog(logs, 25, "LogDurableToolCallNotEnabled", LogLevel.Warning);
     }
 
     [Theory]

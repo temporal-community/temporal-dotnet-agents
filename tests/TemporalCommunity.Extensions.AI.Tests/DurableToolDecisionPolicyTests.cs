@@ -113,6 +113,17 @@ public class DurableToolDecisionPolicyTests
         Assert.Equal(DurableToolOutcome.PauseForApproval, result);
     }
 
+    [Fact]
+    public void GetEffectiveOutcome_CaseVariantOfRequiredTool_ReturnsPauseForApproval()
+    {
+        var result = DurableToolDecisionPolicy.GetEffectiveOutcome(
+            DurableToolOutcome.Proceed,
+            "PLACE_ORDER",
+            requiresApprovalTools: ["place_order"]);
+
+        Assert.Equal(DurableToolOutcome.PauseForApproval, result);
+    }
+
     // ── IsToolSkipped ──────────────────────────────────────────────────────
 
     [Fact]
@@ -124,11 +135,11 @@ public class DurableToolDecisionPolicyTests
     }
 
     [Fact]
-    public void IsToolSkipped_CaseVariant_ReturnsFalse()
+    public void IsToolSkipped_CaseVariant_ReturnsTrue()
     {
         var result = DurableToolDecisionPolicy.IsToolSkipped("MY-TOOL", ["my-tool"]);
 
-        Assert.False(result);
+        Assert.True(result);
     }
 
     [Fact]
@@ -185,6 +196,25 @@ public class DurableToolDecisionPolicyTests
         // Result must not be either input object — a fresh allocation.
         Assert.NotSame(shared, result);
         Assert.NotSame(perTool, result);
+    }
+
+    [Fact]
+    public void ResolveInterceptorActivityOptions_CaseVariantUsesSerializedPerToolEntry()
+    {
+        var shared = new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(5) };
+        IReadOnlyDictionary<string, ActivityOptions> restoredFromHistory =
+            new Dictionary<string, ActivityOptions>(StringComparer.Ordinal)
+            {
+                ["place_order"] = new() { StartToCloseTimeout = TimeSpan.FromSeconds(30) },
+            };
+
+        var result = DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(
+            "PLACE_ORDER",
+            shared,
+            restoredFromHistory);
+
+        Assert.Equal(TimeSpan.FromSeconds(30), result.StartToCloseTimeout);
+        Assert.Equal("intercept:PLACE_ORDER", result.Summary);
     }
 
     // ── GetEffectiveArguments ─────────────────────────────────────────────

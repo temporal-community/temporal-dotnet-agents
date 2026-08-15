@@ -91,6 +91,13 @@ internal static class DurableAIRegistrar
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             Internal.DurableMixedPatternValidator>());
+
+        // Default toolset IDs and cross-toolset visible-name collisions are knowable from the
+        // completed worker service collection. Reject them while worker options are finalized,
+        // rather than poisoning the first stock session with a deterministic resolver failure.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<TemporalWorkerServiceOptions>,
+            Internal.DurableToolsetConfigurationValidator>());
     }
 
     /// <summary>

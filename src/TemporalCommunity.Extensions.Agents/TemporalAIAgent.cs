@@ -355,8 +355,10 @@ public sealed class TemporalAIAgent : AIAgent
                         };
                         // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)
                         // falling back to the shared _activityOptions (P1-2 fix).
-                        var toolDispatchOpts = _toolActivityOptions is not null
-                            && _toolActivityOptions.TryGetValue(tc.Name, out var perToolOpts)
+                        var toolDispatchOpts = DurableToolDecisionPolicy.TryGetToolValue(
+                            _toolActivityOptions,
+                            tc.Name,
+                            out var perToolOpts)
                                 ? perToolOpts
                                 : _activityOptions;
                         toolTasks.Add(Workflow.ExecuteActivityAsync(

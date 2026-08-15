@@ -1124,8 +1124,10 @@ internal class AgentWorkflow :
 
     private ActivityOptions ResolveDurableToolActivityOptions(string toolName)
     {
-        if (_input!.DurableAgentToolActivityOptions is not null
-            && _input!.DurableAgentToolActivityOptions.TryGetValue(toolName, out var perTool))
+        if (DurableToolDecisionPolicy.TryGetToolValue(
+            _input!.DurableAgentToolActivityOptions,
+            toolName,
+            out var perTool))
         {
             return perTool;
         }

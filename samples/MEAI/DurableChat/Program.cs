@@ -112,6 +112,8 @@ builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 // receives their schemas. The workflow resolves one versioned manifest, then dispatches each
 // model-requested invocation as a separate InvokeFunction activity. Per-tool retry/timeout is
 // frozen into that manifest through the DurableChatToolOptions callback.
+// Default IDs and cross-selected-toolset visible-name collisions are validated while the worker
+// starts, before a session can be created.
 var durableWorker = builder.Services
     .AddHostedTemporalWorker(TaskQueue)
     .AddDurableAI(opts =>

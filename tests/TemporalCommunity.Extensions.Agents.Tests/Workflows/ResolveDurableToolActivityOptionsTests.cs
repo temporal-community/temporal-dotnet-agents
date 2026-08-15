@@ -80,4 +80,34 @@ public class ResolveDurableToolActivityOptionsTests
 
         Assert.Null(resolved.RetryPolicy);
     }
+
+    [Fact]
+    public void Resolve_CaseVariant_UsesPerToolPolicyAfterHistoryRoundTrip()
+    {
+        var perToolPolicy = new RetryPolicy { MaximumAttempts = 1 };
+        var input = new AgentWorkflowInput
+        {
+            AgentName = "TestAgent",
+            TaskQueue = "tq",
+            ActivityTimeout = TimeSpan.FromMinutes(5),
+            HeartbeatTimeout = TimeSpan.FromMinutes(2),
+            ResolvedWorkerConfig = new ProxyResolvedWorkerConfig
+            {
+                MaxToolCallsPerTurn = 20,
+                ToolActivityOptions = new Dictionary<string, ActivityOptions>(StringComparer.Ordinal)
+                {
+                    ["place_order"] = new()
+                    {
+                        StartToCloseTimeout = TimeSpan.FromSeconds(15),
+                        RetryPolicy = perToolPolicy,
+                    },
+                },
+            },
+        };
+
+        var resolved = InvokeResolve(input, "PLACE_ORDER");
+
+        Assert.Same(perToolPolicy, resolved.RetryPolicy);
+        Assert.Equal(TimeSpan.FromSeconds(15), resolved.StartToCloseTimeout);
+    }
 }

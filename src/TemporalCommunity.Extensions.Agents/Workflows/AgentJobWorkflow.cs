@@ -243,8 +243,10 @@ internal sealed class AgentJobWorkflow
     /// </summary>
     private static ActivityOptions ResolveDurableToolActivityOptions(AgentJobInput input, string toolName)
     {
-        if (input.DurableAgentToolActivityOptions is not null
-            && input.DurableAgentToolActivityOptions.TryGetValue(toolName, out var perTool))
+        if (DurableToolDecisionPolicy.TryGetToolValue(
+            input.DurableAgentToolActivityOptions,
+            toolName,
+            out var perTool))
         {
             return perTool;
         }

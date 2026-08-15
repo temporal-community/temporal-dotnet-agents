@@ -27,6 +27,9 @@ against current authoritative application data inside their activity.
 - Toolset IDs and visible function names use `StringComparer.Ordinal` everywhere.
 - Selected toolsets are combined in configured order; members retain registration order.
 - Duplicate selected IDs or visible names fail. There is no precedence or silent deduplication.
+- The stock worker validates `DefaultToolsetIds`, implicit/explicit-default conflicts, and visible
+  name collisions while worker options are finalized. Custom-workflow baseline selections are
+  runtime inputs and remain validated by the resolver activity.
 - Registrations contain implementations; durable manifests never contain implementations,
   delegates, service providers, reflection objects, or CLR types.
 - Explicit defaults and the implicit `AddDurableTools` toolset cannot be mixed. Register every
@@ -58,21 +61,23 @@ runs rather than silently dispatching a different implementation.
 | Custom turn supplies an empty list | No tools for that turn | Run model with no tools |
 | Custom turn supplies a baseline subset | Baseline-ordered subset | Run with frozen subset |
 | Custom turn names an ID outside the baseline | Attempted expansion | Non-retryable failure before model activity |
-| Model returns an unselected or unknown function | Not enabled | Same safe blocked result; no tool activity |
+| Model returns an unselected, undeclared, or unknown function | Not enabled | Same safe blocked result; no interceptor, approval, or tool activity |
 | Continue-as-New | Recorded session baseline | Carry unchanged; never resolve again |
 
 The manifest fingerprint covers the ordered declarations and durable policy. Each member also has
 a stable identity fingerprint over its toolset ID, activation key, and declaration. The workflow
 binds that identity to the full manifest fingerprint in every internal tool-activity input. The
 activity validates this binding and the worker's exact activation before it creates a factory or
-invokes a function. A malformed name, schema fingerprint, toolset ID, activation key, manifest
-fingerprint, or binding fails non-retryably without reaching application code.
+invokes a function. The workflow is the membership boundary: it dispatches only a function present
+in the active worker manifest or, in advanced caller-owned mode, the frozen caller declaration
+set. A malformed binding fails non-retryably without reaching application code.
 
-These checks protect package boundaries and deterministic dispatch; they are not an authorization
+The activity fingerprints are integrity and deployment-consistency checks, not an authorization
 system. Tool exposure controls what the model may request. A write tool must still authorize the
 current subject and resource immediately before its external effect. Public blocked results do not
-distinguish an unknown function from a baseline-known but unselected function, and never list the
-worker registry.
+distinguish unknown, undeclared, or baseline-known but unselected functions, and never list the
+worker registry. A replay-safe warning identifies the workflow/turn/iteration/call index for
+operators without adding the model-supplied function name to metric dimensions.
 
 ## Resolution sequence
 

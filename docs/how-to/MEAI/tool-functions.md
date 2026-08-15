@@ -57,6 +57,10 @@ Toolset IDs and model-visible function names use exact ordinal comparison. Named
 be empty, and members retain their registration order. `weather` and `Weather` are different IDs;
 the library does not normalize names or silently resolve collisions.
 
+The worker validates stock `DefaultToolsetIds` and cross-selected-toolset function collisions at
+startup. A custom workflow's baseline or per-turn narrowing is validated when its recorded
+manifest is resolved or narrowed.
+
 Callers then send ordinary chat messages. Do not put functions in `ChatOptions.Tools`.
 
 ```csharp
@@ -194,6 +198,9 @@ Resolve `IDurableChatWorkflowInputFactory` outside workflow code and use its res
 start input. Call `AddDurableToolImplementation<TRequestData, TTurnState>` in the worker. That
 implementation-bearing worker hosts both model and tool activities on the session queue. The
 frozen workflow input, not the live worker registry, is the model-facing declaration authority.
+Registering an additional implementation on the worker does not expose it: a model-returned name
+absent from the frozen caller declarations receives the same safe blocked result as an unknown
+name, before interceptor, approval, factory, or function execution.
 
 An implementation-only worker may use
 `AddHostedTemporalWorker(address, namespace, taskQueue)` and set

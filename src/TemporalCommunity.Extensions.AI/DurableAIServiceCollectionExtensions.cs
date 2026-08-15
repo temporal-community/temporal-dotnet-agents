@@ -20,10 +20,14 @@ public static class DurableAIServiceCollectionExtensions
     /// <param name="services">The workflow-starting process service collection.</param>
     /// <param name="taskQueue">The task queue used by the implementation-bearing worker.</param>
     /// <param name="configure">Optional durable execution configuration.</param>
-    /// <returns>The same service collection for declaration registration.</returns>
+    /// <returns>The same service collection.</returns>
     /// <remarks>
-    /// Follow this call with the <see cref="AddDurableToolDeclaration(IServiceCollection,AIFunctionDeclaration,Action{DurableChatToolOptions}?)"/>
-    /// overload, then resolve <see cref="IDurableChatWorkflowInputFactory"/> outside workflow code.
+    /// In the preferred worker-owned toolset mode, the workflow-starting process registers no
+    /// tool declarations; resolve <see cref="IDurableChatWorkflowInputFactory"/> outside workflow
+    /// code and let the worker resolve its recorded baseline. Follow this call with
+    /// <see cref="AddDurableToolDeclaration(IServiceCollection,AIFunctionDeclaration,Action{DurableChatToolOptions}?)"/>
+    /// only for the advanced caller-owned declaration mode, where this process intentionally owns
+    /// and freezes the model-facing schemas.
     /// Clients created through <c>AddTemporalClient</c> are configured to use
     /// <see cref="DurableAIDataConverter.Instance"/> when their converter is still the SDK default.
     /// A custom converter is preserved. Manually constructed clients must set the durable converter

@@ -135,6 +135,29 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
 
             var toolCalls = stepResult.ToolCalls;
+            var manifestMembers = new Internal.DurableToolsetManifestMember?[toolCalls.Count];
+            var callerDeclarations = new Internal.DurableFunctionDeclarationSnapshot?[toolCalls.Count];
+            var enabledToolCalls = new bool[toolCalls.Count];
+            for (var i = 0; i < toolCalls.Count; i++)
+            {
+                var toolCall = toolCalls[i];
+                var manifestMember = FindManifestMember(toolsetManifest, toolCall.Name);
+                var callerDeclaration = toolsetManifest is null
+                    ? FindCallerDeclaration(RequiredInput.ToolDeclarations, toolCall.Name)
+                    : null;
+
+                manifestMembers[i] = manifestMember;
+                callerDeclarations[i] = callerDeclaration;
+                enabledToolCalls[i] = manifestMember is not null || callerDeclaration is not null;
+                if (!enabledToolCalls[i])
+                {
+                    Workflow.Logger.LogDurableToolCallNotEnabled(
+                        Workflow.Info.WorkflowId,
+                        CurrentTurnNumber,
+                        iteration + 1,
+                        i);
+                }
+            }
 
             // ── Phase 1: Fan out interceptor activities in parallel ────────────────────────
             // Build interceptor results for all tool calls. Tools opted out (SkipInterceptor)
@@ -148,13 +171,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 || toolsetManifest?.Members.Any(member => member.InterceptorEnabled) == true)
             {
                 var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
-                foreach (var tc in toolCalls)
+                for (var i = 0; i < toolCalls.Count; i++)
                 {
-                    var manifestMember = FindManifestMember(toolsetManifest, tc.Name);
-                    if (toolsetManifest is not null
-                        && (manifestMember is null
-                            || !manifestMember.InterceptorEnabled
-                            || manifestMember.SkipInterceptor))
+                    var tc = toolCalls[i];
+                    var manifestMember = manifestMembers[i];
+                    if (!enabledToolCalls[i]
+                        || (toolsetManifest is not null
+                            && (!manifestMember!.InterceptorEnabled
+                                || manifestMember.SkipInterceptor)))
                     {
                         interceptorTasks.Add(Task.FromResult(
                             new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
@@ -214,10 +238,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             {
                 var tc = toolCalls[i];
                 var interceptorResult = interceptorResults?[i];
-                var manifestMember = FindManifestMember(toolsetManifest, tc.Name);
+                var manifestMember = manifestMembers[i];
+                var declaration = manifestMember?.Declaration ?? callerDeclarations[i];
 
                 // Determine effective outcome (Rule 2: RequireApproval floor, Block never overridden).
-                var outcome = toolsetManifest is not null && manifestMember is null
+                var outcome = !enabledToolCalls[i]
                     ? DurableToolOutcome.Block
                     : DurableToolDecisionPolicy.GetEffectiveOutcome(
                         interceptorResult?.Outcome,
@@ -233,8 +258,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         {
                             FunctionName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
-                            Declaration = manifestMember?.Declaration ?? RequiredInput.ToolDeclarations?.FirstOrDefault(
-                                declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
+                            Declaration = declaration,
                             ToolsetId = manifestMember?.ToolsetId,
                             ActivationKey = manifestMember?.ActivationKey,
                             MemberIdentityFingerprint = manifestMember?.MemberIdentityFingerprint,
@@ -292,8 +316,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                             {
                                 FunctionName = tc.Name,
                                 Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
-                                Declaration = manifestMember?.Declaration ?? RequiredInput.ToolDeclarations?.FirstOrDefault(
-                                    declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
+                                Declaration = declaration,
                                 ToolsetId = manifestMember?.ToolsetId,
                                 ActivationKey = manifestMember?.ActivationKey,
                                 MemberIdentityFingerprint = manifestMember?.MemberIdentityFingerprint,
@@ -587,6 +610,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         string toolName) =>
         manifest?.Members.FirstOrDefault(member => string.Equals(
             member.Declaration.Name,
+            toolName,
+            StringComparison.Ordinal));
+
+    private static Internal.DurableFunctionDeclarationSnapshot? FindCallerDeclaration(
+        IReadOnlyList<Internal.DurableFunctionDeclarationSnapshot>? declarations,
+        string toolName) =>
+        declarations?.FirstOrDefault(declaration => string.Equals(
+            declaration.Name,
             toolName,
             StringComparison.Ordinal));
 
