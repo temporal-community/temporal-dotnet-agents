@@ -95,7 +95,8 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient, IDurab
         {
             throw new DurableConfigurationException(
                 "ChatOptions.Tools cannot be used for a durable chat session. " +
-                "Register tools with AddDurableTools so Temporal can schedule each invocation as an activity.");
+                "Register worker-owned tools with AddDurableTools or AddDurableToolset so " +
+                "Temporal can schedule each invocation as an activity.");
         }
 
         var workflowId = GetWorkflowId(conversationId);

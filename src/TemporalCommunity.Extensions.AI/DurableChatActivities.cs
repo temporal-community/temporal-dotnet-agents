@@ -149,8 +149,8 @@ internal sealed class DurableChatActivities(
 
         SetupSpanTags(span, input.ConversationId, modelId);
 
-        // Caller-supplied tools cannot cross the durable boundary. The workflow activity owns
-        // the model-facing schema and builds it from the registered durable-tool registry.
+        // Caller-supplied tools cannot cross the durable boundary. The workflow owns the
+        // model-facing schema and supplies its recorded declarations to this activity.
         EnsureNoCallerSuppliedTools(input.Options);
         var effectiveOptions = input.Options?.Clone() ?? new ChatOptions();
         if (input.ToolDeclarations is { Count: > 0 })
@@ -313,7 +313,8 @@ internal sealed class DurableChatActivities(
         }
 
         throw new ApplicationFailureException(
-            "ChatOptions.Tools is not supported by durable execution. Register tools with AddDurableTools.",
+            "ChatOptions.Tools is not supported by durable execution. Register worker-owned tools " +
+            "with AddDurableTools or AddDurableToolset.",
             errorType: nameof(DurableConfigurationException),
             nonRetryable: true);
     }

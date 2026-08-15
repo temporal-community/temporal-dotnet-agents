@@ -549,8 +549,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
     /// <summary>
     /// Resolves per-tool <see cref="ActivityOptions"/> for a tool dispatch. Falls back to
-    /// the workflow-level defaults when no entry exists for the tool name (defensive — the
-    /// session client eagerly populates every registered tool).
+    /// the workflow-level defaults when no entry exists for the tool name. Worker-owned calls
+    /// carry their options in <paramref name="manifestMember"/>; this fallback serves the
+    /// advanced caller-owned path and malformed legacy inputs.
     /// </summary>
     private ActivityOptions ResolveToolActivityOptions(
         string toolName,
@@ -568,7 +569,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         }
 
         Workflow.Logger.LogWarning(
-            "Tool '{ToolName}' not found in ToolActivityOptions; using defaults. Check session client registration.",
+            "Tool '{ToolName}' not found in caller-owned ToolActivityOptions; using workflow defaults.",
             toolName);
 
         return new ActivityOptions

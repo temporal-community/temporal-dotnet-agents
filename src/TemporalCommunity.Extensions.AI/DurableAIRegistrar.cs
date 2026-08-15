@@ -55,8 +55,8 @@ internal static class DurableAIRegistrar
             }
 
             // Register the session client (concrete + interface alias share the same instance).
-            // Inject both registries so the client can build durable-tool ActivityOptions at
-            // session start when durable tools are present.
+            // The canonical input factory emits a thin input for worker-owned toolsets and retains
+            // the declaration/policy snapshot only for the advanced caller-owned mode.
             services.TryAddSingleton<DurableChatSessionClient>(sp =>
                 new DurableChatSessionClient(
                     sp.GetRequiredService<ITemporalClient>(),

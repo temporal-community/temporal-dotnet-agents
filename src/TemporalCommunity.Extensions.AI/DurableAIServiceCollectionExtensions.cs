@@ -160,9 +160,9 @@ public static class DurableAIServiceCollectionExtensions
     /// Call this after <see cref="AddDurableAI"/>. Tools registered via this method always
     /// receive an entry in the per-tool options registry — a default
     /// <see cref="DurableChatToolOptions"/> when <paramref name="configure"/> is
-    /// <see langword="null"/>, otherwise the configured instance. This guarantees the
-    /// <see cref="DurableChatSessionClient"/> sees every registered tool when it resolves
-    /// managed-session tool dispatch at session start.
+    /// <see langword="null"/>, otherwise the configured instance. This guarantees the implicit
+    /// worker-owned toolset has a complete policy entry for every member when its manifest is
+    /// resolved. The advanced caller-owned mode uses the same registry to freeze per-tool policy.
     ///
     /// <para>
     /// Write-style tools (send email, persist a record, charge a card) should call
@@ -593,9 +593,9 @@ internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>
 /// Registry of per-tool <see cref="DurableChatToolOptions"/> overrides. Populated by
 /// <see cref="DurableAIServiceCollectionExtensions.AddDurableTools(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction, System.Action{DurableChatToolOptions}?)"/>
 /// — every registered tool gets an entry, even if the caller passed
-/// <see langword="null"/> for <c>configure</c>. The <see cref="DurableChatSessionClient"/>
-/// consumes this registry to build the per-tool <c>ActivityOptions</c> dictionary that
-/// drives managed tool dispatch.
+/// <see langword="null"/> for <c>configure</c>. Worker-owned manifest resolution consumes this
+/// policy through the toolset registration; the advanced caller-owned input factory uses the
+/// registry directly.
 /// </summary>
 // The same CS8644 caveat as DurableFunctionRegistry above — Dictionary<TKey, TValue> already
 // implements IReadOnlyDictionary<TKey, TValue>; re-declaring it would trigger the nullability

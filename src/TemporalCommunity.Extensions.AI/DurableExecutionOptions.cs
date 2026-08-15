@@ -235,9 +235,9 @@ public sealed class DurableExecutionOptions
     /// <code>
     /// opts.DefaultToolInterceptor = sp => sp.GetRequiredService&lt;MyInterceptor&gt;();
     /// </code>
-    /// When non-null, the session client pre-computes interceptor <c>ActivityOptions</c>
-    /// at session start and freezes them into <c>DurableChatWorkflowInput</c> so replay
-    /// is deterministic regardless of which worker processes a given turn.
+    /// For worker-owned toolsets, the resolver records whether the interceptor is enabled and
+    /// freezes its activity policy into the session manifest. The advanced caller-owned mode
+    /// freezes the equivalent policy directly into <c>DurableChatWorkflowInput</c>.
     /// </remarks>
     public Func<IServiceProvider, IDurableToolInterceptor<DurableToolContext>>? DefaultToolInterceptor
     {

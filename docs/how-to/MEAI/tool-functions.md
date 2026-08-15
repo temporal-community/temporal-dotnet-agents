@@ -71,7 +71,8 @@ var response = await sessionClient.SendAsync(
 
 The workflow executes this sequence until the model returns a final response:
 
-1. `GetChatStep` calls the configured `IChatClient` with schemas from the durable registry.
+1. `GetChatStep` calls the configured `IChatClient` with schemas from the workflow's recorded
+   worker-owned manifest (or the advanced caller-owned declaration snapshot).
 2. Each returned function call becomes an `InvokeFunction` activity.
 3. Results are added to the next model step.
 
@@ -88,10 +89,11 @@ The workflow executes this sequence until the model returns a final response:
 
 ## Upgrading live 0.10.4 tool sessions
 
-Do not carry a live managed tool session started by version 0.10.4 across this upgrade. New
-sessions freeze their model-facing tool declarations into the workflow start input; a 0.10.4
-workflow history does not contain that field. After an upgraded worker replays such a session,
-replay can succeed, but a later turn cannot offer the registered tools to the model.
+Do not carry a live managed tool session started by version 0.10.4 across this upgrade. Those
+histories contain neither the caller-owned declaration snapshot introduced in 0.12.0 nor the
+worker-owned manifest-resolution command introduced by the toolset design. Drain or terminate
+those sessions before deploying workers with this workflow implementation, then start fresh
+sessions against the corrected worker-owned authority path.
 
 Before deploying the upgraded worker, stop new turns on those sessions and let them expire or call
 `DurableChatSessionClient.ShutdownAsync(conversationId)`. Start replacement sessions after the

@@ -141,8 +141,9 @@ service inside the tool activity.
 - The standard `DurableChatSessionClient.SendAsync` response and persisted history are sufficient.
 - You do not need per-turn domain data returned synchronously to the caller.
 
-This is the right starting point. For managed sessions, register tools with `AddDurableTools`; the
-workflow owns the model/tool loop. Most applications never need a custom workflow.
+This is the right starting point. For managed sessions, register worker-owned tools with
+`AddDurableTools` or `AddDurableToolset`; the workflow owns the model/tool loop. Most applications
+never need a custom workflow.
 
 ---
 

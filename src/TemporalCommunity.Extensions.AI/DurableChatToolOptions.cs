@@ -3,10 +3,8 @@ using Temporalio.Common;
 namespace TemporalCommunity.Extensions.AI;
 
 /// <summary>
-/// Per-tool Temporal activity overrides applied when a durable chat session client
-/// dispatches a tool call as a Temporal activity
-/// (<c>TemporalCommunity.Extensions.AI.InvokeFunction</c>) under the durable tool
-/// dispatch without a custom workflow).
+/// Per-tool Temporal activity overrides applied when the durable workflow dispatches a tool call
+/// as a <c>TemporalCommunity.Extensions.AI.InvokeFunction</c> activity.
 /// </summary>
 /// <remarks>
 /// <para>

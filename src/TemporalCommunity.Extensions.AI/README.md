@@ -57,11 +57,11 @@ For side-effecting functions, design for activity retries or use `NoRetry()`.
 
 ### Upgrade boundary for live 0.10.4 tool sessions
 
-Drain managed tool sessions started by version 0.10.4 before deploying this version. This version
-freezes tool declarations into the workflow start input; 0.10.4 histories do not contain those
-declarations. Although their recorded command histories remain replayable, a new turn after the
-worker upgrade cannot offer tools to the model. Stop new turns and let the old sessions expire, or
-close them with `ShutdownAsync`, then start replacement sessions after deployment.
+Drain managed tool sessions started by version 0.10.4 before deploying this version. Those
+histories contain neither the caller-owned declaration snapshot introduced in 0.12.0 nor the
+worker-owned manifest-resolution command introduced by the toolset design. Stop new turns and let
+the old sessions expire, or close them with `ShutdownAsync`, then start replacement sessions after
+deployment.
 
 ## Quick start
 

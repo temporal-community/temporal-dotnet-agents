@@ -117,9 +117,9 @@ public record class DurableChatWorkflowInput
     public DateTimeOffset? OriginalCreatedAt { get; init; }
 
     /// <summary>
-    /// Per-tool <see cref="ActivityOptions"/> resolved at session start by the
-    /// <see cref="DurableChatSessionClient"/> for every tool registered via
-    /// <see cref="DurableAIServiceCollectionExtensions.AddDurableTools(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction[])"/>.
+    /// Per-tool <see cref="ActivityOptions"/> frozen into workflow input for the advanced
+    /// caller-owned declaration mode. Worker-owned toolsets carry the corresponding options in
+    /// their resolved manifest instead.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -128,10 +128,9 @@ public record class DurableChatWorkflowInput
     /// forward verbatim through continue-as-new transitions.
     /// </para>
     /// <para>
-    /// <b>Mid-session drift:</b> per-tool options are frozen at session start. A new
-    /// <c>AddDurableTools</c> registered after the session begins will NOT affect this
-    /// session — its options dict was already captured into workflow history. Newly
-    /// registered tools are picked up by sessions started after the registration.
+    /// <b>Mid-session drift:</b> caller-owned options are frozen at session start. Worker-owned
+    /// options are frozen when the resolver activity records the session manifest. Later worker
+    /// registration changes do not alter either recorded authority.
     /// </para>
     /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -148,8 +147,8 @@ public record class DurableChatWorkflowInput
 
     /// <summary>
     /// Per-tool overrides for the <c>RunToolInterceptor</c> activity timeout.
-    /// Keys are tool names (exact ordinal comparison). Only entries for tools that have a
-    /// non-null <c>InterceptorTimeout</c> are present; all others use
+    /// Keys are tool names (ordinal case-insensitive policy lookup). Only entries for tools that
+    /// have a non-null <c>InterceptorTimeout</c> are present; all others use
     /// <see cref="InterceptorActivityOptions"/>.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -158,7 +157,8 @@ public record class DurableChatWorkflowInput
     /// <summary>
     /// Tool names that should be skipped when dispatching the <c>RunToolInterceptor</c>
     /// activity. Populated from tools where <c>SkipInterceptorFlag</c> is set.
-    /// Exact ordinal comparisons apply at runtime.
+    /// Ordinal case-insensitive comparisons apply at runtime. Worker-owned manifest membership
+    /// remains an independent exact-ordinal check.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? InterceptorSkippedTools { get; init; }
