@@ -444,6 +444,27 @@ var options = new TemporalAgentRunOptions
 var response = await agentProxy.RunAsync("Look up the latest news.", session, options);
 ```
 
+The selection contract is exact:
+
+| `EnableToolCalls` | `EnableToolNames` | Tools exposed and dispatchable |
+|---|---|---|
+| `false` | any value | none |
+| `true` | `null` | all registered tools |
+| `true` | empty | none |
+| `true` | names | case-insensitive registered matches only |
+
+The workflow checks the same policy again when the model returns a function call. Unknown,
+blank, and excluded names receive a generic blocked result; they do not schedule an interceptor,
+approval, or tool activity. Mixed batches retain model-call order while allowed calls continue
+through normal durable dispatch.
+
+Tool selection is exposure control, not authorization. It reduces what the provider sees and
+what the workflow will dispatch for that run, but it does not establish the caller's identity or
+permission to perform an effect. Side-effecting tools must re-authorize against current,
+authoritative application data inside the tool activity. Tenant-visible blocked responses do not
+distinguish an unknown tool from a registered-but-excluded tool; requested names are available only
+in operator workflow logs, without arguments or registry contents.
+
 ---
 
 ## Agent Orchestration (Inside Workflows)

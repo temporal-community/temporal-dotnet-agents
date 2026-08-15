@@ -21,6 +21,15 @@ namespace TemporalCommunity.Extensions.Agents.State;
 /// </remarks>
 public sealed class AgentSessionRequest : DurableSessionRequest
 {
+    /// <summary>Gets whether durable tool calls are enabled for this turn.</summary>
+    public bool EnableToolCalls { get; init; } = true;
+
+    /// <summary>
+    /// Gets the registered tool names exposed for this turn. A null value exposes all registered
+    /// tools; an empty list exposes none.
+    /// </summary>
+    public IReadOnlyList<string>? EnableToolNames { get; init; }
+
     /// <summary>
     /// Gets the ID of the orchestration or workflow that initiated this request, when applicable.
     /// </summary>
@@ -68,6 +77,8 @@ public sealed class AgentSessionRequest : DurableSessionRequest
             CorrelationId = request.CorrelationId,
             CreatedAt = createdAt,
             Messages = request.Messages.ToList(),
+            EnableToolCalls = request.EnableToolCalls,
+            EnableToolNames = request.EnableToolNames?.ToArray(),
             OrchestrationId = request.OrchestrationId,
             ResponseType = request.ResponseFormat is ChatResponseFormatJson ? "json" : "text",
             ResponseSchema = (request.ResponseFormat as ChatResponseFormatJson)?.Schema,

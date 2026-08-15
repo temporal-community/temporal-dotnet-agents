@@ -5,6 +5,10 @@ using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode; // shared scaffolding (linked via .csproj)
+using TemporalCommunity.Extensions.Agents.Tools;
+using TemporalCommunity.Extensions.Agents.Workflows;
+using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Tools;
 using Temporalio.Testing;
 using Xunit;
 
@@ -92,6 +96,118 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
         Assert.Equal(1, toolCount);
         // Sanity: legacy step-mode path should NOT have run.
         Assert.DoesNotContain("TemporalCommunity.Extensions.Agents.RunAgentStep", activityNames);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task DurableAgent_DisabledToolCalls_BlocksModelReturnedCallBeforeDispatch()
+    {
+        var recorder = new RecordingTool { Name = "echo_tool" };
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", recorder.Name,
+                new Dictionary<string, object?> { ["input"] = "hello" })],
+            "Blocked call handled.");
+
+        using var host = BuildHost(scripted, [recorder.Build()], configureAgent: agent =>
+            agent.AddToolInterceptor(_ => new ProceedingInterceptor()));
+        await host.StartAsync();
+
+        var proxy = host.Services.GetTemporalAgentProxy("DurableAgent");
+        var session = await proxy.CreateSessionAsync();
+        var response = await proxy.RunAsync(
+            "Hi",
+            session,
+            new TemporalAgentRunOptions { EnableToolCalls = false });
+
+        Assert.Contains("Blocked call handled.", response.Messages[^1].Text);
+        Assert.Equal(0, recorder.CallCount);
+        Assert.Null(scripted.Calls[0].Options?.Tools);
+
+        var sessionId = ((TemporalAgentSession)session).SessionId;
+        var activityNames = await CollectActivityNamesAsync(
+            _env.Client.GetWorkflowHandle(sessionId.WorkflowId));
+        Assert.DoesNotContain(InvokeAgentToolActivity, activityNames);
+        Assert.DoesNotContain("TemporalCommunity.Extensions.Agents.RunToolInterceptor", activityNames);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task DurableAgent_RepeatedBlockedCalls_StopAtIterationLimitWithoutDispatch()
+    {
+        const int cap = 3;
+        var recorder = new RecordingTool { Name = "loop_tool" };
+        var responses = Enumerable.Range(0, cap + 2)
+            .Select(i => new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [new FunctionCallContent($"call-{i}", recorder.Name,
+                    new Dictionary<string, object?> { ["input"] = "go" })])))
+            .ToArray();
+        var scripted = new ScriptedChatClient(responses);
+
+        using var host = BuildHost(scripted, [recorder.Build()], agent =>
+            agent.MaxToolCallsPerTurn = cap);
+        await host.StartAsync();
+
+        var proxy = host.Services.GetTemporalAgentProxy("DurableAgent");
+        var session = await proxy.CreateSessionAsync();
+        var response = await proxy.RunAsync(
+            "Hi",
+            session,
+            new TemporalAgentRunOptions { EnableToolCalls = false });
+
+        Assert.Equal(cap, scripted.CallCount);
+        Assert.Equal(0, recorder.CallCount);
+        Assert.Contains("Maximum tool-call iterations", response.Messages[^1].Text);
+
+        var sessionId = ((TemporalAgentSession)session).SessionId;
+        var activityNames = await CollectActivityNamesAsync(
+            _env.Client.GetWorkflowHandle(sessionId.WorkflowId));
+        Assert.DoesNotContain(InvokeAgentToolActivity, activityNames);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task DurableAgent_SubsetSelection_PreservesMixedResultOrderAndDispatchesOnlyAllowedCall()
+    {
+        var allowed = new RecordingTool { Name = "allowed_tool" };
+        var excluded = new RecordingTool { Name = "excluded_tool" };
+        var sharedCallId = "same-call-id";
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+        [
+            new FunctionCallContent(sharedCallId, excluded.Name,
+                new Dictionary<string, object?> { ["input"] = "blocked" }),
+            new FunctionCallContent(sharedCallId, allowed.Name,
+                new Dictionary<string, object?> { ["input"] = "allowed" }),
+        ], "Mixed batch handled.");
+
+        using var host = BuildHost(scripted, [allowed.Build(), excluded.Build()], configureAgent: null);
+        await host.StartAsync();
+
+        var proxy = host.Services.GetTemporalAgentProxy("DurableAgent");
+        var session = await proxy.CreateSessionAsync();
+        await proxy.RunAsync(
+            "Hi",
+            session,
+            new TemporalAgentRunOptions { EnableToolNames = ["ALLOWED_TOOL"] });
+
+        Assert.Equal(1, allowed.CallCount);
+        Assert.Equal(0, excluded.CallCount);
+        Assert.Equal(["allowed_tool"], scripted.Calls[0].Options!.Tools!.Select(t => t.Name));
+
+        var resultMessage = scripted.Calls[1].Messages.Single(message => message.Role == ChatRole.Tool);
+        var results = resultMessage.Contents.OfType<FunctionResultContent>().ToArray();
+        Assert.Equal(2, results.Length);
+        Assert.Equal(sharedCallId, results[0].CallId);
+        Assert.Equal(AgentRunToolSelectionPolicy.BlockedResult, results[0].Result?.ToString());
+        Assert.Equal(sharedCallId, results[1].CallId);
+
+        var sessionId = ((TemporalAgentSession)session).SessionId;
+        var activityNames = await CollectActivityNamesAsync(
+            _env.Client.GetWorkflowHandle(sessionId.WorkflowId));
+        Assert.Equal(1, activityNames.Count(name => name == InvokeAgentToolActivity));
 
         await host.StopAsync();
     }
@@ -314,6 +430,14 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
         });
 
         return builder.Build();
+    }
+
+    private sealed class ProceedingInterceptor : IAgentToolInterceptor
+    {
+        public Task<DurableToolDecision> BeforeToolCallAsync(
+            AgentToolContext context,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(DurableToolDecision.Proceed());
     }
 }
 

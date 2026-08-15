@@ -144,6 +144,57 @@ public class SubAgentStateBagThreadingTests
         }
     }
 
+    [Fact]
+    public async Task SubAgent_DisabledToolCalls_BlocksModelReturnedCallBeforeDispatch()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var recorder = new RecordingTool { Name = "subagent_tool" };
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", recorder.Name,
+                new Dictionary<string, object?> { ["input"] = "data" })],
+            "Blocked call handled.");
+        var taskQueue = $"subagent-selection-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddWorkflow<SelectionBlockingSubAgentWorkflow>()
+            .AddTemporalAgents(options => options.AddDurableAgent("SubAgent", agent =>
+            {
+                agent.ChatClient = services => services.GetRequiredService<IChatClient>();
+                agent.AddTool(recorder.Build());
+            }));
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var handle = await env.Client.StartWorkflowAsync(
+                (SelectionBlockingSubAgentWorkflow workflow) => workflow.RunAsync(),
+                new WorkflowOptions($"subagent-selection-{Guid.NewGuid():N}", taskQueue));
+            await handle.GetResultAsync();
+
+            Assert.Equal(0, recorder.CallCount);
+            var toolSchedules = 0;
+            await foreach (var ev in handle.FetchHistoryEventsAsync())
+            {
+                if (ev.ActivityTaskScheduledEventAttributes?.ActivityType.Name
+                    == "TemporalCommunity.Extensions.Agents.InvokeAgentTool")
+                {
+                    toolSchedules++;
+                }
+            }
+            Assert.Equal(0, toolSchedules);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     [Workflow("SubAgentStateBagThreading.Orchestration")]
     internal class OrchestrationWorkflow
     {
@@ -168,6 +219,21 @@ public class SubAgentStateBagThreadingTests
             var session = await agent.CreateSessionAsync().ConfigureAwait(true);
             await agent.RunAsync([new ChatMessage(ChatRole.User, "Attempt the destructive operation.")], session)
                 .ConfigureAwait(true);
+        }
+    }
+
+    [Workflow("SubAgentStateBagThreading.SelectionBlocking")]
+    internal class SelectionBlockingSubAgentWorkflow
+    {
+        [WorkflowRun]
+        public async Task RunAsync()
+        {
+            var agent = GetTemporalAgent("SubAgent");
+            var session = await agent.CreateSessionAsync().ConfigureAwait(true);
+            await agent.RunAsync(
+                [new ChatMessage(ChatRole.User, "Attempt the operation.")],
+                session,
+                new TemporalAgentRunOptions { EnableToolCalls = false }).ConfigureAwait(true);
         }
     }
 

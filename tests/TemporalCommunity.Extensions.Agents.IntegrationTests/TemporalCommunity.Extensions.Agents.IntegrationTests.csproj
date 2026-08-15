@@ -31,6 +31,7 @@
        has moved to TemporalCommunity.Extensions.Tests.Shared (see ProjectReference above). -->
   <ItemGroup>
     <Compile Include="../TemporalCommunity.Extensions.Agents.Tests/StepMode/RecordingTool.cs" Link="StepMode/RecordingTool.cs" />
+    <Compile Include="../TemporalCommunity.Extensions.Agents.Tests/Compat/ToolSelectionContainingWorkflow.cs" Link="Compat/ToolSelectionContainingWorkflow.cs" />
   </ItemGroup>
 
   <ItemGroup>

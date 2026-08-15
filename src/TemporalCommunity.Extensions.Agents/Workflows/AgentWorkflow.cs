@@ -323,7 +323,11 @@ internal class AgentWorkflow :
                 : ChatResponseFormat.Json;
         }
 
-        return new RunRequest(entry.Messages.ToList(), responseFormat: responseFormat)
+        return new RunRequest(
+            entry.Messages.ToList(),
+            responseFormat: responseFormat,
+            enableToolCalls: entry.EnableToolCalls,
+            enableToolNames: entry.EnableToolNames?.ToList())
         {
             CorrelationId = entry.CorrelationId,
             OrchestrationId = entry.OrchestrationId,
@@ -495,6 +499,30 @@ internal class AgentWorkflow :
 
             var toolCalls = stepResult.ToolCalls;
 
+            var registeredToolNames = _input!.DurableAgentToolActivityOptions?.Keys.ToArray()
+                ?? [];
+            var enabledToolNames = runRequest.EnableToolNames is { } requestedNames
+                ? requestedNames.ToArray()
+                : null;
+            var enabledToolCalls = new bool[toolCalls.Count];
+            for (var i = 0; i < toolCalls.Count; i++)
+            {
+                enabledToolCalls[i] = AgentRunToolSelectionPolicy.IsCallEnabled(
+                    toolCalls[i].Name,
+                    registeredToolNames,
+                    runRequest.EnableToolCalls,
+                    enabledToolNames);
+                if (!enabledToolCalls[i])
+                {
+                    Workflow.Logger.LogRunToolCallBlocked(
+                        _input.AgentName,
+                        Workflow.Info.WorkflowId,
+                        runRequest.CorrelationId ?? string.Empty,
+                        iteration + 1,
+                        toolCalls[i].Name);
+                }
+            }
+
             Workflow.Logger.LogDurableAgentTurnIteration(_input!.AgentName, iteration + 1, toolCalls.Count);
 
             // ── Feature L — Phase 1: Fan out interceptor activities in parallel ────────────
@@ -522,8 +550,16 @@ internal class AgentWorkflow :
                 // optimization only holds for consumers that can fall back to carried state.
                 var forceInterceptorBag = _input!.ScopeAwareTools is { Count: > 0 };
                 var bagForInterceptors = GetStateBagForDispatch(force: forceInterceptorBag);
-                foreach (var tc in toolCalls)
+                for (var i = 0; i < toolCalls.Count; i++)
                 {
+                    var tc = toolCalls[i];
+                    if (!enabledToolCalls[i])
+                    {
+                        interceptorTasks.Add(Task.FromResult(
+                            new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
+                        continue;
+                    }
+
                     if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, skippedTools))
                     {
                         interceptorTasks.Add(Task.FromResult(
@@ -599,6 +635,12 @@ internal class AgentWorkflow :
             for (var i = 0; i < toolCalls.Count; i++)
             {
                 var tc = toolCalls[i];
+                if (!enabledToolCalls[i])
+                {
+                    syntheticResults[i] = AgentRunToolSelectionPolicy.CreateBlockedResult(tc.Name);
+                    continue;
+                }
+
                 var interceptorResult = interceptorResults?[i];
 
                 // Determine effective outcome (Rule 2: RequireApproval floor, Block never overridden).

@@ -252,13 +252,44 @@ public sealed class TemporalAIAgent : AIAgent
 
             var toolCalls = stepResult.ToolCalls;
 
+            var registeredToolNames = _toolActivityOptions?.Keys.ToArray() ?? [];
+            var enabledToolNamesForDispatch = request.EnableToolNames is { } requestedNames
+                ? requestedNames.ToArray()
+                : null;
+            var enabledToolCalls = new bool[toolCalls.Count];
+            for (var i = 0; i < toolCalls.Count; i++)
+            {
+                enabledToolCalls[i] = AgentRunToolSelectionPolicy.IsCallEnabled(
+                    toolCalls[i].Name,
+                    registeredToolNames,
+                    request.EnableToolCalls,
+                    enabledToolNamesForDispatch);
+                if (!enabledToolCalls[i])
+                {
+                    Workflow.Logger.LogRunToolCallBlocked(
+                        _agentName,
+                        Workflow.Info.WorkflowId,
+                        request.CorrelationId ?? string.Empty,
+                        iteration + 1,
+                        toolCalls[i].Name);
+                }
+            }
+
             // Feature L: Phase 1 — fan out interceptor activities if configured.
             AgentsInterceptorResult[]? interceptorResults = null;
             if (_interceptorActivityOptions is { } interceptorOpts)
             {
                 var interceptorTasks = new List<Task<AgentsInterceptorResult>>(toolCalls.Count);
-                foreach (var tc in toolCalls)
+                for (var i = 0; i < toolCalls.Count; i++)
                 {
+                    var tc = toolCalls[i];
+                    if (!enabledToolCalls[i])
+                    {
+                        interceptorTasks.Add(Task.FromResult(
+                            new AgentsInterceptorResult { Outcome = AgentsToolOutcome.Proceed }));
+                        continue;
+                    }
+
                     if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, _interceptorSkippedTools))
                     {
                         interceptorTasks.Add(Task.FromResult(
@@ -297,6 +328,13 @@ public sealed class TemporalAIAgent : AIAgent
             for (var i = 0; i < toolCalls.Count; i++)
             {
                 var tc = toolCalls[i];
+                if (!enabledToolCalls[i])
+                {
+                    syntheticResults[i] = AgentRunToolSelectionPolicy.CreateBlockedResult(tc.Name);
+                    toolTasks.Add(null);
+                    continue;
+                }
+
                 var interceptorResult = interceptorResults?[i];
                 // Determine effective outcome (Rule 2: RequireApproval floor, Block never overridden).
                 var outcome = DurableToolDecisionPolicy.GetEffectiveOutcome(

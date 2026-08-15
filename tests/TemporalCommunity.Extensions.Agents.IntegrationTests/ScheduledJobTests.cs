@@ -150,13 +150,13 @@ public class ScheduledJobTests : IClassFixture<ScheduledJobEnvironmentFixture>
         await host.StartAsync();
 
         var workflowId = $"ta-capagent-captest{Guid.NewGuid():N}";
-        var jobInput = new AgentJobInput
+        var options = host.Services.GetRequiredService<TemporalAgentsOptions>();
+        var jobInput = DefaultTemporalAgentClient.BuildAgentJobInput(
+            "CapAgent",
+            new RunRequest("Run until cap."),
+            options,
+            taskQueue) with
         {
-            AgentName = "CapAgent",
-            TaskQueue = taskQueue,
-            Request = new RunRequest("Run until cap."),
-            ActivityTimeout = TimeSpan.FromSeconds(30),
-            HeartbeatTimeout = TimeSpan.FromSeconds(10),
             MaxToolCallsPerTurn = maxToolCalls,
         };
 
@@ -199,21 +199,11 @@ public class ScheduledJobTests : IClassFixture<ScheduledJobEnvironmentFixture>
 
         try
         {
-            var jobInput = new AgentJobInput
-            {
-                AgentName = "DurableAgent",
-                TaskQueue = taskQueue,
-                Request = new RunRequest("Attempt the destructive operation."),
-                ActivityTimeout = TimeSpan.FromSeconds(30),
-                HeartbeatTimeout = TimeSpan.FromSeconds(10),
-                InterceptorActivityOptions = new ActivityOptions
-                {
-                    StartToCloseTimeout = TimeSpan.FromSeconds(30),
-                    HeartbeatTimeout = TimeSpan.FromSeconds(10),
-                },
-                ScopeAwareTools = [recorder.Name],
-                ScopeAwareApprovalTools = [recorder.Name],
-            };
+            var jobInput = DefaultTemporalAgentClient.BuildAgentJobInput(
+                "DurableAgent",
+                new RunRequest("Attempt the destructive operation."),
+                host.Services.GetRequiredService<TemporalAgentsOptions>(),
+                taskQueue);
 
             var handle = await _env.Client.StartWorkflowAsync(
                 (AgentJobWorkflow wf) => wf.RunAsync(jobInput),
@@ -221,6 +211,52 @@ public class ScheduledJobTests : IClassFixture<ScheduledJobEnvironmentFixture>
             await handle.GetResultAsync();
 
             Assert.Equal(0, recorder.CallCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task AgentJobWorkflow_EmptyToolSelection_BlocksCallBeforeToolActivity()
+    {
+        var recorder = new RecordingTool { Name = "job_tool" };
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", recorder.Name,
+                new Dictionary<string, object?> { ["input"] = "data" })],
+            "Blocked call handled.");
+        var taskQueue = $"scheduled-job-selection-{Guid.NewGuid():N}";
+
+        using var host = BuildWorkerHost(
+            scripted,
+            taskQueue,
+            builder => builder.AddTool(recorder.Build()),
+            agentName: "SelectionAgent");
+        await host.StartAsync();
+
+        try
+        {
+            var request = new RunRequest("Run the job.", enableToolNames: []);
+            var input = DefaultTemporalAgentClient.BuildAgentJobInput(
+                "SelectionAgent",
+                request,
+                host.Services.GetRequiredService<TemporalAgentsOptions>(),
+                taskQueue);
+            var handle = await _env.Client.StartWorkflowAsync(
+                (AgentJobWorkflow workflow) => workflow.RunAsync(input),
+                new WorkflowOptions($"ta-job-selection-{Guid.NewGuid():N}", taskQueue));
+
+            await handle.GetResultAsync();
+
+            Assert.Equal(0, recorder.CallCount);
+            var toolSchedules = 0;
+            await foreach (var ev in handle.FetchHistoryEventsAsync())
+            {
+                if (ev.ActivityTaskScheduledEventAttributes?.ActivityType.Name == InvokeAgentToolActivity)
+                    toolSchedules++;
+            }
+            Assert.Equal(0, toolSchedules);
         }
         finally
         {

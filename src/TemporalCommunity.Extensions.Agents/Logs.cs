@@ -190,4 +190,15 @@ internal static partial class Logs
         Message = "[{AgentName}] Durable agent turn aborted after exceeding iteration cap ({IterationLimit}); returning structured error")]
     public static partial void LogDurableAgentTurnAborted(
         this ILogger logger, string agentName, int iterationLimit);
+
+    [LoggerMessage(EventId = 33, Level = LogLevel.Warning,
+        Message = "[{AgentName}/{WorkflowId}] Blocked model-returned tool call '{RequestedToolName}' " +
+                  "for this run (CorrelationId: {CorrelationId}, Iteration: {Iteration})")]
+    public static partial void LogRunToolCallBlocked(
+        this ILogger logger,
+        string agentName,
+        string workflowId,
+        string correlationId,
+        int iteration,
+        string? requestedToolName);
 }

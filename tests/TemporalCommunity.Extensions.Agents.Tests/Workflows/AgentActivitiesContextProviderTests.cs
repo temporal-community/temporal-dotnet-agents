@@ -134,6 +134,47 @@ public class AgentActivitiesContextProviderTests
         Assert.Equal(1, afterCount);
     }
 
+    [Fact]
+    public async Task RunDurableAgentStep_UsesOneEffectiveOptionsSetAcrossMiddlewareAndProvider()
+    {
+        var client = new SimpleStreamingChatClient();
+        ChatOptions? middlewareOptions = null;
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("EffectiveOptionsAgent", agent =>
+            {
+                agent.Instructions = "registered-instructions";
+                agent.ChatOptions = new ChatOptions { StopSequences = ["STOP"] };
+                agent.ChatClient = _ => client;
+                agent.AddTool(AIFunctionFactory.Create(() => "a", "alpha"));
+                agent.AddTool(AIFunctionFactory.Create(() => "b", "beta"));
+                agent.AddContextProvider(new AppendingInstructionsProvider());
+                agent.ConfigureAgentPipeline = builder => builder.Use(inner =>
+                    new OptionsRecordingAgent(inner, options => middlewareOptions = options));
+            });
+        });
+        var input = new AgentStepInput
+        {
+            AgentName = "EffectiveOptionsAgent",
+            Request = new RunRequest("hello", enableToolNames: ["ALPHA"]),
+            AccumulatedMessages = [new ChatMessage(ChatRole.User, "hello")],
+            SessionId = TemporalAgentSessionId.WithRandomKey("EffectiveOptionsAgent"),
+        };
+
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+        await env.RunAsync(() => activities.RunDurableAgentStepAsync(input));
+
+        Assert.NotNull(client.LastOptions);
+        Assert.NotNull(middlewareOptions);
+        var leafOptions = client.LastOptions;
+        Assert.Equal("registered-instructions\nprovider-instructions", middlewareOptions!.Instructions);
+        Assert.Equal(["STOP"], middlewareOptions.StopSequences);
+        Assert.Equal(["alpha"], middlewareOptions.Tools!.Select(tool => tool.Name));
+        Assert.Equal("registered-instructions\nprovider-instructions", leafOptions!.Instructions);
+        Assert.Equal(["STOP"], leafOptions.StopSequences);
+        Assert.Equal(["alpha"], leafOptions.Tools!.Select(tool => tool.Name));
+    }
+
     /// <summary>
     /// When a context provider returns <see cref="AIContext.Tools"/>, exactly one
     /// <see cref="LogLevel.Error"/> is emitted per turn, regardless of how many tools
@@ -454,6 +495,8 @@ public class AgentActivitiesContextProviderTests
     /// </summary>
     private sealed class SimpleStreamingChatClient : IChatClient
     {
+        public ChatOptions? LastOptions { get; private set; }
+
         public ChatClientMetadata Metadata { get; } = new("test-streaming");
 
         public Task<ChatResponse> GetResponseAsync(
@@ -467,6 +510,7 @@ public class AgentActivitiesContextProviderTests
             ChatOptions? options = null,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            LastOptions = options;
             yield return new ChatResponseUpdate(ChatRole.Assistant, string.Empty);
             await Task.CompletedTask;
         }
@@ -474,6 +518,40 @@ public class AgentActivitiesContextProviderTests
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
         public void Dispose() { }
+    }
+
+    private sealed class AppendingInstructionsProvider : AIContextProvider
+    {
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new AIContext
+            {
+                Instructions = "provider-instructions",
+                Messages = context.AIContext.Messages,
+            });
+    }
+
+    private sealed class OptionsRecordingAgent(
+        AIAgent inner,
+        Action<ChatOptions?> record) : DelegatingAIAgent(inner)
+    {
+        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+            IEnumerable<ChatMessage> messages,
+            AgentSession? session = null,
+            AgentRunOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            record((options as ChatClientAgentRunOptions)?.ChatOptions);
+            await foreach (var update in base.RunCoreStreamingAsync(
+                messages,
+                session,
+                options,
+                cancellationToken))
+            {
+                yield return update;
+            }
+        }
     }
 
     private sealed class MiddlewareSessionObservation

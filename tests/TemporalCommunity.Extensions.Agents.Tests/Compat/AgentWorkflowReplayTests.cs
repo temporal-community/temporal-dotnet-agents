@@ -28,6 +28,28 @@ public class AgentWorkflowReplayTests
         Assert.Null(result.ReplayFailure);
     }
 
+    [Theory]
+    [InlineData("tool-selection-agent-workflow.json", typeof(AgentWorkflow))]
+    [InlineData("tool-selection-agent-job-workflow.json", typeof(AgentJobWorkflow))]
+    [InlineData("tool-selection-temporal-ai-agent.json", typeof(ToolSelectionContainingWorkflow))]
+    public async Task CorrectedToolSelectionHistory_ReplaysWithoutError(
+        string filename,
+        Type workflowType)
+    {
+        var options = new WorkflowReplayerOptions
+        {
+            DataConverter = TemporalAgentDataConverter.Instance,
+        };
+        options.AddWorkflow(workflowType);
+        var replayer = new WorkflowReplayer(options);
+
+        var result = await replayer.ReplayWorkflowAsync(
+            LoadHistory(filename),
+            throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
     private static WorkflowHistory LoadHistory(string filename)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "Compat", "Histories", filename);

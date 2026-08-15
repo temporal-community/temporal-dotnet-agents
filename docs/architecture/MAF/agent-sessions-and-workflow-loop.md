@@ -508,7 +508,7 @@ attempt it then:
 
 1. Creates an activity DI scope and resolves `IChatClient` through `registration.ChatClient`.
 2. Resolves each `AIContextProvider` through its factory from that scope, restores the `TemporalAgentSession` StateBag, and invokes the providers explicitly before and after the model call.
-3. Clones `registration.ChatOptions`, stamps `Instructions` and the blueprint's durable tools, and builds a fresh `ChatClientAgent` with `AIContextProviders = null` and `UseProvidedChatClientAsIs = true`.
+3. Clones `registration.ChatOptions`, stamps `Instructions` and the selected durable tools, and passes that complete effective value through `ChatClientAgentRunOptions`. The fresh `ChatClientAgent` is built with `ChatOptions = null`, `AIContextProviders = null`, and `UseProvidedChatClientAsIs = true`, so MAF cannot merge a second default tool/options set into the request.
 4. Builds and validates one configured `AIAgent` decorator chain from the same activity scope,
    then disposes its supported owned wrapper (`OpenTelemetryAgent`) before disposing the scope.
 
@@ -528,20 +528,16 @@ Per-turn tool filtering and response format are applied inside `RunDurableAgentS
 // Inside RunDurableAgentStepAsync:
 var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
 chatOptions.Instructions = registration.Instructions;
-chatOptions.Tools = cached.Tools.Values.Cast<AITool>().ToList();
+chatOptions.Tools = AgentRunToolSelectionPolicy.FilterProviderTools(
+    cached.Tools.Values.Cast<AITool>().ToList(),
+    input.Request.EnableToolCalls,
+    input.Request.EnableToolNames);
 chatOptions.ResponseFormat = input.Request.ResponseFormat;
-
-if (!input.Request.EnableToolCalls)
-{
-    chatOptions.Tools = null;       // disable all tools for this turn
-}
-else if (input.Request.EnableToolNames is { Count: > 0 } enabledNames)
-{
-    chatOptions.Tools = [.. chatOptions.Tools.Where(t => enabledNames.Contains(t.Name))];
-}
 ```
 
-`TemporalAgentRunOptions.EnableToolCalls` and `EnableToolNames` are copied onto `RunRequest` by `TemporalAIAgentProxy` / `TemporalAIAgent` before the `WorkflowUpdate` is sent, survive serialization through Temporal's event history, and are available on `AgentStepInput.Request` inside every step activity. `EnableToolCalls = false` clears `ChatOptions.Tools` entirely; an `EnableToolNames` list restricts the active tools to the named subset.
+`TemporalAgentRunOptions.EnableToolCalls` and `EnableToolNames` are copied onto `RunRequest` by `TemporalAIAgentProxy` / `TemporalAIAgent` before dispatch. Session workflows freeze them on `AgentSessionRequest`, so they survive Temporal serialization and reconstruction; job and containing-workflow paths carry the same `RunRequest` directly. `EnableToolCalls = false` exposes no tools. `EnableToolNames = null` exposes all registered tools, an empty list exposes none, and a non-empty list exposes only case-insensitive registered matches.
+
+Provider filtering is not the security boundary. A model can still return a malformed, unknown, or previously visible function name. Immediately before interceptor fan-out, each of the three workflow loops (`AgentWorkflow`, `AgentJobWorkflow`, and `TemporalAIAgent`) applies the same deterministic policy against the frozen registered names. A blocked call schedules no interceptor, approval, or tool activity and receives the same tenant-visible synthetic result whether its name is unknown or merely excluded.
 
 ### Discovering session context from inside a tool
 

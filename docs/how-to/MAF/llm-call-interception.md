@@ -167,7 +167,7 @@ The decorator runs inside each `AgentActivities.RunDurableAgentStepAsync` activi
 
 ## Composing with the library's own per-step `ChatOptions`
 
-The library does not decorate your `IChatClient` — it constructs a fresh `ChatOptions` per step from `registration.ChatOptions` (cloned), then stamps `Instructions`, `Tools`, and `ResponseFormat` on it according to the active `TemporalAgentRunOptions` (e.g., `EnableToolNames` filtering) and the originating `RunRequest`. Your decorator sees the resulting `ChatOptions` on every call.
+The library does not decorate your `IChatClient` — it constructs one complete `ChatOptions` value per step from `registration.ChatOptions` (cloned), then stamps `Instructions`, the selected `Tools`, and `ResponseFormat` according to the active `TemporalAgentRunOptions` and originating `RunRequest`. That value is the sole MAF run-options channel; the library-created `ChatClientAgent` has no default `ChatOptions` to merge back in. Agent middleware and chat-client decorators therefore see the same effective values without duplicated tools, instructions, or stop sequences.
 
 Concretely, for a registered agent with the example factory above:
 

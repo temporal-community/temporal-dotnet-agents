@@ -238,6 +238,10 @@ TemporalCommunity.Extensions.Agents.State.AgentDescriptor.Name.get -> string!
 TemporalCommunity.Extensions.Agents.State.AgentDescriptor.Name.init -> void
 TemporalCommunity.Extensions.Agents.State.AgentSessionRequest
 TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.AgentSessionRequest() -> void
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.EnableToolCalls.get -> bool
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.EnableToolCalls.init -> void
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.EnableToolNames.get -> System.Collections.Generic.IReadOnlyList<string!>?
+TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.EnableToolNames.init -> void
 TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.OrchestrationId.get -> string?
 TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.OrchestrationId.init -> void
 TemporalCommunity.Extensions.Agents.State.AgentSessionRequest.ResponseSchema.get -> System.Text.Json.JsonElement?

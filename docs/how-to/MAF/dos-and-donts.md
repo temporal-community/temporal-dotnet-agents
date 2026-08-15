@@ -351,6 +351,23 @@ if (apiKey is null) throw new ArgumentNullException(nameof(apiKey));
 
 ## Security and Configuration
 
+### Don't treat per-run tool selection as authorization
+
+```csharp
+// Exposure control: useful, but not an authorization grant.
+var options = new TemporalAgentRunOptions
+{
+    EnableToolNames = ["issue_refund"],
+};
+```
+
+`EnableToolCalls` and `EnableToolNames` control which registered tool declarations reach the
+provider and which model-returned calls the workflow may dispatch. They do not authenticate the
+caller or authorize an external effect. A write tool must validate current tenant, user, resource,
+and policy data inside its activity immediately before the effect. Do not put function arguments,
+tool inventories, or unknown-versus-excluded distinctions in tenant-visible denial text; the
+library uses one generic blocked result and limits requested-name diagnostics to operator logs.
+
 ### Don't commit real API keys in appsettings.json
 
 ```jsonc

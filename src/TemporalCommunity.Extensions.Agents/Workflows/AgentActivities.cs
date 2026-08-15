@@ -162,17 +162,12 @@ internal sealed class AgentActivities(
         chatOptions.Instructions = registration.Instructions;
         // Spread [..] makes a per-call copy so downstream mutation (EnableToolNames filter below)
         // cannot corrupt the cached IReadOnlyList.
-        chatOptions.Tools = blueprint.ToolsAsAITools.Count > 0 ? [.. blueprint.ToolsAsAITools] : null;
+        var selectedTools = AgentRunToolSelectionPolicy.FilterProviderTools(
+            blueprint.ToolsAsAITools,
+            input.Request.EnableToolCalls,
+            input.Request.EnableToolNames is { } enabledToolNames ? [.. enabledToolNames] : null);
+        chatOptions.Tools = selectedTools.Count > 0 ? [.. selectedTools] : null;
         chatOptions.ResponseFormat = input.Request.ResponseFormat;
-
-        if (!input.Request.EnableToolCalls)
-        {
-            chatOptions.Tools = null;
-        }
-        else if (input.Request.EnableToolNames is { Count: > 0 } enabledNames && chatOptions.Tools is not null)
-        {
-            chatOptions.Tools = [.. chatOptions.Tools.Where(t => enabledNames.Contains(t.Name, StringComparer.OrdinalIgnoreCase))];
-        }
 
         // LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
         // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire
@@ -651,17 +646,14 @@ internal sealed class AgentActivities(
         var registration = blueprint.Registration;
         var agentsOptions = blueprint.AgentsOptions;
 
-        var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
-        chatOptions.Instructions = registration.Instructions;
-        chatOptions.Tools = blueprint.ToolsAsAITools.Count > 0
-            ? [.. blueprint.ToolsAsAITools]
-            : null;
-
         var agentOptions = new ChatClientAgentOptions
         {
             Name = registration.Name,
             Description = registration.Description,
-            ChatOptions = chatOptions,
+            // The activity supplies the complete effective ChatOptions on every run. Leaving
+            // defaults here would make MAF merge registered tools/instructions/stop sequences
+            // back into the filtered per-run options.
+            ChatOptions = null,
             // Q1 (β): keep our explicit AIContextProvider loop inside RunDurableAgentStepAsync
             // rather than delegating to MAF's ChatClientAgent. Setting null here suppresses MAF's
             // own provider lifecycle so providers fire exactly once per turn from our loop.

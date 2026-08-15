@@ -75,6 +75,30 @@ internal sealed class AgentJobWorkflow
 
             var toolCalls = stepResult.ToolCalls;
 
+            var registeredToolNames = input.DurableAgentToolActivityOptions?.Keys.ToArray()
+                ?? [];
+            var enabledToolNames = input.Request.EnableToolNames is { } requestedNames
+                ? requestedNames.ToArray()
+                : null;
+            var enabledToolCalls = new bool[toolCalls.Count];
+            for (var i = 0; i < toolCalls.Count; i++)
+            {
+                enabledToolCalls[i] = AgentRunToolSelectionPolicy.IsCallEnabled(
+                    toolCalls[i].Name,
+                    registeredToolNames,
+                    input.Request.EnableToolCalls,
+                    enabledToolNames);
+                if (!enabledToolCalls[i])
+                {
+                    Workflow.Logger.LogRunToolCallBlocked(
+                        input.AgentName,
+                        Workflow.Info.WorkflowId,
+                        input.Request.CorrelationId ?? string.Empty,
+                        iteration + 1,
+                        toolCalls[i].Name);
+                }
+            }
+
             // Feature L: Phase 1 — fan out interceptor activities if an interceptor is configured.
             DurableToolInterceptorResult[]? interceptorResults = null;
             if (input.InterceptorActivityOptions is { } interceptorOpts)
@@ -83,8 +107,16 @@ internal sealed class AgentJobWorkflow
                 var skippedTools = input.InterceptorSkippedTools;
                 var interceptorToolOpts = input.InterceptorToolActivityOptions;
 
-                foreach (var tc in toolCalls)
+                for (var i = 0; i < toolCalls.Count; i++)
                 {
+                    var tc = toolCalls[i];
+                    if (!enabledToolCalls[i])
+                    {
+                        interceptorTasks.Add(Task.FromResult(
+                            new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
+                        continue;
+                    }
+
                     if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, skippedTools))
                     {
                         interceptorTasks.Add(Task.FromResult(
@@ -124,6 +156,13 @@ internal sealed class AgentJobWorkflow
             for (var i = 0; i < toolCalls.Count; i++)
             {
                 var tc = toolCalls[i];
+                if (!enabledToolCalls[i])
+                {
+                    syntheticResults[i] = AgentRunToolSelectionPolicy.CreateBlockedResult(tc.Name);
+                    toolTasks.Add(null);
+                    continue;
+                }
+
                 var interceptorResult = interceptorResults?[i];
                 // Determine effective outcome (Rule 2: RequireApproval floor, Block never overridden).
                 var outcome = DurableToolDecisionPolicy.GetEffectiveOutcome(

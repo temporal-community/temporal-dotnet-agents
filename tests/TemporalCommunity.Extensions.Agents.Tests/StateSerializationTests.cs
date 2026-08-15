@@ -62,6 +62,23 @@ public class StateSerializationTests
         Assert.Equal("wf-123", stateRequest.OrchestrationId);
     }
 
+    [Fact]
+    public void FromRunRequest_PreservesPerTurnToolSelection()
+    {
+        var request = new RunRequest(
+            "hello",
+            enableToolCalls: false,
+            enableToolNames: ["alpha"])
+        {
+            CorrelationId = "selection-correlation",
+        };
+
+        var stateRequest = AgentSessionRequest.FromRunRequest(request, DateTimeOffset.UtcNow);
+
+        Assert.False(stateRequest.EnableToolCalls);
+        Assert.Equal(["alpha"], stateRequest.EnableToolNames);
+    }
+
     // ─── Polymorphic type discriminators ────────────────────────────────────
 
     [Fact]
