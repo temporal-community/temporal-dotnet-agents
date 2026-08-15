@@ -12,6 +12,8 @@ public sealed record TypedTurnState(int Revision, IReadOnlyList<string> Receipts
 public sealed record TypedWorkflowConfiguration(
     string WorkflowType,
     string? HistoryReducerKey,
+    IReadOnlyList<string> ToolsetIds,
+    string? ManifestFingerprint,
     IReadOnlyList<string> ToolNames,
     int ToolMaximumAttempts,
     TimeSpan ToolTimeout,
@@ -75,18 +77,27 @@ public sealed class TypedDurableTurnWorkflow
     public TypedWorkflowConfiguration GetConfiguration()
     {
         var input = RequiredInput;
+        var manifest = input.ToolsetManifest;
         var declaration = GetStateToolDeclaration(input);
-        var toolOptions = input.ToolActivityOptions![declaration.Name];
+        var manifestMember = manifest?.Members.Single(member => member.Declaration.Name == "state_tool");
+        var toolOptions = manifestMember?.ToolActivityOptions
+            ?? input.ToolActivityOptions![declaration.Name];
         return new TypedWorkflowConfiguration(
             Workflow.Info.WorkflowType,
             input.HistoryReducerKey,
-            input.ToolDeclarations!.Select(item => item.Name).ToArray(),
+            manifest?.ToolsetIds.ToArray() ?? [],
+            manifest?.Fingerprint,
+            manifest?.Members.Select(item => item.Declaration.Name).ToArray()
+                ?? input.ToolDeclarations!.Select(item => item.Name).ToArray(),
             toolOptions.RetryPolicy!.MaximumAttempts,
             toolOptions.StartToCloseTimeout ?? TimeSpan.Zero,
             input.MaxToolCallsPerTurn,
             input.MaximumConsecutiveErrorsPerRequest,
             input.IncludeDetailedErrors,
-            input.RequiresApprovalTools?.ToArray() ?? [],
+            manifest?.Members.Where(member => member.RequiresApproval)
+                .Select(member => member.Declaration.Name).ToArray()
+                ?? input.RequiresApprovalTools?.ToArray()
+                ?? [],
             input.ApprovalTimeout);
     }
 
@@ -95,6 +106,9 @@ public sealed class TypedDurableTurnWorkflow
 
     private static DurableFunctionDeclarationSnapshot GetStateToolDeclaration(
         DurableChatWorkflowInput input) =>
-        input.ToolDeclarations?.SingleOrDefault(declaration => declaration.Name == "state_tool")
+        input.ToolsetManifest?.Members
+            .Select(member => member.Declaration)
+            .SingleOrDefault(declaration => declaration.Name == "state_tool")
+            ?? input.ToolDeclarations?.SingleOrDefault(declaration => declaration.Name == "state_tool")
             ?? throw new InvalidOperationException("The frozen state_tool declaration is missing.");
 }

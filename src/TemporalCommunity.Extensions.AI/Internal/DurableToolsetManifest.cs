@@ -41,6 +41,51 @@ internal sealed record DurableToolsetManifest
         }
     }
 
+    internal DurableToolsetManifest Narrow(IReadOnlyList<string>? selectedToolsetIds)
+    {
+        Validate();
+        if (selectedToolsetIds is null)
+        {
+            return this;
+        }
+
+        var requested = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in selectedToolsetIds)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                throw Failure("A durable turn toolset selection contains an empty ID.");
+            }
+
+            if (!requested.Add(id))
+            {
+                throw Failure($"Durable toolset '{id}' was selected more than once for one turn.");
+            }
+
+            if (!ToolsetIds.Contains(id, StringComparer.Ordinal))
+            {
+                throw Failure(
+                    $"Durable toolset '{id}' is outside the workflow's recorded baseline.");
+            }
+        }
+
+        // A caller can select a subset, but cannot reorder the recorded authority baseline.
+        var orderedIds = ToolsetIds.Where(requested.Contains).ToArray();
+        var narrowed = new DurableToolsetManifest
+        {
+            ManifestVersion = ManifestVersion,
+            ToolsetIds = orderedIds,
+            Members = Members.Where(member => requested.Contains(member.ToolsetId)).ToArray(),
+            Fingerprint = string.Empty,
+        };
+        narrowed = narrowed with
+        {
+            Fingerprint = DurableToolsetManifestFingerprint.Create(narrowed),
+        };
+        narrowed.Validate();
+        return narrowed;
+    }
+
     internal static ApplicationFailureException Failure(string message) => new(
         message,
         errorType: nameof(Exceptions.DurableConfigurationException),

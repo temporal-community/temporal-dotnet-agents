@@ -20,6 +20,9 @@ built-in managed tool loop and return a typed result:
 public sealed class ApplicationWorkflow
     : DurableToolWorkflowBase<ApplicationRequest, ApplicationTurnState>
 {
+    protected override IReadOnlyList<string>? DurableToolsetBaselineIds =>
+        ["catalog", "operations"];
+
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
 
@@ -29,6 +32,23 @@ public sealed class ApplicationWorkflow
         RunDurableTurnAsync(request);
 }
 ```
+
+The protected baseline is resolved once and is the workflow's maximum tool authority. A turn may
+deterministically narrow it without carrying schemas or implementations in the Update:
+
+```csharp
+var request = new DurableTurnRequest<ApplicationRequest, ApplicationTurnState>
+{
+    Messages = messages,
+    RequestData = applicationRequest,
+    InitialTurnState = initialState,
+    Options = new DurableTurnOptions { ToolsetIds = ["catalog"] },
+};
+```
+
+`null` uses the complete recorded baseline; an empty list exposes no tools. Caller ordering cannot
+reorder the baseline, and an unknown or out-of-baseline ID fails before the model activity. Keep
+the protected list fixed and deterministic—workflow code cannot discover live worker DI state.
 
 `RequestData` is immutable application input for one Update. `InitialTurnState` is the state at
 that turn's start, and `FinalTurnState` is the last successfully recorded state returned to the

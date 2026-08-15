@@ -130,6 +130,18 @@ Null requests, empty message lists, and null turn options fail terminally as
 `DurableTurnInvalidRequest` before any model or tool activity is scheduled; they are application
 input failures, not workflow-task failures.
 
+The specialized base also owns worker-toolset authority. Override `DurableToolsetBaselineIds` with
+a fixed ordered list to select this workflow type's maximum baseline, or leave it `null` to use the
+worker defaults. Resolution occurs once through an activity and the resulting manifest is recorded
+in workflow history. The override must be deterministic: it cannot inspect DI, process state,
+external services, or non-Temporal time/random APIs.
+
+`DurableTurnOptions.ToolsetIds` can narrow that recorded baseline for one Update. `null` uses the
+entire baseline and an empty list exposes no tools. Duplicate, empty, or out-of-baseline IDs fail
+the Update non-retryably before a model activity. Selection preserves baseline order even when the
+caller lists IDs in another order, is fixed across every model iteration in the turn, and is not
+carried into a later turn or Continue-as-New.
+
 When a typed turn reaches the model/tool iteration limit, the immediate `DurableTurnResult`
 contains the complete function-call/function-result protocol and final turn state. That output is
 for caller inspection and explicit commit/discard policy. The workflow persists only the terminal

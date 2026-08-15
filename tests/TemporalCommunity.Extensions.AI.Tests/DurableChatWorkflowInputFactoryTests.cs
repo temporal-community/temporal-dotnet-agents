@@ -83,7 +83,7 @@ public class DurableChatWorkflowInputFactoryTests
     }
 
     [Fact]
-    public void RegisterDefaultWorkflowFalse_StillRegistersFactory()
+    public void RegisterDefaultWorkflowFalse_CreatesThinWorkerOwnedInput()
     {
         var services = new ServiceCollection();
         var worker = services
@@ -95,8 +95,8 @@ public class DurableChatWorkflowInputFactoryTests
 
         var factory = provider.GetRequiredService<IDurableChatWorkflowInputFactory>();
         var input = factory.Create();
-        Assert.NotNull(input.ToolDeclarations);
-        Assert.NotNull(input.ToolActivityOptions);
+        Assert.Null(input.ToolDeclarations);
+        Assert.Null(input.ToolActivityOptions);
         Assert.Null(provider.GetService<DurableChatSessionClient>());
         Assert.Null(provider.GetService<ITemporalClient>());
     }

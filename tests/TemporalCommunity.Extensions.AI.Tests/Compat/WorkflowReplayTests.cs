@@ -144,6 +144,17 @@ public class WorkflowReplayTests
         Assert.Null(result.ReplayFailure);
     }
 
+    [Fact]
+    public async Task TypedWorkerOwnedToolsetV1_ReplaysWithoutError()
+    {
+        var replayer = BuildReplayer();
+        var history = LoadHistory("typed-worker-owned-toolset-v1.json");
+
+        var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
     /// <summary>
     /// A 0.12.0 typed-turn history that persisted the complete function protocol after an
     /// iteration-limit result remains replayable. New executions use a patch marker to persist

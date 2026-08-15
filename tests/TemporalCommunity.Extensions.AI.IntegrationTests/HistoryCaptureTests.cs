@@ -209,7 +209,7 @@ public class HistoryCaptureTests
     /// explicit state completion, and a final model response.
     /// </summary>
     [Fact]
-    public async Task Capture_TypedDurableTurn()
+    public async Task Capture_TypedWorkerOwnedToolsetV1()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
@@ -241,7 +241,7 @@ public class HistoryCaptureTests
 
         Assert.Equal(1, result.FinalTurnState!.Revision);
         var history = await handle.FetchHistoryAsync();
-        await SaveHistoryAsync("typed-durable-turn-v1.json", history);
+        await SaveHistoryAsync("typed-worker-owned-toolset-v1.json", history);
 
         await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();

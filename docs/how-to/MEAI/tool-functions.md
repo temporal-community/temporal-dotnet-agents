@@ -162,7 +162,18 @@ are arbitrary `object?` instances; silently dropping them could change provider 
 JSON-normalizing them could change their CLR types. Registration reports the tool and sorted keys.
 If application behavior depends on those properties, this path is not supported yet.
 
-For split processes, configure the workflow-starting process without creating a worker builder:
+For a split worker-owned deployment, the workflow-starting process needs no tool registrations:
+
+```csharp
+services.AddDurableChatWorkflowInputFactory(taskQueue);
+```
+
+The worker registers the named toolsets and the custom workflow selects its maximum baseline via
+`DurableToolsetBaselineIds`. The created start input contains session settings but no schemas or
+implementations; the workflow resolves its worker-owned manifest once.
+
+The older caller-owned declaration mode remains an advanced control-plane option. Use it only when
+the starting process deliberately owns and freezes the schemas before workflow start:
 
 ```csharp
 services

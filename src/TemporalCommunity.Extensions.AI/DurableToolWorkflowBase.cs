@@ -22,6 +22,60 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
     private readonly Dictionary<DurableSessionRequest, DurableTurnRequest<TRequestData, TTurnState>>
         _turnRequests = new(Internal.ReferenceComparer<DurableSessionRequest>.Instance);
     private readonly HashSet<string> _managedUpdateIds = new(StringComparer.Ordinal);
+    private bool _toolAuthorityReady;
+
+    /// <summary>
+    /// Gets the ordered worker-owned toolsets that form this custom workflow's maximum baseline.
+    /// A <see langword="null"/> value uses the worker defaults; an empty list creates a no-tools
+    /// baseline. The value must be deterministic and stable for the workflow type.
+    /// </summary>
+    /// <remarks>
+    /// Override with a fixed list when this workflow must use a subset of the worker's registered
+    /// toolsets. Do not read dependency injection, process-local state, external services, or
+    /// nondeterministic APIs from this property.
+    /// </remarks>
+    protected virtual IReadOnlyList<string>? DurableToolsetBaselineIds => null;
+
+    /// <inheritdoc/>
+    protected sealed override async Task RunAsync(DurableChatWorkflowInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.ToolsetManifest is not null && input.ToolDeclarations is not null)
+        {
+            throw Internal.DurableToolsetManifest.Failure(
+                "A durable tool workflow cannot combine caller-owned declarations with a " +
+                "worker-owned toolset manifest.");
+        }
+
+        if (input.ToolsetManifest is null && input.ToolDeclarations is null)
+        {
+            var baselineIds = DurableToolsetBaselineIds;
+            var resolverOptions = new ActivityOptions
+            {
+                StartToCloseTimeout = input.ActivityTimeout,
+                HeartbeatTimeout = input.HeartbeatTimeout,
+                RetryPolicy = Internal.DefaultRetryPolicy.Resolve(input.RetryPolicy),
+                Summary = "Resolve durable toolsets",
+            };
+            var resolutionRequest = baselineIds is null
+                ? new Internal.DurableToolsetResolutionRequest { UseWorkerDefaults = true }
+                : new Internal.DurableToolsetResolutionRequest { ToolsetIds = baselineIds };
+            var manifest = await Workflow.ExecuteActivityAsync(
+                (DurableToolsetActivities activities) =>
+                    activities.ResolveDurableToolsetsAsync(resolutionRequest),
+                resolverOptions).ConfigureAwait(true);
+            manifest.Validate();
+            input = input with { ToolsetManifest = manifest };
+        }
+        else
+        {
+            input.ToolsetManifest?.Validate();
+        }
+
+        var sessionTask = base.RunAsync(input);
+        _toolAuthorityReady = true;
+        await sessionTask.ConfigureAwait(true);
+    }
 
     /// <summary>
     /// Runs one package-managed durable turn. This method must be called from a workflow Update,
@@ -68,6 +122,8 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
                 nonRetryable: true);
         }
 
+        await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+
         var requestEntry = DurableSessionRequest.FromMessages(
             request.Messages,
             request.CorrelationId);
@@ -105,6 +161,7 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
                 $"Typed turn data is missing for request '{requestEntry.CorrelationId}'.");
         }
 
+        var turnManifest = RequiredInput.ToolsetManifest?.Narrow(request.Options.ToolsetIds);
         var loopResult = await ExecuteManagedToolLoopTurnAsync(
             activityOptions,
             requestEntry,
@@ -117,7 +174,8 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
             JsonSerializer.SerializeToElement(
                 request.InitialTurnState,
                 DurableAIJsonUtilities.DefaultOptions),
-            request.Options.DispatchMode).ConfigureAwait(true);
+            request.Options.DispatchMode,
+            turnManifest).ConfigureAwait(true);
 
         return new DurableTurnResult<TTurnState>
         {

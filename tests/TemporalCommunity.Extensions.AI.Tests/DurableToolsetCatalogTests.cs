@@ -147,6 +147,52 @@ public sealed class DurableToolsetCatalogTests
     }
 
     [Fact]
+    public void Narrow_PreservesBaselineOrderAndSupportsNoTools()
+    {
+        var services = CreateServices();
+        var worker = services.AddHostedTemporalWorker("queue").AddDurableAI();
+        worker.AddDurableToolset("first", tools => tools
+            .Add(AIFunctionFactory.Create(() => "one", "one")));
+        worker.AddDurableToolset("second", tools => tools
+            .Add(AIFunctionFactory.Create(() => "two", "two")));
+        worker.AddDurableToolset("third", tools => tools
+            .Add(AIFunctionFactory.Create(() => "three", "three")));
+        using var provider = services.BuildServiceProvider();
+        var baseline = provider.GetRequiredService<DurableToolsetCatalog>().Resolve(new()
+        {
+            ToolsetIds = ["first", "second", "third"],
+        });
+
+        var narrowed = baseline.Narrow(["third", "first"]);
+        var empty = baseline.Narrow([]);
+
+        Assert.Same(baseline, baseline.Narrow(null));
+        Assert.Equal(["first", "third"], narrowed.ToolsetIds);
+        Assert.Equal(["one", "three"], narrowed.Members.Select(member => member.Declaration.Name));
+        Assert.NotEqual(baseline.Fingerprint, narrowed.Fingerprint);
+        Assert.Empty(empty.ToolsetIds);
+        Assert.Empty(empty.Members);
+        empty.Validate();
+    }
+
+    [Fact]
+    public void Narrow_RejectsDuplicateAndOutOfBaselineSelections()
+    {
+        var services = CreateServices();
+        var worker = services.AddHostedTemporalWorker("queue").AddDurableAI();
+        worker.AddDurableToolset("allowed", tools => tools
+            .Add(AIFunctionFactory.Create(() => "ok", "allowed_tool")));
+        using var provider = services.BuildServiceProvider();
+        var baseline = provider.GetRequiredService<DurableToolsetCatalog>().Resolve(new()
+        {
+            ToolsetIds = ["allowed"],
+        });
+
+        AssertNonRetryable(() => baseline.Narrow(["allowed", "allowed"]));
+        AssertNonRetryable(() => baseline.Narrow(["missing"]));
+    }
+
+    [Fact]
     public void Manifest_RoundTripsThroughDurableConverterWithoutRuntimeObjects()
     {
         var services = CreateServices();

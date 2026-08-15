@@ -35,16 +35,6 @@ var worker = builder.Services
     })
     .AddWorkflow<ContextualTurnWorkflow>();
 
-// The declaration and receiver activator are built once. Each tool activity attempt receives a
-// fresh ReferenceTools receiver and fresh ProcessingAttemptServices from that activity's scope.
-worker.AddDurableToolFactory<ReferenceTools>(
-    nameof(ReferenceTools.ReadReference),
-    new AIFunctionFactoryOptions
-    {
-        Name = "read_reference",
-        Description = "Reads a reference value.",
-    });
-
 var firstDeclaration = AIFunctionFactory.Create(
     (string value) => string.Empty,
     "apply_first",
@@ -54,8 +44,20 @@ var secondDeclaration = AIFunctionFactory.Create(
     "apply_second",
     "Applies the second value.").AsDeclarationOnly();
 
-RegisterStatefulTool(worker, firstDeclaration, "first", requireApproval: true);
-RegisterStatefulTool(worker, secondDeclaration, "second", requireApproval: false);
+// The custom workflow's protected baseline selects these two worker-owned groups once. The
+// declaration and receiver activator are built once; activity attempts still get fresh scopes.
+worker.AddDurableToolset("reference", tools => tools.AddDurableToolFactory<ReferenceTools>(
+    nameof(ReferenceTools.ReadReference),
+    new AIFunctionFactoryOptions
+    {
+        Name = "read_reference",
+        Description = "Reads a reference value.",
+    }));
+worker.AddDurableToolset("processing", tools =>
+{
+    RegisterStatefulTool(tools, firstDeclaration, "first", requireApproval: true);
+    RegisterStatefulTool(tools, secondDeclaration, "second", requireApproval: false);
+});
 
 var host = builder.Build();
 await host.StartAsync();
@@ -150,7 +152,9 @@ var deniedRequest = new DurableTurnRequest<ProcessingRequest, ProcessingState>
     CorrelationId = request.CorrelationId,
     ConversationId = request.ConversationId,
     ChatOptions = request.ChatOptions,
-    Options = request.Options,
+    // Narrow this turn to processing. The baseline-known read_reference call returned by the
+    // scripted model is blocked without scheduling a tool activity.
+    Options = new DurableTurnOptions { ToolsetIds = ["processing"] },
 };
 var deniedTurn = deniedHandle.ExecuteUpdateAsync<DurableTurnResult<ProcessingState>>(
     "Turn",
@@ -193,12 +197,12 @@ await deniedHandle.SignalAsync(workflow => workflow.RequestShutdownAsync());
 await host.StopAsync();
 
 void RegisterStatefulTool(
-    ITemporalWorkerServiceOptionsBuilder workerBuilder,
+    DurableToolsetBuilder toolset,
     AIFunctionDeclaration declaration,
     string step,
     bool requireApproval)
 {
-    workerBuilder.AddDurableToolFactory<ProcessingRequest, ProcessingState>(
+    toolset.AddDurableToolFactory<ProcessingRequest, ProcessingState>(
         declaration,
         (services, context) =>
         {

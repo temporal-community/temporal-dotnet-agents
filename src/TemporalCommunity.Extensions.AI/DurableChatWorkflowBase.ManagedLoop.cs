@@ -28,7 +28,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         string? conversationId,
         System.Text.Json.JsonElement? requestData = null,
         System.Text.Json.JsonElement? initialTurnState = null,
-        DurableToolDispatchMode dispatchMode = DurableToolDispatchMode.Parallel)
+        DurableToolDispatchMode dispatchMode = DurableToolDispatchMode.Parallel,
+        Internal.DurableToolsetManifest? effectiveToolsetManifest = null)
     {
         // Seed the LLM with the flattened conversation transcript: prior turns from
         // history + the request that was just appended (which is the last entry in History
@@ -41,7 +42,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         UsageDetails? totalUsage = null;
         var consecutiveErrors = 0;
         var currentTurnState = initialTurnState;
-        var toolsetManifest = RequiredInput.ToolsetManifest;
+        var toolsetManifest = effectiveToolsetManifest ?? RequiredInput.ToolsetManifest;
         var effectiveDeclarations = toolsetManifest is null
             ? RequiredInput.ToolDeclarations
             : toolsetManifest.Members.Select(member => member.Declaration).ToArray();

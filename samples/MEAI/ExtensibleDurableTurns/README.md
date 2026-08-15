@@ -4,7 +4,8 @@ This domain-neutral sample demonstrates `DurableToolWorkflowBase<TRequestData, T
 
 - one `GetChatStep` activity per model iteration;
 - one `InvokeFunction` activity per real tool call;
-- an unchanged ordinary .NET function registered with `AddDurableTools`;
+- two named worker-owned toolsets recorded once as the custom workflow's maximum baseline;
+- an unchanged ordinary .NET function registered through a method-based durable tool factory;
 - two invocation-scoped functions that receive request data and current turn state without adding
   either value to their model schema;
 - activity-attempt DI scopes containing a scoped authorization service and an
@@ -38,6 +39,11 @@ After the successful turn, the sample starts a second turn for a denied subject.
 authorization immediately before invocation, records `before -> denied -> error -> finally`, and
 rethrows. The inner function, external sink write, and state completion do not run. The lifecycle
 output also shows a fresh scoped identity for each retry attempt.
+
+The workflow fixes its baseline to `reference` followed by `processing`. The second turn supplies
+`ToolsetIds = ["processing"]`; the model's baseline-known `read_reference` request is therefore
+handled as unavailable without scheduling that function. A turn may select fewer baseline groups,
+but cannot add one or reorder the recorded baseline.
 
 The sample creates its Temporal client manually, so it sets `DurableAIDataConverter.Instance`
 explicitly. A client registered through `AddTemporalClient` is configured automatically by

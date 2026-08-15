@@ -6,10 +6,10 @@ namespace TemporalCommunity.Extensions.AI;
 /// Creates the canonical, replay-frozen start input for a managed durable chat workflow.
 /// </summary>
 /// <remarks>
-/// Resolve this service outside workflow code. It snapshots worker defaults plus registered
-/// durable-tool, interceptor, retry, timeout, and approval settings into serializable workflow
-/// input. Custom workflows that reuse the managed tool loop should start from this factory rather
-/// than reconstructing configuration independently.
+/// Resolve this service outside workflow code. For worker-owned toolsets it creates a thin input;
+/// the workflow resolves declarations and durable policy once on the worker. For the advanced
+/// caller-owned declaration mode it snapshots registered declarations and policy. Custom
+/// workflows should start from this factory rather than reconstructing session configuration.
 /// </remarks>
 public interface IDurableChatWorkflowInputFactory
 {
@@ -48,8 +48,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         _functionRegistry = functionRegistry;
         _toolOptionsRegistry = toolOptionsRegistry;
         _declarationRegistry = declarationRegistry;
-        _useWorkerToolsets = options.RegisterDefaultWorkflow
-            && toolsetRegistrations?.Any() == true;
+        _useWorkerToolsets = toolsetRegistrations?.Any() == true;
         _toolActivityOptions = new(BuildToolActivityOptions, LazyThreadSafetyMode.ExecutionAndPublication);
         _interceptorActivityOptions = new(BuildInterceptorActivityOptions, LazyThreadSafetyMode.ExecutionAndPublication);
         _interceptorToolActivityOptions = new(

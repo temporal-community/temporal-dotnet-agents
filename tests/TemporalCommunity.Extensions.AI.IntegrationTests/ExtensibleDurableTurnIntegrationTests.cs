@@ -19,6 +19,103 @@ public class ExtensibleDurableTurnIntegrationTests
     private const string InvokeFunctionActivity = "TemporalCommunity.Extensions.AI.InvokeFunction";
 
     [Fact]
+    public async Task WorkerOwnedBaseline_CanBeNarrowedPerTurnWithoutExpansion()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("excluded", "first_tool")])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "excluded call handled")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("included", "first_tool")])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "included call handled")),
+        ]);
+        var firstInvocations = 0;
+        var taskQueue = $"typed-toolset-narrowing-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton(env.Client);
+        builder.Services.AddChatClient(chatClient).Build();
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new NoopEmbeddingGenerator());
+        var worker = builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options => options.RegisterDefaultWorkflow = false)
+            .AddWorkflow<NarrowingDurableTurnWorkflow>();
+        worker.AddDurableToolset("first", tools => tools.Add(
+            AIFunctionFactory.Create(() =>
+            {
+                Interlocked.Increment(ref firstInvocations);
+                return "first";
+            }, "first_tool")));
+        worker.AddDurableToolset("second", tools => tools.Add(
+            AIFunctionFactory.Create(() => "second", "second_tool")));
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        var input = host.Services.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
+        var handle = await env.Client.StartWorkflowAsync(
+            (NarrowingDurableTurnWorkflow workflow) => workflow.RunAsync(input),
+            new WorkflowOptions($"typed-toolset-narrowing-{Guid.NewGuid():N}", taskQueue));
+
+        var excluded = CreateRequestWithToolsets("first tool is outside this turn", ["second"]);
+        await handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(excluded),
+            new WorkflowUpdateOptions { Id = "narrow-second" });
+        Assert.Equal(0, firstInvocations);
+
+        var included = CreateRequestWithToolsets("first tool is enabled", ["first"]);
+        await handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(included),
+            new WorkflowUpdateOptions { Id = "narrow-first" });
+
+        Assert.Equal(1, firstInvocations);
+        Assert.All(chatClient.Calls.Take(2), call =>
+            Assert.Equal(["second_tool"], call.Options!.Tools!.Select(tool => tool.Name)));
+        Assert.All(chatClient.Calls.Skip(2), call =>
+            Assert.Equal(["first_tool"], call.Options!.Tools!.Select(tool => tool.Name)));
+        Assert.Equal(
+            1,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+
+        var attemptedExpansion = CreateRequestWithToolsets("expand authority", ["missing"]);
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+                workflow => workflow.TurnAsync(attemptedExpansion),
+                new WorkflowUpdateOptions { Id = "attempt-expansion" }));
+        Assert.Equal(4, chatClient.CallCount);
+        Assert.Equal(
+            4,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, GetChatStepActivity));
+
+        chatClient.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "queued turn complete")));
+        chatClient.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "queued turn complete")));
+        var queuedFirstRequest = CreateRequestWithToolsets("queued-first", ["first"]);
+        var queuedSecondRequest = CreateRequestWithToolsets("queued-second", ["second"]);
+        var queuedFirst = handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(queuedFirstRequest),
+            new WorkflowUpdateOptions { Id = "queued-first" });
+        var queuedSecond = handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(queuedSecondRequest),
+            new WorkflowUpdateOptions { Id = "queued-second" });
+        await Task.WhenAll(queuedFirst, queuedSecond);
+
+        var queuedCalls = chatClient.Calls.Skip(4).ToArray();
+        Assert.Equal(2, queuedCalls.Length);
+        var firstCall = Assert.Single(queuedCalls, call =>
+            call.Messages.Last(message => message.Role == ChatRole.User).Text == "queued-first");
+        var secondCall = Assert.Single(queuedCalls, call =>
+            call.Messages.Last(message => message.Role == ChatRole.User).Text == "queued-second");
+        Assert.Equal(["first_tool"], firstCall.Options!.Tools!.Select(tool => tool.Name));
+        Assert.Equal(["second_tool"], secondCall.Options!.Tools!.Select(tool => tool.Name));
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+    [Fact]
     public async Task ActivityOnlyWorker_ExecutesToolWithoutDITemporalClient()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
@@ -572,6 +669,16 @@ public class ExtensibleDurableTurnIntegrationTests
             InitialTurnState = new IntegrationTurnState(0, []),
         };
 
+    private static DurableTurnRequest<IntegrationRequestData, IntegrationTurnState>
+        CreateRequestWithToolsets(string message, IReadOnlyList<string> toolsetIds) =>
+        new()
+        {
+            Messages = [new ChatMessage(ChatRole.User, message)],
+            RequestData = new IntegrationRequestData("operation-decision", "trusted-subject"),
+            InitialTurnState = new IntegrationTurnState(0, []),
+            Options = new DurableTurnOptions { ToolsetIds = toolsetIds },
+        };
+
     private static IHost BuildHost(
         ITemporalClient client,
         string taskQueue,
@@ -942,6 +1049,21 @@ public sealed record IntegrationTurnState(int Revision, IReadOnlyList<string> Re
 public sealed class IntegrationDurableTurnWorkflow
     : DurableToolWorkflowBase<IntegrationRequestData, IntegrationTurnState>
 {
+    [WorkflowRun]
+    public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
+
+    [WorkflowUpdate("Turn")]
+    public Task<DurableTurnResult<IntegrationTurnState>> TurnAsync(
+        DurableTurnRequest<IntegrationRequestData, IntegrationTurnState> request) =>
+        RunDurableTurnAsync(request);
+}
+
+[Workflow("TemporalCommunity.Extensions.AI.Tests.NarrowingDurableTurnWorkflow")]
+public sealed class NarrowingDurableTurnWorkflow
+    : DurableToolWorkflowBase<IntegrationRequestData, IntegrationTurnState>
+{
+    protected override IReadOnlyList<string>? DurableToolsetBaselineIds => ["first", "second"];
+
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
 

@@ -61,6 +61,8 @@ public class TypedDurableTurnLifecycleTests
             "TemporalCommunity.Extensions.AI.Tests.TypedDurableTurnWorkflow",
             configuration.WorkflowType);
         Assert.Equal(ReducerKey, configuration.HistoryReducerKey);
+        Assert.Equal(["default"], configuration.ToolsetIds);
+        Assert.StartsWith("tai-toolset-v1:", configuration.ManifestFingerprint, StringComparison.Ordinal);
         Assert.Equal(["approval_only", "state_tool"], configuration.ToolNames.Order());
         Assert.Equal(2, configuration.ToolMaximumAttempts);
         Assert.Equal(TimeSpan.FromSeconds(9), configuration.ToolTimeout);
