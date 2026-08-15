@@ -121,6 +121,10 @@ internal sealed class DurableToolsetCatalog
         {
             ToolsetId = toolsetId,
             ActivationKey = member.ActivationKey,
+            MemberIdentityFingerprint = DurableToolsetMemberIdentityFingerprint.Create(
+                toolsetId,
+                member.ActivationKey,
+                member.Declaration),
             Declaration = member.Declaration,
             ToolActivityOptions = new ActivityOptions
             {

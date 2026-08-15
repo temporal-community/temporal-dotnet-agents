@@ -127,7 +127,8 @@ or opt them out of retries.
 In split deployments, the client process needs `AddDurableChatWorkflowInputFactory` and the
 Temporal client but does not register tools. The worker polling the session queue registers
 `AddDurableAI` and its default tools. A worker registration change applies only to newly started
-sessions; existing sessions retain their recorded manifest.
+sessions; existing sessions retain their recorded manifest and require workers to preserve
+compatible activation keys and function schemas for its members.
 
 Streaming is not supported for durable sessions. For a custom workflow that directly invokes a
 known function, use `AIFunction.AsDurable()`; it is separate from managed chat-session tool

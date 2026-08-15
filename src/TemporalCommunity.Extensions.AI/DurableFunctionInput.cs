@@ -5,7 +5,7 @@ namespace TemporalCommunity.Extensions.AI;
 /// <summary>
 /// Serializable input for the durable function invocation activity.
 /// </summary>
-internal sealed class DurableFunctionInput
+internal sealed record class DurableFunctionInput
 {
     /// <summary>
     /// The name of the <see cref="Microsoft.Extensions.AI.AIFunction"/> to invoke.
@@ -22,6 +22,10 @@ internal sealed class DurableFunctionInput
     public string? ToolsetId { get; init; }
 
     public string? ActivationKey { get; init; }
+
+    public string? MemberIdentityFingerprint { get; init; }
+
+    public string? AuthorityBindingFingerprint { get; init; }
 
     public string? ManifestFingerprint { get; init; }
 

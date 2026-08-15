@@ -358,6 +358,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         ArgumentNullException.ThrowIfNull(carriedHistory);
         ArgumentNullException.ThrowIfNull(approvalResolutionHistory);
 
+        Internal.DurableToolsetAuthority.Resolve(input);
+
         return input with
         {
             CarriedHistory = carriedHistory,

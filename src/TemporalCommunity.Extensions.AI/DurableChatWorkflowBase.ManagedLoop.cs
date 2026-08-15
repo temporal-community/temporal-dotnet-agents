@@ -237,7 +237,13 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                                 declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
                             ToolsetId = manifestMember?.ToolsetId,
                             ActivationKey = manifestMember?.ActivationKey,
+                            MemberIdentityFingerprint = manifestMember?.MemberIdentityFingerprint,
                             ManifestFingerprint = toolsetManifest?.Fingerprint,
+                            AuthorityBindingFingerprint = manifestMember is null
+                                ? null
+                                : Internal.DurableToolsetAuthorityBindingFingerprint.Create(
+                                    toolsetManifest!.Fingerprint,
+                                    manifestMember.MemberIdentityFingerprint),
                             RequestData = requestData,
                             TurnState = currentTurnState,
                             DispatchMode = dispatchMode,
@@ -290,7 +296,13 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                                     declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
                                 ToolsetId = manifestMember?.ToolsetId,
                                 ActivationKey = manifestMember?.ActivationKey,
+                                MemberIdentityFingerprint = manifestMember?.MemberIdentityFingerprint,
                                 ManifestFingerprint = toolsetManifest?.Fingerprint,
+                                AuthorityBindingFingerprint = manifestMember is null
+                                    ? null
+                                    : Internal.DurableToolsetAuthorityBindingFingerprint.Create(
+                                        toolsetManifest!.Fingerprint,
+                                        manifestMember.MemberIdentityFingerprint),
                                 RequestData = requestData,
                                 TurnState = currentTurnState,
                                 DispatchMode = dispatchMode,

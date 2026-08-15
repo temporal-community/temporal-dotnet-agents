@@ -37,16 +37,8 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     public new async Task RunAsync(DurableChatWorkflowInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
-        if (input.ToolsetManifest is not null && input.ToolDeclarations is not null)
-        {
-            throw new ApplicationFailureException(
-                "A durable chat session cannot combine caller-owned declarations with a " +
-                "worker-owned toolset manifest.",
-                errorType: nameof(Exceptions.DurableConfigurationException),
-                nonRetryable: true);
-        }
-
-        if (input.ToolsetManifest is null && input.ToolDeclarations is null)
+        var authority = Internal.DurableToolsetAuthority.Resolve(input);
+        if (authority == Internal.DurableToolsetAuthorityKind.None)
         {
             var resolverOptions = new ActivityOptions
             {
@@ -62,11 +54,6 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             manifest.Validate();
             input = input with { ToolsetManifest = manifest };
         }
-        else
-        {
-            input.ToolsetManifest?.Validate();
-        }
-
         var sessionTask = base.RunAsync(input);
         _toolAuthorityReady = true;
         await sessionTask.ConfigureAwait(true);

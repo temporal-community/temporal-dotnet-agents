@@ -30,6 +30,9 @@ public class ExtensibleDurableTurnIntegrationTests
                 [new FunctionCallContent("excluded", "first_tool")])),
             new ChatResponse(new ChatMessage(ChatRole.Assistant, "excluded call handled")),
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("unknown", "unknown_tool")])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "unknown call handled")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
                 [new FunctionCallContent("included", "first_tool")])),
             new ChatResponse(new ChatMessage(ChatRole.Assistant, "included call handled")),
         ]);
@@ -66,6 +69,19 @@ public class ExtensibleDurableTurnIntegrationTests
             new WorkflowUpdateOptions { Id = "narrow-second" });
         Assert.Equal(0, firstInvocations);
 
+        var unknown = CreateRequestWithToolsets("unknown tool", ["first"]);
+        await handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(unknown),
+            new WorkflowUpdateOptions { Id = "unknown-tool" });
+        Assert.Equal(0, firstInvocations);
+        var excludedResult = Assert.Single(
+            chatClient.Calls[1].Messages.SelectMany(message => message.Contents)
+                .OfType<FunctionResultContent>(), result => result.CallId == "excluded").Result;
+        var unknownResult = Assert.Single(
+            chatClient.Calls[3].Messages.SelectMany(message => message.Contents)
+                .OfType<FunctionResultContent>(), result => result.CallId == "unknown").Result;
+        Assert.Equal(excludedResult?.ToString(), unknownResult?.ToString());
+
         var included = CreateRequestWithToolsets("first tool is enabled", ["first"]);
         await handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
             workflow => workflow.TurnAsync(included),
@@ -74,7 +90,7 @@ public class ExtensibleDurableTurnIntegrationTests
         Assert.Equal(1, firstInvocations);
         Assert.All(chatClient.Calls.Take(2), call =>
             Assert.Equal(["second_tool"], call.Options!.Tools!.Select(tool => tool.Name)));
-        Assert.All(chatClient.Calls.Skip(2), call =>
+        Assert.All(chatClient.Calls.Skip(2).Take(4), call =>
             Assert.Equal(["first_tool"], call.Options!.Tools!.Select(tool => tool.Name)));
         Assert.Equal(
             1,
@@ -85,9 +101,9 @@ public class ExtensibleDurableTurnIntegrationTests
             handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
                 workflow => workflow.TurnAsync(attemptedExpansion),
                 new WorkflowUpdateOptions { Id = "attempt-expansion" }));
-        Assert.Equal(4, chatClient.CallCount);
+        Assert.Equal(6, chatClient.CallCount);
         Assert.Equal(
-            4,
+            6,
             await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, GetChatStepActivity));
 
         chatClient.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "queued turn complete")));
@@ -102,7 +118,7 @@ public class ExtensibleDurableTurnIntegrationTests
             new WorkflowUpdateOptions { Id = "queued-second" });
         await Task.WhenAll(queuedFirst, queuedSecond);
 
-        var queuedCalls = chatClient.Calls.Skip(4).ToArray();
+        var queuedCalls = chatClient.Calls.Skip(6).ToArray();
         Assert.Equal(2, queuedCalls.Length);
         var firstCall = Assert.Single(queuedCalls, call =>
             call.Messages.Last(message => message.Role == ChatRole.User).Text == "queued-first");

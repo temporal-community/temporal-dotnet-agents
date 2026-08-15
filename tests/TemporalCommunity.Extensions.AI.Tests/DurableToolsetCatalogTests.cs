@@ -193,6 +193,45 @@ public sealed class DurableToolsetCatalogTests
     }
 
     [Fact]
+    public void Manifest_RejectsInvalidPolicyEvenWithMatchingTopLevelFingerprint()
+    {
+        var services = CreateServices();
+        var worker = services.AddHostedTemporalWorker("queue").AddDurableAI();
+        worker.AddDurableToolset("allowed", tools => tools
+            .Add(AIFunctionFactory.Create(() => "ok", "allowed_tool")));
+        using var provider = services.BuildServiceProvider();
+        var manifest = provider.GetRequiredService<DurableToolsetCatalog>().Resolve(new()
+        {
+            ToolsetIds = ["allowed"],
+        });
+        var invalid = manifest with
+        {
+            Members = [manifest.Members[0] with { ApprovalTimeout = TimeSpan.Zero }],
+            Fingerprint = string.Empty,
+        };
+        invalid = invalid with
+        {
+            Fingerprint = DurableToolsetManifestFingerprint.Create(invalid),
+        };
+
+        AssertNonRetryable(invalid.Validate);
+    }
+
+    [Fact]
+    public void Authority_RejectsCallerDeclarationsCombinedWithWorkerManifest()
+    {
+        var declaration = DurableFunctionDeclarationSnapshot.Create(
+            AIFunctionFactory.Create(() => "ok", "caller_tool").AsDeclarationOnly());
+        var input = new DurableChatWorkflowInput
+        {
+            ToolDeclarations = [declaration],
+            ToolsetManifest = CreateEmptyManifest(),
+        };
+
+        AssertNonRetryable(() => DurableToolsetAuthority.Resolve(input));
+    }
+
+    [Fact]
     public void Manifest_RoundTripsThroughDurableConverterWithoutRuntimeObjects()
     {
         var services = CreateServices();

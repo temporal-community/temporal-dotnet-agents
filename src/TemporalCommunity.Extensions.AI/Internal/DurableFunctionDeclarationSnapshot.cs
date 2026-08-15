@@ -43,6 +43,25 @@ internal sealed record DurableFunctionDeclarationSnapshot
 
     public AIFunctionDeclaration ToDeclaration() => new SnapshotDeclaration(this);
 
+    internal void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(Name)
+            || !string.Equals(
+                JsonSchemaFingerprint,
+                DurableJsonSchemaFingerprint.Create(JsonSchema),
+                StringComparison.Ordinal)
+            || !string.Equals(
+                ReturnJsonSchemaFingerprint,
+                ReturnJsonSchema is { } returnSchema
+                    ? DurableJsonSchemaFingerprint.Create(returnSchema)
+                    : null,
+                StringComparison.Ordinal))
+        {
+            throw DurableToolsetManifest.Failure(
+                "A durable function declaration snapshot is invalid.");
+        }
+    }
+
     public void ValidateImplementation(AIFunction function)
     {
         ArgumentNullException.ThrowIfNull(function);

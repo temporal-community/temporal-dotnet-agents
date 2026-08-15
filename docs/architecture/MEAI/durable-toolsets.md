@@ -40,8 +40,39 @@ but an authority-bearing change requires a new manifest version or an operationa
 sessions. Canonical fingerprint encoding, field order, and exact ordinal name semantics are part of
 the versioned contract.
 
-Changing worker registrations affects new sessions only. To adopt a changed baseline, start a new
-session; runtime refresh is intentionally unsupported.
+Changing default selection or durable policy does not rewrite a running session's recorded
+manifest. To adopt a changed baseline, start a new session; runtime refresh is intentionally
+unsupported. Workers serving in-flight sessions must retain compatible activation keys and
+function schemas for every recorded member. An incompatible binding fails before application code
+runs rather than silently dispatching a different implementation.
+
+## Authority behavior
+
+| Input/session shape | Effective authority | Result |
+|---|---|---|
+| No declarations or manifest; worker defaults exist | Resolved worker manifest | Resolve once, then run |
+| No declarations or manifest; no defaults | Empty worker manifest | Normal no-tools model call |
+| Caller declarations only | Caller-owned snapshot | Advanced mode; no resolver |
+| Caller declarations and worker manifest | Ambiguous | Non-retryable failure before model or resolver activity |
+| Custom turn omits `ToolsetIds` | Complete recorded baseline | Run with baseline |
+| Custom turn supplies an empty list | No tools for that turn | Run model with no tools |
+| Custom turn supplies a baseline subset | Baseline-ordered subset | Run with frozen subset |
+| Custom turn names an ID outside the baseline | Attempted expansion | Non-retryable failure before model activity |
+| Model returns an unselected or unknown function | Not enabled | Same safe blocked result; no tool activity |
+| Continue-as-New | Recorded session baseline | Carry unchanged; never resolve again |
+
+The manifest fingerprint covers the ordered declarations and durable policy. Each member also has
+a stable identity fingerprint over its toolset ID, activation key, and declaration. The workflow
+binds that identity to the full manifest fingerprint in every internal tool-activity input. The
+activity validates this binding and the worker's exact activation before it creates a factory or
+invokes a function. A malformed name, schema fingerprint, toolset ID, activation key, manifest
+fingerprint, or binding fails non-retryably without reaching application code.
+
+These checks protect package boundaries and deterministic dispatch; they are not an authorization
+system. Tool exposure controls what the model may request. A write tool must still authorize the
+current subject and resource immediately before its external effect. Public blocked results do not
+distinguish an unknown function from a baseline-known but unselected function, and never list the
+worker registry.
 
 ## Resolution sequence
 

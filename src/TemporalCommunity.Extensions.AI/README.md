@@ -28,8 +28,9 @@ SendAsync -> DurableChatWorkflow -> GetChatStep activity
 ## Supported capabilities
 
 - Durable multi-turn chat sessions with `SendAsync` and `GetHistoryAsync`.
-- Registered durable tools through `AddDurableTools`; every model-requested function invocation is
-  a Temporal activity with independently configurable timeout and retry behavior.
+- Worker-owned durable tools through `AddDurableTools` or named `AddDurableToolset` groups; every
+  enabled model-requested invocation is a Temporal activity with independently configurable
+  timeout and retry behavior.
 - Pre-tool decisions through `IDurableToolInterceptor<DurableToolContext>`, including block,
   skip, and approval outcomes.
 - Human approval APIs: `GetPendingApprovalAsync`, retry-safe `ResolveApprovalAsync`, and `ShutdownAsync`. Approvals are per-request; reusable approval scopes are an MAF-only capability.
@@ -45,8 +46,9 @@ workflow use does not change the durable-session tool contract below.
 
 ## Managed-session tool contract
 
-`AddDurableTools` is the sole source of both the model-visible function schema and the worker-side
-function implementation. Do not put functions in `ChatOptions.Tools` when calling
+Worker tool registrations are the source of both model-visible schemas and worker implementations.
+Use `AddDurableTools` for one implicit default group or `AddDurableToolset` for named groups. Do not
+put functions in `ChatOptions.Tools` when calling
 `DurableChatSessionClient.SendAsync`; the client rejects that configuration. Do not add
 `UseFunctionInvocation()` to the `IChatClient` pipeline used by a managed durable session.
 
@@ -93,8 +95,8 @@ builder.Services
 `AddDurableTools` creates one implicit worker-owned default toolset. The stock client request stays
 thin: it carries no implementation or schema. On a new session, the workflow schedules
 `ResolveDurableToolsets` once before `GetChatStep`; Temporal records the returned versioned manifest
-and Continue-as-New carries it unchanged. Worker registration changes therefore affect new
-sessions, not sessions already running.
+and Continue-as-New carries it unchanged. Changed defaults affect new sessions; workers must retain
+compatible activation keys and function schemas for recorded in-flight members.
 
 Send a turn without `ChatOptions.Tools`:
 

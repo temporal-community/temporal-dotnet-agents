@@ -40,14 +40,8 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
     protected sealed override async Task RunAsync(DurableChatWorkflowInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
-        if (input.ToolsetManifest is not null && input.ToolDeclarations is not null)
-        {
-            throw Internal.DurableToolsetManifest.Failure(
-                "A durable tool workflow cannot combine caller-owned declarations with a " +
-                "worker-owned toolset manifest.");
-        }
-
-        if (input.ToolsetManifest is null && input.ToolDeclarations is null)
+        var authority = Internal.DurableToolsetAuthority.Resolve(input);
+        if (authority == Internal.DurableToolsetAuthorityKind.None)
         {
             var baselineIds = DurableToolsetBaselineIds;
             var resolverOptions = new ActivityOptions
@@ -67,11 +61,6 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
             manifest.Validate();
             input = input with { ToolsetManifest = manifest };
         }
-        else
-        {
-            input.ToolsetManifest?.Validate();
-        }
-
         var sessionTask = base.RunAsync(input);
         _toolAuthorityReady = true;
         await sessionTask.ConfigureAwait(true);

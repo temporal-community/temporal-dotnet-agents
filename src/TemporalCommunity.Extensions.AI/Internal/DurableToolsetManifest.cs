@@ -34,6 +34,27 @@ internal sealed record DurableToolsetManifest
                 $"This worker supports version '{CurrentVersion}'.");
         }
 
+        var selectedIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in ToolsetIds)
+        {
+            if (string.IsNullOrWhiteSpace(id) || !selectedIds.Add(id))
+            {
+                throw Failure("The durable toolset manifest contains an invalid toolset selection.");
+            }
+        }
+
+        var activationKeys = new HashSet<string>(StringComparer.Ordinal);
+        var functionNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var member in Members)
+        {
+            member.Validate(selectedIds);
+            if (!activationKeys.Add(member.ActivationKey)
+                || !functionNames.Add(member.Declaration.Name))
+            {
+                throw Failure("The durable toolset manifest contains an ambiguous member.");
+            }
+        }
+
         var expected = DurableToolsetManifestFingerprint.Create(this);
         if (!string.Equals(Fingerprint, expected, StringComparison.Ordinal))
         {
@@ -98,6 +119,8 @@ internal sealed record DurableToolsetManifestMember
 
     public required string ActivationKey { get; init; }
 
+    public required string MemberIdentityFingerprint { get; init; }
+
     public required DurableFunctionDeclarationSnapshot Declaration { get; init; }
 
     public required ActivityOptions ToolActivityOptions { get; init; }
@@ -111,6 +134,62 @@ internal sealed record DurableToolsetManifestMember
     public bool RequiresApproval { get; init; }
 
     public required TimeSpan ApprovalTimeout { get; init; }
+
+    internal void Validate(HashSet<string> selectedToolsetIds)
+    {
+        Declaration.Validate();
+        if (string.IsNullOrWhiteSpace(ToolsetId)
+            || !selectedToolsetIds.Contains(ToolsetId)
+            || string.IsNullOrWhiteSpace(ActivationKey)
+            || !string.Equals(
+                MemberIdentityFingerprint,
+                DurableToolsetMemberIdentityFingerprint.Create(
+                    ToolsetId,
+                    ActivationKey,
+                    Declaration),
+                StringComparison.Ordinal)
+            || !ToolActivityOptions.StartToCloseTimeout.HasValue
+            || ToolActivityOptions.StartToCloseTimeout.Value <= TimeSpan.Zero
+            || !ToolActivityOptions.HeartbeatTimeout.HasValue
+            || ToolActivityOptions.HeartbeatTimeout.Value <= TimeSpan.Zero
+            || ApprovalTimeout <= TimeSpan.Zero
+            || (InterceptorEnabled && InterceptorActivityOptions is null)
+            || (!InterceptorEnabled && InterceptorActivityOptions is not null))
+        {
+            throw DurableToolsetManifest.Failure(
+                "The durable toolset manifest contains an invalid member or policy.");
+        }
+    }
+}
+
+internal static class DurableToolsetMemberIdentityFingerprint
+{
+    internal static string Create(
+        string toolsetId,
+        string activationKey,
+        DurableFunctionDeclarationSnapshot declaration)
+    {
+        var value = JsonSerializer.SerializeToElement(new
+        {
+            ToolsetId = toolsetId,
+            ActivationKey = activationKey,
+            Declaration = declaration,
+        }, DurableAIJsonUtilities.DefaultOptions);
+        return $"tai-tool-member-v1:{DurableJsonSchemaFingerprint.Create(value)}";
+    }
+}
+
+internal static class DurableToolsetAuthorityBindingFingerprint
+{
+    internal static string Create(string manifestFingerprint, string memberIdentityFingerprint)
+    {
+        var value = JsonSerializer.SerializeToElement(new
+        {
+            ManifestFingerprint = manifestFingerprint,
+            MemberIdentityFingerprint = memberIdentityFingerprint,
+        }, DurableAIJsonUtilities.DefaultOptions);
+        return $"tai-tool-binding-v1:{DurableJsonSchemaFingerprint.Create(value)}";
+    }
 }
 
 internal static class DurableToolsetManifestFingerprint

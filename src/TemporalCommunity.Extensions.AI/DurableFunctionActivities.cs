@@ -32,8 +32,18 @@ internal sealed class DurableFunctionActivities(
 
         Internal.DurableToolFactoryActivation? activation = null;
         AIFunction function;
+        if (input.ActivationKey is null
+            && (input.ToolsetId is not null
+                || input.MemberIdentityFingerprint is not null
+                || input.ManifestFingerprint is not null
+                || input.AuthorityBindingFingerprint is not null))
+        {
+            throw WorkerOwnedBindingFailure();
+        }
+
         if (input.ActivationKey is not null)
         {
+            ValidateWorkerOwnedBinding(input);
             if (toolsetActivationCatalog is null
                 || !toolsetActivationCatalog.TryGetValue(input.ActivationKey, out var toolsetActivation)
                 || !string.Equals(toolsetActivation.ToolsetId, input.ToolsetId, StringComparison.Ordinal)
@@ -49,6 +59,18 @@ internal sealed class DurableFunctionActivities(
             }
 
             var member = toolsetActivation.Member;
+            var currentIdentity = Internal.DurableToolsetMemberIdentityFingerprint.Create(
+                toolsetActivation.ToolsetId,
+                member.ActivationKey,
+                member.Declaration);
+            if (!string.Equals(
+                currentIdentity,
+                input.MemberIdentityFingerprint,
+                StringComparison.Ordinal))
+            {
+                throw WorkerOwnedBindingFailure();
+            }
+
             if (member.ActivationFactory is not null)
             {
                 activation = CreateFactoryActivation(member.ActivationFactory, input, ctx);
@@ -146,6 +168,67 @@ internal sealed class DurableFunctionActivities(
             throw;
         }
     }
+
+    private static void ValidateWorkerOwnedBinding(DurableFunctionInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.ToolsetId)
+            || string.IsNullOrWhiteSpace(input.MemberIdentityFingerprint)
+            || input.Declaration is null
+            || !IsVersionOneFingerprint(input.ManifestFingerprint, "tai-toolset-v1:")
+            || !IsVersionOneFingerprint(
+                input.MemberIdentityFingerprint,
+                "tai-tool-member-v1:")
+            || !IsVersionOneFingerprint(
+                input.AuthorityBindingFingerprint,
+                "tai-tool-binding-v1:"))
+        {
+            throw WorkerOwnedBindingFailure();
+        }
+
+        input.Declaration.Validate();
+        var carriedIdentity = Internal.DurableToolsetMemberIdentityFingerprint.Create(
+            input.ToolsetId,
+            input.ActivationKey!,
+            input.Declaration);
+        if (!string.Equals(
+            carriedIdentity,
+            input.MemberIdentityFingerprint,
+            StringComparison.Ordinal)
+            || !string.Equals(
+                Internal.DurableToolsetAuthorityBindingFingerprint.Create(
+                    input.ManifestFingerprint!,
+                    input.MemberIdentityFingerprint),
+                input.AuthorityBindingFingerprint,
+                StringComparison.Ordinal))
+        {
+            throw WorkerOwnedBindingFailure();
+        }
+    }
+
+    private static bool IsVersionOneFingerprint(string? value, string prefix)
+    {
+        if (value is null || value.Length != prefix.Length + 64
+            || !value.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        for (var i = prefix.Length; i < value.Length; i++)
+        {
+            var c = value[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static ApplicationFailureException WorkerOwnedBindingFailure() => new(
+        "The durable tool activity input does not match its recorded manifest member.",
+        errorType: nameof(Exceptions.DurableConfigurationException),
+        nonRetryable: true);
 
     private Internal.DurableToolFactoryActivation CreateFactoryActivation(
         Internal.IDurableToolActivationFactory activationFactory,
