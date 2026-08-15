@@ -31,6 +31,12 @@ internal static class SampleTools
     }
 }
 
+internal sealed class ReferenceTools(ProcessingAttemptServices attemptServices)
+{
+    public string ReadReference(string reference) =>
+        $"reference:{reference}:scope={attemptServices.InstanceId}";
+}
+
 internal interface IAuthoritativeAuthorizationService
 {
     ValueTask<bool> IsAllowedAsync(

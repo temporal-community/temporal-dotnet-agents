@@ -79,10 +79,36 @@ for new turns on an older live session.
 
 ## Invocation-scoped tools for typed turns
 
-Keep ordinary functions as the default. Use an invocation-scoped factory only when a tool genuinely
-needs the `RequestData` or current `TurnState` supplied to a `DurableToolWorkflowBase` Update.
-The declaration is frozen before workflow start; the implementation is created inside each tool
-activity attempt:
+For a regular instance method with constructor-injected services, register the handler type and one
+explicit method. The library creates the MEAI declaration and receiver activator once, then MEAI
+creates and disposes one receiver for each activity attempt:
+
+```csharp
+worker.AddDurableToolFactory<InventoryTools>(
+    nameof(InventoryTools.LookupAsync),
+    new AIFunctionFactoryOptions
+    {
+        Name = "lookup_inventory",
+        Description = "Looks up current inventory.",
+    });
+
+sealed class InventoryTools(IInventoryStore store)
+{
+    public Task<InventoryItem> LookupAsync(
+        string sku,
+        CancellationToken cancellationToken) =>
+        store.LookupAsync(sku, cancellationToken);
+}
+```
+
+This is the normal DI-backed path. It does not scan the handler class; overloaded methods use the
+`MethodInfo` overload. `IServiceProvider`, `AIFunctionArguments`, and `CancellationToken` parameters
+follow normal MEAI binding and are excluded from the model schema.
+
+Use the declaration-plus-activation overload only when a tool genuinely needs the `RequestData` or
+current `TurnState` supplied to a `DurableToolWorkflowBase` Update, custom MEAI decorators, or a
+state-completion callback. The declaration is frozen before workflow start; the implementation is
+created inside each tool activity attempt:
 
 ```csharp
 var declaration = AIFunctionFactory.Create(

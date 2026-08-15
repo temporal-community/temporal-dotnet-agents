@@ -1,5 +1,17 @@
 # Extensible durable turns
 
+## Method receiver ownership
+
+`AddDurableToolFactory<THandler>(methodName, ...)` uses MEAI's instance receiver factory. Schema
+construction and the compiled `ActivatorUtilities` factory happen once during worker registration.
+Each invocation resolves constructor dependencies from the current activity scope and creates a new
+handler. MEAI disposes that invocation-owned handler after the method completes; the activity scope
+separately disposes its scoped dependencies. The library never returns a container-owned handler to
+MEAI, avoiding double disposal. Success, failure, and cancellation follow the same lifetime rule.
+
+The activity sets `AIFunctionArguments.Services` to its scoped provider. MEAI automatically excludes
+`IServiceProvider`, `AIFunctionArguments`, and `CancellationToken` parameters from the model schema.
+
 This document records the design constraints for application-owned workflows that reuse the
 package's managed model/tool loop. The feature is intentionally based on ordinary
 `Microsoft.Extensions.AI.AIFunction` instances. It does not introduce a second middleware pipeline,

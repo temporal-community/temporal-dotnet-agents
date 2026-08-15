@@ -20,6 +20,7 @@ public class DurableAIServiceCollectionExtensionsTests
             .GetMethods(BindingFlags.Public | BindingFlags.Static)
             .Where(method => method.Name is nameof(DurableAIServiceCollectionExtensions.AddDurableToolFactory)
                 or nameof(DurableAIServiceCollectionExtensions.AddDurableToolImplementation))
+            .Where(method => method.GetParameters().Any(parameter => parameter.Name == "factory"))
             .ToArray();
 
         Assert.Equal(2, factoryMethods.Length);

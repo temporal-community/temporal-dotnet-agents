@@ -106,6 +106,7 @@ internal sealed class DurableFunctionActivities(
             var arguments = input.Arguments is not null
                 ? new AIFunctionArguments(input.Arguments)
                 : new AIFunctionArguments();
+            arguments.Services = serviceProvider;
 
             var result = await function.InvokeAsync(arguments, ct).ConfigureAwait(false);
 

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using System.Reflection;
 using TemporalCommunity.Extensions.AI.Internal;
 using Temporalio.Extensions.Hosting;
 
@@ -243,6 +244,44 @@ public static class DurableAIServiceCollectionExtensions
     }
 
     /// <summary>
+    /// Registers one explicitly selected instance method as a durable tool. The declaration and
+    /// receiver activator are created once during registration; a fresh receiver is created and
+    /// disposed for every tool activity attempt.
+    /// </summary>
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableToolFactory<THandler>(
+        this ITemporalWorkerServiceOptionsBuilder builder,
+        string methodName,
+        AIFunctionFactoryOptions? functionOptions = null,
+        Action<DurableChatToolOptions>? configure = null)
+        where THandler : class
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
+        EnsureDurableAIRegistered(builder);
+        RegisterMethodTool<THandler>(builder.Services, ResolveMethod<THandler>(methodName), functionOptions, configure);
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers one explicitly selected instance method as a durable tool. This overload avoids
+    /// ambiguity when the handler has overloaded methods.
+    /// </summary>
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableToolFactory<THandler>(
+        this ITemporalWorkerServiceOptionsBuilder builder,
+        MethodInfo method,
+        AIFunctionFactoryOptions? functionOptions = null,
+        Action<DurableChatToolOptions>? configure = null)
+        where THandler : class
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(method);
+        EnsureDurableAIRegistered(builder);
+        ValidateMethod<THandler>(method);
+        RegisterMethodTool<THandler>(builder.Services, method, functionOptions, configure);
+        return builder;
+    }
+
+    /// <summary>
     /// Registers only a stable model-facing declaration. Use this in a client process that starts
     /// workflows but does not host executable tool implementations.
     /// </summary>
@@ -346,6 +385,63 @@ public static class DurableAIServiceCollectionExtensions
     {
         AddDurableToolDeclaration(builder, declaration, configure);
         AddDurableToolImplementation(builder, declaration.Name, factory);
+    }
+
+    internal static AIFunction RegisterMethodTool<THandler>(
+        IServiceCollection services,
+        MethodInfo method,
+        AIFunctionFactoryOptions? functionOptions,
+        Action<DurableChatToolOptions>? configure)
+        where THandler : class
+    {
+        ValidateMethod<THandler>(method);
+        var activator = ActivatorUtilities.CreateFactory(typeof(THandler), Type.EmptyTypes);
+        var function = AIFunctionFactory.Create(
+            method,
+            arguments => activator(
+                arguments.Services
+                    ?? throw new InvalidOperationException(
+                        $"Durable tool '{method.Name}' requires an activity service provider."),
+                null),
+            functionOptions ?? new AIFunctionFactoryOptions());
+        RegisterDurableFunction(services, function, configure);
+        return function;
+    }
+
+    internal static MethodInfo ResolveMethod<THandler>(string methodName)
+        where THandler : class
+    {
+        var matches = typeof(THandler)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .Where(method => string.Equals(method.Name, methodName, StringComparison.Ordinal))
+            .ToArray();
+        return matches.Length switch
+        {
+            1 => matches[0],
+            0 => throw new ArgumentException(
+                $"Public instance method '{methodName}' was not found on '{typeof(THandler).FullName}'.",
+                nameof(methodName)),
+            _ => throw new ArgumentException(
+                $"Method name '{methodName}' is overloaded on '{typeof(THandler).FullName}'. " +
+                "Use the MethodInfo overload to select one method explicitly.",
+                nameof(methodName)),
+        };
+    }
+
+    internal static void ValidateMethod<THandler>(MethodInfo method)
+        where THandler : class
+    {
+        if (method.IsStatic
+            || !method.IsPublic
+            || method.ContainsGenericParameters
+            || method.DeclaringType is null
+            || !method.DeclaringType.IsAssignableFrom(typeof(THandler)))
+        {
+            throw new ArgumentException(
+                $"Method '{method.Name}' must be a closed public instance method callable on " +
+                $"'{typeof(THandler).FullName}'.",
+                nameof(method));
+        }
     }
 
     private static DurableToolsetRegistration GetOrAddImplicitDefaultToolset(

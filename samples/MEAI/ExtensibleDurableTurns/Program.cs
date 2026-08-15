@@ -35,11 +35,15 @@ var worker = builder.Services
     })
     .AddWorkflow<ContextualTurnWorkflow>();
 
-// Ordinary functions remain the default and require no Temporal-specific signature.
-worker.AddDurableTools(AIFunctionFactory.Create(
-    SampleTools.ReadReference,
-    "read_reference",
-    "Reads a reference value."));
+// The declaration and receiver activator are built once. Each tool activity attempt receives a
+// fresh ReferenceTools receiver and fresh ProcessingAttemptServices from that activity's scope.
+worker.AddDurableToolFactory<ReferenceTools>(
+    nameof(ReferenceTools.ReadReference),
+    new AIFunctionFactoryOptions
+    {
+        Name = "read_reference",
+        Description = "Reads a reference value.",
+    });
 
 var firstDeclaration = AIFunctionFactory.Create(
     (string value) => string.Empty,

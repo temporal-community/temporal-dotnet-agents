@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using System.Reflection;
 using Temporalio.Extensions.Hosting;
 
 namespace TemporalCommunity.Extensions.AI;
@@ -53,6 +54,48 @@ public sealed class DurableToolsetBuilder
             factory,
             configure);
         registration.Add(declaration.Name);
+        return this;
+    }
+
+    /// <summary>
+    /// Adds one explicitly selected handler method. A fresh handler is created from the activity
+    /// scope for every invocation while its declaration and activator are cached at registration.
+    /// </summary>
+    public DurableToolsetBuilder AddDurableToolFactory<THandler>(
+        string methodName,
+        AIFunctionFactoryOptions? functionOptions = null,
+        Action<DurableChatToolOptions>? configure = null)
+        where THandler : class
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
+        var method = DurableAIServiceCollectionExtensions.ResolveMethod<THandler>(methodName);
+        return AddMethod<THandler>(method, functionOptions, configure);
+    }
+
+    /// <summary>Adds one explicitly selected handler method, including an overload.</summary>
+    public DurableToolsetBuilder AddDurableToolFactory<THandler>(
+        MethodInfo method,
+        AIFunctionFactoryOptions? functionOptions = null,
+        Action<DurableChatToolOptions>? configure = null)
+        where THandler : class
+    {
+        ArgumentNullException.ThrowIfNull(method);
+        return AddMethod<THandler>(method, functionOptions, configure);
+    }
+
+    private DurableToolsetBuilder AddMethod<THandler>(
+        MethodInfo method,
+        AIFunctionFactoryOptions? functionOptions,
+        Action<DurableChatToolOptions>? configure)
+        where THandler : class
+    {
+        DurableAIServiceCollectionExtensions.ValidateMethod<THandler>(method);
+        var function = DurableAIServiceCollectionExtensions.RegisterMethodTool<THandler>(
+            worker.Services,
+            method,
+            functionOptions,
+            configure);
+        registration.Add(function.Name);
         return this;
     }
 }
