@@ -505,6 +505,44 @@ public class DurableToolInterceptorIntegrationTests
         await host2.StopAsync();
     }
 
+    [Fact]
+    public async Task Approval_ConcurrentEquivalentResolutions_RunToolOnce()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+
+        var harness = new ScriptedToolHarness();
+        var tool = harness.BuildAlwaysSucceeds("write_record", "Writes a record.", _ => "written");
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", "write_record")],
+            "Write complete.");
+        var taskQueue = $"ai-approval-race-{Guid.NewGuid():N}";
+        using var host = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
+            builder.AddDurableTools(tool, options => options.RequireApproval()));
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"approval-race-{Guid.NewGuid():N}";
+        var chatTask = sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, "write")]);
+        var pending = await WaitForPendingApprovalAsync(sessionClient, conversationId);
+        Assert.NotNull(pending);
+
+        var decision = new DurableApprovalDecision
+        {
+            RequestId = pending!.RequestId,
+            Approved = true,
+            Reason = "Approved by reviewer.",
+        };
+        var outcomes = await Task.WhenAll(
+            sessionClient.ResolveApprovalAsync(conversationId, decision),
+            sessionClient.ResolveApprovalAsync(conversationId, decision));
+
+        Assert.Contains(outcomes, outcome => outcome.Status == DurableApprovalResolutionStatus.Accepted);
+        Assert.Contains(outcomes, outcome => outcome.Status == DurableApprovalResolutionStatus.AlreadyResolved);
+        await chatTask.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(1, harness.GetInvocationCount("write_record"));
+        await host.StopAsync();
+    }
+
     /// <summary>
     /// A completed decision remains idempotently recognizable after the workflow starts a
     /// new run. This protects a reviewer retry whose first update response was lost.

@@ -180,6 +180,52 @@ public sealed class WorkflowParkedApprovalReviewDataTests
         await host2.StopAsync();
     }
 
+    [Fact]
+    public async Task WorkflowParkedApproval_ConcurrentEquivalentResolutions_RunToolOnce()
+    {
+        await using var environment = await TestEnvironmentHelper.StartLocalAsync();
+        environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var invocations = 0;
+        var tool = AIFunctionFactory.Create(
+            () =>
+            {
+                Interlocked.Increment(ref invocations);
+                return "done";
+            },
+            name: "write_record",
+            description: "Writes a record.");
+        var chatClient = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", "write_record")],
+            "Write complete.");
+        var taskQueue = $"agent-approval-race-{Guid.NewGuid():N}";
+
+        using var host = BuildHost(environment.Client, taskQueue, chatClient, tool, new ApprovalInterceptor(null));
+        await host.StartAsync();
+        var proxy = host.Services.GetTemporalAgentProxy("ApprovalAgent");
+        var client = host.Services.GetRequiredService<ITemporalAgentClient>();
+        var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+        var runTask = proxy.RunAsync("write", session);
+        var pending = await WaitForPendingAsync(client, session.SessionId);
+        Assert.NotNull(pending);
+
+        var decision = new DurableAgentApprovalDecision
+        {
+            RequestId = pending!.RequestId,
+            Approved = true,
+            Reason = "Approved by reviewer.",
+        };
+        var outcomes = await Task.WhenAll(
+            client.ResolveApprovalAsync(session.SessionId, decision),
+            client.ResolveApprovalAsync(session.SessionId, decision));
+
+        Assert.Contains(outcomes, outcome => outcome.Status == DurableApprovalResolutionStatus.Accepted);
+        Assert.Contains(outcomes, outcome => outcome.Status == DurableApprovalResolutionStatus.AlreadyResolved);
+        await runTask.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(1, Volatile.Read(ref invocations));
+        await host.StopAsync();
+    }
+
     private static async Task<DurableApprovalRequest?> WaitForPendingAsync(
         ITemporalAgentClient client,
         TemporalAgentSessionId sessionId)
