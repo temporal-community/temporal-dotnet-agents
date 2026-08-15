@@ -190,6 +190,15 @@ static async Task RunHitlDemoAsync(DurableChatSessionClient sessionClient)
         Console.WriteLine($" ║  Function    : {fnName[..Math.Min(34, fnName.Length)],-34}║");
         if (pending.Description is { Length: > 0 })
             Console.WriteLine($" ║  Description : {pending.Description[..Math.Min(34, pending.Description.Length)],-34}║");
+        if (pending.ReviewData is not null)
+        {
+            foreach (var (key, value) in pending.ReviewData)
+            {
+                Console.WriteLine($" ║  {key,-12}: {value[..Math.Min(30, value.Length)],-30}║");
+            }
+        }
+        if (pending.ExpiresAt is { } expiresAt)
+            Console.WriteLine($" ║  Expires     : {expiresAt:O} ║");
         Console.WriteLine(" ╚══════════════════════════════════════════════════╝");
         Console.WriteLine();
 
@@ -210,8 +219,11 @@ static async Task RunHitlDemoAsync(DurableChatSessionClient sessionClient)
             Reason    = "Auto-approved by sample reviewer.",
         };
 
-        await sessionClient.ResolveApprovalAsync(conversationId, decision);
-        Console.WriteLine(" [Reviewer] Approval submitted — waiting for assistant response...\n");
+        var resolution = await sessionClient.ResolveApprovalAsync(conversationId, decision);
+        Console.WriteLine($" [Reviewer] Approval submitted: {resolution.Status}");
+        var duplicate = await sessionClient.ResolveApprovalAsync(conversationId, decision);
+        Console.WriteLine($" [Reviewer] Identical retry: {duplicate.Status}");
+        Console.WriteLine(" [Reviewer] Waiting for assistant response...\n");
     }
     else
     {

@@ -673,6 +673,10 @@ internal class AgentWorkflow :
                             FunctionName = tc.Name,
                             CallId = tc.CallId,
                             Description = DurableToolDecisionPolicy.GetApprovalDescription(interceptorResult, tc.Name),
+                            // Metadata is deliberately interceptor-authored. Do not expose raw
+                            // model function arguments to a reviewer unless an interceptor has
+                            // first reduced them to explicit, safe review data.
+                            ReviewData = interceptorResult?.Metadata,
                         };
 
                         // Sequential: the mixin enforces one pending approval at a time.

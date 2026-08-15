@@ -19,7 +19,8 @@ The sample registers an `OrderInterceptor` that fires before every `apply_refund
 - `IAgentToolInterceptor.BeforeToolCallAsync` — all four decision outcomes in one coherent flow
 - `DurableToolDecision.Skip` — synthetic result injected; tool activity never dispatched
 - `DurableToolDecision.Block` — error result injected; tool activity never dispatched
-- `DurableToolDecision.PauseForApproval` — enriched description provided to the reviewer
+- `DurableToolDecision.PauseForApproval` — enriched description and explicit reviewer-safe metadata
+  provided to the reviewer
 - `DurableToolOptions.RequireApproval()` — configuration-time floor independent of interceptor
 - `DurableToolOptions.SkipInterceptor()` — opt read-only `lookup_order` out of the interceptor
 - `ITemporalAgentClient.GetPendingApprovalAsync` / `ResolveApprovalAsync` — approval poll/resolve loop
@@ -27,6 +28,10 @@ The sample registers an `OrderInterceptor` that fires before every `apply_refund
 > **Library split:** `DurableToolDecision`, `DurableToolContext`, and `IDurableToolInterceptor<TContext>` are defined in `TemporalCommunity.Extensions.AI.Tools`. `IAgentToolInterceptor` and `AgentToolContext` are in `TemporalCommunity.Extensions.Agents.Tools`. Add `using TemporalCommunity.Extensions.AI.Tools;` to any file that references `DurableToolDecision` directly; add `using TemporalCommunity.Extensions.Agents.Tools;` for `IAgentToolInterceptor` / `AgentToolContext`.
 
 > **`IDurableToolInterceptor<DurableToolContext>` sample** — see `samples/MEAI/ToolInterceptor` for the base-library interface in action. Interceptors run inside `DurableChatWorkflow.ExecuteDurableToolLoopTurnAsync` (the durable tool-dispatch loop).
+
+> **Security boundary:** `ReviewData` is display context selected by the interceptor, not a
+> reviewer credential or authorization claim. The external approval endpoint authenticates the
+> reviewer; `apply_refund` still needs effect-time authorization and idempotency protection.
 
 ## Prerequisites
 

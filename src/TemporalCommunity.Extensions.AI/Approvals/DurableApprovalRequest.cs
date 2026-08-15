@@ -33,7 +33,10 @@ public sealed class DurableApprovalRequest
     /// <remarks>
     /// The durable tool loop never copies raw model-supplied function arguments into this
     /// property. Populate it only from data intentionally selected for the reviewer, such as
-    /// an account identifier, operation summary, or policy reference.
+    /// an account identifier, operation summary, or policy reference. This data is not a
+    /// trusted actor identity, credential, or authorization claim. The approval UI must
+    /// authenticate its reviewer independently, and the tool must authorize the effect against
+    /// current authoritative state immediately before executing it.
     /// </remarks>
     public IReadOnlyDictionary<string, string>? ReviewData { get; init; }
 

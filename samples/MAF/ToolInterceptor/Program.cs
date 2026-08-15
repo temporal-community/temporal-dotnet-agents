@@ -163,8 +163,15 @@ while (!agentTask.IsCompleted)
 
     if (pending is null) continue;
 
-    // Approval gate — print the enriched description and auto-approve for demo.
+    // Approval gate — print only the interceptor-selected reviewer-safe data.
     Console.WriteLine($"[Approval requested] {pending.Description}");
+    if (pending.ReviewData is not null)
+    {
+        foreach (var (key, value) in pending.ReviewData)
+        {
+            Console.WriteLine($"  {key}: {value}");
+        }
+    }
     Console.WriteLine("[Auto-approving for demo]");
 
     var resolution = await agentClient.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
@@ -175,6 +182,17 @@ while (!agentTask.IsCompleted)
     });
 
     Console.WriteLine($"[Approval resolution: {resolution.Status}]");
+
+    // The reason explains the decision; it must never carry reviewer credentials or roles.
+    // The external approval console authenticates reviewers, and the write tool must still
+    // authorize the effect against current state.
+    var duplicate = await agentClient.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
+    {
+        RequestId = pending.RequestId,
+        Approved = true,
+        Reason = "Demo auto-approve",
+    });
+    Console.WriteLine($"[Duplicate resolution: {duplicate.Status}]");
 
     // Break so we don't loop and re-approve after the tool has already run.
     break;

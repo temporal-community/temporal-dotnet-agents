@@ -26,6 +26,9 @@ webhook, or other review system in a real application.
   per-tool timeout (`WithApprovalTimeout`) and a 26-hour session lifetime.
 - `NoRetry()` is deliberate: deleting records is a write operation and should not be repeated by
   an activity retry without an idempotency design.
+- An approval decision records permission to attempt the operation; it is not reviewer identity
+  or authorization. Authenticate the reviewer in the external UI and authorize the write against
+  current authoritative state immediately before the effect.
 - `ChatOptions.Tools` and `UseFunctionInvocation()` are not used. Managed sessions obtain both
   the model-visible schema and the worker implementation from `AddDurableTools`.
 

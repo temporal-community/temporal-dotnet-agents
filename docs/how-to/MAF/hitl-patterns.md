@@ -32,6 +32,11 @@ TemporalAgents supports two HITL flavors. Choose based on how long the approval 
 
 Both flavors use retry-safe `ResolveApprovalAsync` for external systems to unblock the workflow.
 
+For workflow-parked approvals, `DurableApprovalRequest.ReviewData` is explicit display context
+from an `IAgentToolInterceptor`; raw model arguments are not copied automatically. It is not a
+reviewer identity, credential, or authorization grant. Authenticate the reviewer in the external
+approval UI and authorize the tool against current authoritative state immediately before an effect.
+
 Three `[WorkflowUpdate]` / `[WorkflowQuery]` handlers make this work:
 
 | Handler | Type | Purpose |

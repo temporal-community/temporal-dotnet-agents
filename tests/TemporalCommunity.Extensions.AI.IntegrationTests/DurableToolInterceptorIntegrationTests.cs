@@ -372,6 +372,140 @@ public class DurableToolInterceptorIntegrationTests
     }
 
     /// <summary>
+    /// Every approval in one model-produced batch must resolve before any tool activity begins.
+    /// Duplicate model call IDs are not approval identities: each call receives its own request.
+    /// </summary>
+    [Fact]
+    public async Task ApprovalBatch_WaitsForEveryDecisionBeforeSchedulingAnyTool()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+
+        var harness = new ScriptedToolHarness();
+        var approvedTool = harness.BuildAlwaysSucceeds("approved_action", "Approved action.", _ => "approved");
+        var deniedTool = harness.BuildAlwaysSucceeds("denied_action", "Denied action.", _ => "denied");
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+        [
+            new FunctionCallContent("duplicate-call-id", "approved_action"),
+            new FunctionCallContent("duplicate-call-id", "denied_action"),
+        ],
+        "Approval processing complete.");
+
+        var taskQueue = $"approval-batch-{Guid.NewGuid():N}";
+        using var host = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
+        {
+            builder.AddDurableTools(approvedTool, options => options.RequireApproval());
+            builder.AddDurableTools(deniedTool, options => options.RequireApproval());
+        });
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"approval-batch-{Guid.NewGuid():N}";
+        var workflowId = sessionClient.GetWorkflowId(conversationId);
+        var handle = env.Client.GetWorkflowHandle(workflowId);
+        var chatTask = sessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "run both actions")]);
+
+        var first = await WaitForPendingApprovalAsync(sessionClient, conversationId);
+        Assert.NotNull(first);
+        Assert.Equal(0, harness.GetInvocationCount("approved_action"));
+        Assert.Equal(0, harness.GetInvocationCount("denied_action"));
+
+        await sessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
+        {
+            RequestId = first!.RequestId,
+            Approved = true,
+        });
+
+        var second = await WaitForPendingApprovalAsync(sessionClient, conversationId, first.RequestId);
+        Assert.NotNull(second);
+        Assert.NotEqual(first.RequestId, second!.RequestId);
+        Assert.Equal(0, harness.GetInvocationCount("approved_action"));
+        Assert.Equal(0, harness.GetInvocationCount("denied_action"));
+
+        await sessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
+        {
+            RequestId = second.RequestId,
+            Approved = false,
+            Reason = "Denied by test",
+        });
+
+        await chatTask.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(1, harness.GetInvocationCount("approved_action"));
+        Assert.Equal(0, harness.GetInvocationCount("denied_action"));
+
+        var events = new List<Temporalio.Api.History.V1.HistoryEvent>();
+        await foreach (var historyEvent in handle.FetchHistoryEventsAsync())
+        {
+            events.Add(historyEvent);
+        }
+
+        // The initial SendAsync Update completes after the turn. The two preceding completed
+        // updates are the first and second approval resolutions. The approved tool must be
+        // scheduled only after the second (final) resolution is recorded.
+        var completedUpdates = events
+            .Where(historyEvent => historyEvent.WorkflowExecutionUpdateCompletedEventAttributes is not null)
+            .OrderBy(historyEvent => historyEvent.EventId)
+            .ToArray();
+        Assert.True(completedUpdates.Length >= 3, "Expected two approval updates and the chat update.");
+        var finalResolutionEventId = completedUpdates[^2].EventId;
+        var invokeScheduleEventIds = events
+            .Where(historyEvent => historyEvent.ActivityTaskScheduledEventAttributes?.ActivityType.Name == InvokeFunctionActivity)
+            .Select(historyEvent => historyEvent.EventId)
+            .ToArray();
+        Assert.Single(invokeScheduleEventIds);
+        Assert.True(invokeScheduleEventIds[0] > finalResolutionEventId,
+            "The approved tool was scheduled before the final approval resolution completed.");
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task WorkerRestart_WhileApprovalPending_PreservesRequestIdAndRunsToolOnce()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+
+        var harness = new ScriptedToolHarness();
+        var tool = harness.BuildAlwaysSucceeds("write_record", "Writes a record.", _ => "written");
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", "write_record")],
+            "Write complete.");
+        var taskQueue = $"ai-approval-restart-{Guid.NewGuid():N}";
+
+        using var host1 = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
+            builder.AddDurableTools(tool, options => options.RequireApproval()));
+        await host1.StartAsync();
+        var client1 = host1.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"approval-restart-{Guid.NewGuid():N}";
+        var chatTask = client1.SendAsync(conversationId, [new ChatMessage(ChatRole.User, "write")]);
+        var pendingBeforeRestart = await WaitForPendingApprovalAsync(client1, conversationId);
+        Assert.NotNull(pendingBeforeRestart);
+        Assert.Equal(0, harness.GetInvocationCount("write_record"));
+
+        await host1.StopAsync();
+        using var host2 = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
+            builder.AddDurableTools(tool, options => options.RequireApproval()));
+        await host2.StartAsync();
+        var client2 = host2.Services.GetRequiredService<DurableChatSessionClient>();
+        var pendingAfterRestart = await WaitForPendingApprovalAsync(client2, conversationId);
+        Assert.NotNull(pendingAfterRestart);
+        Assert.Equal(pendingBeforeRestart!.RequestId, pendingAfterRestart!.RequestId);
+
+        await client2.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
+        {
+            RequestId = pendingAfterRestart.RequestId,
+            Approved = true,
+        });
+        await chatTask.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(1, harness.GetInvocationCount("write_record"));
+
+        var handle = env.Client.GetWorkflowHandle(client2.GetWorkflowId(conversationId));
+        var counts = await WorkflowHistoryAssertions.CountAllScheduledByTypeAsync(handle);
+        Assert.Equal(1, counts[InvokeFunctionActivity]);
+        await host2.StopAsync();
+    }
+
+    /// <summary>
     /// A completed decision remains idempotently recognizable after the workflow starts a
     /// new run. This protects a reviewer retry whose first update response was lost.
     /// </summary>
@@ -618,5 +752,32 @@ public class DurableToolInterceptorIntegrationTests
             DurableToolContext context,
             CancellationToken cancellationToken) =>
             handler(context, cancellationToken);
+    }
+
+    private static async Task<DurableApprovalRequest?> WaitForPendingApprovalAsync(
+        DurableChatSessionClient sessionClient,
+        string conversationId,
+        string? excludedRequestId = null)
+    {
+        for (var i = 0; i < 30; i++)
+        {
+            try
+            {
+                var pending = await sessionClient.GetPendingApprovalAsync(conversationId);
+                if (pending is not null && !string.Equals(pending.RequestId, excludedRequestId, StringComparison.Ordinal))
+                {
+                    return pending;
+                }
+            }
+            catch (Temporalio.Exceptions.RpcException exception)
+                when (exception.Code == Temporalio.Exceptions.RpcException.StatusCode.NotFound)
+            {
+                // The first query can arrive before the asynchronous workflow start is visible.
+            }
+
+            await Task.Delay(200);
+        }
+
+        return null;
     }
 }

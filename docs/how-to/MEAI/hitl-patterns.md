@@ -89,7 +89,9 @@ return DurableToolDecision.PauseForApproval(
 ```
 
 The reviewer receives these values in `pending.ReviewData`; include only information that is safe
-and useful for the reviewer.
+and useful for the reviewer. `ReviewData` is not a reviewer identity, credential, or authorization
+grant. Authenticate the reviewer in the external approval UI and authorize the tool against current
+authoritative state immediately before it performs an effect.
 
 ## Interceptors
 
@@ -100,3 +102,9 @@ Use `RequireApproval()` for a tool that must always be reviewed. See the
 
 Do not implement approval by passing a tool in `ChatOptions.Tools` or by putting
 `UseFunctionInvocation()` on the session client. Both bypass the managed-session contract.
+
+## Approval batches
+
+For one model response, the workflow records all interceptor decisions, resolves every required
+approval, and only then schedules any approved tool activity. An allowed sibling tool therefore
+cannot execute while another tool from that response is awaiting review.

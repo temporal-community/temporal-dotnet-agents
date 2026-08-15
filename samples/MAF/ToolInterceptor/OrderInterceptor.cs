@@ -77,11 +77,20 @@ public sealed class OrderInterceptor(FakeOrderService orderService) : IAgentTool
                     $"automatic approval limit. Please contact a supervisor."));
         }
 
-        // Decision path 3 — valid refund → PauseForApproval with enriched description.
+        // Decision path 3 — valid refund → PauseForApproval with reviewer-safe metadata.
+        // This is display context only. It is not a reviewer credential or authorization claim;
+        // the write tool must still authorize against authoritative state before the effect.
         var description =
             $"Apply refund of ${amount:F2} for {order.CustomerName} " +
             $"— {order.ProductName}, Order {order.OrderId}";
 
-        return Task.FromResult(DurableToolDecision.PauseForApproval(description));
+        return Task.FromResult(DurableToolDecision.PauseForApproval(
+            description,
+            new Dictionary<string, string>
+            {
+                ["orderId"] = order.OrderId,
+                ["refundAmount"] = amount.ToString("F2", System.Globalization.CultureInfo.InvariantCulture),
+                ["policy"] = "refund-under-500-review",
+            }));
     }
 }
