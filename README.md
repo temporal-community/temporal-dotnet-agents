@@ -101,7 +101,7 @@ down-level limitations.
 | [WorkflowRouting](samples/MAF/WorkflowRouting) | `Extensions.Agents` | Static and dynamic durable routing patterns |
 | [AmbientAgent](samples/MAF/AmbientAgent) | `Extensions.Agents` | Signal-driven ambient monitoring agent |
 | [ConfigurableAgent](samples/MAF/ConfigurableAgent) | `Extensions.Agents` | Per-agent settings and read-only tools |
-| [PerToolActivities](samples/MAF/PerToolActivities) | `Extensions.Agents` | Per-tool activity options and no-retry write tools |
+| [PerToolActivities](samples/MAF/PerToolActivities) | `Extensions.Agents` | Per-tool activity options, per-turn tool selection, and no-retry write tools |
 | [ContextProviders](samples/MAF/ContextProviders) | `Extensions.Agents` | Custom `AIContextProvider` implementations |
 | [DurableContextProvider](samples/MAF/DurableContextProvider) | `Extensions.Agents` | Context-provided tools dispatched durably |
 | [MixedActivities](samples/MAF/MixedActivities) | `Extensions.Agents` | Regular and AI activities in one workflow |

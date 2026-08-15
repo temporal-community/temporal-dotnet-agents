@@ -6,6 +6,7 @@
 // the tool loop directly.
 
 using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Workflows;
 using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
 
@@ -27,15 +28,26 @@ namespace PerToolActivities;
 public sealed class RefundWorkflow
 {
     [WorkflowRun]
-    public async Task<string> RunAsync(string customerComplaint)
+    public async Task<string> RunAsync(RefundTurnInput input)
     {
         var agent = GetTemporalAgent("RefundAgent");
         var session = await agent.CreateSessionAsync().ConfigureAwait(true);
 
         var response = await agent.RunAsync(
-            [new ChatMessage(ChatRole.User, customerComplaint)],
-            session).ConfigureAwait(true);
+            [new ChatMessage(ChatRole.User, input.CustomerComplaint)],
+            session,
+            new TemporalAgentRunOptions
+            {
+                EnableToolCalls = input.EnableToolCalls,
+                EnableToolNames = input.EnableToolNames?.ToList(),
+            }).ConfigureAwait(true);
 
         return response.Text ?? string.Empty;
     }
 }
+
+/// <summary>Per-turn input, including the MAF tool-exposure controls demonstrated by this sample.</summary>
+public sealed record RefundTurnInput(
+    string CustomerComplaint,
+    bool EnableToolCalls = true,
+    IReadOnlyList<string>? EnableToolNames = null);

@@ -6,9 +6,12 @@
 //
 // Run:  dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj
 //
-// Two scenarios run back-to-back:
+// Five scenarios run back-to-back:
 //   1. Happy path — all tools succeed exactly once.
-//   2. Transient lookup failure — the read tool fails on attempt 1 and retries; the
+//   2. Subset — only lookup_order is exposed and dispatchable.
+//   3. Empty list — no tools are exposed or dispatchable.
+//   4. Disabled — EnableToolCalls=false blocks every model-returned call.
+//   5. Transient lookup failure — the read tool fails on attempt 1 and retries; the
 //      write tools still fire exactly once. This is the per-tool retry guarantee.
 
 using System.ClientModel;
@@ -138,12 +141,40 @@ await RunScenarioAsync(
 PrintToolStats(orderService, refundService, emailService);
 Console.WriteLine();
 
-// ── Step 6b: Scenario 2 — transient lookup failure ───────────────────────────
+// ── Step 6b: Per-turn tool-selection matrix ──────────────────────────────────
+Console.WriteLine("─── Scenario 2: Subset (lookup_order only) ────────────────");
+await RunScenarioAsync(
+    client,
+    taskQueue,
+    workflowId: $"refund-subset-{Guid.NewGuid():N}",
+    complaint: "Only look up the current status of order ORD-003. Do not refund or email.",
+    enableToolNames: ["LOOKUP_ORDER"]);
+Console.WriteLine();
+
+Console.WriteLine("─── Scenario 3: Empty enabled-name list (no tools) ─────────");
+await RunScenarioAsync(
+    client,
+    taskQueue,
+    workflowId: $"refund-empty-{Guid.NewGuid():N}",
+    complaint: "Explain that no operational tools are available for this turn.",
+    enableToolNames: []);
+Console.WriteLine();
+
+Console.WriteLine("─── Scenario 4: Tool calls disabled ────────────────────────");
+await RunScenarioAsync(
+    client,
+    taskQueue,
+    workflowId: $"refund-disabled-{Guid.NewGuid():N}",
+    complaint: "Explain that tool execution is disabled for this turn.",
+    enableToolCalls: false);
+Console.WriteLine();
+
+// ── Step 6c: Scenario 5 — transient lookup failure ───────────────────────────
 var lookupBefore = orderService.LookupCalls;
 var refundBefore = refundService.RefundCalls;
 var emailBefore = emailService.SendCalls;
 
-Console.WriteLine("─── Scenario 2: Transient lookup failure (per-tool retry) ───");
+Console.WriteLine("─── Scenario 5: Transient lookup failure (per-tool retry) ───");
 orderService.FailOnceEnabled = true;
 
 await RunScenarioAsync(
@@ -183,15 +214,26 @@ Console.WriteLine("Done.");
 // LOCAL HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-static async Task RunScenarioAsync(ITemporalClient client, string taskQueue, string workflowId, string complaint)
+static async Task RunScenarioAsync(
+    ITemporalClient client,
+    string taskQueue,
+    string workflowId,
+    string complaint,
+    bool enableToolCalls = true,
+    IReadOnlyList<string>? enableToolNames = null)
 {
     Console.WriteLine($"  Workflow:  {workflowId}");
     Console.WriteLine($"  Complaint: {complaint}");
+    Console.WriteLine($"  Selection: EnableToolCalls={enableToolCalls}, EnableToolNames=" +
+        (enableToolNames is null ? "<all registered>" : $"[{string.Join(", ", enableToolNames)}]"));
 
     try
     {
         var result = await client.ExecuteWorkflowAsync(
-            (RefundWorkflow wf) => wf.RunAsync(complaint),
+            (RefundWorkflow wf) => wf.RunAsync(new RefundTurnInput(
+                complaint,
+                enableToolCalls,
+                enableToolNames)),
             new WorkflowOptions
             {
                 Id = workflowId,

@@ -23,10 +23,22 @@ calls to resolve it:
 | `apply_refund`| Write | **1**             | Non-idempotent — retry would issue a double refund |
 | `send_email`  | Write | **1**             | Non-idempotent — retry would deliver a duplicate   |
 
-The same workflow runs twice:
+The same workflow also demonstrates all four per-turn selection states:
+
+| Run option | Meaning |
+|---|---|
+| `EnableToolCalls = true`, `EnableToolNames = null` | all registered tools |
+| `EnableToolNames = ["lookup_order"]` | only the named registered subset |
+| `EnableToolNames = []` | no tools |
+| `EnableToolCalls = false` | no tools, regardless of the name list |
+
+Five scenarios run:
 
 1. **Happy path** — every tool succeeds on its first attempt.
-2. **Transient lookup failure** — the in-memory `lookup_order` tool is configured
+2. **Subset** — only `lookup_order` is exposed and dispatchable.
+3. **Empty list** — no tools are exposed or dispatchable.
+4. **Disabled** — all model-returned tool calls are blocked before durable dispatch.
+5. **Transient lookup failure** — the in-memory `lookup_order` tool is configured
    to throw on its first invocation. Temporal retries the activity (default
    policy, unbounded attempts) and the second attempt succeeds. The write tools
    are **not** re-run.
@@ -55,7 +67,7 @@ proving that retries are scoped to the failing tool.
 dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj
 ```
 
-After both scenarios complete, open the Temporal Web UI at
+After the scenarios complete, open the Temporal Web UI at
 <http://localhost:8233> and inspect either workflow's history. Each
 `RunDurableAgentStep` and each `InvokeAgentTool` shows up as a distinct activity
 row with the tool name in its summary — clicking into the failed `lookup_order`
@@ -75,7 +87,19 @@ Worker started. Running per-tool activity scenarios...
   Agent:     I have refunded $49.99 to your order ORD-002 and emailed confirmation to acme@example.com.
   Final state → LookupCalls = 1, RefundCalls = 1, SendCalls = 1
 
-─── Scenario 2: Transient lookup failure (per-tool retry) ───
+─── Scenario 2: Subset (lookup_order only) ────────────────
+  Selection: EnableToolCalls=True, EnableToolNames=[LOOKUP_ORDER]
+  ...
+
+─── Scenario 3: Empty enabled-name list (no tools) ─────────
+  Selection: EnableToolCalls=True, EnableToolNames=[]
+  ...
+
+─── Scenario 4: Tool calls disabled ────────────────────────
+  Selection: EnableToolCalls=False, EnableToolNames=<all registered>
+  ...
+
+─── Scenario 5: Transient lookup failure (per-tool retry) ───
   Workflow:  refund-retry-...
   Complaint: Refund my order ORD-001 for $19.99. Email confirmation to acme@example.com.
   Agent:     Your refund of $19.99 has been applied to ORD-001 and the confirmation email is on its way.
@@ -91,8 +115,14 @@ Done.
 ```
 
 The exact wording of the agent's final reply varies between runs — the model is
-non-deterministic. The call counts are deterministic: lookup at least 2, write
-tools exactly 1 each.
+non-deterministic. The retry scenario's deltas are the durable guarantee: lookup at least 2,
+while each write tool fires exactly once.
+
+Selection is enforced twice: the model receives only the selected tool declarations, and the
+workflow checks every returned function call again before interceptor, approval, or tool activity
+dispatch. Unknown and excluded names receive the same generic result. Selection is exposure
+control, not authorization; write tools must still authorize current application identity and
+resource state inside their activity.
 
 ---
 
