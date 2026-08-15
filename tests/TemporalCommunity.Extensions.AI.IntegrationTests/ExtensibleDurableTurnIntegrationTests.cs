@@ -305,6 +305,90 @@ public class ExtensibleDurableTurnIntegrationTests
     }
 
     [Fact]
+    public async Task ActivityExecutionAdapter_Retry_RecordsErrorFinallyThenFreshScopeSuccess()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var chatClient = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-first", "apply_first",
+                new Dictionary<string, object?> { ["value"] = "one" })],
+            "done");
+        var lifecycle = new AdapterLifecycleRecorder();
+        var taskQueue = $"extensible-adapter-retry-{Guid.NewGuid():N}";
+
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            new ConcurrentBag<ToolObservation>(),
+            new ConcurrentDictionary<string, byte>(StringComparer.Ordinal),
+            adapterLifecycle: lifecycle);
+        await host.StartAsync();
+
+        var handle = await StartWorkflowAsync(env.Client, host.Services, taskQueue);
+        var result = await handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(CreateRequest()),
+            new WorkflowUpdateOptions { Id = "adapter-retry" });
+
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, result.CompletionReason);
+        var firstAttempt = lifecycle.Entries
+            .Where(entry => entry.ToolName == "apply_first" && entry.Attempt == 1)
+            .ToArray();
+        var secondAttempt = lifecycle.Entries
+            .Where(entry => entry.ToolName == "apply_first" && entry.Attempt == 2)
+            .ToArray();
+        Assert.Equal(["before", "error", "finally"], firstAttempt.Select(entry => entry.Stage));
+        Assert.Equal(["before", "success", "finally"], secondAttempt.Select(entry => entry.Stage));
+        Assert.Single(firstAttempt.Select(entry => entry.ScopeId).Distinct());
+        Assert.Single(secondAttempt.Select(entry => entry.ScopeId).Distinct());
+        Assert.NotEqual(firstAttempt[0].ScopeId, secondAttempt[0].ScopeId);
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task ActivityExecutionAdapter_Denial_DoesNotInvokeInnerEffectOrStateCompletion()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var lifecycle = new AdapterLifecycleRecorder();
+        var innerCalls = 0;
+        var externalEffects = 0;
+        var stateCompletions = 0;
+        var taskQueue = $"extensible-adapter-denied-{Guid.NewGuid():N}";
+        var chatClient = OneToolThenFinal();
+        using var host = BuildDeniedAdapterHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            lifecycle,
+            () => Interlocked.Increment(ref innerCalls),
+            () => Interlocked.Increment(ref externalEffects),
+            () => Interlocked.Increment(ref stateCompletions));
+        await host.StartAsync();
+
+        var handle = await StartWorkflowAsync(env.Client, host.Services, taskQueue);
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+                workflow => workflow.TurnAsync(CreateRequest()),
+                new WorkflowUpdateOptions { Id = "adapter-denied" }));
+
+        Assert.Equal(0, innerCalls);
+        Assert.Equal(0, externalEffects);
+        Assert.Equal(0, stateCompletions);
+        Assert.Equal(
+            ["before", "denied", "error", "finally"],
+            lifecycle.Entries.Select(entry => entry.Stage));
+        Assert.Equal(
+            1,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+    [Fact]
     public async Task SequentialTurn_InterceptorProceed_InvokesTool()
     {
         var outcome = await RunInterceptorOutcomeAsync(DurableToolDecision.Proceed());
@@ -495,7 +579,8 @@ public class ExtensibleDurableTurnIntegrationTests
         ConcurrentBag<ToolObservation> observations,
         ConcurrentDictionary<string, byte> externalEffects,
         Action<DurableExecutionOptions>? configureOptions = null,
-        AttemptScopeTracker? attemptScopes = null)
+        AttemptScopeTracker? attemptScopes = null,
+        AdapterLifecycleRecorder? adapterLifecycle = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
@@ -517,8 +602,69 @@ public class ExtensibleDurableTurnIntegrationTests
             })
             .AddWorkflow<IntegrationDurableTurnWorkflow>();
 
-        RegisterTool(worker, "apply_first", observations, externalEffects, failFirstAttempt: true);
-        RegisterTool(worker, "apply_second", observations, externalEffects, failFirstAttempt: false);
+        RegisterTool(worker, "apply_first", observations, externalEffects, failFirstAttempt: true, adapterLifecycle);
+        RegisterTool(worker, "apply_second", observations, externalEffects, failFirstAttempt: false, adapterLifecycle);
+        return builder.Build();
+    }
+
+    private static IHost BuildDeniedAdapterHost(
+        ITemporalClient client,
+        string taskQueue,
+        IChatClient chatClient,
+        AdapterLifecycleRecorder lifecycle,
+        Action onInner,
+        Action onEffect,
+        Action onStateCompletion)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton(client);
+        builder.Services.AddChatClient(chatClient).Build();
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new NoopEmbeddingGenerator());
+        var worker = builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options =>
+            {
+                options.RegisterDefaultWorkflow = false;
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+                options.HeartbeatTimeout = TimeSpan.FromSeconds(10);
+                options.MaximumConsecutiveErrorsPerRequest = 0;
+            })
+            .AddWorkflow<IntegrationDurableTurnWorkflow>();
+        var declaration = AIFunctionFactory.Create(
+            (string value) => string.Empty,
+            "decision_tool",
+            "A denied execution-adapter tool.").AsDeclarationOnly();
+        worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
+            declaration,
+            (_, context) =>
+            {
+                var inner = AIFunctionFactory.Create(
+                    (string value) =>
+                    {
+                        onInner();
+                        onEffect();
+                        return value;
+                    },
+                    declaration.Name,
+                    declaration.Description);
+                return new DurableToolActivation<IntegrationTurnState>
+                {
+                    Function = new RecordingExecutionAdapter(
+                        inner,
+                        lifecycle,
+                        declaration.Name,
+                        context.Metadata.Attempt,
+                        Guid.Empty,
+                        allowed: false),
+                    CompleteState = (_, _) =>
+                    {
+                        onStateCompletion();
+                        return ValueTask.FromResult(DurableStateUpdate<IntegrationTurnState>.Unchanged);
+                    },
+                };
+            },
+            options => options.WithMaxAttempts(1));
         return builder.Build();
     }
 
@@ -596,7 +742,8 @@ public class ExtensibleDurableTurnIntegrationTests
         string name,
         ConcurrentBag<ToolObservation> observations,
         ConcurrentDictionary<string, byte> externalEffects,
-        bool failFirstAttempt)
+        bool failFirstAttempt,
+        AdapterLifecycleRecorder? adapterLifecycle = null)
     {
         var declaration = AIFunctionFactory.Create(
             (string value) => string.Empty,
@@ -608,29 +755,41 @@ public class ExtensibleDurableTurnIntegrationTests
             (services, context) =>
             {
                 var attemptServices = services.GetRequiredService<AttemptScopedToolServices>();
+                AIFunction function = AIFunctionFactory.Create(
+                    (string value) =>
+                    {
+                        observations.Add(new ToolObservation(
+                            name,
+                            context.Metadata.Attempt,
+                            context.Metadata.IdempotencyKey,
+                            context.RequestData.OperationId,
+                            context.TurnState?.Revision ?? 0,
+                            value,
+                            attemptServices.InstanceId));
+                        externalEffects.TryAdd(context.Metadata.IdempotencyKey, 0);
+                        if (failFirstAttempt && context.Metadata.Attempt == 1)
+                        {
+                            throw new InvalidOperationException("Injected lost completion.");
+                        }
+
+                        return $"{name}:{value}:{attemptServices.Client.BaseAddress}";
+                    },
+                    name,
+                    declaration.Description);
+                if (adapterLifecycle is not null)
+                {
+                    function = new RecordingExecutionAdapter(
+                        function,
+                        adapterLifecycle,
+                        name,
+                        context.Metadata.Attempt,
+                        attemptServices.InstanceId,
+                        allowed: true);
+                }
+
                 return new DurableToolActivation<IntegrationTurnState>
                 {
-                    Function = AIFunctionFactory.Create(
-                        (string value) =>
-                        {
-                            observations.Add(new ToolObservation(
-                                name,
-                                context.Metadata.Attempt,
-                                context.Metadata.IdempotencyKey,
-                                context.RequestData.OperationId,
-                                context.TurnState?.Revision ?? 0,
-                                value,
-                                attemptServices.InstanceId));
-                            externalEffects.TryAdd(context.Metadata.IdempotencyKey, 0);
-                            if (failFirstAttempt && context.Metadata.Attempt == 1)
-                            {
-                                throw new InvalidOperationException("Injected lost completion.");
-                            }
-
-                            return $"{name}:{value}:{attemptServices.Client.BaseAddress}";
-                        },
-                        name,
-                        declaration.Description),
+                    Function = function,
                     CompleteState = (_, _) => ValueTask.FromResult(
                         DurableStateUpdate<IntegrationTurnState>.Replace(
                             new IntegrationTurnState(
@@ -656,6 +815,59 @@ public class ExtensibleDurableTurnIntegrationTests
     {
         public ConcurrentBag<Guid> Created { get; } = [];
         public ConcurrentBag<Guid> Disposed { get; } = [];
+    }
+
+    private sealed record AdapterLifecycleEntry(
+        string ToolName,
+        int Attempt,
+        Guid ScopeId,
+        string Stage);
+
+    private sealed class AdapterLifecycleRecorder
+    {
+        private readonly ConcurrentQueue<AdapterLifecycleEntry> _entries = new();
+
+        public IReadOnlyList<AdapterLifecycleEntry> Entries => _entries.ToArray();
+
+        public void Record(string toolName, int attempt, Guid scopeId, string stage) =>
+            _entries.Enqueue(new AdapterLifecycleEntry(toolName, attempt, scopeId, stage));
+    }
+
+    private sealed class RecordingExecutionAdapter(
+        AIFunction innerFunction,
+        AdapterLifecycleRecorder lifecycle,
+        string toolName,
+        int attempt,
+        Guid scopeId,
+        bool allowed) : DelegatingAIFunction(innerFunction)
+    {
+        protected override async ValueTask<object?> InvokeCoreAsync(
+            AIFunctionArguments arguments,
+            CancellationToken cancellationToken)
+        {
+            lifecycle.Record(toolName, attempt, scopeId, "before");
+            try
+            {
+                if (!allowed)
+                {
+                    lifecycle.Record(toolName, attempt, scopeId, "denied");
+                    throw new UnauthorizedAccessException("Denied by the authoritative test service.");
+                }
+
+                var result = await base.InvokeCoreAsync(arguments, cancellationToken);
+                lifecycle.Record(toolName, attempt, scopeId, "success");
+                return result;
+            }
+            catch
+            {
+                lifecycle.Record(toolName, attempt, scopeId, "error");
+                throw;
+            }
+            finally
+            {
+                lifecycle.Record(toolName, attempt, scopeId, "finally");
+            }
+        }
     }
 
     private sealed class AttemptScopedToolServices : IDisposable

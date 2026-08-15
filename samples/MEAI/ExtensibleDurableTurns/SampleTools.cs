@@ -58,12 +58,30 @@ internal sealed class ProcessingAttemptServices : IDisposable
     {
         Client = httpClientFactory.CreateClient("processing-attempt");
         Authorization = authorization;
+        InstanceId = Guid.NewGuid();
     }
 
     public HttpClient Client { get; }
     public IAuthoritativeAuthorizationService Authorization { get; }
+    public Guid InstanceId { get; }
 
     public void Dispose() => Client.Dispose();
+}
+
+internal sealed record ExecutionAdapterObservation(
+    string ToolName,
+    int Attempt,
+    Guid ScopeId,
+    string Stage);
+
+internal sealed class ExecutionAdapterAudit
+{
+    private readonly System.Collections.Concurrent.ConcurrentQueue<ExecutionAdapterObservation> _entries = new();
+
+    public IReadOnlyList<ExecutionAdapterObservation> Entries => _entries.ToArray();
+
+    public void Record(string toolName, int attempt, Guid scopeId, string stage) =>
+        _entries.Enqueue(new ExecutionAdapterObservation(toolName, attempt, scopeId, stage));
 }
 
 internal sealed class IdempotentExternalSink
@@ -83,19 +101,39 @@ internal sealed class AuthorizingFunction(
     AIFunction innerFunction,
     IAuthoritativeAuthorizationService authorization,
     string subjectId,
-    string resourceId) : DelegatingAIFunction(innerFunction)
+    string resourceId,
+    string toolName,
+    int attempt,
+    Guid scopeId,
+    ExecutionAdapterAudit audit) : DelegatingAIFunction(innerFunction)
 {
     protected override async ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        // Request/state locate the subject and resource; current permission comes from the
-        // authoritative service immediately before the effect. A forged state flag is ignored.
-        if (!await authorization.IsAllowedAsync(subjectId, resourceId, cancellationToken))
+        audit.Record(toolName, attempt, scopeId, "before");
+        try
         {
-            throw new UnauthorizedAccessException("The authoritative service denied this operation.");
-        }
+            // Request/state locate the subject and resource; current permission comes from the
+            // authoritative service immediately before the effect. A forged state flag is ignored.
+            if (!await authorization.IsAllowedAsync(subjectId, resourceId, cancellationToken))
+            {
+                audit.Record(toolName, attempt, scopeId, "denied");
+                throw new UnauthorizedAccessException("The authoritative service denied this operation.");
+            }
 
-        return await base.InvokeCoreAsync(arguments, cancellationToken);
+            var result = await base.InvokeCoreAsync(arguments, cancellationToken);
+            audit.Record(toolName, attempt, scopeId, "success");
+            return result;
+        }
+        catch
+        {
+            audit.Record(toolName, attempt, scopeId, "error");
+            throw;
+        }
+        finally
+        {
+            audit.Record(toolName, attempt, scopeId, "finally");
+        }
     }
 }

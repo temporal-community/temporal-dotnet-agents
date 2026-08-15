@@ -23,11 +23,16 @@ builder.Services.AddHttpClient("processing-attempt", client =>
 builder.Services.AddScoped<IAuthoritativeAuthorizationService, AuthoritativeAuthorizationService>();
 builder.Services.AddScoped<ProcessingAttemptServices>();
 builder.Services.AddSingleton<IdempotentExternalSink>();
+builder.Services.AddSingleton<ExecutionAdapterAudit>();
 
 var worker = builder.Services
     .AddHostedTemporalWorker(taskQueue)
     .AddWorkflow<SharedWorkerStatusWorkflow>()
-    .AddDurableAI(options => options.RegisterDefaultWorkflow = false)
+    .AddDurableAI(options =>
+    {
+        options.RegisterDefaultWorkflow = false;
+        options.MaximumConsecutiveErrorsPerRequest = 0;
+    })
     .AddWorkflow<ContextualTurnWorkflow>();
 
 // Ordinary functions remain the default and require no Temporal-specific signature.
@@ -116,7 +121,71 @@ foreach (var receipt in result.FinalTurnState?.Receipts ?? [])
     Console.WriteLine($"{receipt.Step}: {receipt.Value} ({receipt.ActivityIdempotencyKey})");
 }
 
+var adapterAudit = host.Services.GetRequiredService<ExecutionAdapterAudit>();
+Console.WriteLine("Execution adapter lifecycle:");
+foreach (var observation in adapterAudit.Entries)
+{
+    Console.WriteLine(
+        $"  {observation.ToolName} attempt {observation.Attempt}, scope {observation.ScopeId}: {observation.Stage}");
+}
+
+// A second turn uses a subject denied by the authoritative service. The decorator throws before
+// the ordinary function can reach the external sink or state-completion callback.
+var deniedHandle = await temporalClient.StartWorkflowAsync(
+    (ContextualTurnWorkflow workflow) => workflow.RunAsync(startInput),
+    new WorkflowOptions($"extensible-turn-denied-{Guid.NewGuid():N}", taskQueue));
+var deniedRequest = new DurableTurnRequest<ProcessingRequest, ProcessingState>
+{
+    RequestData = request.RequestData with
+    {
+        OperationId = "business-operation-denied",
+        SubjectId = "denied-user",
+    },
+    Messages = request.Messages,
+    InitialTurnState = request.InitialTurnState,
+    CorrelationId = request.CorrelationId,
+    ConversationId = request.ConversationId,
+    ChatOptions = request.ChatOptions,
+    Options = request.Options,
+};
+var deniedTurn = deniedHandle.ExecuteUpdateAsync<DurableTurnResult<ProcessingState>>(
+    "Turn",
+    [deniedRequest],
+    new WorkflowUpdateOptions { Id = deniedRequest.RequestData.OperationId });
+pendingApproval = null;
+while (!deniedTurn.IsCompleted && pendingApproval is null)
+{
+    await Task.Delay(100);
+    pendingApproval = await deniedHandle.QueryAsync<ContextualTurnWorkflow, DurableApprovalRequest?>(
+        workflow => workflow.GetPendingApproval());
+}
+if (pendingApproval is not null)
+{
+    await deniedHandle.ExecuteUpdateAsync<ContextualTurnWorkflow, DurableApprovalResolutionResult>(
+        workflow => workflow.ResolveApprovalAsync(new DurableApprovalDecision
+        {
+            RequestId = pendingApproval.RequestId,
+            Approved = true,
+            Reason = "Approved to demonstrate effect-time authorization denial.",
+        }));
+}
+var deniedTurnFailed = false;
+try
+{
+    await deniedTurn;
+}
+catch (Exception exception)
+{
+    deniedTurnFailed = true;
+    Console.WriteLine($"Denied turn failed before the ordinary function effect: {exception.GetType().Name}");
+}
+if (!deniedTurnFailed)
+{
+    throw new InvalidOperationException("The denied sample turn unexpectedly succeeded.");
+}
+
 await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+await deniedHandle.SignalAsync(workflow => workflow.RequestShutdownAsync());
 await host.StopAsync();
 
 void RegisterStatefulTool(
@@ -131,6 +200,7 @@ void RegisterStatefulTool(
         {
             var attemptServices = services.GetRequiredService<ProcessingAttemptServices>();
             var externalSink = services.GetRequiredService<IdempotentExternalSink>();
+            var adapterAudit = services.GetRequiredService<ExecutionAdapterAudit>();
             var inner = AIFunctionFactory.Create(
                 (string value) =>
                 {
@@ -153,7 +223,11 @@ void RegisterStatefulTool(
                     inner,
                     attemptServices.Authorization,
                     context.RequestData.SubjectId,
-                    context.RequestData.ResourceId),
+                    context.RequestData.ResourceId,
+                    declaration.Name,
+                    context.Metadata.Attempt,
+                    attemptServices.InstanceId,
+                    adapterAudit),
                 CompleteState = (_, _) => ValueTask.FromResult(
                     DurableStateUpdate<ProcessingState>.Replace(
                         SampleTools.Complete(context, step, step))),

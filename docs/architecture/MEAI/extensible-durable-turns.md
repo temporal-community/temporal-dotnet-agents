@@ -83,6 +83,14 @@ The durable orchestration layer owns scheduling, approvals, retries, and state t
 function decorators remain the activity-local extension point for validation, authorization,
 telemetry, and other function behavior.
 
+An execution adapter is ordinary MEAI function middleware, not a second Temporal middleware
+abstraction. The invocation factory may wrap its ordinary `AIFunction` in a
+`DelegatingAIFunction`; the activity invokes the resulting function inside the attempt's DI scope.
+Before/success/error/finally hooks therefore run once per activity attempt. Adapters must rethrow
+errors and cancellation so the activity records failure and Temporal—not the decorator—owns retry.
+Authorization belongs immediately before the external effect and must consult authoritative,
+current application data; request data and turn state only locate that decision.
+
 ## Package-owned orchestration boundary
 
 The stock managed workflow and the typed specialization share one loop implementation on

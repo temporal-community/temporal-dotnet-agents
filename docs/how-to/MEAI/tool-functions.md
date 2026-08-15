@@ -140,6 +140,14 @@ approval evidence, or authorization grants. A high-risk tool must obtain the cur
 decision from an authoritative service inside the activity immediately before every external
 effect.
 
+Use MEAI's existing `DelegatingAIFunction` when an invocation-scoped implementation needs
+activity-local validation, authorization, telemetry, or lifecycle observation. Override
+`InvokeCoreAsync`, run before logic, delegate to `base.InvokeCoreAsync`, observe success or error,
+and use `finally` for attempt-local cleanup. Rethrow failures and cancellation; swallowing them
+would prevent Temporal from applying the configured activity retry policy. The decorator and its
+dependencies are created from a fresh activity DI scope on every attempt. Ordinary functions need
+no special signature and remain the default registration path.
+
 ### Activity idempotency key
 
 `Metadata.IdempotencyKey` identifies one scheduled tool activity across its activity retries. The
