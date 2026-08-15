@@ -2,9 +2,10 @@
 
 ## Overview
 
-This sample demonstrates OpenTelemetry tracing for a durable MEAI chat session. It produces a
-complete span hierarchy from the external `SendAsync` call, through the Temporal protocol layers,
-down to the LLM inference span emitted by `DurableChatActivities`. It also shows the
+This sample demonstrates OpenTelemetry tracing and metrics for a durable MEAI chat session. It
+produces a complete span hierarchy from the external `SendAsync` call, through the Temporal
+protocol layers, down to the LLM inference span emitted by `DurableChatActivities`. It also shows
+how to subscribe to the library's stable `Meter` name and the
 `DurableAIPlugin` registration path — the plugin-based entry point — as an alternative to
 `AddDurableAI()`.
 
@@ -13,13 +14,15 @@ down to the LLM inference span emitted by `DurableChatActivities`. It also shows
 - `conversation.id` attribute on the client send span and the inference span — filter an entire
   session in one query
 - Four `ActivitySource` names must be registered with the tracer provider
+- `DurableChatTelemetry.MeterName` must be registered with the meter provider to collect durable
+  toolset resolver and validation measurements
 - `TracingInterceptor` propagates the W3C `traceparent` header across gRPC boundaries
 - Plugin registration path: `AddWorkerPlugin(new DurableAIPlugin(...))` as an alternative to
   `AddDurableAI()`
 
 ## Span Hierarchy
 
-Two `ActivitySource`s emit spans during a chat turn:
+The library and the Temporal SDK emit spans during a chat turn:
 
 - `TemporalCommunity.Extensions.AI` — library spans for the client send and the LLM inference call
 - `Temporalio-Client`, `Temporalio-Workflow`, `Temporalio-Activity` — Temporal SDK protocol spans
@@ -87,8 +90,16 @@ the full list.
           .AddSource(TracingInterceptor.ClientSource.Name)
           .AddSource(TracingInterceptor.WorkflowsSource.Name)
           .AddSource(TracingInterceptor.ActivitiesSource.Name)
+          .AddConsoleExporter())
+      .WithMetrics(metrics => metrics
+          .AddMeter(DurableChatTelemetry.MeterName)
           .AddConsoleExporter());
   ```
+- **The library owns semantic diagnostics; the application owns export.**
+  `TemporalCommunity.Extensions.AI` emits `ActivitySource`, `Meter`, and structured `ILogger`
+  signals without depending on an OpenTelemetry SDK. `Temporalio.Extensions.OpenTelemetry`
+  supplies the Temporal protocol spans and trace-context propagation. This sample selects the
+  OpenTelemetry console exporters for both library spans and metrics.
 - **`TracingInterceptor` is required for connected traces.** Without it, Temporal's internal gRPC
   calls break the distributed trace and the library spans appear disconnected from the protocol
   spans in your backend.
@@ -129,8 +140,11 @@ dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
 
 ### Expected Output
 
-Span data is written to the console by `AddConsoleExporter()`. You will see one set of spans per
-chat turn (the sample makes two). The workflow ID is `chat-otel-demo-<guid>` — the `chat-` prefix
+Span and metric data are written to the console by `AddConsoleExporter()`. You will see one set of
+spans per chat turn (the sample makes two). Worker-owned toolset sessions additionally report the
+attempt-scoped `temporal.ai.toolset.*` instruments described in
+[`docs/how-to/MEAI/observability.md`](../../../docs/how-to/MEAI/observability.md). The workflow ID is
+`chat-otel-demo-<guid>` — the `chat-` prefix
 comes from `DurableExecutionOptions.WorkflowIdPrefix` (default) and the sample appends
 `otel-demo-{Guid.NewGuid():N}` as the conversation ID, where `<guid>` is a 32-character hex string
 with no hyphens. Look for entries roughly like the following (exact attribute formatting depends

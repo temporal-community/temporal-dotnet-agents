@@ -75,6 +75,7 @@ public class WireNameContractTests
         "TemporalCommunity.Extensions.AI.RunToolInterceptor",
         "TemporalCommunity.Extensions.AI.InvokeFunction",
         "TemporalCommunity.Extensions.AI.GenerateEmbedding",
+        "TemporalCommunity.Extensions.AI.ResolveDurableToolsets",
 
         // Agents library activities
         "TemporalCommunity.Extensions.Agents.ReduceHistoryByKey",

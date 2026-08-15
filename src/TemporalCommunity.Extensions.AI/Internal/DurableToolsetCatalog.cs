@@ -19,10 +19,18 @@ internal sealed class DurableToolsetCatalog
     internal DurableToolsetManifest Resolve(DurableToolsetResolutionRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.ResolutionVersion != DurableToolsetResolutionRequest.CurrentVersion)
+        {
+            throw DurableToolsetManifest.Failure(
+                $"Unsupported durable toolset resolution version '{request.ResolutionVersion}'.",
+                DurableToolsetValidationReasons.InvalidManifestVersion);
+        }
+
         if (request.UseWorkerDefaults && request.ToolsetIds is not null)
         {
             throw DurableToolsetManifest.Failure(
-                "A durable toolset resolution request cannot combine worker defaults with explicit IDs.");
+                "A durable toolset resolution request cannot combine worker defaults with explicit IDs.",
+                DurableToolsetValidationReasons.AuthorityMismatch);
         }
 
         var selected = request.UseWorkerDefaults
@@ -40,7 +48,8 @@ internal sealed class DurableToolsetCatalog
                 {
                     throw DurableToolsetManifest.Failure(
                         $"Selected durable toolsets contain more than one function named " +
-                        $"'{member.Declaration.Name}'. Function names use exact ordinal comparison.");
+                        $"'{member.Declaration.Name}'. Function names use exact ordinal comparison.",
+                        DurableToolsetValidationReasons.NameCollision);
                 }
 
                 members.Add(CreateManifestMember(toolset.Id, member));
@@ -71,13 +80,15 @@ internal sealed class DurableToolsetCatalog
             if (string.IsNullOrWhiteSpace(id))
             {
                 throw DurableToolsetManifest.Failure(
-                    "A durable toolset resolution request contains an empty toolset ID.");
+                    "A durable toolset resolution request contains an empty toolset ID.",
+                    DurableToolsetValidationReasons.InvalidDeclaration);
             }
 
             if (!seen.Add(id))
             {
                 throw DurableToolsetManifest.Failure(
-                    $"Durable toolset '{id}' was selected more than once.");
+                    $"Durable toolset '{id}' was selected more than once.",
+                    DurableToolsetValidationReasons.DuplicateSelection);
             }
 
             var registration = registrations.FirstOrDefault(candidate =>
@@ -85,7 +96,8 @@ internal sealed class DurableToolsetCatalog
             if (registration is null)
             {
                 throw DurableToolsetManifest.Failure(
-                    $"Durable toolset '{id}' is not registered on this worker.");
+                    $"Durable toolset '{id}' is not registered on this worker.",
+                    DurableToolsetValidationReasons.UnknownToolset);
             }
 
             selected.Add(registration);
@@ -105,7 +117,8 @@ internal sealed class DurableToolsetCatalog
         {
             throw DurableToolsetManifest.Failure(
                 "Explicit DefaultToolsetIds cannot be combined with the implicit AddDurableTools " +
-                "toolset. Register every selected default through AddDurableToolset.");
+                "toolset. Register every selected default through AddDurableToolset.",
+                DurableToolsetValidationReasons.AuthorityMismatch);
         }
 
         return ResolveExplicit(options.DefaultToolsetIds);

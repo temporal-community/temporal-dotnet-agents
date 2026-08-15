@@ -5,7 +5,7 @@ internal static class DurableToolDemo
 {
     /// <summary>
     /// Runs a managed durable-tool session. Tool schemas and implementations both come from
-    /// the worker's AddDurableTools registrations; callers do not pass ChatOptions.Tools.
+    /// the worker's selected durable toolsets; callers do not pass ChatOptions.Tools.
     /// </summary>
     public static async Task<IEnumerable<string>> RunDurableToolDemoAsync(
         DurableChatSessionClient sessionClient)

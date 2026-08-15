@@ -8,6 +8,10 @@
 - `AddDurableToolFactory` separates a stable declaration from an invocation-scoped implementation
   for tools that need typed request data, turn state, or scoped DI.
 
+Pre-release migration: `AddDurableToolFactory` replaces the former `AddDurableTool` name. No
+compatibility alias is shipped. Use the factory name for both method-based handlers and explicit
+declaration/activation registrations.
+
 The session workflow supplies frozen function schemas to the model, and each model-requested
 invocation is a Temporal activity.
 

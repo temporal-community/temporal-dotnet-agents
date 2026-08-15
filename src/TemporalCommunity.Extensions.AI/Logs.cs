@@ -113,4 +113,28 @@ internal static partial class Logs
     [LoggerMessage(EventId = 19, Level = LogLevel.Warning,
         Message = "WithChatClientTag was used but Activity.Current is null; tags ({TagKeys}) will not be applied. Ensure the OpenTelemetry pipeline is configured.")]
     public static partial void LogChatClientTagsSkipped(this ILogger logger, string tagKeys);
+
+    // ── Durable toolset resolution and validation ──────────────────────────
+
+    [LoggerMessage(EventId = 20, Level = LogLevel.Debug,
+        Message = "Resolving durable toolsets")]
+    public static partial void LogToolsetResolverStarted(this ILogger logger);
+
+    [LoggerMessage(EventId = 21, Level = LogLevel.Debug,
+        Message = "Resolved durable toolsets (Toolsets={ToolsetCount}, Functions={FunctionCount})")]
+    public static partial void LogToolsetResolverCompleted(
+        this ILogger logger, int toolsetCount, int functionCount);
+
+    [LoggerMessage(EventId = 22, Level = LogLevel.Warning,
+        Message = "Durable toolset resolution failed ({Reason})")]
+    public static partial void LogToolsetResolverFailed(
+        this ILogger logger, Exception exception, string reason);
+
+    [LoggerMessage(EventId = 23, Level = LogLevel.Warning,
+        Message = "Durable toolset activity validation rejected input ({Reason})")]
+    public static partial void LogToolsetValidationRejected(this ILogger logger, string reason);
+
+    [LoggerMessage(EventId = 24, Level = LogLevel.Warning,
+        Message = "Durable turn toolset narrowing rejected ({Reason})")]
+    public static partial void LogToolsetNarrowingRejected(this ILogger logger, string reason);
 }

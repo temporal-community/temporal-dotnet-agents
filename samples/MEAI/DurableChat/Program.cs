@@ -225,14 +225,13 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
 //
 // Background: tool registration is split across two concerns.
 //
-//   - `AddDurableTools(weatherTool, ...)` (Program.cs above) registers the
-//     tool IMPLEMENTATION on the worker so a Temporal activity exists that can
-//     dispatch the function when the LLM requests it.
+//   - `AddDurableToolset(...)` (Program.cs above) registers each model declaration,
+//     implementation, and durable policy in a named worker-owned group.
 //
 //   - The durable runtime supplies the tool SCHEMA to the model from that same
 //     registry. Callers must not set ChatOptions.Tools for a durable session.
 //
-// Because the tool is registered with AddDurableTools(), the
+// Because the tool is registered in a durable toolset, the
 // workflow dispatches it as a separate InvokeFunction activity instead of
 // running it inline. One GetChatStep activity for the LLM call, one
 // InvokeFunction activity for the tool call — visible side-by-side in the
@@ -250,8 +249,8 @@ static async Task<IEnumerable<string>> RunToolCallDemoAsync(DurableChatSessionCl
     var q = "What is the weather like in Seattle right now?";
     Console.WriteLine($" User : {q}");
 
-    // No ChatOptions.Tools: the activity obtains the model schema from the
-    // DurableFunctionRegistry populated by AddDurableTools.
+    // No ChatOptions.Tools: the workflow records the worker-owned manifest once,
+    // then supplies its frozen declaration to each model activity.
     var response = await sessionClient.SendAsync(
         conversationId,
         [new ChatMessage(ChatRole.User, q)]);

@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- Added worker-owned durable toolsets for MEAI managed sessions and typed custom workflows. Thin
+  clients no longer need tool schemas: workers register one implicit group with `AddDurableTools`
+  or named groups with `AddDurableToolset`, and workflows resolve and record one immutable,
+  versioned manifest before model dispatch.
+- Added `AddDurableToolFactory` for cached method declarations and fresh activity-attempt
+  implementations with scoped DI. This replaces the pre-release `AddDurableTool` name; no
+  compatibility alias is provided.
+- Removed the pre-release `IChatClientDecorator` abstraction and keyed decorator lookup. Compose
+  ordinary MEAI chat middleware when registering each keyed or unkeyed `IChatClient` pipeline.
+- Added toolset resolution and validation diagnostics through the package `ActivitySource`, a new
+  stable `DurableChatTelemetry.MeterName`, and bounded structured logs. The package remains
+  exporter-neutral; the OpenTelemetry sample demonstrates application-owned collection.
+- Expanded the clean packed-package consumer to prove thin-client/worker-owned toolsets, approval
+  and denial, activity retry, fresh scoped dependencies, and both shipped target assets.
 - MAF per-run tool selection is now atomic across provider exposure and workflow dispatch for
   `AgentWorkflow`, `AgentJobWorkflow`, and containing workflows that call `TemporalAIAgent`.
   Disabled, empty, subset, malformed, unknown, mixed, and repeated blocked calls fail closed without
@@ -17,9 +31,6 @@
 - Recorded a non-shipping generalized deferred-tool prototype and ADR. The result is **Defer**:
   no public API or package asset ships, while test-only coverage proves the candidate state machine's
   cap, duplicate/conflict, timeout/cancel, Continue-as-New, replay, and authorization-freshness rules.
-- Keyed `IChatClientDecorator` results are now checked for inline function-invocation middleware
-  before provider dispatch when durable tools are registered, closing a gap in the managed tool-loop
-  mixed-pattern protection.
 - Documented that `DurableAIDataConverter` applies to every workflow sharing an AI-enabled worker,
   added a mixed ordinary-workflow integration regression, and extended the deterministic
   `ExtensibleDurableTurns` sample with that supported shared-worker configuration.

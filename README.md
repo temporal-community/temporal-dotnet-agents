@@ -15,7 +15,7 @@ activities and replay safely after crashes or restarts.
 
 ### `TemporalCommunity.Extensions.AI`
 
-A lightweight integration for [Microsoft.Extensions.AI (MEAI)](https://learn.microsoft.com/en-us/dotnet/ai/ai-extensions). It provides direct `IChatClient` middleware for custom workflows and `DurableChatSessionClient` for managed multi-turn sessions. Managed sessions own their model/tool loop and use `AddDurableTools` for durable function dispatch. No Agent Framework dependency is required.
+A lightweight integration for [Microsoft.Extensions.AI (MEAI)](https://learn.microsoft.com/en-us/dotnet/ai/ai-extensions). It provides direct `IChatClient` middleware for custom workflows and `DurableChatSessionClient` for managed multi-turn sessions. Managed sessions own their model/tool loop and use worker-owned default or named toolsets for durable function dispatch; thin clients carry no schemas or implementations. No Agent Framework dependency is required.
 
 **Start here if:** you are already using MEAI's `IChatClient` directly and want Temporal durability without adopting the full Agent Framework.
 
@@ -81,7 +81,7 @@ down-level limitations.
 |--------|---------|-------------|
 | [DurableChat](samples/MEAI/DurableChat) | `Extensions.AI` | Multi-turn durable chat with `DurableChatSessionClient` and tool functions |
 | [DurableTools](samples/MEAI/DurableTools) | `Extensions.AI` | Per-tool activity dispatch with `AsDurable()` and `AddDurableTools` |
-| [OpenTelemetry](samples/MEAI/OpenTelemetry) | `Extensions.AI` | OTel tracing — span hierarchy, ActivitySource names, and token attributes |
+| [OpenTelemetry](samples/MEAI/OpenTelemetry) | `Extensions.AI` | OTel tracing and metrics — signal ownership, source/meter names, and token attributes |
 | [HumanInTheLoop](samples/MEAI/HumanInTheLoop) | `Extensions.AI` | Workflow-owned approval gates with `RequireApproval()` and retry-safe `ResolveApprovalAsync` |
 | [DurableEmbeddings](samples/MEAI/DurableEmbeddings) | `Extensions.AI` | `IEmbeddingGenerator` wrapped for durable per-chunk activity dispatch |
 | [ToolInterceptor](samples/MEAI/ToolInterceptor) | `Extensions.AI` | Intercept, pause, skip, or block tool calls |

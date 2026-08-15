@@ -19,6 +19,8 @@ TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.ResolveApproval
 abstract TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.ExecuteTurnAsync(Temporalio.Workflows.ActivityOptions! activityOptions, TemporalCommunity.Extensions.AI.Session.DurableSessionRequest! requestEntry, Microsoft.Extensions.AI.ChatOptions? chatOptions) -> System.Threading.Tasks.Task<TOutput>!
 const TemporalCommunity.Extensions.AI.DurableAIPlugin.PluginName = "TemporalCommunity.Extensions.AI.DurableAIPlugin" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ActivitySourceName = "TemporalCommunity.Extensions.AI" -> string!
+const TemporalCommunity.Extensions.AI.DurableChatTelemetry.MeterName = "TemporalCommunity.Extensions.AI" -> string!
+const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ToolsetResolveSpanName = "durable_toolset.resolve" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ChatOperationName = "chat" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ChatSendSpanName = "durable_chat.send" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ConversationIdAttribute = "conversation.id" -> string!

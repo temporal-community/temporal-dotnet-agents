@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Temporalio.Client;
 using Temporalio.Common;
@@ -65,7 +66,10 @@ builder.Services
         // backend auth — set via secrets manager, never plaintext env var (leaks via /proc,
         // container metadata, crash dumps). See README "Going to Production" section.
         // .AddOtlpExporter()
-        );
+        )
+    .WithMetrics(metrics => metrics
+        .AddMeter(DurableChatTelemetry.MeterName)
+        .AddConsoleExporter());
 
 // ── Setup: Connect Temporal client with TracingInterceptor + DurableAIDataConverter
 //

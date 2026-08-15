@@ -18,6 +18,8 @@ disables the HTTP cache, verifies local source metadata and package SHA-512 valu
 - `net8.0`, which must select both packages' `lib/netstandard2.1` assets.
 
 The executable starts an embedded Temporal server and uses separate client and worker service
-providers. It covers client-only converter wiring, declaration/implementation splitting, the public
-typed workflow base, activity-attempt scoped DI, sequential typed state, separate model/tool
-activities, invalid dispatch rejection, and the one-turn-per-Update guard.
+providers. The thin client registers no tools or schemas; the worker owns a named toolset and the
+custom workflow records that toolset's resolved manifest. The gate covers client-only converter
+wiring, worker-owned toolsets, the public typed workflow base, approve and deny decisions,
+activity retry with a fresh/disposed DI scope per attempt, sequential typed state, separate
+resolver/model/tool activities, invalid dispatch rejection, and the one-turn-per-Update guard.

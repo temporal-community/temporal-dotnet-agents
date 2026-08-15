@@ -330,6 +330,28 @@ public sealed class DurableToolsetCatalogTests
         AssertNonRetryable(absentVersion.Validate);
     }
 
+    [Fact]
+    public void ResolutionRequestJson_RoundTripsAndAbsentVersionUsesVersionOne()
+    {
+        var request = new DurableToolsetResolutionRequest
+        {
+            ToolsetIds = ["catalog", "orders"],
+        };
+
+        var json = JsonSerializer.Serialize(request, DurableAIJsonUtilities.DefaultOptions);
+        var restored = JsonSerializer.Deserialize<DurableToolsetResolutionRequest>(
+            json,
+            DurableAIJsonUtilities.DefaultOptions)!;
+        var absentVersion = JsonSerializer.Deserialize<DurableToolsetResolutionRequest>(
+            "{\"toolsetIds\":[\"catalog\"]}",
+            DurableAIJsonUtilities.DefaultOptions)!;
+
+        Assert.Equal(DurableToolsetResolutionRequest.CurrentVersion, restored.ResolutionVersion);
+        Assert.Equal(["catalog", "orders"], restored.ToolsetIds);
+        Assert.Equal(DurableToolsetResolutionRequest.CurrentVersion, absentVersion.ResolutionVersion);
+        Assert.Equal(["catalog"], absentVersion.ToolsetIds);
+    }
+
     private static ServiceCollection CreateServices()
     {
         var services = new ServiceCollection();

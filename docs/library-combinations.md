@@ -47,7 +47,7 @@ builder.Services
         opts.ActivityTimeout   = TimeSpan.FromMinutes(5);
         opts.SessionTimeToLive = TimeSpan.FromHours(24);
     })
-    .AddDurableTools(weatherTool);
+    .AddDurableTools(weatherTool); // one implicit worker-owned default toolset
 ```
 
 ### Usage
@@ -64,7 +64,9 @@ var response = await sessionClient.SendAsync(
 
 - Crash recovery for every LLM call — if the worker restarts mid-activity, Temporal retries and returns the result from history on replay.
 - Full conversation history stored in workflow state, surviving restarts and `ContinueAsNew` transitions.
-- Managed tool-call durability via `AddDurableTools()` — each tool invocation becomes its own activity with its own retry policy.
+- Managed tool-call durability through one implicit `AddDurableTools()` group or ordered named
+  `AddDurableToolset(...)` groups. The worker owns schemas and implementations, the client remains
+  thin, and each tool invocation becomes its own activity with its own retry policy.
 - Durable embedding generation via `DurableEmbeddingGenerator`.
 - HITL approval gates via `DurableApprovalRequest` / `DurableApprovalDecision`.
 - `DurableAIDataConverter` auto-wired when using the managed registration overloads (`AddTemporalClient` + `AddDurableAI`, or the 3-arg `AddHostedTemporalWorker` overload). It applies to every workflow sharing that worker client, including ordinary workflows. Manual `TemporalClient.ConnectAsync` callers that exchange those payloads must set `DataConverter = DurableAIDataConverter.Instance` explicitly; see [the shared-worker guidance](how-to/MEAI/usage.md#sharing-a-worker-with-non-ai-workflows).

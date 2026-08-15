@@ -8,6 +8,8 @@ internal sealed record DurableToolsetResolutionRequest
 {
     internal const int CurrentVersion = 1;
 
+    public int ResolutionVersion { get; init; } = CurrentVersion;
+
     public bool UseWorkerDefaults { get; init; }
 
     public IReadOnlyList<string>? ToolsetIds { get; init; }
@@ -31,7 +33,8 @@ internal sealed record DurableToolsetManifest
         {
             throw Failure(
                 $"Unsupported durable toolset manifest version '{ManifestVersion}'. " +
-                $"This worker supports version '{CurrentVersion}'.");
+                $"This worker supports version '{CurrentVersion}'.",
+                DurableToolsetValidationReasons.InvalidManifestVersion);
         }
 
         var selectedIds = new HashSet<string>(StringComparer.Ordinal);
@@ -39,7 +42,9 @@ internal sealed record DurableToolsetManifest
         {
             if (string.IsNullOrWhiteSpace(id) || !selectedIds.Add(id))
             {
-                throw Failure("The durable toolset manifest contains an invalid toolset selection.");
+                throw Failure(
+                    "The durable toolset manifest contains an invalid toolset selection.",
+                    DurableToolsetValidationReasons.DuplicateSelection);
             }
         }
 
@@ -51,14 +56,18 @@ internal sealed record DurableToolsetManifest
             if (!activationKeys.Add(member.ActivationKey)
                 || !functionNames.Add(member.Declaration.Name))
             {
-                throw Failure("The durable toolset manifest contains an ambiguous member.");
+                throw Failure(
+                    "The durable toolset manifest contains an ambiguous member.",
+                    DurableToolsetValidationReasons.NameCollision);
             }
         }
 
         var expected = DurableToolsetManifestFingerprint.Create(this);
         if (!string.Equals(Fingerprint, expected, StringComparison.Ordinal))
         {
-            throw Failure("The durable toolset manifest fingerprint is invalid.");
+            throw Failure(
+                "The durable toolset manifest fingerprint is invalid.",
+                DurableToolsetValidationReasons.ManifestMismatch);
         }
     }
 
@@ -75,18 +84,23 @@ internal sealed record DurableToolsetManifest
         {
             if (string.IsNullOrWhiteSpace(id))
             {
-                throw Failure("A durable turn toolset selection contains an empty ID.");
+                throw Failure(
+                    "A durable turn toolset selection contains an empty ID.",
+                    DurableToolsetValidationReasons.InvalidDeclaration);
             }
 
             if (!requested.Add(id))
             {
-                throw Failure($"Durable toolset '{id}' was selected more than once for one turn.");
+                throw Failure(
+                    $"Durable toolset '{id}' was selected more than once for one turn.",
+                    DurableToolsetValidationReasons.DuplicateSelection);
             }
 
             if (!ToolsetIds.Contains(id, StringComparer.Ordinal))
             {
                 throw Failure(
-                    $"Durable toolset '{id}' is outside the workflow's recorded baseline.");
+                    $"Durable toolset '{id}' is outside the workflow's recorded baseline.",
+                    DurableToolsetValidationReasons.UnknownToolset);
             }
         }
 
@@ -107,10 +121,13 @@ internal sealed record DurableToolsetManifest
         return narrowed;
     }
 
-    internal static ApplicationFailureException Failure(string message) => new(
-        message,
-        errorType: nameof(Exceptions.DurableConfigurationException),
-        nonRetryable: true);
+    internal static ApplicationFailureException Failure(
+        string message,
+        string reason = DurableToolsetValidationReasons.ManifestMismatch) => new(
+            message,
+            new DurableToolsetValidationException(reason, message),
+            errorType: nameof(Exceptions.DurableConfigurationException),
+            nonRetryable: true);
 }
 
 internal sealed record DurableToolsetManifestMember
@@ -157,7 +174,8 @@ internal sealed record DurableToolsetManifestMember
             || (!InterceptorEnabled && InterceptorActivityOptions is not null))
         {
             throw DurableToolsetManifest.Failure(
-                "The durable toolset manifest contains an invalid member or policy.");
+                "The durable toolset manifest contains an invalid member or policy.",
+                DurableToolsetValidationReasons.InvalidPolicy);
         }
     }
 }

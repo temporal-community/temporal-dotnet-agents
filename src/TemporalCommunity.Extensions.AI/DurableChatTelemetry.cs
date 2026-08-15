@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 
 namespace TemporalCommunity.Extensions.AI;
 
@@ -20,7 +21,19 @@ public static class DurableChatTelemetry
     /// <summary>The name of the <see cref="ActivitySource"/> used by this library.</summary>
     public const string ActivitySourceName = "TemporalCommunity.Extensions.AI";
 
+    /// <summary>The name of the <see cref="Meter"/> used by this library.</summary>
+    public const string MeterName = "TemporalCommunity.Extensions.AI";
+
     internal static readonly ActivitySource ActivitySource = new(ActivitySourceName);
+    internal static readonly Meter Meter = new(MeterName);
+    internal static readonly Counter<long> ToolsetResolverAttempts = Meter.CreateCounter<long>(
+        "temporal.ai.toolset.resolver.attempts");
+    internal static readonly Histogram<int> ToolsetResolverSelectedToolsets =
+        Meter.CreateHistogram<int>("temporal.ai.toolset.resolver.selected_toolsets");
+    internal static readonly Histogram<int> ToolsetResolverSelectedFunctions =
+        Meter.CreateHistogram<int>("temporal.ai.toolset.resolver.selected_functions");
+    internal static readonly Counter<long> ToolsetValidationRejections = Meter.CreateCounter<long>(
+        "temporal.ai.toolset.validation.rejections");
 
     // ── Span names ───────────────────────────────────────────────────────────
 
@@ -46,6 +59,9 @@ public static class DurableChatTelemetry
     /// format.
     /// </summary>
     public const string ExecuteToolOperationName = "execute_tool";
+
+    /// <summary>Activity-side span emitted while resolving a worker-owned toolset manifest.</summary>
+    public const string ToolsetResolveSpanName = "durable_toolset.resolve";
 
     // ── Attribute names ──────────────────────────────────────────────────────
 

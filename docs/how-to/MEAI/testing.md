@@ -39,6 +39,9 @@ just smoke-extensible-turns
 This gate does not use project references or the normal global NuGet cache. It validates the local
 source metadata and SHA-512 of the freshly packed AI and Agents packages, then runs the public
 split-registration workflow once with `lib/net10.0` and once with `lib/netstandard2.1` selected.
+The client registers no tool or schema. The worker owns the named toolset, and the run proves
+manifest resolution, approval and denial, activity retry with fresh/disposed scoped services,
+sequential state, and separate resolver/model/tool activities.
 
 ---
 

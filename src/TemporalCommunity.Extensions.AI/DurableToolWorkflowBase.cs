@@ -150,7 +150,17 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
                 $"Typed turn data is missing for request '{requestEntry.CorrelationId}'.");
         }
 
-        var turnManifest = RequiredInput.ToolsetManifest?.Narrow(request.Options.ToolsetIds);
+        Internal.DurableToolsetManifest? turnManifest;
+        try
+        {
+            turnManifest = RequiredInput.ToolsetManifest?.Narrow(request.Options.ToolsetIds);
+        }
+        catch (ApplicationFailureException exception)
+        {
+            Workflow.Logger.LogToolsetNarrowingRejected(
+                Internal.DurableToolsetValidation.GetReason(exception));
+            throw;
+        }
         var loopResult = await ExecuteManagedToolLoopTurnAsync(
             activityOptions,
             requestEntry,

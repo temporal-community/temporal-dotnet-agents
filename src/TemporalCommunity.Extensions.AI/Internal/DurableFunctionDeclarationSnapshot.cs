@@ -58,7 +58,8 @@ internal sealed record DurableFunctionDeclarationSnapshot
                 StringComparison.Ordinal))
         {
             throw DurableToolsetManifest.Failure(
-                "A durable function declaration snapshot is invalid.");
+                "A durable function declaration snapshot is invalid.",
+                DurableToolsetValidationReasons.InvalidDeclaration);
         }
     }
 

@@ -52,10 +52,7 @@ internal sealed class DurableFunctionActivities(
                     input.FunctionName,
                     StringComparison.Ordinal))
             {
-                throw new ApplicationFailureException(
-                    "The durable toolset activation does not match the recorded manifest member.",
-                    errorType: nameof(Exceptions.DurableConfigurationException),
-                    nonRetryable: true);
+                throw WorkerOwnedBindingFailure();
             }
 
             var member = toolsetActivation.Member;
@@ -78,25 +75,27 @@ internal sealed class DurableFunctionActivities(
             }
             else
             {
-                function = member.Function
-                    ?? throw new ApplicationFailureException(
-                        "The durable toolset member has no worker implementation.",
-                        errorType: nameof(Exceptions.DurableConfigurationException),
-                        nonRetryable: true);
+                if (member.Function is null)
+                {
+                    throw WorkerOwnedBindingFailure();
+                }
+
+                function = member.Function;
             }
 
-            input.Declaration?.ValidateImplementation(function);
+            ValidateImplementation(input.Declaration, function);
         }
         else if (factoryRegistry is not null
             && factoryRegistry.TryGetValue(input.FunctionName, out var activationFactory))
         {
             activation = CreateFactoryActivation(activationFactory, input, ctx);
             function = activation.Function;
-            input.Declaration?.ValidateImplementation(function);
+            ValidateImplementation(input.Declaration, function);
 
             if (input.DispatchMode == DurableToolDispatchMode.Parallel
                 && activation.CompleteState is not null)
             {
+                RecordValidationRejection(Internal.DurableToolsetValidationReasons.InvalidPolicy);
                 throw new Temporalio.Exceptions.ApplicationFailureException(
                     "A durable tool cannot complete turn state while parallel dispatch is enabled.",
                     errorType: nameof(Exceptions.DurableConfigurationException),
@@ -110,7 +109,7 @@ internal sealed class DurableFunctionActivities(
         }
         else
         {
-            input.Declaration?.ValidateImplementation(function);
+            ValidateImplementation(input.Declaration, function);
         }
 
         using var span = DurableChatTelemetry.ActivitySource.StartActivity(
@@ -169,7 +168,7 @@ internal sealed class DurableFunctionActivities(
         }
     }
 
-    private static void ValidateWorkerOwnedBinding(DurableFunctionInput input)
+    private void ValidateWorkerOwnedBinding(DurableFunctionInput input)
     {
         if (string.IsNullOrWhiteSpace(input.ToolsetId)
             || string.IsNullOrWhiteSpace(input.MemberIdentityFingerprint)
@@ -185,7 +184,15 @@ internal sealed class DurableFunctionActivities(
             throw WorkerOwnedBindingFailure();
         }
 
-        input.Declaration.Validate();
+        try
+        {
+            input.Declaration.Validate();
+        }
+        catch
+        {
+            RecordValidationRejection(Internal.DurableToolsetValidationReasons.InvalidDeclaration);
+            throw;
+        }
         var carriedIdentity = Internal.DurableToolsetMemberIdentityFingerprint.Create(
             input.ToolsetId,
             input.ActivationKey!,
@@ -225,10 +232,39 @@ internal sealed class DurableFunctionActivities(
         return true;
     }
 
-    private static ApplicationFailureException WorkerOwnedBindingFailure() => new(
-        "The durable tool activity input does not match its recorded manifest member.",
-        errorType: nameof(Exceptions.DurableConfigurationException),
-        nonRetryable: true);
+    private ApplicationFailureException WorkerOwnedBindingFailure()
+    {
+        RecordValidationRejection(Internal.DurableToolsetValidationReasons.ManifestMismatch);
+        return new ApplicationFailureException(
+            "The durable tool activity input does not match its recorded manifest member.",
+            new Internal.DurableToolsetValidationException(
+                Internal.DurableToolsetValidationReasons.ManifestMismatch,
+                "The durable tool activity input does not match its recorded manifest member."),
+            errorType: nameof(Exceptions.DurableConfigurationException),
+            nonRetryable: true);
+    }
+
+    private void ValidateImplementation(
+        Internal.DurableFunctionDeclarationSnapshot? declaration,
+        AIFunction function)
+    {
+        try
+        {
+            declaration?.ValidateImplementation(function);
+        }
+        catch
+        {
+            RecordValidationRejection(Internal.DurableToolsetValidationReasons.InvalidDeclaration);
+            throw;
+        }
+    }
+
+    private void RecordValidationRejection(string reason)
+    {
+        var tags = new TagList { { "reason", reason } };
+        DurableChatTelemetry.ToolsetValidationRejections.Add(1, tags);
+        _logger.LogToolsetValidationRejected(reason);
+    }
 
     private Internal.DurableToolFactoryActivation CreateFactoryActivation(
         Internal.IDurableToolActivationFactory activationFactory,

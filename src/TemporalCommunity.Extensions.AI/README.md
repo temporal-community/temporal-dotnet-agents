@@ -190,7 +190,8 @@ for inline function invocation or caller-supplied session tools.
 ## Documentation and samples
 
 - [Durable approvals](../../docs/concepts/durable-approvals.md) — generic per-request approval lifecycle and retry outcomes
-
+- [Worker-owned durable toolsets](../../docs/architecture/MEAI/durable-toolsets.md)
+- [Observability](../../docs/how-to/MEAI/observability.md)
 - [MEAI usage](../../docs/how-to/MEAI/usage.md)
 - [Durable tool contract](../../docs/how-to/MEAI/tool-functions.md)
 - [Managed-session tool contract](../../docs/how-to/MEAI/managed-session-tool-contract.md)

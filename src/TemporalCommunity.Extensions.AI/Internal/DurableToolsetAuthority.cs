@@ -38,7 +38,8 @@ internal static class DurableToolsetAuthority
 
     internal static ApplicationFailureException ConflictFailure() =>
         DurableToolsetManifest.Failure(
-            "Caller-owned tool declarations and a worker-owned toolset manifest cannot be combined.");
+            "Caller-owned tool declarations and a worker-owned toolset manifest cannot be combined.",
+            DurableToolsetValidationReasons.AuthorityMismatch);
 
     private static void ValidateCallerDeclarations(
         IReadOnlyList<DurableFunctionDeclarationSnapshot> declarations)
@@ -51,7 +52,8 @@ internal static class DurableToolsetAuthority
             {
                 throw DurableToolsetManifest.Failure(
                     $"Caller-owned declarations contain more than one function named " +
-                    $"'{declaration.Name}'.");
+                    $"'{declaration.Name}'.",
+                    DurableToolsetValidationReasons.NameCollision);
             }
         }
     }
