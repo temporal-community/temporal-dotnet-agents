@@ -173,7 +173,7 @@ public class DurableChatClientTests
             Instructions = "stream instructions",
             ContinuationToken = ResponseContinuationToken.FromBytes(new byte[] { 4, 5, 6 }),
             RawRepresentationFactory = _ => null,
-        }.WithChatClientFactoryKey("factory");
+        }.WithChatClientTag("tenant", "acme");
         chatOptions.AdditionalProperties!["user.custom"] = "keep";
 
         await foreach (var _ in client.GetStreamingResponseAsync(
@@ -189,7 +189,7 @@ public class DurableChatClientTests
         Assert.DoesNotContain(
             capturedOptions.AdditionalProperties,
             pair => pair.Key.StartsWith("temporal.", StringComparison.Ordinal));
-        Assert.Equal("factory", chatOptions.GetChatClientFactoryKey());
+        Assert.Contains(chatOptions.GetChatClientTags(), pair => pair is { Key: "tenant", Value: "acme" });
     }
 
     // ── Activity Summary (visible in Temporal Web UI activity list) ────────

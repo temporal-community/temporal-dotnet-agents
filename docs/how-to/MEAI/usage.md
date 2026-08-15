@@ -56,14 +56,12 @@ client and worker.
 For a keyed client, register it with `AddKeyedChatClient` and set
 `DurableExecutionOptions.DefaultChatClientKey`.
 
-## Worker decorators and option visibility
+## Per-call activity tags and client middleware
 
-Register a keyed `IChatClientDecorator`, or use the built-in `"tags"` decorator, then select it per
-request:
+Attach request-specific values to the durable model-activity span directly:
 
 ```csharp
 var options = new ChatOptions()
-    .WithChatClientFactoryKey("tags")
     .WithChatClientTag("tenant", "acme")
     .WithChatClientTag("request_id", requestId);
 
@@ -71,8 +69,12 @@ await sessionClient.SendAsync(conversationId, messages, options);
 ```
 
 The same `ChatOptions` contract applies to direct `UseDurableExecution()` calls inside custom
-workflows. A per-call factory key wins over `DefaultChatClientFactoryKey`; an empty string disables
-the worker default for that call.
+workflows. The activity applies the tags immediately before provider invocation and removes their
+Temporal-private option keys at the provider boundary.
+
+Use ordinary MEAI `ChatClientBuilder`/`DelegatingChatClient` composition for logging, retry,
+routing, telemetry, caching, or shadowing. Register complete keyed `IChatClient` pipelines and use
+`WithChatClientKey(...)` when a call must choose among them.
 
 For direct chat and embedding adapters, `DurableExecutionOptions.TaskQueue` is copied to
 `ActivityOptions.TaskQueue` on every scheduled model activity. The workflow itself continues on
@@ -80,10 +82,9 @@ the queue from its `WorkflowOptions`. This supports a split deployment where wor
 `my-workflows` and provider/activity workers registered with `AddDurableAI()` poll
 `my-ai-activities`. Both queues may be the same, but they are not required to be.
 
-Serializable Temporal routing metadata remains in the durable payload until the activity selects
-and invokes the decorator. Decorators see those keys and must delegate through the inner client
-supplied to `Decorate`. The inner provider boundary removes all Temporal-owned keys while retaining
-ordinary MEAI properties and user-owned `AdditionalProperties`.
+Serializable Temporal routing metadata remains in the durable payload until the activity consumes
+it. The provider boundary removes all Temporal-owned keys while retaining ordinary MEAI properties
+and user-owned `AdditionalProperties`.
 
 With the default durable converter, arbitrary object-typed user values preserve their JSON content
 but may deserialize as `JsonElement`. The library's own routing/tag/timeout/retry getters handle

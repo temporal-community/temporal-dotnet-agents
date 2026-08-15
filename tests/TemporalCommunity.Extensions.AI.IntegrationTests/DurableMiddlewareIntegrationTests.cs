@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,21 +36,19 @@ public class DurableMiddlewareIntegrationTests
         AssertDirectChatWorkflowAsync(streaming: true);
 
     /// <summary>
-    /// Verifies direct-workflow routing metadata reaches the selected decorator while Temporal
-    /// private keys are removed immediately before the worker-side provider call.
+    /// Verifies direct-workflow tags reach the model-activity span while Temporal private keys are
+    /// removed immediately before the worker-side provider call.
     /// </summary>
     [Fact]
-    public async Task DurableChatClientWorkflow_DecoratorMetadataReachesDecoratorNotProvider()
+    public async Task DurableChatClientWorkflow_TagsReachActivityNotProvider()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var providerClient = new MetadataRecordingChatClient();
-        var decorator = new MetadataRecordingDecorator();
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(env.Client);
         builder.Services.AddSingleton<IChatClient>(providerClient);
-        builder.Services.AddKeyedSingleton<IChatClientDecorator>("capture", decorator);
         builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
             new StubEmbeddingGenerator(4));
         builder.Services
@@ -63,6 +62,13 @@ public class DurableMiddlewareIntegrationTests
             .AddWorkflow<DurableChatClientWorkflow>();
 
         using var host = builder.Build();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == DurableChatTelemetry.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
+                ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(listener);
         await host.StartAsync();
         try
         {
@@ -77,13 +83,8 @@ public class DurableMiddlewareIntegrationTests
                 MetadataRecordingChatClient.ResponseText,
                 await handle.GetResultAsync().WaitAsync(TimeSpan.FromSeconds(15)));
 
-            Assert.Equal("capture", decorator.Options?.GetChatClientFactoryKey());
-            Assert.Contains(
-                decorator.Options!.GetChatClientTags(),
-                tag => tag is { Key: "fixture", Value: "v1" });
-            Assert.Contains(
-                decorator.Options.GetChatClientTags(),
-                tag => tag is { Key: "tenant", Value: "acme" });
+            Assert.Equal("v1", providerClient.ActivityTags["fixture"]);
+            Assert.Equal("acme", providerClient.ActivityTags["tenant"]);
             Assert.Equal(
                 "keep",
                 providerClient.Options?.AdditionalProperties?["user.custom"]?.ToString());
@@ -396,12 +397,21 @@ public class DurableMiddlewareIntegrationTests
 
         public ChatOptions? Options { get; private set; }
 
+        public Dictionary<string, object?> ActivityTags { get; } = [];
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
             Options = options;
+            if (Activity.Current is { } activity)
+            {
+                foreach (var tag in activity.TagObjects)
+                {
+                    ActivityTags[tag.Key] = tag.Value;
+                }
+            }
             return Task.FromResult(
                 new ChatResponse([new ChatMessage(ChatRole.Assistant, ResponseText)]));
         }
@@ -422,17 +432,6 @@ public class DurableMiddlewareIntegrationTests
 
         public void Dispose()
         {
-        }
-    }
-
-    private sealed class MetadataRecordingDecorator : IChatClientDecorator
-    {
-        public ChatOptions? Options { get; private set; }
-
-        public IChatClient Decorate(IChatClient inner, ChatOptions? options)
-        {
-            Options = options;
-            return inner;
         }
     }
 

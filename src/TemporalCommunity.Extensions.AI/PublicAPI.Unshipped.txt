@@ -28,7 +28,6 @@ const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ToolCallIdAttribute =
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ToolNameAttribute = "gen_ai.tool.name" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.ShutdownSignalName = "Shutdown" -> string!
 const TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.ActivityTimeoutKey = "temporal.activity.timeout" -> string!
-const TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.ChatClientFactoryKeySettingKey = "temporal.chatClientFactoryKey" -> string!
 const TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.ChatClientKeySettingKey = "temporal.chatClientKey" -> string!
 const TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.ChatClientTagsKeyPrefix = "temporal.chatClientTag." -> string!
 const TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.HeartbeatTimeoutKey = "temporal.heartbeat.timeout" -> string!
@@ -53,7 +52,6 @@ static TemporalCommunity.Extensions.AI.EmbeddingGeneratorBuilderExtensions.UseDu
 static TemporalCommunity.Extensions.AI.Session.DurableSessionRequest.FromMessages(System.Collections.Generic.IReadOnlyList<Microsoft.Extensions.AI.ChatMessage!>! messages, string? correlationId = null, System.DateTimeOffset? timestamp = null) -> TemporalCommunity.Extensions.AI.Session.DurableSessionRequest!
 static TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.FromChatResponse(string! correlationId, Microsoft.Extensions.AI.ChatResponse! response, System.DateTimeOffset timestamp) -> TemporalCommunity.Extensions.AI.Session.DurableSessionResponse!
 static TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.WithActivityTimeout(this Microsoft.Extensions.AI.ChatOptions! options, System.TimeSpan timeout) -> Microsoft.Extensions.AI.ChatOptions!
-static TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.WithChatClientFactoryKey(this Microsoft.Extensions.AI.ChatOptions! options, string! key) -> Microsoft.Extensions.AI.ChatOptions!
 static TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.WithChatClientKey(this Microsoft.Extensions.AI.ChatOptions! options, string! key) -> Microsoft.Extensions.AI.ChatOptions!
 static TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.WithChatClientTag(this Microsoft.Extensions.AI.ChatOptions! options, string! name, string! value) -> Microsoft.Extensions.AI.ChatOptions!
 static TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.WithHeartbeatTimeout(this Microsoft.Extensions.AI.ChatOptions! options, System.TimeSpan timeout) -> Microsoft.Extensions.AI.ChatOptions!
@@ -259,8 +257,6 @@ TemporalCommunity.Extensions.AI.DurableExecutionOptions.ActivityTimeout.get -> S
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.ActivityTimeout.set -> void
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.ApprovalTimeout.get -> System.TimeSpan
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.ApprovalTimeout.set -> void
-TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultChatClientFactoryKey.get -> string?
-TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultChatClientFactoryKey.set -> void
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultChatClientKey.get -> string?
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultChatClientKey.set -> void
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultHistoryReducerKey.get -> string?
@@ -295,11 +291,6 @@ TemporalCommunity.Extensions.AI.DurableExecutionOptions.WorkflowIdPrefix.set -> 
 TemporalCommunity.Extensions.AI.DurableSessionAttributes
 TemporalCommunity.Extensions.AI.DurableSessionAttributes.DurableSessionAttributes() -> void
 TemporalCommunity.Extensions.AI.EmbeddingGeneratorBuilderExtensions
-TemporalCommunity.Extensions.AI.Exceptions.DurableChatClientFactoryNotFoundException
-TemporalCommunity.Extensions.AI.Exceptions.DurableChatClientFactoryNotFoundException.DurableChatClientFactoryNotFoundException(string! factoryKey) -> void
-TemporalCommunity.Extensions.AI.Exceptions.DurableChatClientFactoryNotFoundException.DurableChatClientFactoryNotFoundException(string! factoryKey, string! message) -> void
-TemporalCommunity.Extensions.AI.Exceptions.DurableChatClientFactoryNotFoundException.FactoryKey.get -> string!
-TemporalCommunity.Extensions.AI.Exceptions.DurableChatClientFactoryNotFoundException.FactoryKey.init -> void
 TemporalCommunity.Extensions.AI.Exceptions.DurableCompactionMarkerException
 TemporalCommunity.Extensions.AI.Exceptions.DurableCompactionMarkerException.DurableCompactionMarkerException(string! markerCorrelationId, string! message, System.Collections.Generic.IReadOnlyList<string!>? missingMessageIds = null, System.Exception? innerException = null) -> void
 TemporalCommunity.Extensions.AI.Exceptions.DurableCompactionMarkerException.MarkerCorrelationId.get -> string!
@@ -327,8 +318,6 @@ TemporalCommunity.Extensions.AI.Exceptions.DurableReplayCompatibilityException.R
 TemporalCommunity.Extensions.AI.Exceptions.DurableReplayCompatibilityException.RegisteredContext.init -> void
 TemporalCommunity.Extensions.AI.Exceptions.DurableReplayCompatibilityException.SuggestedAction.get -> string!
 TemporalCommunity.Extensions.AI.Exceptions.DurableReplayCompatibilityException.SuggestedAction.init -> void
-TemporalCommunity.Extensions.AI.IChatClientDecorator
-TemporalCommunity.Extensions.AI.IChatClientDecorator.Decorate(Microsoft.Extensions.AI.IChatClient! inner, Microsoft.Extensions.AI.ChatOptions? options) -> Microsoft.Extensions.AI.IChatClient!
 TemporalCommunity.Extensions.AI.IDurableChatSessionClient
 TemporalCommunity.Extensions.AI.IDurableChatSessionClient.GetHistoryAsync(string! conversationId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!>!
 TemporalCommunity.Extensions.AI.IDurableChatSessionClient.GetPendingApprovalAsync(string! conversationId, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest?>!

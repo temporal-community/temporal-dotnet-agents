@@ -70,20 +70,7 @@ internal sealed class DurableChatActivities(
         // resolved instance.
         EnsureMixedPatternCheck(chatClient);
         chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
-
-        // Per-call IChatClientDecorator resolution. Per-call WithChatClientFactoryKey
-        // wins; worker-level DefaultChatClientFactoryKey is the fallback. Empty-string per-call
-        // value is the documented opt-out (overrides the worker default with "no decoration").
-        var factoryKey = resolvedOptions.GetChatClientFactoryKey()
-            ?? services.GetService<DurableExecutionOptions>()?.DefaultChatClientFactoryKey;
-
-        if (!string.IsNullOrEmpty(factoryKey))
-        {
-            var decorator = services.GetKeyedService<IChatClientDecorator>(factoryKey)
-                ?? throw new DurableChatClientFactoryNotFoundException(factoryKey);
-            chatClient = decorator.Decorate(chatClient, resolvedOptions);
-            EnsureDecoratedMixedPatternCheck(chatClient);
-        }
+        Internal.ChatClientActivityTags.Apply(resolvedOptions, _logger);
 
         var response = await StreamAndCollectAsync(
             chatClient, input.Messages, resolvedOptions, input, span, ctx)
@@ -123,21 +110,6 @@ internal sealed class DurableChatActivities(
 
             _mixedPatternCheckedClients.Add(chatClient);
         }
-    }
-
-    /// <summary>
-    /// Validates a per-invocation decorated chain without caching it. Decorators commonly create
-    /// a fresh wrapper for every activity call, so retaining those wrappers in the resolved-client
-    /// cache would grow that cache for the lifetime of this activity instance.
-    /// </summary>
-    private void EnsureDecoratedMixedPatternCheck(IChatClient chatClient)
-    {
-        if (!HasDurableToolsRegistered())
-        {
-            return;
-        }
-
-        ThrowIfMixedPattern(chatClient);
     }
 
     private bool HasDurableToolsRegistered()
@@ -193,16 +165,7 @@ internal sealed class DurableChatActivities(
         var chatClient = ResolveChatClient(input.ClientKey);
         EnsureMixedPatternCheck(chatClient);
         chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
-
-        var factoryKey = effectiveOptions.GetChatClientFactoryKey()
-            ?? services.GetService<DurableExecutionOptions>()?.DefaultChatClientFactoryKey;
-        if (!string.IsNullOrEmpty(factoryKey))
-        {
-            var decorator = services.GetKeyedService<IChatClientDecorator>(factoryKey)
-                ?? throw new DurableChatClientFactoryNotFoundException(factoryKey);
-            chatClient = decorator.Decorate(chatClient, effectiveOptions);
-            EnsureDecoratedMixedPatternCheck(chatClient);
-        }
+        Internal.ChatClientActivityTags.Apply(effectiveOptions, _logger);
 
         var response = await StreamAndCollectAsync(
             chatClient, input.Messages, effectiveOptions, input, span, ctx)

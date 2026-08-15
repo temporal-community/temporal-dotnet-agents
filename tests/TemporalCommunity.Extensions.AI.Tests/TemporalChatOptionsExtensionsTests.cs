@@ -13,7 +13,6 @@ public class TemporalChatOptionsExtensionsTests
             .WithHeartbeatTimeout(TimeSpan.FromSeconds(15))
             .WithMaxRetryAttempts(4)
             .WithChatClientKey("provider")
-            .WithChatClientFactoryKey(string.Empty)
             .WithChatClientTag("tenant", "acme");
 
         var converter = DurableAIDataConverter.Instance.PayloadConverter;
@@ -30,7 +29,6 @@ public class TemporalChatOptionsExtensionsTests
         Assert.Equal(TimeSpan.FromSeconds(15), options.GetHeartbeatTimeout());
         Assert.Equal(4, options.GetMaxRetryAttempts());
         Assert.Equal("provider", options.GetChatClientKey());
-        Assert.Equal(string.Empty, options.GetChatClientFactoryKey());
         Assert.Contains(options.GetChatClientTags(), tag => tag is { Key: "tenant", Value: "acme" });
     }
 
@@ -207,41 +205,6 @@ public class TemporalChatOptionsExtensionsTests
         Assert.False(captured!.AdditionalProperties!.ContainsKey(TemporalChatOptionsExtensions.ChatClientKeySettingKey));
         Assert.False(captured.AdditionalProperties.ContainsKey(TemporalChatOptionsExtensions.ActivityTimeoutKey));
         Assert.True(captured.AdditionalProperties.ContainsKey("user.custom"));
-    }
-
-    [Fact]
-    public void WithChatClientFactoryKey_SetsProperty()
-    {
-        var options = new ChatOptions();
-        options.WithChatClientFactoryKey("tenant-logger");
-
-        Assert.NotNull(options.AdditionalProperties);
-        Assert.Equal("tenant-logger", options.GetChatClientFactoryKey());
-    }
-
-    [Fact]
-    public void WithChatClientFactoryKey_EmptyString_OverridesToOptOut()
-    {
-        // Empty string is the documented opt-out from worker-level DefaultChatClientFactoryKey.
-        var options = new ChatOptions();
-        options.WithChatClientFactoryKey(string.Empty);
-
-        Assert.NotNull(options.AdditionalProperties);
-        Assert.Equal(string.Empty, options.GetChatClientFactoryKey());
-    }
-
-    [Fact]
-    public void WithChatClientFactoryKey_NullKey_Throws()
-    {
-        var options = new ChatOptions();
-        Assert.Throws<ArgumentNullException>(() => options.WithChatClientFactoryKey(null!));
-    }
-
-    [Fact]
-    public void GetChatClientFactoryKey_ReturnsNullWhenNotSet()
-    {
-        var options = new ChatOptions();
-        Assert.Null(options.GetChatClientFactoryKey());
     }
 
     [Fact]

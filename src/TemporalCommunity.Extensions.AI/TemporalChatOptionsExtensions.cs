@@ -30,23 +30,14 @@ public static class TemporalChatOptionsExtensions
     public const string ChatClientKeySettingKey = "temporal.chatClientKey";
 
     /// <summary>
-    /// Key for per-request <see cref="IChatClientDecorator"/> resolution key. Decorators are
-    /// resolved from keyed DI inside the durable-chat activity and applied around the resolved
-    /// <see cref="IChatClient"/> before <c>GetStreamingResponseAsync</c> is called.
-    /// </summary>
-    public const string ChatClientFactoryKeySettingKey = "temporal.chatClientFactoryKey";
-
-    /// <summary>
-    /// Key prefix for per-request tag pairs consumed by the built-in <c>"tags"</c> decorator.
+    /// Key prefix for per-request tags applied to the durable model-activity span.
     /// User code calls <see cref="WithChatClientTag(ChatOptions, string, string)"/>, which writes
     /// entries under <c>temporal.chatClientTag.{name}</c> on
     /// <see cref="ChatOptions.AdditionalProperties"/>.
     /// </summary>
     /// <remarks>
-    /// Per the Q-ChatClientFactory-shape decision, the tag data path is intentionally scoped
-    /// to feed the pre-registered <c>"tags"</c> decorator only — not a general-purpose data
-    /// surface. The prefix lets the strip-list filter all tag entries with a single check
-    /// at the workflow boundary.
+    /// The prefix lets the provider-boundary filter remove all activity-only tag entries with a
+    /// single check before invoking the configured <see cref="IChatClient"/>.
     /// </remarks>
     public const string ChatClientTagsKeyPrefix = "temporal.chatClientTag.";
 
@@ -112,63 +103,19 @@ public static class TemporalChatOptionsExtensions
     }
 
     /// <summary>
-    /// Sets the per-request <see cref="IChatClientDecorator"/> key. The named decorator is
-    /// resolved from keyed DI inside the durable-chat activity and applied around the resolved
-    /// <see cref="IChatClient"/> before the LLM call.
+    /// Sets a per-request tag pair applied to the durable model-activity span. Multiple calls add
+    /// multiple tags; the latest value for a given <paramref name="name"/> wins.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Takes precedence over <see cref="DurableExecutionOptions.DefaultChatClientFactoryKey"/>.
-    /// Pass an empty string to opt out of decoration entirely for this request (overrides the
-    /// worker default).
+    /// The durable chat activity reads these entries from
+    /// <see cref="ChatOptions.AdditionalProperties"/> and attaches them to
+    /// <c>Activity.Current</c> immediately before provider invocation. No client wrapper or keyed
+    /// registration is required.
     /// </para>
     /// <para>
-    /// The key crosses the durable boundary so the worker can select the decorator. The selected
-    /// decorator receives it in <see cref="ChatOptions.AdditionalProperties"/>; the library removes
-    /// it before the ultimate provider call.
-    /// </para>
-    /// <para>
-    /// Mutates <see cref="ChatOptions.AdditionalProperties"/> on <paramref name="options"/>
-    /// in-place and returns the same instance. Clone first if the original must be preserved.
-    /// </para>
-    /// <para>
-    /// If <paramref name="key"/> names a decorator that is not registered in DI, the activity
-    /// throws <see cref="Exceptions.DurableChatClientFactoryNotFoundException"/> at dispatch
-    /// time. Built-in keys (e.g. <c>"tags"</c>) are pre-registered by <c>AddDurableAI</c> /
-    /// <c>AddTemporalAgents</c>.
-    /// </para>
-    /// </remarks>
-    public static ChatOptions WithChatClientFactoryKey(this ChatOptions options, string key)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(key);
-        (options.AdditionalProperties ??= new())[ChatClientFactoryKeySettingKey] = key;
-        return options;
-    }
-
-    /// <summary>
-    /// Sets a per-request tag pair consumed by the built-in <c>"tags"</c> decorator. Multiple
-    /// calls add multiple tags; the latest value for a given <paramref name="name"/> wins.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The built-in <c>"tags"</c> decorator (pre-registered by <c>AddDurableAI</c> /
-    /// <c>AddTemporalAgents</c>) reads these entries from
-    /// <see cref="ChatOptions.AdditionalProperties"/> and attaches them as tags to
-    /// <c>Activity.Current</c> at dispatch time. Combined with
-    /// <see cref="WithChatClientFactoryKey(ChatOptions, string)"/> set to <c>"tags"</c>, this
-    /// covers per-tenant tagging, correlation IDs, and similar per-request OTel context without
-    /// requiring a custom <see cref="IChatClientDecorator"/> registration.
-    /// </para>
-    /// <para>
-    /// <b>Contract scope:</b> this data path is intentionally scoped to feed the pre-registered
-    /// <c>"tags"</c> decorator only — not a general-purpose per-call data surface. Custom
-    /// decorators should read their own keys from <see cref="ChatOptions.AdditionalProperties"/>
-    /// using their own well-known prefix.
-    /// </para>
-    /// <para>
-    /// Tags cross the durable boundary and are visible to the selected worker decorator. The
-    /// library removes every Temporal-owned tag key before the ultimate provider call.
+    /// Tags cross the durable boundary to the worker activity. The library removes every
+    /// Temporal-owned tag key before the ultimate provider call.
     /// </para>
     /// <para>
     /// Mutates <see cref="ChatOptions.AdditionalProperties"/> on <paramref name="options"/>
@@ -220,15 +167,6 @@ public static class TemporalChatOptionsExtensions
     /// </summary>
     internal static string? GetChatClientKey(this ChatOptions? options) =>
         options?.AdditionalProperties?.TryGetValue(ChatClientKeySettingKey, out var value) == true
-            ? TryGetString(value)
-            : null;
-
-    /// <summary>
-    /// Tries to read a per-request chat client factory key from
-    /// <see cref="ChatOptions.AdditionalProperties"/>.
-    /// </summary>
-    internal static string? GetChatClientFactoryKey(this ChatOptions? options) =>
-        options?.AdditionalProperties?.TryGetValue(ChatClientFactoryKeySettingKey, out var value) == true
             ? TryGetString(value)
             : null;
 

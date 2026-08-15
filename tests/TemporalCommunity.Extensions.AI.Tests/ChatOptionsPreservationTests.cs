@@ -52,7 +52,6 @@ public class ChatOptionsPreservationTests
             ContinuationToken = ResponseContinuationToken.FromBytes(new byte[] { 1, 2, 3 }),
             RawRepresentationFactory = _ => null,
         }
-            .WithChatClientFactoryKey(string.Empty)
             .WithChatClientTag("tenant", "acme")
             .WithChatClientTag("request", "req-1");
         original.AdditionalProperties!["user.custom"] = "keep";
@@ -60,8 +59,7 @@ public class ChatOptionsPreservationTests
         var prepared = ChatOptionsSanitizer.PrepareForDurableTransport(original);
 
         Assert.NotNull(prepared);
-        Assert.Equal(string.Empty, prepared!.GetChatClientFactoryKey());
-        Assert.Equal(2, prepared.GetChatClientTags().Count);
+        Assert.Equal(2, prepared!.GetChatClientTags().Count);
         Assert.Equal("keep", prepared.AdditionalProperties!["user.custom"]);
         Assert.Null(prepared.ContinuationToken);
         Assert.Null(prepared.RawRepresentationFactory);
@@ -78,7 +76,6 @@ public class ChatOptionsPreservationTests
         var roundTripped = (DurableChatInput)converter.ToValue(payload, typeof(DurableChatInput))!;
         var roundTrippedOptions = Assert.IsType<ChatOptions>(roundTripped.Options);
 
-        Assert.Equal(string.Empty, roundTrippedOptions.GetChatClientFactoryKey());
         Assert.Equal(2, roundTrippedOptions.GetChatClientTags().Count);
         Assert.Equal("keep", roundTrippedOptions.AdditionalProperties!["user.custom"]?.ToString());
     }

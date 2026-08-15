@@ -106,25 +106,23 @@ The converter is a worker/client setting, not an AI-workflow setting. If ordinar
 this worker, their callers must use the same compatible converter too. See
 [the shared-worker guidance](../../docs/how-to/MEAI/usage.md#sharing-a-worker-with-non-ai-workflows).
 
-## Per-call decorators and metadata
+## Per-call tags and client middleware
 
-Select a keyed worker decorator and provide its built-in tag metadata from either a managed session
-or the direct workflow adapter:
+Provide activity-span tag metadata from either a managed session or the direct workflow adapter:
 
 ```csharp
 var options = new ChatOptions()
-    .WithChatClientFactoryKey("tags")
     .WithChatClientTag("tenant", "customer-42")
     .WithChatClientTag("request_id", requestId);
 
 await sessionClient.SendAsync("customer-42", messages, options);
 ```
 
-An empty factory key explicitly disables `DefaultChatClientFactoryKey` for that call. Serializable
-Temporal routing values cross the workflow/activity boundary and are visible to the selected
-`IChatClientDecorator`. The decorator must delegate through the supplied inner client. Immediately
-before the provider call, the library removes all Temporal-private keys while retaining ordinary
-MEAI options and user-owned `AdditionalProperties`.
+Serializable Temporal tag values cross the workflow/activity boundary and are applied directly to
+the current model-activity span. Immediately before the provider call, the library removes all
+Temporal-private keys while retaining ordinary MEAI options and user-owned `AdditionalProperties`.
+Use ordinary MEAI `IChatClient` middleware for retry, routing, logging, telemetry, caching, and
+shadowing; `WithChatClientKey(...)` selects among complete keyed client pipelines per call.
 
 Object-typed user properties preserve their JSON content across the default durable converter, but
 may arrive at the activity as `JsonElement`; their original CLR runtime type is not guaranteed.

@@ -7,6 +7,10 @@ namespace TemporalCommunity.Extensions.AI.Internal;
 /// </summary>
 internal static class ChatOptionsSanitizer
 {
+    // This removed decorator-routing key can still appear in recorded durable payloads. Continue
+    // stripping it so replay never leaks Temporal-private metadata to a provider.
+    private const string LegacyChatClientFactoryKey = "temporal.chatClientFactoryKey";
+
     /// <summary>
     /// Clones options for durable transport, retaining serializable routing metadata while
     /// removing provider-owned state that cannot be safely resumed across an activity boundary.
@@ -58,7 +62,7 @@ internal static class ChatOptionsSanitizer
             or TemporalChatOptionsExtensions.HeartbeatTimeoutKey
             or TemporalChatOptionsExtensions.MaxRetryAttemptsKey
             or TemporalChatOptionsExtensions.ChatClientKeySettingKey
-            or TemporalChatOptionsExtensions.ChatClientFactoryKeySettingKey
+            or LegacyChatClientFactoryKey
             || key.StartsWith(
                 TemporalChatOptionsExtensions.ChatClientTagsKeyPrefix,
                 StringComparison.Ordinal);

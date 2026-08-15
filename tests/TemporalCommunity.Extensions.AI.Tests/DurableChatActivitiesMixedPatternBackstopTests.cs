@@ -10,8 +10,7 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 /// Step 4d B-check backstop tests: pins the in-activity safety net that catches the MEAI
 /// mixed-pattern misconfiguration when the A-check (startup validator) can't reach the
 /// resolved <see cref="IChatClient"/> — e.g. keyed-only registrations, factory-deferred
-/// dependencies, or per-call decorators that re-introduce
-/// <see cref="FunctionInvokingChatClient"/>.
+/// dependencies.
 /// </summary>
 public class DurableChatActivitiesMixedPatternBackstopTests
 {
@@ -80,43 +79,6 @@ public class DurableChatActivitiesMixedPatternBackstopTests
         provider.Dispose();
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task DurableTools_DecoratorAddsFunctionInvocation_ThrowsBeforeProviderCall(
-        bool useChatStep)
-    {
-        var inner = new RecordingChatClient();
-        var decorator = new FunctionInvokingDecorator();
-        var (provider, activities) = BuildActivities(
-            inner,
-            registerDurableTool: true,
-            decorator: ("inline", decorator));
-        var options = new ChatOptions().WithChatClientFactoryKey("inline");
-        var input = new DurableChatInput
-        {
-            Messages = [new ChatMessage(ChatRole.User, "hello")],
-            Options = options,
-            ConversationId = "test",
-            TurnNumber = 1,
-        };
-
-        if (useChatStep)
-        {
-            await Assert.ThrowsAsync<DurableMixedPatternException>(
-                () => activities.GetChatStepAsync(input));
-        }
-        else
-        {
-            await Assert.ThrowsAsync<DurableMixedPatternException>(
-                () => activities.GetResponseAsync(input));
-        }
-
-        Assert.True(decorator.WasInvoked);
-        Assert.Equal(0, inner.CallCount);
-        provider.Dispose();
-    }
-
     [Fact]
     public async Task BackstopRunsOncePerClient_RepeatCallsDoNotRewalkChain()
     {
@@ -148,8 +110,7 @@ public class DurableChatActivitiesMixedPatternBackstopTests
 
     private static (ServiceProvider Provider, DurableChatActivities Activities) BuildActivities(
         IChatClient inner,
-        bool registerDurableTool,
-        (string Key, IChatClientDecorator Decorator)? decorator = null)
+        bool registerDurableTool)
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -164,11 +125,6 @@ public class DurableChatActivitiesMixedPatternBackstopTests
             services.AddSingleton<Action<DurableFunctionRegistry>>(
                 r => r.Register(AIFunctionFactory.Create(() => "ok", name: "noop")));
         }
-        if (decorator is var (key, instance))
-        {
-            services.AddKeyedSingleton<IChatClientDecorator>(key, instance);
-        }
-
         var provider = services.BuildServiceProvider();
         var activities = new DurableChatActivities(provider, provider.GetService<ILoggerFactory>());
         return (provider, activities);
@@ -202,14 +158,4 @@ public class DurableChatActivitiesMixedPatternBackstopTests
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
     }
 
-    private sealed class FunctionInvokingDecorator : IChatClientDecorator
-    {
-        public bool WasInvoked { get; private set; }
-
-        public IChatClient Decorate(IChatClient inner, ChatOptions? options)
-        {
-            WasInvoked = true;
-            return new ChatClientBuilder(inner).UseFunctionInvocation().Build();
-        }
-    }
 }

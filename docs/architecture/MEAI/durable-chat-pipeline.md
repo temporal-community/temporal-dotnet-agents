@@ -12,7 +12,7 @@ caller
   -> durable transport preparation
   -> DurableChatWorkflow [workflow update]
   -> GetChatStep [LLM activity]
-     -> selected IChatClientDecorator [Temporal metadata visible]
+     -> apply per-call activity tags [Temporal metadata visible]
      -> provider boundary [Temporal metadata removed]
      -> IChatClient provider
   -> InvokeFunction x N [tool activities]
@@ -45,21 +45,20 @@ worker implementation. A chat pipeline used by a durable session must not includ
 ## Chat options boundaries
 
 Durable transport begins with `ChatOptions.Clone()`. It retains serializable Temporal settings,
-client/decorator routing, tag entries, ordinary MEAI options, and user-owned additional properties.
+client routing, tag entries, ordinary MEAI options, and user-owned additional properties.
 It removes only `RawRepresentationFactory` and `ContinuationToken`, which cannot be safely resumed
 across the activity boundary.
 
-After the activity resolves the provider, it wraps that provider in a boundary client and then
-applies the selected decorator outside the boundary. The decorator therefore receives the routing
-metadata it needs. When the decorator delegates, the boundary clones the invocation options and
-removes every Temporal-owned key immediately before the provider call. Both `GetResponse` and
-`GetChatStep` use the same boundary. Before dispatch, the activity validates the returned decorated
+After the activity resolves the provider, it applies configured activity tags to
+`Activity.Current`, then invokes the provider through a boundary client. The boundary clones the
+invocation options and removes every Temporal-owned key immediately before the provider call. Both
+`GetResponse` and `GetChatStep` use the same boundary. The activity validates the resolved client
 chain and rejects `FunctionInvokingChatClient` when durable tools are registered, preserving the
-workflow-owned tool loop.
+workflow-owned tool loop. Other model-call concerns use ordinary MEAI `IChatClient` composition.
 
 The default converter preserves arbitrary user properties by JSON content. Because
 `AdditionalProperties` values are object-typed, they may deserialize as `JsonElement`; original CLR
-runtime types are not promised. Library-owned getters normalize this shape for factory/client keys,
+runtime types are not promised. Library-owned getters normalize this shape for client keys,
 tags, activity and heartbeat timeouts, and maximum retry attempts.
 
 ## Direct-adapter task-queue boundary

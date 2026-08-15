@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,18 +25,16 @@ public class DurableChatSessionIntegrationTests
     }
 
     [Fact]
-    public async Task ManagedGetChatStep_DecoratorMetadataReachesDecoratorNotProvider()
+    public async Task ManagedGetChatStep_TagsReachActivityNotProvider()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var providerClient = new MetadataRecordingChatClient();
-        var decorator = new MetadataRecordingDecorator();
         var taskQueue = $"managed-metadata-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(env.Client);
         builder.Services.AddSingleton<IChatClient>(providerClient);
-        builder.Services.AddKeyedSingleton<IChatClientDecorator>("inspect", decorator);
         builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
             new NoopEmbeddingGenerator());
         builder.Services
@@ -48,6 +47,13 @@ public class DurableChatSessionIntegrationTests
             });
 
         using var host = builder.Build();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == DurableChatTelemetry.ActivitySourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
+                ActivitySamplingResult.AllData,
+        };
+        ActivitySource.AddActivityListener(listener);
         await host.StartAsync();
         try
         {
@@ -56,7 +62,6 @@ public class DurableChatSessionIntegrationTests
             {
                 Instructions = "managed instructions",
             }
-                .WithChatClientFactoryKey("inspect")
                 .WithChatClientTag("tenant", "acme")
                 .WithActivityTimeout(TimeSpan.FromSeconds(20))
                 .WithMaxRetryAttempts(2);
@@ -67,10 +72,7 @@ public class DurableChatSessionIntegrationTests
                 [new ChatMessage(ChatRole.User, "hello")],
                 options);
 
-            Assert.Equal("inspect", decorator.Options?.GetChatClientFactoryKey());
-            Assert.Contains(
-                decorator.Options!.GetChatClientTags(),
-                tag => tag is { Key: "tenant", Value: "acme" });
+            Assert.Equal("acme", providerClient.ActivityTags["tenant"]);
             Assert.Equal("keep", providerClient.Options?.AdditionalProperties?["user.custom"]?.ToString());
             Assert.Equal("managed instructions", providerClient.Options?.Instructions);
             Assert.DoesNotContain(
@@ -272,12 +274,21 @@ public class DurableChatSessionIntegrationTests
     {
         public ChatOptions? Options { get; private set; }
 
+        public Dictionary<string, object?> ActivityTags { get; } = [];
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
             Options = options;
+            if (Activity.Current is { } activity)
+            {
+                foreach (var tag in activity.TagObjects)
+                {
+                    ActivityTags[tag.Key] = tag.Value;
+                }
+            }
             return Task.FromResult(
                 new ChatResponse([new ChatMessage(ChatRole.Assistant, "managed response")])
                 {
@@ -301,17 +312,6 @@ public class DurableChatSessionIntegrationTests
 
         public void Dispose()
         {
-        }
-    }
-
-    private sealed class MetadataRecordingDecorator : IChatClientDecorator
-    {
-        public ChatOptions? Options { get; private set; }
-
-        public IChatClient Decorate(IChatClient inner, ChatOptions? options)
-        {
-            Options = options;
-            return inner;
         }
     }
 

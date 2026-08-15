@@ -107,4 +107,10 @@ internal static partial class Logs
     [LoggerMessage(EventId = 18, Level = LogLevel.Error,
         Message = "Durable embedding activity failed")]
     public static partial void LogEmbeddingActivityFailed(this ILogger logger, Exception ex);
+
+    // ── Per-call activity tags ──────────────────────────────────────────────
+
+    [LoggerMessage(EventId = 19, Level = LogLevel.Warning,
+        Message = "WithChatClientTag was used but Activity.Current is null; tags ({TagKeys}) will not be applied. Ensure the OpenTelemetry pipeline is configured.")]
+    public static partial void LogChatClientTagsSkipped(this ILogger logger, string tagKeys);
 }

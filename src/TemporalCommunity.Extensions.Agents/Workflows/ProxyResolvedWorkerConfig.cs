@@ -29,12 +29,6 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// subsequent iterations (and carries it forward across continue-as-new).
 /// </item>
 /// </list>
-/// <para>
-/// The nullable <see cref="DefaultChatClientFactoryKey"/> slot is reserved as a
-/// forward-compatibility placeholder for a future configurable per-call chat-client factory
-/// key. It is intentionally NOT
-/// <c>required</c> so existing call sites can construct the record without supplying them.
-/// </para>
 /// </remarks>
 internal sealed record ProxyResolvedWorkerConfig
 {
@@ -51,14 +45,6 @@ internal sealed record ProxyResolvedWorkerConfig
     /// workflow-level activity-timeout/retry-policy fields.
     /// </summary>
     public required IReadOnlyDictionary<string, ActivityOptions> ToolActivityOptions { get; init; }
-
-    /// <summary>
-    /// Reserved for Step 4 of the MAF gap-analysis plan (configurable per-call chat-client
-    /// factory key). Nullable and NOT <c>required</c> so call sites do not need to supply a
-    /// value until Step 4 lands.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DefaultChatClientFactoryKey { get; init; }
 
     /// <summary>
     /// Pre-computed <see cref="ActivityOptions"/> for <c>RunToolInterceptor</c> dispatches that

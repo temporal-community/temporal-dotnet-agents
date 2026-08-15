@@ -342,11 +342,6 @@ public class HistoryCaptureTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(client);
         builder.Services.AddSingleton<IChatClient>(new TestChatClient());
-        // DurableChatClientWorkflow requests the keyed "capture" decorator when it
-        // captures the compatibility metadata carried by this history fixture.
-        builder.Services.AddKeyedSingleton<IChatClientDecorator>(
-            "capture",
-            new PassthroughChatClientDecorator());
         builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
             new NoopEmbeddingGenerator());
 
@@ -451,11 +446,6 @@ public class HistoryCaptureTests
                             ["captured"]))),
             });
         return builder.Build();
-    }
-
-    private sealed class PassthroughChatClientDecorator : IChatClientDecorator
-    {
-        public IChatClient Decorate(IChatClient inner, ChatOptions? options) => inner;
     }
 
     private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>

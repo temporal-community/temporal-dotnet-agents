@@ -42,10 +42,10 @@ public class ChatOptionsSanitizerTests
             ContinuationToken = ResponseContinuationToken.FromBytes(new byte[] { 1, 2, 3 }),
             RawRepresentationFactory = _ => null,
         }
-            .WithChatClientFactoryKey("factory")
             .WithChatClientTag("tenant", "acme")
             .WithActivityTimeout(TimeSpan.FromSeconds(10));
         options.AdditionalProperties!["user.custom"] = "keep";
+        options.AdditionalProperties["temporal.chatClientFactoryKey"] = "recorded-legacy-key";
         return options;
     }
 
@@ -61,8 +61,10 @@ public class ChatOptionsSanitizerTests
         Assert.DoesNotContain(
             actual.AdditionalProperties,
             pair => ChatOptionsSanitizer.IsTemporalKey(pair.Key));
-        Assert.Equal("factory", original.GetChatClientFactoryKey());
         Assert.Contains(original.GetChatClientTags(), pair => pair.Key == "tenant");
+        Assert.Equal(
+            "recorded-legacy-key",
+            original.AdditionalProperties!["temporal.chatClientFactoryKey"]);
     }
 
     private sealed class RecordingChatClient : IChatClient

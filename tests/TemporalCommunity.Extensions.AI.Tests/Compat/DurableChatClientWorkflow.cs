@@ -34,7 +34,6 @@ public sealed class DurableChatClientWorkflow
         if (input.IncludeCompatibilityMetadata)
         {
             options = new ChatOptions()
-                .WithChatClientFactoryKey("capture")
                 .WithChatClientTag("fixture", "v1")
                 .WithChatClientTag("tenant", "acme")
                 .WithActivityTimeout(TimeSpan.FromSeconds(20))
