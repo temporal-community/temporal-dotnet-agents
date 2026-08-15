@@ -103,10 +103,10 @@ builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 // DurableChatSessionClient on the worker. The session client is resolved from
 // DI after the host starts.
 //
-// AddDurableTools registers tools in the DurableFunctionRegistry. Because at
-// least one tool is registered, the workflow dispatches
-// each tool invocation as a separate InvokeFunction activity, and per-tool
-// retry/timeout can be configured via the DurableChatToolOptions callback.
+// AddDurableTools registers the worker's implicit default toolset. The client never receives its
+// schema. The workflow resolves a versioned manifest once, then dispatches each model-requested
+// invocation as a separate InvokeFunction activity. Per-tool retry/timeout is frozen into that
+// manifest through the DurableChatToolOptions callback.
 builder.Services
     .AddHostedTemporalWorker(TaskQueue)
     .AddDurableAI(opts =>

@@ -22,6 +22,8 @@ public class DurableToolInterceptorIntegrationTests
 {
     private const string RunToolInterceptorActivity = "TemporalCommunity.Extensions.AI.RunToolInterceptor";
     private const string InvokeFunctionActivity = "TemporalCommunity.Extensions.AI.InvokeFunction";
+    private const string ResolveToolsetsActivity = "TemporalCommunity.Extensions.AI.ResolveDurableToolsets";
+    private const string GetChatStepActivity = "TemporalCommunity.Extensions.AI.GetChatStep";
 
     // ── Proceed ─────────────────────────────────────────────────────────────
 
@@ -457,6 +459,14 @@ public class DurableToolInterceptorIntegrationTests
         Assert.True(invokeScheduleEventIds[0] > finalResolutionEventId,
             "The approved tool was scheduled before the final approval resolution completed.");
 
+        var scheduledActivityNames = events
+            .Where(historyEvent => historyEvent.ActivityTaskScheduledEventAttributes is not null)
+            .Select(historyEvent => historyEvent.ActivityTaskScheduledEventAttributes!.ActivityType.Name)
+            .ToArray();
+        Assert.Equal(1, scheduledActivityNames.Count(name => name == ResolveToolsetsActivity));
+        Assert.Equal(ResolveToolsetsActivity, scheduledActivityNames[0]);
+        Assert.Contains(GetChatStepActivity, scheduledActivityNames);
+
         await host.StopAsync();
     }
 
@@ -613,6 +623,7 @@ public class DurableToolInterceptorIntegrationTests
         var continuedHandle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
             workflowId, runId: continuedRunId);
         DurableChatWorkflowInput? continuedInput = null;
+        var continuedResolverSchedules = 0;
         await foreach (var historyEvent in continuedHandle.FetchHistoryEventsAsync())
         {
             if (historyEvent.WorkflowExecutionStartedEventAttributes?.Input?.Payloads_.Count > 0)
@@ -622,13 +633,20 @@ public class DurableToolInterceptorIntegrationTests
                     .ToValue(
                         historyEvent.WorkflowExecutionStartedEventAttributes.Input.Payloads_[0],
                         typeof(DurableChatWorkflowInput))!;
-                break;
+            }
+
+            if (historyEvent.ActivityTaskScheduledEventAttributes?.ActivityType.Name
+                == ResolveToolsetsActivity)
+            {
+                continuedResolverSchedules++;
             }
         }
 
         Assert.NotNull(continuedInput);
+        Assert.NotNull(continuedInput!.ToolsetManifest);
+        Assert.Equal(0, continuedResolverSchedules);
         Assert.Contains(
-            continuedInput!.ApprovalResolutionHistory!,
+            continuedInput.ApprovalResolutionHistory!,
             retained => retained.RequestId == decision.RequestId && retained.Approved);
         var retry = await continuedHandle.ExecuteUpdateAsync<DurableChatWorkflow, DurableApprovalResolutionResult>(
             workflow => workflow.ResolveApprovalAsync(decision));

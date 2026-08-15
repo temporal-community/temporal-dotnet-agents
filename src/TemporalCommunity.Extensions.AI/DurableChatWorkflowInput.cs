@@ -13,6 +13,9 @@ public record class DurableChatWorkflowInput
     [JsonInclude]
     internal IReadOnlyList<Internal.DurableFunctionDeclarationSnapshot>? ToolDeclarations { get; init; }
 
+    [JsonInclude]
+    internal Internal.DurableToolsetManifest? ToolsetManifest { get; init; }
+
     /// <summary>
     /// The session time-to-live. The workflow completes when idle for this duration.
     /// </summary>
@@ -155,7 +158,7 @@ public record class DurableChatWorkflowInput
     /// <summary>
     /// Tool names that should be skipped when dispatching the <c>RunToolInterceptor</c>
     /// activity. Populated from tools where <c>SkipInterceptorFlag</c> is set.
-    /// Case-insensitive comparisons apply at runtime.
+    /// Exact ordinal comparisons apply at runtime.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? InterceptorSkippedTools { get; init; }

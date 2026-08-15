@@ -26,6 +26,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
     private readonly DurableFunctionRegistry? _functionRegistry;
     private readonly DurableChatToolOptionsRegistry? _toolOptionsRegistry;
     private readonly Internal.DurableFunctionDeclarationRegistry? _declarationRegistry;
+    private readonly bool _useWorkerToolsets;
     private readonly Lazy<IReadOnlyDictionary<string, ActivityOptions>?> _toolActivityOptions;
     private readonly Lazy<ActivityOptions?> _interceptorActivityOptions;
     private readonly Lazy<IReadOnlyDictionary<string, ActivityOptions>?> _interceptorToolActivityOptions;
@@ -37,7 +38,8 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         DurableExecutionOptions options,
         DurableFunctionRegistry? functionRegistry,
         DurableChatToolOptionsRegistry? toolOptionsRegistry,
-        Internal.DurableFunctionDeclarationRegistry? declarationRegistry = null)
+        Internal.DurableFunctionDeclarationRegistry? declarationRegistry = null,
+        IEnumerable<DurableToolsetRegistration>? toolsetRegistrations = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
@@ -46,6 +48,8 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         _functionRegistry = functionRegistry;
         _toolOptionsRegistry = toolOptionsRegistry;
         _declarationRegistry = declarationRegistry;
+        _useWorkerToolsets = options.RegisterDefaultWorkflow
+            && toolsetRegistrations?.Any() == true;
         _toolActivityOptions = new(BuildToolActivityOptions, LazyThreadSafetyMode.ExecutionAndPublication);
         _interceptorActivityOptions = new(BuildInterceptorActivityOptions, LazyThreadSafetyMode.ExecutionAndPublication);
         _interceptorToolActivityOptions = new(
@@ -73,16 +77,16 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         MaxEntryCount = _options.MaxEntryCount,
         HistoryReducer = _options.HistoryReducer,
         HistoryReducerKey = _options.DefaultHistoryReducerKey,
-        ToolActivityOptions = _toolActivityOptions.Value,
+        ToolActivityOptions = _useWorkerToolsets ? null : _toolActivityOptions.Value,
         MaxToolCallsPerTurn = _options.MaxToolCallsPerTurn,
         MaximumConsecutiveErrorsPerRequest = _options.MaximumConsecutiveErrorsPerRequest,
         IncludeDetailedErrors = _options.IncludeDetailedErrors,
-        InterceptorActivityOptions = _interceptorActivityOptions.Value,
-        InterceptorToolActivityOptions = _interceptorToolActivityOptions.Value,
-        InterceptorSkippedTools = _interceptorSkippedTools.Value,
-        RequiresApprovalTools = _requiresApprovalTools.Value,
-        ToolApprovalTimeouts = _toolApprovalTimeouts.Value,
-        ToolDeclarations = _declarationRegistry is { Count: > 0 }
+        InterceptorActivityOptions = _useWorkerToolsets ? null : _interceptorActivityOptions.Value,
+        InterceptorToolActivityOptions = _useWorkerToolsets ? null : _interceptorToolActivityOptions.Value,
+        InterceptorSkippedTools = _useWorkerToolsets ? null : _interceptorSkippedTools.Value,
+        RequiresApprovalTools = _useWorkerToolsets ? null : _requiresApprovalTools.Value,
+        ToolApprovalTimeouts = _useWorkerToolsets ? null : _toolApprovalTimeouts.Value,
+        ToolDeclarations = !_useWorkerToolsets && _declarationRegistry is { Count: > 0 }
             ? _declarationRegistry.Values.ToList()
             : null,
     };

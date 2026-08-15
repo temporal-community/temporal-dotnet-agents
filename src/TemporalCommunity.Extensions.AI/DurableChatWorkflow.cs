@@ -31,9 +31,46 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     // not leak entries for the workflow's lifetime.
     private readonly Dictionary<DurableSessionRequest, (string? ClientKey, string? ConversationId)>
         _perTurnMeta = new(Internal.ReferenceComparer<DurableSessionRequest>.Instance);
+    private bool _toolAuthorityReady;
 
     [WorkflowRun]
-    public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
+    public new async Task RunAsync(DurableChatWorkflowInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.ToolsetManifest is not null && input.ToolDeclarations is not null)
+        {
+            throw new ApplicationFailureException(
+                "A durable chat session cannot combine caller-owned declarations with a " +
+                "worker-owned toolset manifest.",
+                errorType: nameof(Exceptions.DurableConfigurationException),
+                nonRetryable: true);
+        }
+
+        if (input.ToolsetManifest is null && input.ToolDeclarations is null)
+        {
+            var resolverOptions = new ActivityOptions
+            {
+                StartToCloseTimeout = input.ActivityTimeout,
+                HeartbeatTimeout = input.HeartbeatTimeout,
+                RetryPolicy = Internal.DefaultRetryPolicy.Resolve(input.RetryPolicy),
+                Summary = "Resolve durable toolsets",
+            };
+            var manifest = await Workflow.ExecuteActivityAsync(
+                (DurableToolsetActivities activities) => activities.ResolveDurableToolsetsAsync(
+                    new Internal.DurableToolsetResolutionRequest { UseWorkerDefaults = true }),
+                resolverOptions).ConfigureAwait(true);
+            manifest.Validate();
+            input = input with { ToolsetManifest = manifest };
+        }
+        else
+        {
+            input.ToolsetManifest?.Validate();
+        }
+
+        var sessionTask = base.RunAsync(input);
+        _toolAuthorityReady = true;
+        await sessionTask.ConfigureAwait(true);
+    }
 
     /// <summary>
     /// Validates a chat request before it enters workflow history.
@@ -55,6 +92,8 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     [WorkflowUpdate("Chat")]
     public async Task<DurableSessionResponse> ChatAsync(DurableChatInput input)
     {
+        await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+
         // Build the request entry for this turn — the factory auto-generates the
         // correlation ID via Workflow.NewGuid() (deterministic, replay-safe) when the
         // caller did not supply one.

@@ -94,7 +94,9 @@ public class DurableChatWorkflowInputFactoryTests
         using var provider = services.BuildServiceProvider();
 
         var factory = provider.GetRequiredService<IDurableChatWorkflowInputFactory>();
-        Assert.NotNull(factory.Create().ToolActivityOptions);
+        var input = factory.Create();
+        Assert.NotNull(input.ToolDeclarations);
+        Assert.NotNull(input.ToolActivityOptions);
         Assert.Null(provider.GetService<DurableChatSessionClient>());
         Assert.Null(provider.GetService<ITemporalClient>());
     }

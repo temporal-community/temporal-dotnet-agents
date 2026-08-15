@@ -116,7 +116,12 @@ public class DurableAIServiceCollectionExtensionsTests
         var input = provider.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
 
         Assert.Equal(0, factoryCalls);
-        var frozen = Assert.Single(input.ToolDeclarations!);
+        Assert.Null(input.ToolDeclarations);
+        var manifest = provider.GetRequiredService<DurableToolsetCatalog>().Resolve(new()
+        {
+            UseWorkerDefaults = true,
+        });
+        var frozen = Assert.Single(manifest.Members).Declaration;
         Assert.Equal("contextual_tool", frozen.Name);
         Assert.NotNull(provider.GetRequiredService<DurableToolFactoryRegistry>()["contextual_tool"]);
     }

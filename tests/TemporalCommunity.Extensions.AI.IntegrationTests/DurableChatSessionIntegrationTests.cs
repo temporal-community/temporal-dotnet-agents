@@ -138,6 +138,20 @@ public class DurableChatSessionIntegrationTests
         Assert.Equal(history[2].CorrelationId, history[3].CorrelationId);
         // Different turns produce different correlation IDs.
         Assert.NotEqual(history[0].CorrelationId, history[2].CorrelationId);
+
+        var workflowHandle = _fixture.Client.GetWorkflowHandle(
+            _fixture.SessionClient.GetWorkflowId(conversationId));
+        var resolverSchedules = 0;
+        await foreach (var historyEvent in workflowHandle.FetchHistoryEventsAsync())
+        {
+            if (historyEvent.ActivityTaskScheduledEventAttributes?.ActivityType.Name
+                == "TemporalCommunity.Extensions.AI.ResolveDurableToolsets")
+            {
+                resolverSchedules++;
+            }
+        }
+
+        Assert.Equal(1, resolverSchedules);
     }
 
     [Fact]

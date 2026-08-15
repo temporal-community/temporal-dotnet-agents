@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
+using Temporalio.Exceptions;
 
 namespace TemporalCommunity.Extensions.AI;
 
@@ -14,7 +15,8 @@ internal sealed class DurableFunctionActivities(
     IReadOnlyDictionary<string, AIFunction> functionRegistry,
     ILoggerFactory? loggerFactory = null,
     Internal.DurableToolFactoryRegistry? factoryRegistry = null,
-    IServiceProvider? serviceProvider = null)
+    IServiceProvider? serviceProvider = null,
+    Internal.DurableToolsetActivationCatalog? toolsetActivationCatalog = null)
 {
     private readonly ILogger _logger = (loggerFactory ?? NullLoggerFactory.Instance)
         .CreateLogger<DurableFunctionActivities>();
@@ -30,45 +32,43 @@ internal sealed class DurableFunctionActivities(
 
         Internal.DurableToolFactoryActivation? activation = null;
         AIFunction function;
-        if (factoryRegistry is not null
-            && factoryRegistry.TryGetValue(input.FunctionName, out var activationFactory))
+        if (input.ActivationKey is not null)
         {
-            if (!ActivityExecutionContext.HasCurrent)
+            if (toolsetActivationCatalog is null
+                || !toolsetActivationCatalog.TryGetValue(input.ActivationKey, out var toolsetActivation)
+                || !string.Equals(toolsetActivation.ToolsetId, input.ToolsetId, StringComparison.Ordinal)
+                || !string.Equals(
+                    toolsetActivation.Member.Declaration.Name,
+                    input.FunctionName,
+                    StringComparison.Ordinal))
             {
-                throw new InvalidOperationException(
-                    "Invocation-scoped durable tools require an activity execution context.");
+                throw new ApplicationFailureException(
+                    "The durable toolset activation does not match the recorded manifest member.",
+                    errorType: nameof(Exceptions.DurableConfigurationException),
+                    nonRetryable: true);
             }
 
-            var info = ctx.Info;
-            var workflowId = info.WorkflowId
-                ?? throw new InvalidOperationException("Activity workflow ID is missing.");
-            var workflowRunId = info.WorkflowRunId
-                ?? throw new InvalidOperationException("Activity workflow run ID is missing.");
-            var idempotencyKey = Internal.DurableToolIdempotencyKey.Create(
-                input.IdempotencyKeyVersion,
-                info.Namespace,
-                workflowId,
-                workflowRunId,
-                info.ActivityId);
-            var metadata = new DurableToolInvocationMetadata(
-                info.Namespace,
-                workflowId,
-                workflowRunId,
-                info.ActivityId,
-                info.Attempt,
-                info.TaskQueue,
-                input.FunctionName,
-                input.ToolCallId,
-                input.ModelIteration,
-                input.CallIndex,
-                input.ConversationId,
-                input.CorrelationId,
-                idempotencyKey);
-            activation = activationFactory.Create(
-                serviceProvider ?? throw new InvalidOperationException(
-                    "Invocation-scoped durable tools require an activity service provider."),
-                input,
-                metadata);
+            var member = toolsetActivation.Member;
+            if (member.ActivationFactory is not null)
+            {
+                activation = CreateFactoryActivation(member.ActivationFactory, input, ctx);
+                function = activation.Function;
+            }
+            else
+            {
+                function = member.Function
+                    ?? throw new ApplicationFailureException(
+                        "The durable toolset member has no worker implementation.",
+                        errorType: nameof(Exceptions.DurableConfigurationException),
+                        nonRetryable: true);
+            }
+
+            input.Declaration?.ValidateImplementation(function);
+        }
+        else if (factoryRegistry is not null
+            && factoryRegistry.TryGetValue(input.FunctionName, out var activationFactory))
+        {
+            activation = CreateFactoryActivation(activationFactory, input, ctx);
             function = activation.Function;
             input.Declaration?.ValidateImplementation(function);
 
@@ -145,5 +145,48 @@ internal sealed class DurableFunctionActivities(
             _logger.LogFunctionFailed(ex, input.FunctionName);
             throw;
         }
+    }
+
+    private Internal.DurableToolFactoryActivation CreateFactoryActivation(
+        Internal.IDurableToolActivationFactory activationFactory,
+        DurableFunctionInput input,
+        ActivityExecutionContext context)
+    {
+        if (!ActivityExecutionContext.HasCurrent)
+        {
+            throw new InvalidOperationException(
+                "Invocation-scoped durable tools require an activity execution context.");
+        }
+
+        var info = context.Info;
+        var workflowId = info.WorkflowId
+            ?? throw new InvalidOperationException("Activity workflow ID is missing.");
+        var workflowRunId = info.WorkflowRunId
+            ?? throw new InvalidOperationException("Activity workflow run ID is missing.");
+        var idempotencyKey = Internal.DurableToolIdempotencyKey.Create(
+            input.IdempotencyKeyVersion,
+            info.Namespace,
+            workflowId,
+            workflowRunId,
+            info.ActivityId);
+        var metadata = new DurableToolInvocationMetadata(
+            info.Namespace,
+            workflowId,
+            workflowRunId,
+            info.ActivityId,
+            info.Attempt,
+            info.TaskQueue,
+            input.FunctionName,
+            input.ToolCallId,
+            input.ModelIteration,
+            input.CallIndex,
+            input.ConversationId,
+            input.CorrelationId,
+            idempotencyKey);
+        return activationFactory.Create(
+            serviceProvider ?? throw new InvalidOperationException(
+                "Invocation-scoped durable tools require an activity service provider."),
+            input,
+            metadata);
     }
 }

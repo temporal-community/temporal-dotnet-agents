@@ -90,6 +90,12 @@ builder.Services
     .AddDurableTools(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
 ```
 
+`AddDurableTools` creates one implicit worker-owned default toolset. The stock client request stays
+thin: it carries no implementation or schema. On a new session, the workflow schedules
+`ResolveDurableToolsets` once before `GetChatStep`; Temporal records the returned versioned manifest
+and Continue-as-New carries it unchanged. Worker registration changes therefore affect new
+sessions, not sessions already running.
+
 Send a turn without `ChatOptions.Tools`:
 
 ```csharp

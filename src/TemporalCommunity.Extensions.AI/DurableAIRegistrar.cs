@@ -131,7 +131,8 @@ internal static class DurableAIRegistrar
                 options,
                 sp.GetService<DurableFunctionRegistry>(),
                 sp.GetService<DurableChatToolOptionsRegistry>(),
-                sp.GetService<Internal.DurableFunctionDeclarationRegistry>()));
+                sp.GetService<Internal.DurableFunctionDeclarationRegistry>(),
+                sp.GetServices<DurableToolsetRegistration>()));
     }
 
     private static void RegisterClientDataConverterServices(IServiceCollection services)

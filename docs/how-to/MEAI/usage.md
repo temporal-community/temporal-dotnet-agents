@@ -93,8 +93,10 @@ from durable transport because they cannot be safely resumed.
 
 ## Durable tools
 
-Register functions on the worker. The registry supplies the schema to the model and the activity
-implementation to the worker.
+Register functions on the worker. `AddDurableTools` creates one implicit default toolset. The
+client-side `SendAsync` request contains no schemas or implementations; the stock workflow resolves
+the worker toolset once through `ResolveDurableToolsets`, records the returned manifest, and uses it
+for every model/tool iteration and Continue-as-New run.
 
 ```csharp
 builder.Services
@@ -121,6 +123,11 @@ var history = await sessionClient.GetHistoryAsync("customer-42");
 Tool calls are recorded as `TemporalCommunity.Extensions.AI.InvokeFunction` activities. Configure
 `MaxToolCallsPerTurn` to bound model/tool iteration cost and make side-effecting tools idempotent
 or opt them out of retries.
+
+In split deployments, the client process needs `AddDurableChatWorkflowInputFactory` and the
+Temporal client but does not register tools. The worker polling the session queue registers
+`AddDurableAI` and its default tools. A worker registration change applies only to newly started
+sessions; existing sessions retain their recorded manifest.
 
 Streaming is not supported for durable sessions. For a custom workflow that directly invokes a
 known function, use `AIFunction.AsDurable()`; it is separate from managed chat-session tool

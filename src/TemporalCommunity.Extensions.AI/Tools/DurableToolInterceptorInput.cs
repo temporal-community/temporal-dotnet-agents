@@ -26,4 +26,7 @@ internal sealed class DurableToolInterceptorInput
 
     /// <summary>Turn number within the current session.</summary>
     public int? TurnNumber { get; init; }
+
+    /// <summary>Originating worker-owned toolset, when manifest authority is active.</summary>
+    public string? ToolsetId { get; init; }
 }

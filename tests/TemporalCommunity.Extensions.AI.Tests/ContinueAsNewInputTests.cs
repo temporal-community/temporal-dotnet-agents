@@ -31,6 +31,18 @@ public class ContinueAsNewInputTests
         {
             ["approve"] = TimeSpan.FromHours(4),
         };
+        var manifestWithoutFingerprint = new TemporalCommunity.Extensions.AI.Internal.DurableToolsetManifest
+        {
+            ManifestVersion = TemporalCommunity.Extensions.AI.Internal.DurableToolsetManifest.CurrentVersion,
+            ToolsetIds = [],
+            Members = [],
+            Fingerprint = string.Empty,
+        };
+        var manifest = manifestWithoutFingerprint with
+        {
+            Fingerprint = TemporalCommunity.Extensions.AI.Internal.DurableToolsetManifestFingerprint.Create(
+                manifestWithoutFingerprint),
+        };
 
         var original = new DurableChatWorkflowInput
         {
@@ -62,6 +74,7 @@ public class ContinueAsNewInputTests
             MaxToolCallsPerTurn = 17,
             MaximumConsecutiveErrorsPerRequest = 5,
             IncludeDetailedErrors = true,
+            ToolsetManifest = manifest,
         };
         var carriedHistory = new List<DurableSessionEntry>
         {
@@ -102,5 +115,6 @@ public class ContinueAsNewInputTests
             original.MaximumConsecutiveErrorsPerRequest,
             actual.MaximumConsecutiveErrorsPerRequest);
         Assert.Equal(original.IncludeDetailedErrors, actual.IncludeDetailedErrors);
+        Assert.Same(manifest, actual.ToolsetManifest);
     }
 }

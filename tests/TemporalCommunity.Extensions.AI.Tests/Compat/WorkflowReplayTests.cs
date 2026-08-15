@@ -106,6 +106,17 @@ public class WorkflowReplayTests
         Assert.Null(result.ReplayFailure);
     }
 
+    [Fact]
+    public async Task WorkerOwnedToolsetV1_ReplaysWithoutError()
+    {
+        var replayer = BuildReplayer();
+        var history = LoadHistory("worker-owned-toolset-v1.json");
+
+        var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
     /// <summary>
     /// The direct-adapter history captured before Temporal routing metadata was preserved
     /// remains replayable. This protects the workflow command sequence, not byte-for-byte

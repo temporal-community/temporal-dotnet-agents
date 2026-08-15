@@ -161,6 +161,47 @@ public class HistoryCaptureTests
         await host.StopAsync();
     }
 
+    /// <summary>
+    /// Captures the worker-owned v1 command path:
+    /// ResolveDurableToolsets → GetChatStep → InvokeFunction → GetChatStep.
+    /// Kept separate from the older caller-owned Pattern-3 fixture.
+    /// </summary>
+    [Fact]
+    public async Task Capture_WorkerOwnedToolsetV1()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var harness = new ScriptedToolHarness();
+        var tool = harness.BuildAlwaysSucceeds(
+            "lookup_status",
+            "Looks up current status.",
+            _ => "ready");
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", "lookup_status")],
+            "Status is ready.");
+        var taskQueue = $"capture-toolset-v1-{Guid.NewGuid():N}";
+        using var host = BuildPattern3Host(
+            env.Client,
+            taskQueue,
+            scripted,
+            builder => builder.AddDurableTools(tool));
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"cap-toolset-v1-{Guid.NewGuid():N}";
+        var response = await sessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "check status")]);
+        Assert.Contains("ready", response.Text);
+
+        var handle = env.Client.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
+        var history = await handle.FetchHistoryAsync();
+        await SaveHistoryAsync("worker-owned-toolset-v1.json", history);
+
+        await host.StopAsync();
+    }
+
     // ── Typed durable turn ─────────────────────────────────────────────────────────────
 
     /// <summary>

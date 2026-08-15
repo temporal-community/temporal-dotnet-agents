@@ -41,6 +41,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         UsageDetails? totalUsage = null;
         var consecutiveErrors = 0;
         var currentTurnState = initialTurnState;
+        var toolsetManifest = RequiredInput.ToolsetManifest;
+        var effectiveDeclarations = toolsetManifest is null
+            ? RequiredInput.ToolDeclarations
+            : toolsetManifest.Members.Select(member => member.Declaration).ToArray();
 
         var maxIterations = RequiredInput.MaxToolCallsPerTurn;
 
@@ -55,7 +59,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 TurnNumber = CurrentTurnNumber,
                 ClientKey = clientKey,
                 CorrelationId = requestEntry.CorrelationId,
-                ToolDeclarations = RequiredInput.ToolDeclarations,
+                ToolDeclarations = effectiveDeclarations,
             };
 
             DurableChatStepResult stepResult;
@@ -139,12 +143,22 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             var interceptorToolOpts = RequiredInput.InterceptorToolActivityOptions;
             var skippedTools = RequiredInput.InterceptorSkippedTools;
 
-            if (interceptorActivityOpts is not null)
+            if (interceptorActivityOpts is not null
+                || toolsetManifest?.Members.Any(member => member.InterceptorEnabled) == true)
             {
                 var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
                 foreach (var tc in toolCalls)
                 {
-                    if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, skippedTools))
+                    var manifestMember = FindManifestMember(toolsetManifest, tc.Name);
+                    if (toolsetManifest is not null
+                        && (manifestMember is null
+                            || !manifestMember.InterceptorEnabled
+                            || manifestMember.SkipInterceptor))
+                    {
+                        interceptorTasks.Add(Task.FromResult(
+                            new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
+                    }
+                    else if (DurableToolDecisionPolicy.IsToolSkipped(tc.Name, skippedTools))
                     {
                         interceptorTasks.Add(Task.FromResult(
                             new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed }));
@@ -161,12 +175,17 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                             ConversationId = conversationId,
                             CorrelationId = requestEntry.CorrelationId,
                             TurnNumber = CurrentTurnNumber,
+                            ToolsetId = manifestMember?.ToolsetId,
                         };
 
                         // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel typed dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (DurableChatActivities a) => a.RunToolInterceptorAsync(interceptorInput),
-                            DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(tc.Name, interceptorActivityOpts, interceptorToolOpts)));
+                            manifestMember?.InterceptorActivityOptions
+                                ?? DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(
+                                    tc.Name,
+                                    interceptorActivityOpts!,
+                                    interceptorToolOpts)));
                     }
                 }
 
@@ -194,10 +213,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             {
                 var tc = toolCalls[i];
                 var interceptorResult = interceptorResults?[i];
+                var manifestMember = FindManifestMember(toolsetManifest, tc.Name);
 
                 // Determine effective outcome (Rule 2: RequireApproval floor, Block never overridden).
-                var outcome = DurableToolDecisionPolicy.GetEffectiveOutcome(
-                    interceptorResult?.Outcome, tc.Name, requiresApprovalTools);
+                var outcome = toolsetManifest is not null && manifestMember is null
+                    ? DurableToolOutcome.Block
+                    : DurableToolDecisionPolicy.GetEffectiveOutcome(
+                        interceptorResult?.Outcome,
+                        tc.Name,
+                        manifestMember?.RequiresApproval == true ? [tc.Name] : requiresApprovalTools);
 
                 switch (outcome)
                 {
@@ -208,8 +232,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         {
                             FunctionName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
-                            Declaration = RequiredInput.ToolDeclarations?.FirstOrDefault(
+                            Declaration = manifestMember?.Declaration ?? RequiredInput.ToolDeclarations?.FirstOrDefault(
                                 declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
+                            ToolsetId = manifestMember?.ToolsetId,
+                            ActivationKey = manifestMember?.ActivationKey,
+                            ManifestFingerprint = toolsetManifest?.Fingerprint,
                             RequestData = requestData,
                             TurnState = currentTurnState,
                             DispatchMode = dispatchMode,
@@ -219,7 +246,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                             ConversationId = conversationId,
                             CorrelationId = requestEntry.CorrelationId,
                             IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
-                        }, ResolveToolActivityOptions(tc.Name)));
+                        }, ResolveToolActivityOptions(tc.Name, manifestMember)));
                         break;
                     }
 
@@ -242,7 +269,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         // Sequential: the mixin enforces one pending approval at a time.
                         var decision = await RequestApprovalFromTurnLoopAsync(
                             approvalRequest,
-                            ResolveApprovalTimeout(tc.Name),
+                            ResolveApprovalTimeout(tc.Name, manifestMember),
                             onRequested: req => Workflow.Logger.LogInformation(
                                 "[{SessionId}] Approval requested for tool '{ToolName}' (RequestId: {RequestId})",
                                 Workflow.Info.WorkflowId, req.FunctionName, req.RequestId),
@@ -258,8 +285,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                             {
                                 FunctionName = tc.Name,
                                 Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
-                                Declaration = RequiredInput.ToolDeclarations?.FirstOrDefault(
+                                Declaration = manifestMember?.Declaration ?? RequiredInput.ToolDeclarations?.FirstOrDefault(
                                     declaration => string.Equals(declaration.Name, tc.Name, StringComparison.Ordinal)),
+                                ToolsetId = manifestMember?.ToolsetId,
+                                ActivationKey = manifestMember?.ActivationKey,
+                                ManifestFingerprint = toolsetManifest?.Fingerprint,
                                 RequestData = requestData,
                                 TurnState = currentTurnState,
                                 DispatchMode = dispatchMode,
@@ -269,7 +299,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                                 ConversationId = conversationId,
                                 CorrelationId = requestEntry.CorrelationId,
                                 IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
-                            }, ResolveToolActivityOptions(tc.Name)));
+                            }, ResolveToolActivityOptions(tc.Name, manifestMember)));
                         }
                         else
                         {
@@ -486,8 +516,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// the workflow-level defaults when no entry exists for the tool name (defensive — the
     /// session client eagerly populates every registered tool).
     /// </summary>
-    private ActivityOptions ResolveToolActivityOptions(string toolName)
+    private ActivityOptions ResolveToolActivityOptions(
+        string toolName,
+        Internal.DurableToolsetManifestMember? manifestMember)
     {
+        if (manifestMember is not null)
+        {
+            return manifestMember.ToolActivityOptions;
+        }
+
         if (RequiredInput.ToolActivityOptions is not null
             && RequiredInput.ToolActivityOptions.TryGetValue(toolName, out var perTool))
         {
@@ -514,8 +551,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// Resolves the reviewer deadline for a tool approval. Per-tool values are frozen in the
     /// workflow input at session start; the session-wide timeout is the fallback.
     /// </summary>
-    private TimeSpan ResolveApprovalTimeout(string toolName)
+    private TimeSpan ResolveApprovalTimeout(
+        string toolName,
+        Internal.DurableToolsetManifestMember? manifestMember)
     {
+        if (manifestMember is not null)
+        {
+            return manifestMember.ApprovalTimeout;
+        }
+
         if (RequiredInput.ToolApprovalTimeouts is not null
             && RequiredInput.ToolApprovalTimeouts.TryGetValue(toolName, out var timeout))
         {
@@ -524,6 +568,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         return RequiredInput.ApprovalTimeout;
     }
+
+    private static Internal.DurableToolsetManifestMember? FindManifestMember(
+        Internal.DurableToolsetManifest? manifest,
+        string toolName) =>
+        manifest?.Members.FirstOrDefault(member => string.Equals(
+            member.Declaration.Name,
+            toolName,
+            StringComparison.Ordinal));
 
     private static ApplicationFailureException? CreateFatalToolFailure(
         Exception? exception,

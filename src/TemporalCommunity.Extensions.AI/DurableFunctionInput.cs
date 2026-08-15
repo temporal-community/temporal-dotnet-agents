@@ -19,6 +19,12 @@ internal sealed class DurableFunctionInput
 
     public Internal.DurableFunctionDeclarationSnapshot? Declaration { get; init; }
 
+    public string? ToolsetId { get; init; }
+
+    public string? ActivationKey { get; init; }
+
+    public string? ManifestFingerprint { get; init; }
+
     public JsonElement? RequestData { get; init; }
 
     public JsonElement? TurnState { get; set; }

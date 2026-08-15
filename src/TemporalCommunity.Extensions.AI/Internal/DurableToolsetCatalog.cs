@@ -140,19 +140,28 @@ internal sealed class DurableToolsetCatalog
 
 internal sealed class DurableToolsetActivationCatalog
 {
-    private readonly IReadOnlyDictionary<string, DurableToolsetMemberRegistration> members;
+    private readonly IReadOnlyDictionary<string, DurableToolsetActivation> members;
 
     internal DurableToolsetActivationCatalog(IEnumerable<DurableToolsetRegistration> registrations)
     {
-        var result = new Dictionary<string, DurableToolsetMemberRegistration>(StringComparer.Ordinal);
-        foreach (var member in registrations.SelectMany(registration => registration.Members))
+        var result = new Dictionary<string, DurableToolsetActivation>(StringComparer.Ordinal);
+        foreach (var registration in registrations)
         {
-            result.Add(member.ActivationKey, member);
+            foreach (var member in registration.Members)
+            {
+                result.Add(
+                    member.ActivationKey,
+                    new DurableToolsetActivation(registration.Id, member));
+            }
         }
 
         members = result;
     }
 
-    internal bool TryGetValue(string activationKey, out DurableToolsetMemberRegistration member) =>
+    internal bool TryGetValue(string activationKey, out DurableToolsetActivation member) =>
         members.TryGetValue(activationKey, out member!);
 }
+
+internal sealed record DurableToolsetActivation(
+    string ToolsetId,
+    DurableToolsetMemberRegistration Member);
