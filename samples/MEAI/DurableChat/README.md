@@ -4,11 +4,12 @@ This sample runs multi-turn `DurableChatSessionClient` conversations and a manag
 loop. A conversation ID maps to a Temporal workflow; each turn is a workflow update and the
 workflow retains conversation history across worker restarts.
 
-`AddDurableTools` creates the worker's implicit default toolset. The client sends only its
-conversation ID, messages, and chat options; it does not construct or serialize tool schemas. The
-workflow resolves the worker-owned toolset once, before the first model call, and Temporal records
-that versioned manifest for replay and Continue-as-New. The sample intentionally does not call
-`UseFunctionInvocation()` and never passes `ChatOptions.Tools`.
+Two `AddDurableToolset` registrations provide weather and service-status capabilities.
+`DefaultToolsetIds` composes them in a stable order as the stock workflow's worker-owned baseline.
+The client sends only its conversation ID, messages, and chat options; it does not construct or
+serialize tool schemas. The workflow resolves the baseline once, before the first model call, and
+Temporal records that versioned manifest for replay and Continue-as-New. The sample intentionally
+does not call `UseFunctionInvocation()` and never passes `ChatOptions.Tools`.
 
 ```
 DurableChatSessionClient
@@ -42,7 +43,7 @@ dotnet run --project samples/MEAI/DurableChat/DurableChat.csproj
 
 Open `http://localhost:8233` to inspect the one-time resolver, `GetChatStep` model activities, and individual
 `InvokeFunction` tool activities. Configure per-tool timeouts and retry behavior through the
-`AddDurableTools` callback; use `NoRetry()` for an unsafe non-idempotent operation.
+toolset member callback; use `NoRetry()` for an unsafe non-idempotent operation.
 
 Changing the worker registration affects new sessions only. A running session continues to use its
 recorded manifest, including after Continue-as-New.

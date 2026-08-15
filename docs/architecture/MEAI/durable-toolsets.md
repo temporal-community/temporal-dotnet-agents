@@ -21,12 +21,16 @@ against current authoritative application data inside their activity.
 
 - `AddDurableTools` contributes functions to one implicit default toolset.
 - `AddDurableToolset(id, ...)` registers a non-empty named toolset.
+- `DefaultToolsetIds` composes ordered named toolsets for the stock workflow. `null` selects the
+  implicit default; an empty list deliberately exposes no tools.
 - `AddDurableToolFactory` registers invocation-scoped activation behind a stable declaration.
 - Toolset IDs and visible function names use `StringComparer.Ordinal` everywhere.
 - Selected toolsets are combined in configured order; members retain registration order.
 - Duplicate selected IDs or visible names fail. There is no precedence or silent deduplication.
 - Registrations contain implementations; durable manifests never contain implementations,
   delegates, service providers, reflection objects, or CLR types.
+- Explicit defaults and the implicit `AddDurableTools` toolset cannot be mixed. Register every
+  selected default as a named toolset when more than one group is required.
 
 ## Manifest compatibility
 

@@ -26,7 +26,7 @@ internal sealed class DurableToolsetCatalog
         }
 
         var selected = request.UseWorkerDefaults
-            ? registrations.Where(registration => registration.IsImplicitDefault).ToArray()
+            ? ResolveDefaults()
             : ResolveExplicit(request.ToolsetIds ?? []);
         var toolsetIds = selected.Select(registration => registration.Id).ToArray();
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -92,6 +92,23 @@ internal sealed class DurableToolsetCatalog
         }
 
         return selected.ToArray();
+    }
+
+    private DurableToolsetRegistration[] ResolveDefaults()
+    {
+        if (options.DefaultToolsetIds is null)
+        {
+            return registrations.Where(registration => registration.IsImplicitDefault).ToArray();
+        }
+
+        if (registrations.Any(registration => registration.IsImplicitDefault))
+        {
+            throw DurableToolsetManifest.Failure(
+                "Explicit DefaultToolsetIds cannot be combined with the implicit AddDurableTools " +
+                "toolset. Register every selected default through AddDurableToolset.");
+        }
+
+        return ResolveExplicit(options.DefaultToolsetIds);
     }
 
     private DurableToolsetManifestMember CreateManifestMember(

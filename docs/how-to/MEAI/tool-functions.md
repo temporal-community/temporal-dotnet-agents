@@ -36,6 +36,19 @@ worker.AddDurableToolset("weather", tools => tools
     .Add(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30))));
 ```
 
+The stock workflow can combine several named defaults in one ordered baseline:
+
+```csharp
+var worker = services.AddHostedTemporalWorker("durable-chat").AddDurableAI(options =>
+    options.DefaultToolsetIds = ["catalog", "orders"]);
+
+worker.AddDurableToolset("catalog", tools => tools.Add(searchCatalog));
+worker.AddDurableToolset("orders", tools => tools.Add(checkOrder));
+```
+
+`null` selects the single implicit toolset registered through `AddDurableTools`; an empty list
+creates a deliberate no-tools baseline. Do not combine explicit defaults with `AddDurableTools`.
+
 Toolset IDs and model-visible function names use exact ordinal comparison. Named toolsets cannot
 be empty, and members retain their registration order. `weather` and `Weather` are different IDs;
 the library does not normalize names or silently resolve collisions.

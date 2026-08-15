@@ -395,9 +395,11 @@ public class DurableToolInterceptorIntegrationTests
         var taskQueue = $"approval-batch-{Guid.NewGuid():N}";
         using var host = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
         {
-            builder.AddDurableTools(approvedTool, options => options.RequireApproval());
-            builder.AddDurableTools(deniedTool, options => options.RequireApproval());
-        });
+            builder.AddDurableToolset("approved-actions", tools => tools
+                .Add(approvedTool, options => options.RequireApproval()));
+            builder.AddDurableToolset("denied-actions", tools => tools
+                .Add(deniedTool, options => options.RequireApproval()));
+        }, options => options.DefaultToolsetIds = ["approved-actions", "denied-actions"]);
         await host.StartAsync();
 
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();

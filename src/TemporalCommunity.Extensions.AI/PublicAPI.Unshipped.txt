@@ -264,6 +264,8 @@ TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultChatClientKey.get
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultChatClientKey.set -> void
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultHistoryReducerKey.get -> string?
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultHistoryReducerKey.set -> void
+TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultToolsetIds.get -> System.Collections.Generic.IReadOnlyList<string!>?
+TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultToolsetIds.set -> void
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultToolInterceptor.get -> System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.AI.Tools.IDurableToolInterceptor<TemporalCommunity.Extensions.AI.Tools.DurableToolContext!>!>?
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.DefaultToolInterceptor.set -> void
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.DurableExecutionOptions() -> void

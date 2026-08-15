@@ -167,6 +167,18 @@ public sealed class DurableExecutionOptions
     public bool RegisterDefaultWorkflow { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets the ordered named toolsets that form the stock workflow's worker-owned
+    /// baseline. A <see langword="null"/> value uses the implicit toolset populated by
+    /// <c>AddDurableTools</c>; an empty list creates a no-tools baseline.
+    /// </summary>
+    /// <remarks>
+    /// Do not combine this property with <c>AddDurableTools</c>. Use
+    /// <c>AddDurableToolset</c> for every selected ID. IDs use exact ordinal comparison and are
+    /// resolved once for each new session.
+    /// </remarks>
+    public IReadOnlyList<string>? DefaultToolsetIds { get; set; }
+
+    /// <summary>
     /// Gets or sets the maximum number of LLM iterations the durable tool loop will
     /// execute before synthesizing an "iterations exceeded" sentinel response and aborting
     /// the turn. Defaults to <c>20</c>.
@@ -276,6 +288,25 @@ public sealed class DurableExecutionOptions
         {
             throw new InvalidOperationException(
                 $"{nameof(MaximumConsecutiveErrorsPerRequest)} cannot be negative in {nameof(DurableExecutionOptions)}.");
+        }
+
+        if (DefaultToolsetIds is not null)
+        {
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var id in DefaultToolsetIds)
+            {
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    throw new InvalidOperationException(
+                        $"{nameof(DefaultToolsetIds)} cannot contain an empty identifier.");
+                }
+
+                if (!ids.Add(id))
+                {
+                    throw new InvalidOperationException(
+                        $"{nameof(DefaultToolsetIds)} contains duplicate identifier '{id}'.");
+                }
+            }
         }
     }
 }

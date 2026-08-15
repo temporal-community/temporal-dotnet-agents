@@ -41,7 +41,7 @@ if (string.IsNullOrEmpty(apiKey))
         "Note: user secrets only load in the Development environment (DOTNET_ENVIRONMENT unset or set to 'Development').");
 
 // ── Setup: Tool functions ────────────────────────────────────────────────────
-// Registering a function through AddDurableTools below makes each call run as a
+// Registering a function in a durable toolset below makes each call run as a
 // separate Temporal activity — no special
 // wrapping required on the tool itself.
 //
@@ -56,6 +56,11 @@ var weatherTool = AIFunctionFactory.Create(
     GetCurrentWeather,
     name: "get_current_weather",
     description: "Returns the current weather conditions for a given city.");
+
+var serviceStatusTool = AIFunctionFactory.Create(
+    () => "All customer services are operational.",
+    name: "get_service_status",
+    description: "Returns the current customer-service status.");
 
 // ── Setup: Register IChatClient ───────────────────────────────────────────────
 // AddChatClient registers the IChatClient as a singleton in DI. It returns a
@@ -103,15 +108,16 @@ builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 // DurableChatSessionClient on the worker. The session client is resolved from
 // DI after the host starts.
 //
-// AddDurableTools registers the worker's implicit default toolset. The client never receives its
-// schema. The workflow resolves a versioned manifest once, then dispatches each model-requested
-// invocation as a separate InvokeFunction activity. Per-tool retry/timeout is frozen into that
-// manifest through the DurableChatToolOptions callback.
-builder.Services
+// DefaultToolsetIds composes two named worker-owned toolsets in a stable order. The client never
+// receives their schemas. The workflow resolves one versioned manifest, then dispatches each
+// model-requested invocation as a separate InvokeFunction activity. Per-tool retry/timeout is
+// frozen into that manifest through the DurableChatToolOptions callback.
+var durableWorker = builder.Services
     .AddHostedTemporalWorker(TaskQueue)
     .AddDurableAI(opts =>
     {
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
+        opts.DefaultToolsetIds = ["information", "operations"];
 
         // Worker-level fallback for any tool that doesn't override its RetryPolicy.
         // Without this, RetryPolicy is null and Temporal applies its built-in
@@ -121,13 +127,16 @@ builder.Services
 
         // Cap the LLM-to-tool loop per turn.
         opts.MaxToolCallsPerTurn = 10;
-    })
-    // Per-tool retry-policy fallback chain:
-    //   per-tool opts.RetryPolicy (not set here) → worker `RetryPolicy = MaximumAttempts = 3`.
-    // Weather lookup is idempotent (read-only), so we accept retries. For write-style
-    // tools (send email, charge a card), override with `opts.NoRetry()` to prevent
-    // double-execution on transient activity failure.
-    .AddDurableTools(weatherTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
+    });
+
+// Per-tool retry-policy fallback chain:
+//   per-tool opts.RetryPolicy (not set here) → worker `RetryPolicy = MaximumAttempts = 3`.
+// Weather lookup is idempotent (read-only), so we accept retries. For write-style tools
+// (send email, charge a card), override with `opts.NoRetry()`.
+durableWorker.AddDurableToolset("information", tools => tools
+    .Add(weatherTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30))));
+durableWorker.AddDurableToolset("operations", tools => tools
+    .Add(serviceStatusTool));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 var host = builder.Build();

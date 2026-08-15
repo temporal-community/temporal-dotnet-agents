@@ -68,6 +68,44 @@ public sealed class DurableToolsetCatalogTests
     }
 
     [Fact]
+    public void Resolve_OrderedNamedDefaults_ComposesManifestInConfiguredOrder()
+    {
+        var services = CreateServices();
+        var worker = services.AddHostedTemporalWorker("queue").AddDurableAI(options =>
+            options.DefaultToolsetIds = ["actions", "catalog"]);
+        worker.AddDurableToolset("catalog", tools => tools
+            .Add(AIFunctionFactory.Create(() => "find", "find")));
+        worker.AddDurableToolset("actions", tools => tools
+            .Add(AIFunctionFactory.Create(() => "reserve", "reserve")));
+        using var provider = services.BuildServiceProvider();
+
+        var manifest = provider.GetRequiredService<DurableToolsetCatalog>().Resolve(new()
+        {
+            UseWorkerDefaults = true,
+        });
+
+        Assert.Equal(["actions", "catalog"], manifest.ToolsetIds);
+        Assert.Equal(["reserve", "find"], manifest.Members.Select(m => m.Declaration.Name));
+    }
+
+    [Fact]
+    public void Resolve_RejectsMixingImplicitAndExplicitDefaultConfiguration()
+    {
+        var services = CreateServices();
+        var worker = services.AddHostedTemporalWorker("queue").AddDurableAI(options =>
+            options.DefaultToolsetIds = ["catalog"]);
+        worker.AddDurableTools(AIFunctionFactory.Create(() => "implicit", "implicit"));
+        worker.AddDurableToolset("catalog", tools =>
+            tools.Add(AIFunctionFactory.Create(() => "find", "find")));
+        using var provider = services.BuildServiceProvider();
+
+        AssertNonRetryable(() => provider.GetRequiredService<DurableToolsetCatalog>().Resolve(new()
+        {
+            UseWorkerDefaults = true,
+        }));
+    }
+
+    [Fact]
     public void Resolve_RejectsUnknownDuplicateAndCollidingSelections()
     {
         var services = CreateServices();
