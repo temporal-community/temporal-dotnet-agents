@@ -360,7 +360,7 @@ public class TypedDurableTurnLifecycleTests
             (string value) => string.Empty,
             "state_tool",
             "Updates typed state.").AsDeclarationOnly();
-        worker.AddDurableTool<TypedTurnRequestData, TypedTurnState>(
+        worker.AddDurableToolFactory<TypedTurnRequestData, TypedTurnState>(
             stateDeclaration,
             (_, context) => new DurableToolActivation<TypedTurnState>
             {
@@ -382,7 +382,7 @@ public class TypedDurableTurnLifecycleTests
             () => string.Empty,
             "approval_only",
             "Freezes approval policy without invoking it.").AsDeclarationOnly();
-        worker.AddDurableTool<TypedTurnRequestData, TypedTurnState>(
+        worker.AddDurableToolFactory<TypedTurnRequestData, TypedTurnState>(
             approvalDeclaration,
             (_, _) => new DurableToolActivation<TypedTurnState>
             {

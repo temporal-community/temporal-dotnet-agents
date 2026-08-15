@@ -124,11 +124,11 @@ public class DurableToolDecisionPolicyTests
     }
 
     [Fact]
-    public void IsToolSkipped_CaseInsensitiveMatch_ReturnsTrue()
+    public void IsToolSkipped_CaseVariant_ReturnsFalse()
     {
         var result = DurableToolDecisionPolicy.IsToolSkipped("MY-TOOL", ["my-tool"]);
 
-        Assert.True(result);
+        Assert.False(result);
     }
 
     [Fact]

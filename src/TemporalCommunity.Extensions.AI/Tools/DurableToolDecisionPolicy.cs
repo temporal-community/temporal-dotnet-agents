@@ -23,7 +23,7 @@ internal static class DurableToolDecisionPolicy
     /// <param name="toolName">The name of the tool being dispatched.</param>
     /// <param name="requiresApprovalTools">
     /// Optional set of tool names that require human approval regardless of interceptor outcome.
-    /// Matched case-insensitively.
+    /// Matched using exact ordinal comparison.
     /// </param>
     /// <returns>The effective <see cref="DurableToolOutcome"/> to act on.</returns>
     internal static DurableToolOutcome GetEffectiveOutcome(
@@ -36,7 +36,7 @@ internal static class DurableToolDecisionPolicy
         // RequireApproval floor: Block is strictly stricter and is always honoured as-is;
         // every other outcome (Proceed, Skip, PauseForApproval) is overridden (BLOCK-3 fix).
         var toolRequiresApproval = requiresApprovalTools is not null
-            && requiresApprovalTools.Contains(toolName, StringComparer.OrdinalIgnoreCase);
+            && requiresApprovalTools.Contains(toolName, StringComparer.Ordinal);
 
         if (toolRequiresApproval && outcome != DurableToolOutcome.Block)
         {
@@ -48,7 +48,7 @@ internal static class DurableToolDecisionPolicy
 
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="toolName"/> is present in
-    /// <paramref name="skippedTools"/> (case-insensitive OrdinalIgnoreCase).
+    /// <paramref name="skippedTools"/> using exact ordinal comparison.
     /// Returns <see langword="false"/> when <paramref name="skippedTools"/> is
     /// <see langword="null"/> or the tool is not listed.
     /// </summary>
@@ -56,7 +56,7 @@ internal static class DurableToolDecisionPolicy
         string toolName,
         IReadOnlyList<string>? skippedTools) =>
         skippedTools is not null
-        && skippedTools.Contains(toolName, StringComparer.OrdinalIgnoreCase);
+        && skippedTools.Contains(toolName, StringComparer.Ordinal);
 
     /// <summary>
     /// Resolves <see cref="ActivityOptions"/> for the interceptor activity.

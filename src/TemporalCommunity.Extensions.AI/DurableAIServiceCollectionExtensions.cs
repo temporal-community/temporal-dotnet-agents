@@ -10,6 +10,8 @@ namespace TemporalCommunity.Extensions.AI;
 /// </summary>
 public static class DurableAIServiceCollectionExtensions
 {
+    internal const string ImplicitDefaultToolsetId = "default";
+
     /// <summary>
     /// Registers only the services needed to create replay-frozen workflow input in a process
     /// that starts workflows but does not host a Temporal worker.
@@ -171,28 +173,53 @@ public static class DurableAIServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(tool);
 
-        if (!builder.Services.Any(d => d.ServiceType == typeof(DurableExecutionOptions)))
+        EnsureDurableAIRegistered(builder, nameof(AddDurableTools));
+        var toolset = GetOrAddImplicitDefaultToolset(builder.Services);
+        RegisterDurableFunction(builder.Services, tool, configure);
+        toolset.Add(tool.Name);
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers a named, worker-owned set of durable tools.
+    /// </summary>
+    /// <param name="builder">The worker options builder returned by <see cref="AddDurableAI"/>.</param>
+    /// <param name="toolsetId">The stable, case-sensitive toolset identifier.</param>
+    /// <param name="configure">Adds the ordered members of the toolset.</param>
+    /// <returns>The same builder for further chaining.</returns>
+    /// <remarks>
+    /// Toolset identifiers and function names use exact ordinal comparison. A named toolset must
+    /// contain at least one member. Implementations remain worker-local; a later resolver activity
+    /// freezes only declarations and durable policy into workflow history.
+    /// </remarks>
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableToolset(
+        this ITemporalWorkerServiceOptionsBuilder builder,
+        string toolsetId,
+        Action<DurableToolsetBuilder> configure)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toolsetId);
+        ArgumentNullException.ThrowIfNull(configure);
+        EnsureDurableAIRegistered(builder, nameof(AddDurableToolset));
+
+        if (FindToolset(builder.Services, toolsetId) is not null)
         {
             throw new InvalidOperationException(
-                "AddDurableTools requires AddDurableAI to be called first on the same worker builder.");
+                $"A durable toolset named '{toolsetId}' is already registered. " +
+                "Toolset identifiers use exact ordinal comparison.");
         }
 
-        var services = builder.Services;
+        var registration = new DurableToolsetRegistration(toolsetId, isImplicitDefault: false);
+        var toolsetBuilder = new DurableToolsetBuilder(builder, registration);
+        configure(toolsetBuilder);
+        if (registration.FunctionNames.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"Durable toolset '{toolsetId}' must contain at least one tool.");
+        }
 
-        // Capture the registration as a Func<DurableChatToolOptions> so the registry can
-        // materialize options lazily — this avoids running user-supplied configure delegates
-        // at registration time and keeps DI state idempotent across plugin/extension paths.
-        var perToolOptions = new DurableChatToolOptions();
-        configure?.Invoke(perToolOptions);
-
-        services.AddSingleton<Action<DurableFunctionRegistry>>(
-            registry => registry.Register(tool));
-        var declaration = DurableFunctionDeclarationSnapshot.Create(tool.AsDeclarationOnly());
-        services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
-            registry => registry[declaration.Name] = declaration);
-        services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
-            registry => registry[tool.Name] = perToolOptions);
-
+        builder.Services.AddSingleton(registration);
         return builder;
     }
 
@@ -204,7 +231,7 @@ public static class DurableAIServiceCollectionExtensions
     /// The factory is invoked once per tool activity attempt. Its service provider belongs to that
     /// attempt's DI scope and must not be captured beyond the returned function's invocation.
     /// </remarks>
-    public static ITemporalWorkerServiceOptionsBuilder AddDurableTool<TRequestData, TTurnState>(
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableToolFactory<TRequestData, TTurnState>(
         this ITemporalWorkerServiceOptionsBuilder builder,
         AIFunctionDeclaration declaration,
         Func<IServiceProvider, DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory,
@@ -294,13 +321,98 @@ public static class DurableAIServiceCollectionExtensions
         return builder;
     }
 
-    private static void EnsureDurableAIRegistered(ITemporalWorkerServiceOptionsBuilder builder)
+    internal static void RegisterDurableFunction(
+        IServiceCollection services,
+        AIFunction tool,
+        Action<DurableChatToolOptions>? configure)
+    {
+        var perToolOptions = new DurableChatToolOptions();
+        configure?.Invoke(perToolOptions);
+
+        services.AddSingleton<Action<DurableFunctionRegistry>>(
+            registry => registry.Register(tool));
+        var declaration = DurableFunctionDeclarationSnapshot.Create(tool.AsDeclarationOnly());
+        services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
+            registry => registry[declaration.Name] = declaration);
+        services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
+            registry => registry[tool.Name] = perToolOptions);
+    }
+
+    internal static void RegisterDurableToolFactory<TRequestData, TTurnState>(
+        ITemporalWorkerServiceOptionsBuilder builder,
+        AIFunctionDeclaration declaration,
+        Func<IServiceProvider, DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory,
+        Action<DurableChatToolOptions>? configure)
+    {
+        AddDurableToolDeclaration(builder, declaration, configure);
+        AddDurableToolImplementation(builder, declaration.Name, factory);
+    }
+
+    private static DurableToolsetRegistration GetOrAddImplicitDefaultToolset(
+        IServiceCollection services)
+    {
+        var existing = FindToolset(services, ImplicitDefaultToolsetId);
+        if (existing is not null)
+        {
+            if (!existing.IsImplicitDefault)
+            {
+                throw new InvalidOperationException(
+                    $"The reserved implicit toolset identifier '{ImplicitDefaultToolsetId}' " +
+                    "cannot also be registered explicitly.");
+            }
+
+            return existing;
+        }
+
+        var registration = new DurableToolsetRegistration(
+            ImplicitDefaultToolsetId,
+            isImplicitDefault: true);
+        services.AddSingleton(registration);
+        return registration;
+    }
+
+    private static DurableToolsetRegistration? FindToolset(
+        IServiceCollection services,
+        string toolsetId) =>
+        services
+            .Where(descriptor => descriptor.ServiceType == typeof(DurableToolsetRegistration))
+            .Select(descriptor => descriptor.ImplementationInstance as DurableToolsetRegistration)
+            .FirstOrDefault(registration => registration is not null
+                && string.Equals(registration.Id, toolsetId, StringComparison.Ordinal));
+
+    private static void EnsureDurableAIRegistered(
+        ITemporalWorkerServiceOptionsBuilder builder,
+        string? caller = null)
     {
         if (!builder.Services.Any(d => d.ServiceType == typeof(DurableExecutionOptions)))
         {
             throw new InvalidOperationException(
-                "Durable tool registration requires AddDurableAI to be called first on the same worker builder.");
+                $"{caller ?? "Durable tool registration"} requires AddDurableAI to be called first " +
+                "on the same worker builder.");
         }
+    }
+}
+
+internal sealed class DurableToolsetRegistration(string id, bool isImplicitDefault)
+{
+    private readonly List<string> functionNames = [];
+
+    internal string Id { get; } = id;
+
+    internal bool IsImplicitDefault { get; } = isImplicitDefault;
+
+    internal IReadOnlyList<string> FunctionNames => functionNames;
+
+    internal void Add(string functionName)
+    {
+        if (functionNames.Contains(functionName, StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Toolset '{Id}' already contains a function named '{functionName}'. " +
+                "Function names use exact ordinal comparison.");
+        }
+
+        functionNames.Add(functionName);
     }
 }
 
@@ -316,7 +428,7 @@ public static class DurableAIServiceCollectionExtensions
 internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>
 {
     public DurableFunctionRegistry(IEnumerable<Action<DurableFunctionRegistry>>? configurators = null)
-        : base(StringComparer.OrdinalIgnoreCase)
+        : base(StringComparer.Ordinal)
     {
         if (configurators is null) return;
 
@@ -355,7 +467,7 @@ internal sealed class DurableChatToolOptionsRegistry
     /// </summary>
     internal DurableChatToolOptionsRegistry(
         IEnumerable<Action<DurableChatToolOptionsRegistry>>? configurators = null)
-        : base(StringComparer.OrdinalIgnoreCase)
+        : base(StringComparer.Ordinal)
     {
         if (configurators is null) return;
 

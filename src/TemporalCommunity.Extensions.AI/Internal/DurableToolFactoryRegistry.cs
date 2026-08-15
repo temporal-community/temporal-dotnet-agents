@@ -78,7 +78,7 @@ internal sealed class DurableToolFactoryRegistry
 {
     internal DurableToolFactoryRegistry(
         IEnumerable<Action<DurableToolFactoryRegistry>>? configurators = null)
-        : base(StringComparer.OrdinalIgnoreCase)
+        : base(StringComparer.Ordinal)
     {
         if (configurators is null)
         {
@@ -97,7 +97,7 @@ internal sealed class DurableFunctionDeclarationRegistry
 {
     internal DurableFunctionDeclarationRegistry(
         IEnumerable<Action<DurableFunctionDeclarationRegistry>>? configurators = null)
-        : base(StringComparer.OrdinalIgnoreCase)
+        : base(StringComparer.Ordinal)
     {
         if (configurators is null)
         {

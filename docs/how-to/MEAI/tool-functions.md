@@ -1,8 +1,15 @@
 # Durable tools with Microsoft.Extensions.AI
 
-`TemporalCommunity.Extensions.AI` supports one managed tool model for a durable chat session:
-register every callable function with `AddDurableTools`. The session workflow supplies those
-function schemas to the model, and each model-requested invocation is a Temporal activity.
+`TemporalCommunity.Extensions.AI` supports three registration levels for managed durable tools:
+
+- `AddDurableTools` is the concise choice for one implicit default toolset.
+- `AddDurableToolset` creates a named, ordered capability group. Use it when a worker needs to
+  combine several groups or a custom workflow must narrow its baseline.
+- `AddDurableToolFactory` separates a stable declaration from an invocation-scoped implementation
+  for tools that need typed request data, turn state, or scoped DI.
+
+The session workflow supplies frozen function schemas to the model, and each model-requested
+invocation is a Temporal activity.
 
 ```csharp
 var weatherTool = AIFunctionFactory.Create(
@@ -21,6 +28,17 @@ builder.Services
     })
     .AddDurableTools(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
 ```
+
+The equivalent named grouping is:
+
+```csharp
+worker.AddDurableToolset("weather", tools => tools
+    .Add(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30))));
+```
+
+Toolset IDs and model-visible function names use exact ordinal comparison. Named toolsets cannot
+be empty, and members retain their registration order. `weather` and `Weather` are different IDs;
+the library does not normalize names or silently resolve collisions.
 
 Callers then send ordinary chat messages. Do not put functions in `ChatOptions.Tools`.
 
@@ -72,7 +90,7 @@ var declaration = AIFunctionFactory.Create(
     name: "process_item",
     description: "Processes one item.").AsDeclarationOnly();
 
-worker.AddDurableTool<ApplicationRequest, ApplicationTurnState>(
+worker.AddDurableToolFactory<ApplicationRequest, ApplicationTurnState>(
     declaration,
     (services, context) =>
     {
@@ -191,3 +209,6 @@ only to managed sessions and direct chat/embedding adapters and does not reroute
 
 For the complete managed-session boundary, see the
 [managed-session tool contract](managed-session-tool-contract.md).
+
+For the worker-owned authority and manifest design, see
+[Durable toolsets](../../architecture/MEAI/durable-toolsets.md).

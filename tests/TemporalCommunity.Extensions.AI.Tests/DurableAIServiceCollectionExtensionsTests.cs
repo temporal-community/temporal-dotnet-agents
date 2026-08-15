@@ -18,7 +18,7 @@ public class DurableAIServiceCollectionExtensionsTests
     {
         var factoryMethods = typeof(DurableAIServiceCollectionExtensions)
             .GetMethods(BindingFlags.Public | BindingFlags.Static)
-            .Where(method => method.Name is nameof(DurableAIServiceCollectionExtensions.AddDurableTool)
+            .Where(method => method.Name is nameof(DurableAIServiceCollectionExtensions.AddDurableToolFactory)
                 or nameof(DurableAIServiceCollectionExtensions.AddDurableToolImplementation))
             .ToArray();
 
@@ -88,7 +88,7 @@ public class DurableAIServiceCollectionExtensionsTests
     }
 
     [Fact]
-    public void AddDurableTool_FreezesDeclarationWithoutCallingInvocationFactory()
+    public void AddDurableToolFactory_FreezesDeclarationWithoutCallingInvocationFactory()
     {
         var services = new ServiceCollection();
         services.AddSingleton(A.Fake<ITemporalClient>());
@@ -98,7 +98,7 @@ public class DurableAIServiceCollectionExtensionsTests
             "contextual_tool").AsDeclarationOnly();
         var factoryCalls = 0;
 
-        worker.AddDurableTool<RequestData, TurnState>(
+        worker.AddDurableToolFactory<RequestData, TurnState>(
             declaration,
             (_, context) =>
             {
@@ -118,6 +118,114 @@ public class DurableAIServiceCollectionExtensionsTests
         var frozen = Assert.Single(input.ToolDeclarations!);
         Assert.Equal("contextual_tool", frozen.Name);
         Assert.NotNull(provider.GetRequiredService<DurableToolFactoryRegistry>()["contextual_tool"]);
+    }
+
+    [Fact]
+    public void AddDurableToolset_RegistersOrderedMembersAndPolicies()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+        var read = AIFunctionFactory.Create(() => "read", "read_item");
+        var write = AIFunctionFactory.Create(() => "write", "write_item");
+
+        var returned = worker.AddDurableToolset("inventory", tools => tools
+            .Add(read)
+            .Add(write, options => options.RequireApproval()));
+
+        Assert.Same(worker, returned);
+        using var provider = services.BuildServiceProvider();
+        var toolset = Assert.Single(provider.GetServices<DurableToolsetRegistration>());
+        Assert.Equal("inventory", toolset.Id);
+        Assert.False(toolset.IsImplicitDefault);
+        Assert.Equal(["read_item", "write_item"], toolset.FunctionNames);
+        Assert.Same(read, provider.GetRequiredService<DurableFunctionRegistry>()["read_item"]);
+        Assert.True(provider.GetRequiredService<DurableChatToolOptionsRegistry>()["write_item"].RequireApprovalFlag);
+    }
+
+    [Fact]
+    public void AddDurableTools_UsesOneImplicitDefaultToolset()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+
+        worker.AddDurableTools(AIFunctionFactory.Create(() => "a", "a"));
+        worker.AddDurableTools(AIFunctionFactory.Create(() => "b", "b"));
+
+        using var provider = services.BuildServiceProvider();
+        var toolset = Assert.Single(provider.GetServices<DurableToolsetRegistration>());
+        Assert.True(toolset.IsImplicitDefault);
+        Assert.Equal(["a", "b"], toolset.FunctionNames);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void AddDurableToolset_RejectsMissingIdentifier(string? toolsetId)
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+
+        Assert.ThrowsAny<ArgumentException>(() =>
+            worker.AddDurableToolset(toolsetId!, tools =>
+                tools.Add(AIFunctionFactory.Create(() => "ok", "tool"))));
+    }
+
+    [Fact]
+    public void AddDurableToolset_RejectsEmptyNamedToolset()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            worker.AddDurableToolset("empty", _ => { }));
+
+        Assert.Contains("must contain at least one tool", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AddDurableToolset_UsesOrdinalToolsetAndFunctionNames()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+
+        worker.AddDurableToolset("Catalog", tools =>
+            tools.Add(AIFunctionFactory.Create(() => "upper", "Find")));
+        worker.AddDurableToolset("catalog", tools =>
+            tools.Add(AIFunctionFactory.Create(() => "lower", "find")));
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Equal(2, provider.GetServices<DurableToolsetRegistration>().Count());
+        var registry = provider.GetRequiredService<DurableFunctionRegistry>();
+        Assert.Equal(2, registry.Count);
+        Assert.Equal("Find", registry["Find"].Name);
+        Assert.Equal("find", registry["find"].Name);
+    }
+
+    [Fact]
+    public void AddDurableToolset_RejectsDuplicateIdentifierAndMember()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+        worker.AddDurableToolset("catalog", tools =>
+            tools.Add(AIFunctionFactory.Create(() => "ok", "find")));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            worker.AddDurableToolset("catalog", tools =>
+                tools.Add(AIFunctionFactory.Create(() => "other", "other"))));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            worker.AddDurableToolset("duplicate-members", tools =>
+            {
+                tools.Add(AIFunctionFactory.Create(() => "one", "same"));
+                tools.Add(AIFunctionFactory.Create(() => "two", "same"));
+            }));
     }
 
     [Fact]

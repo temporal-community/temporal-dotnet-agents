@@ -63,6 +63,13 @@ public sealed class DurableTurnOptions
     /// deterministic order.
     /// </summary>
     public DurableToolDispatchMode DispatchMode { get; init; } = DurableToolDispatchMode.Sequential;
+
+    /// <summary>
+    /// Gets an optional ordered selection of worker-owned toolsets for this turn. A
+    /// <see langword="null"/> value uses the complete session baseline; an empty list exposes no
+    /// tools. Selection may narrow but never expand the baseline.
+    /// </summary>
+    public IReadOnlyList<string>? ToolsetIds { get; init; }
 }
 
 /// <summary>Specifies how tool calls from one model response are scheduled.</summary>

@@ -194,7 +194,7 @@ void RegisterStatefulTool(
     string step,
     bool requireApproval)
 {
-    workerBuilder.AddDurableTool<ProcessingRequest, ProcessingState>(
+    workerBuilder.AddDurableToolFactory<ProcessingRequest, ProcessingState>(
         declaration,
         (services, context) =>
         {

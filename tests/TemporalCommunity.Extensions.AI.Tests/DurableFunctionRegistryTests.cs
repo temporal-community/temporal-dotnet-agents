@@ -18,15 +18,16 @@ public class DurableFunctionRegistryTests
     }
 
     [Fact]
-    public void Register_IsCaseInsensitive()
+    public void Register_UsesExactOrdinalNames()
     {
         var registry = new DurableFunctionRegistry();
         var func = AIFunctionFactory.Create(() => "test", "MyFunc");
 
         registry.Register(func);
 
-        Assert.True(registry.ContainsKey("myfunc"));
-        Assert.True(registry.ContainsKey("MYFUNC"));
+        Assert.True(registry.ContainsKey("MyFunc"));
+        Assert.False(registry.ContainsKey("myfunc"));
+        Assert.False(registry.ContainsKey("MYFUNC"));
     }
 
     [Fact]

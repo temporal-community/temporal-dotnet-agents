@@ -431,7 +431,7 @@ public class HistoryCaptureTests
             (string value) => string.Empty,
             "state_tool",
             "Updates captured typed state.").AsDeclarationOnly();
-        worker.AddDurableTool<TypedTurnRequestData, TypedTurnState>(
+        worker.AddDurableToolFactory<TypedTurnRequestData, TypedTurnState>(
             declaration,
             (_, context) => new DurableToolActivation<TypedTurnState>
             {

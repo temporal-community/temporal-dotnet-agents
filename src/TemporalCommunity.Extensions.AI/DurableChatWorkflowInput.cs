@@ -145,7 +145,7 @@ public record class DurableChatWorkflowInput
 
     /// <summary>
     /// Per-tool overrides for the <c>RunToolInterceptor</c> activity timeout.
-    /// Keys are tool names (case-insensitive). Only entries for tools that have a
+    /// Keys are tool names (exact ordinal comparison). Only entries for tools that have a
     /// non-null <c>InterceptorTimeout</c> are present; all others use
     /// <see cref="InterceptorActivityOptions"/>.
     /// </summary>

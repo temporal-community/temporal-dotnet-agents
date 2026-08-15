@@ -635,7 +635,7 @@ public class ExtensibleDurableTurnIntegrationTests
             (string value) => string.Empty,
             "decision_tool",
             "A denied execution-adapter tool.").AsDeclarationOnly();
-        worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
+        worker.AddDurableToolFactory<IntegrationRequestData, IntegrationTurnState>(
             declaration,
             (_, context) =>
             {
@@ -695,7 +695,7 @@ public class ExtensibleDurableTurnIntegrationTests
             () => string.Empty,
             "state_failure",
             "Produces an ordinary effect before state completion fails.").AsDeclarationOnly();
-        worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
+        worker.AddDurableToolFactory<IntegrationRequestData, IntegrationTurnState>(
             declaration,
             (_, _) => new DurableToolActivation<IntegrationTurnState>
             {
@@ -718,7 +718,7 @@ public class ExtensibleDurableTurnIntegrationTests
                 () => string.Empty,
                 "later_tool",
                 "Must not run after a fatal sequential tool failure.").AsDeclarationOnly();
-            worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
+            worker.AddDurableToolFactory<IntegrationRequestData, IntegrationTurnState>(
                 laterDeclaration,
                 (_, _) => new DurableToolActivation<IntegrationTurnState>
                 {
@@ -750,7 +750,7 @@ public class ExtensibleDurableTurnIntegrationTests
             name,
             $"Runs {name}.").AsDeclarationOnly();
 
-        worker.AddDurableTool<IntegrationRequestData, IntegrationTurnState>(
+        worker.AddDurableToolFactory<IntegrationRequestData, IntegrationTurnState>(
             declaration,
             (services, context) =>
             {

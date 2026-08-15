@@ -101,7 +101,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
 
         var result = new Dictionary<string, ActivityOptions>(
             _declarationRegistry?.Count ?? _functionRegistry?.Count ?? 0,
-            StringComparer.OrdinalIgnoreCase);
+            StringComparer.Ordinal);
 
         foreach (var toolName in toolNames)
         {
@@ -147,7 +147,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         {
             if (kvp.Value.InterceptorTimeout.HasValue)
             {
-                result ??= new Dictionary<string, ActivityOptions>(StringComparer.OrdinalIgnoreCase);
+                result ??= new Dictionary<string, ActivityOptions>(StringComparer.Ordinal);
                 result[kvp.Key] = new ActivityOptions
                 {
                     StartToCloseTimeout = kvp.Value.InterceptorTimeout,
@@ -210,7 +210,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         {
             if (kvp.Value.ApprovalTimeout is { } timeout)
             {
-                result ??= new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase);
+                result ??= new Dictionary<string, TimeSpan>(StringComparer.Ordinal);
                 result[kvp.Key] = timeout;
             }
         }

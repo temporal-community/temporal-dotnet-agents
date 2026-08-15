@@ -29,6 +29,23 @@ public class DurableTurnContractTests
     }
 
     [Fact]
+    public void ToolsetIds_DefaultToBaseline_AndRoundTripExactNames()
+    {
+        Assert.Null(new DurableTurnOptions().ToolsetIds);
+
+        var options = new DurableTurnOptions
+        {
+            ToolsetIds = ["Catalog", "catalog"],
+        };
+        var json = JsonSerializer.Serialize(options, DurableAIJsonUtilities.DefaultOptions);
+        var actual = JsonSerializer.Deserialize<DurableTurnOptions>(
+            json,
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.Equal(["Catalog", "catalog"], actual!.ToolsetIds);
+    }
+
+    [Fact]
     public void CompletionReason_HasFrozenNumericValues()
     {
         Assert.Equal(0, (int)DurableTurnCompletionReason.FinalResponse);
