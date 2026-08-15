@@ -176,8 +176,7 @@ public static class DurableAIServiceCollectionExtensions
 
         EnsureDurableAIRegistered(builder, nameof(AddDurableTools));
         var toolset = GetOrAddImplicitDefaultToolset(builder.Services);
-        RegisterDurableFunction(builder.Services, tool, configure);
-        toolset.Add(tool.Name);
+        toolset.Add(RegisterDurableFunction(builder.Services, tool, configure));
 
         return builder;
     }
@@ -238,8 +237,12 @@ public static class DurableAIServiceCollectionExtensions
         Func<IServiceProvider, DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory,
         Action<DurableChatToolOptions>? configure = null)
     {
-        AddDurableToolDeclaration(builder, declaration, configure);
-        AddDurableToolImplementation(builder, declaration.Name, factory);
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(declaration);
+        ArgumentNullException.ThrowIfNull(factory);
+        EnsureDurableAIRegistered(builder);
+        var toolset = GetOrAddImplicitDefaultToolset(builder.Services);
+        toolset.Add(RegisterDurableToolFactory(builder, declaration, factory, configure));
         return builder;
     }
 
@@ -258,7 +261,12 @@ public static class DurableAIServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentException.ThrowIfNullOrWhiteSpace(methodName);
         EnsureDurableAIRegistered(builder);
-        RegisterMethodTool<THandler>(builder.Services, ResolveMethod<THandler>(methodName), functionOptions, configure);
+        var toolset = GetOrAddImplicitDefaultToolset(builder.Services);
+        toolset.Add(RegisterMethodTool<THandler>(
+            builder.Services,
+            ResolveMethod<THandler>(methodName),
+            functionOptions,
+            configure));
         return builder;
     }
 
@@ -277,7 +285,8 @@ public static class DurableAIServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(method);
         EnsureDurableAIRegistered(builder);
         ValidateMethod<THandler>(method);
-        RegisterMethodTool<THandler>(builder.Services, method, functionOptions, configure);
+        var toolset = GetOrAddImplicitDefaultToolset(builder.Services);
+        toolset.Add(RegisterMethodTool<THandler>(builder.Services, method, functionOptions, configure));
         return builder;
     }
 
@@ -360,7 +369,7 @@ public static class DurableAIServiceCollectionExtensions
         return builder;
     }
 
-    internal static void RegisterDurableFunction(
+    internal static DurableRegisteredTool RegisterDurableFunction(
         IServiceCollection services,
         AIFunction tool,
         Action<DurableChatToolOptions>? configure)
@@ -375,19 +384,30 @@ public static class DurableAIServiceCollectionExtensions
             registry => registry[declaration.Name] = declaration);
         services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
             registry => registry[tool.Name] = perToolOptions);
+        return new DurableRegisteredTool(declaration, perToolOptions, tool, null);
     }
 
-    internal static void RegisterDurableToolFactory<TRequestData, TTurnState>(
+    internal static DurableRegisteredTool RegisterDurableToolFactory<TRequestData, TTurnState>(
         ITemporalWorkerServiceOptionsBuilder builder,
         AIFunctionDeclaration declaration,
         Func<IServiceProvider, DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory,
         Action<DurableChatToolOptions>? configure)
     {
-        AddDurableToolDeclaration(builder, declaration, configure);
-        AddDurableToolImplementation(builder, declaration.Name, factory);
+        var snapshot = DurableFunctionDeclarationSnapshot.Create(declaration);
+        var perToolOptions = new DurableChatToolOptions();
+        configure?.Invoke(perToolOptions);
+        var activationFactory = new DurableToolActivationFactory<TRequestData, TTurnState>(factory);
+
+        builder.Services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
+            registry => registry[snapshot.Name] = snapshot);
+        builder.Services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
+            registry => registry[snapshot.Name] = perToolOptions);
+        builder.Services.AddSingleton<Action<DurableToolFactoryRegistry>>(
+            registry => registry[snapshot.Name] = activationFactory);
+        return new DurableRegisteredTool(snapshot, perToolOptions, null, activationFactory);
     }
 
-    internal static AIFunction RegisterMethodTool<THandler>(
+    internal static DurableRegisteredTool RegisterMethodTool<THandler>(
         IServiceCollection services,
         MethodInfo method,
         AIFunctionFactoryOptions? functionOptions,
@@ -404,8 +424,7 @@ public static class DurableAIServiceCollectionExtensions
                         $"Durable tool '{method.Name}' requires an activity service provider."),
                 null),
             functionOptions ?? new AIFunctionFactoryOptions());
-        RegisterDurableFunction(services, function, configure);
-        return function;
+        return RegisterDurableFunction(services, function, configure);
     }
 
     internal static MethodInfo ResolveMethod<THandler>(string methodName)
@@ -491,26 +510,51 @@ public static class DurableAIServiceCollectionExtensions
 
 internal sealed class DurableToolsetRegistration(string id, bool isImplicitDefault)
 {
-    private readonly List<string> functionNames = [];
+    private readonly List<DurableToolsetMemberRegistration> members = [];
 
     internal string Id { get; } = id;
 
     internal bool IsImplicitDefault { get; } = isImplicitDefault;
 
-    internal IReadOnlyList<string> FunctionNames => functionNames;
+    internal IReadOnlyList<DurableToolsetMemberRegistration> Members => members;
 
-    internal void Add(string functionName)
+    internal IReadOnlyList<string> FunctionNames => members.Select(member => member.Declaration.Name).ToList();
+
+    internal void Add(DurableRegisteredTool tool)
     {
-        if (functionNames.Contains(functionName, StringComparer.Ordinal))
+        var functionName = tool.Declaration.Name;
+        if (members.Any(member => string.Equals(
+            member.Declaration.Name,
+            functionName,
+            StringComparison.Ordinal)))
         {
             throw new InvalidOperationException(
                 $"Toolset '{Id}' already contains a function named '{functionName}'. " +
                 "Function names use exact ordinal comparison.");
         }
 
-        functionNames.Add(functionName);
+        var memberIndex = members.Count;
+        members.Add(new DurableToolsetMemberRegistration(
+            $"tai-tool-v1:{Id.Length}:{Id}:{memberIndex}",
+            tool.Declaration,
+            tool.Options,
+            tool.Function,
+            tool.ActivationFactory));
     }
 }
+
+internal sealed record DurableRegisteredTool(
+    Internal.DurableFunctionDeclarationSnapshot Declaration,
+    DurableChatToolOptions Options,
+    AIFunction? Function,
+    Internal.IDurableToolActivationFactory? ActivationFactory);
+
+internal sealed record DurableToolsetMemberRegistration(
+    string ActivationKey,
+    Internal.DurableFunctionDeclarationSnapshot Declaration,
+    DurableChatToolOptions Options,
+    AIFunction? Function,
+    Internal.IDurableToolActivationFactory? ActivationFactory);
 
 /// <summary>
 /// Registry for <see cref="AIFunction"/> instances that can be invoked durably.

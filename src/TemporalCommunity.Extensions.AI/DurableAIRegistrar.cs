@@ -76,6 +76,7 @@ internal static class DurableAIRegistrar
             builder.AddSingletonActivities<DurableChatActivities>();
             builder.AddScopedActivities<DurableFunctionActivities>();
             builder.AddSingletonActivities<DurableEmbeddingActivities>();
+            builder.AddSingletonActivities<DurableToolsetActivities>();
         }
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
@@ -116,6 +117,13 @@ internal static class DurableAIRegistrar
         services.TryAddSingleton<DurableChatToolOptionsRegistry>(sp =>
             new DurableChatToolOptionsRegistry(
                 sp.GetServices<Action<DurableChatToolOptionsRegistry>>()));
+        services.TryAddSingleton<Internal.DurableToolsetCatalog>(sp =>
+            new Internal.DurableToolsetCatalog(
+                sp.GetServices<DurableToolsetRegistration>(),
+                options));
+        services.TryAddSingleton<Internal.DurableToolsetActivationCatalog>(sp =>
+            new Internal.DurableToolsetActivationCatalog(
+                sp.GetServices<DurableToolsetRegistration>()));
         services.TryAddSingleton<IReadOnlyDictionary<string, AIFunction>>(
             sp => sp.GetRequiredService<DurableFunctionRegistry>());
         services.TryAddSingleton<IDurableChatWorkflowInputFactory>(sp =>

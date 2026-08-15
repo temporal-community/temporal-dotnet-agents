@@ -1,0 +1,158 @@
+using Temporalio.Common;
+using Temporalio.Workflows;
+
+namespace TemporalCommunity.Extensions.AI.Internal;
+
+internal sealed class DurableToolsetCatalog
+{
+    private readonly IReadOnlyList<DurableToolsetRegistration> registrations;
+    private readonly DurableExecutionOptions options;
+
+    internal DurableToolsetCatalog(
+        IEnumerable<DurableToolsetRegistration> registrations,
+        DurableExecutionOptions options)
+    {
+        this.registrations = registrations.ToArray();
+        this.options = options;
+    }
+
+    internal DurableToolsetManifest Resolve(DurableToolsetResolutionRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.UseWorkerDefaults && request.ToolsetIds is not null)
+        {
+            throw DurableToolsetManifest.Failure(
+                "A durable toolset resolution request cannot combine worker defaults with explicit IDs.");
+        }
+
+        var selected = request.UseWorkerDefaults
+            ? registrations.Where(registration => registration.IsImplicitDefault).ToArray()
+            : ResolveExplicit(request.ToolsetIds ?? []);
+        var toolsetIds = selected.Select(registration => registration.Id).ToArray();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var members = new List<DurableToolsetManifestMember>();
+
+        foreach (var toolset in selected)
+        {
+            foreach (var member in toolset.Members)
+            {
+                if (!names.Add(member.Declaration.Name))
+                {
+                    throw DurableToolsetManifest.Failure(
+                        $"Selected durable toolsets contain more than one function named " +
+                        $"'{member.Declaration.Name}'. Function names use exact ordinal comparison.");
+                }
+
+                members.Add(CreateManifestMember(toolset.Id, member));
+            }
+        }
+
+        var manifest = new DurableToolsetManifest
+        {
+            ManifestVersion = DurableToolsetManifest.CurrentVersion,
+            ToolsetIds = toolsetIds,
+            Members = members.ToArray(),
+            Fingerprint = string.Empty,
+        };
+        manifest = manifest with
+        {
+            Fingerprint = DurableToolsetManifestFingerprint.Create(manifest),
+        };
+        manifest.Validate();
+        return manifest;
+    }
+
+    private DurableToolsetRegistration[] ResolveExplicit(IReadOnlyList<string> requestedIds)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var selected = new List<DurableToolsetRegistration>(requestedIds.Count);
+        foreach (var id in requestedIds)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                throw DurableToolsetManifest.Failure(
+                    "A durable toolset resolution request contains an empty toolset ID.");
+            }
+
+            if (!seen.Add(id))
+            {
+                throw DurableToolsetManifest.Failure(
+                    $"Durable toolset '{id}' was selected more than once.");
+            }
+
+            var registration = registrations.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, id, StringComparison.Ordinal));
+            if (registration is null)
+            {
+                throw DurableToolsetManifest.Failure(
+                    $"Durable toolset '{id}' is not registered on this worker.");
+            }
+
+            selected.Add(registration);
+        }
+
+        return selected.ToArray();
+    }
+
+    private DurableToolsetManifestMember CreateManifestMember(
+        string toolsetId,
+        DurableToolsetMemberRegistration member)
+    {
+        var retryPolicy = member.Options.RetryPolicy ?? DefaultRetryPolicy.Resolve(options.RetryPolicy);
+        var interceptorEnabled = options.DefaultToolInterceptor is not null;
+        return new DurableToolsetManifestMember
+        {
+            ToolsetId = toolsetId,
+            ActivationKey = member.ActivationKey,
+            Declaration = member.Declaration,
+            ToolActivityOptions = new ActivityOptions
+            {
+                StartToCloseTimeout = member.Options.StartToCloseTimeout ?? options.ActivityTimeout,
+                HeartbeatTimeout = member.Options.HeartbeatTimeout ?? options.HeartbeatTimeout,
+                RetryPolicy = Clone(retryPolicy),
+                Summary = member.Declaration.Name,
+            },
+            InterceptorEnabled = interceptorEnabled,
+            InterceptorActivityOptions = interceptorEnabled
+                ? new ActivityOptions
+                {
+                    StartToCloseTimeout = member.Options.InterceptorTimeout ?? options.ActivityTimeout,
+                    HeartbeatTimeout = options.HeartbeatTimeout,
+                    RetryPolicy = Clone(DefaultRetryPolicy.Resolve(options.RetryPolicy)),
+                    Summary = member.Declaration.Name,
+                }
+                : null,
+            SkipInterceptor = member.Options.SkipInterceptorFlag,
+            RequiresApproval = member.Options.RequireApprovalFlag,
+            ApprovalTimeout = member.Options.ApprovalTimeout ?? options.ApprovalTimeout,
+        };
+    }
+
+    private static RetryPolicy Clone(RetryPolicy policy) => new()
+    {
+        InitialInterval = policy.InitialInterval,
+        BackoffCoefficient = policy.BackoffCoefficient,
+        MaximumInterval = policy.MaximumInterval,
+        MaximumAttempts = policy.MaximumAttempts,
+        NonRetryableErrorTypes = policy.NonRetryableErrorTypes?.ToArray(),
+    };
+}
+
+internal sealed class DurableToolsetActivationCatalog
+{
+    private readonly IReadOnlyDictionary<string, DurableToolsetMemberRegistration> members;
+
+    internal DurableToolsetActivationCatalog(IEnumerable<DurableToolsetRegistration> registrations)
+    {
+        var result = new Dictionary<string, DurableToolsetMemberRegistration>(StringComparer.Ordinal);
+        foreach (var member in registrations.SelectMany(registration => registration.Members))
+        {
+            result.Add(member.ActivationKey, member);
+        }
+
+        members = result;
+    }
+
+    internal bool TryGetValue(string activationKey, out DurableToolsetMemberRegistration member) =>
+        members.TryGetValue(activationKey, out member!);
+}

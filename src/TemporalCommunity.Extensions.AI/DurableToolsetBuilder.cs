@@ -30,11 +30,10 @@ public sealed class DurableToolsetBuilder
         Action<DurableChatToolOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(function);
-        DurableAIServiceCollectionExtensions.RegisterDurableFunction(
+        registration.Add(DurableAIServiceCollectionExtensions.RegisterDurableFunction(
             worker.Services,
             function,
-            configure);
-        registration.Add(function.Name);
+            configure));
         return this;
     }
 
@@ -48,12 +47,11 @@ public sealed class DurableToolsetBuilder
     {
         ArgumentNullException.ThrowIfNull(declaration);
         ArgumentNullException.ThrowIfNull(factory);
-        DurableAIServiceCollectionExtensions.RegisterDurableToolFactory(
+        registration.Add(DurableAIServiceCollectionExtensions.RegisterDurableToolFactory(
             worker,
             declaration,
             factory,
-            configure);
-        registration.Add(declaration.Name);
+            configure));
         return this;
     }
 
@@ -90,12 +88,12 @@ public sealed class DurableToolsetBuilder
         where THandler : class
     {
         DurableAIServiceCollectionExtensions.ValidateMethod<THandler>(method);
-        var function = DurableAIServiceCollectionExtensions.RegisterMethodTool<THandler>(
+        var registered = DurableAIServiceCollectionExtensions.RegisterMethodTool<THandler>(
             worker.Services,
             method,
             functionOptions,
             configure);
-        registration.Add(function.Name);
+        registration.Add(registered);
         return this;
     }
 }

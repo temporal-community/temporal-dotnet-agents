@@ -20,14 +20,17 @@ caller
   -> final ChatResponse
 ```
 
-`GetChatStep` resolves the worker's `DurableFunctionRegistry` and passes its `AIFunction` schemas
-to the configured `IChatClient`. When the model returns `FunctionCallContent`, the workflow starts
+`GetChatStep` receives workflow-frozen declaration snapshots and passes them to the configured
+`IChatClient`. Caller-owned mode supplies those snapshots at workflow start. Worker-owned mode
+resolves registered toolsets into a versioned manifest before the first model step. The model
+activity never discovers schemas from the live worker registry. When the model returns
+`FunctionCallContent`, the workflow starts
 one `InvokeFunction` activity per call and feeds the resulting `FunctionResultContent` messages
 back to the next model step. Tool activities have their own timeout and retry options.
 
 This is the only managed-session function loop. The public session API rejects
-`ChatOptions.Tools`; registry registration is the source of truth for both the schema and the
-worker implementation. A chat pipeline used by a durable session must not include
+`ChatOptions.Tools`; the recorded declaration/manifest authority and matching worker registration
+jointly define durable dispatch. A chat pipeline used by a durable session must not include
 `UseFunctionInvocation()`, which would execute functions outside the workflow-owned activity loop.
 
 ## Components
@@ -36,7 +39,8 @@ worker implementation. A chat pipeline used by a durable session must not includ
 | --- | --- |
 | `DurableChatSessionClient` | Atomically starts/reuses the workflow and sends the chat update. |
 | `DurableChatWorkflow` | Stores session history and drives model/tool iterations. |
-| `DurableChatActivities.GetChatStepAsync` | Resolves the `IChatClient` and registry-backed tool schemas, then makes one model call. |
+| `DurableChatActivities.GetChatStepAsync` | Resolves the `IChatClient`, receives frozen declarations, and makes one model call. |
+| `DurableToolsetActivities.ResolveDurableToolsetsAsync` | Resolves worker-owned toolsets to a versioned, implementation-free manifest. |
 | `DurableFunctionActivities.InvokeFunctionAsync` | Resolves and invokes one registered function as an activity. |
 | `DurableFunctionRegistry` | Worker-local, startup-built map of stable function names to `AIFunction` implementations. |
 | `DurableAIDataConverter` | Preserves MEAI polymorphic content such as function call and result messages in Temporal payloads. |

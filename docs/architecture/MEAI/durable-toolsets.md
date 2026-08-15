@@ -38,3 +38,31 @@ the versioned contract.
 
 Changing worker registrations affects new sessions only. To adopt a changed baseline, start a new
 session; runtime refresh is intentionally unsupported.
+
+## Resolution sequence
+
+```mermaid
+sequenceDiagram
+    participant W as Managed workflow
+    participant R as ResolveDurableToolsets activity
+    participant M as GetChatStep activity
+    participant P as Interceptor and approval
+    participant T as InvokeFunction activity
+    W->>R: worker defaults or ordered baseline IDs
+    R-->>W: versioned manifest
+    Note over W: Temporal records and replays the manifest
+    W->>M: effective declaration snapshots and fingerprint
+    M-->>W: model function calls
+    W->>P: toolset ID, exact function name, safe review metadata
+    W->>T: frozen member identity and policy
+```
+
+The manifest contains declaration snapshots, resolved activity policies, origin toolset IDs, and
+opaque worker activation keys. It contains no function instances, factories, delegates, service
+providers, `Type`, or `MethodInfo`. The resolver validates requested IDs, selection duplicates,
+visible-name collisions, declaration support, and policy values before returning the manifest.
+
+The v1 fingerprint is `tai-toolset-v1:` plus the lowercase SHA-256 hash of the canonical JSON
+representation of manifest version, ordered toolset IDs, and ordered members. Object properties are
+sorted ordinally; array order is preserved. The empty v1 manifest vector is
+`tai-toolset-v1:60051ad63143350993d6849484391752110cd71d72234847dd6275a93bc5623d`.
