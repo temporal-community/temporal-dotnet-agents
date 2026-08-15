@@ -90,8 +90,8 @@ The sample sends 20 health readings with a spike at readings 13–15. There are 
 ```
 Worker started. Launching ambient agent workflows...
 
-AlertWorkflow started: ambient-alert-001
-MonitorWorkflow started: ambient-monitor-001
+AlertWorkflow started: ambient-alert-<unique-run-id>
+MonitorWorkflow started: ambient-monitor-<unique-run-id>
 
 ── Sending simulated health readings ───────────────────────
   Reading  1: CPU= 33.2% Mem= 51.3% Temp= 56.8°C

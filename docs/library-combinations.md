@@ -202,6 +202,7 @@ In short:
 - [Tool Functions](how-to/MEAI/tool-functions.md) — Model 1 vs Model 2 tool execution
 - [Human-in-the-Loop Patterns (MEAI)](how-to/MEAI/hitl-patterns.md)
 - [Human-in-the-Loop Patterns (MAF)](how-to/MAF/hitl-patterns.md)
+- [Pre-release MAF Worker Cutover](how-to/MAF/pre-release-cutover.md)
 - [Cross-Library Integration Architecture](architecture/MEAI/cross-library-integration.md)
 - [Durable Chat Pipeline Architecture](architecture/MEAI/durable-chat-pipeline.md)
 - [Durability and Determinism](architecture/MAF/durability-and-determinism.md)

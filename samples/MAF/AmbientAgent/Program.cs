@@ -89,8 +89,9 @@ Console.WriteLine("Worker started. Launching ambient agent workflows...\n");
 
 var client = host.Services.GetRequiredService<ITemporalClient>();
 
-const string monitorWorkflowId = "ambient-monitor-001";
-const string alertWorkflowId = "ambient-alert-001";
+var runId = Guid.NewGuid().ToString("N");
+var monitorWorkflowId = $"ambient-monitor-{runId}";
+var alertWorkflowId = $"ambient-alert-{runId}";
 
 // ── Step 7: Start the AlertWorkflow (must exist before MonitorWorkflow signals it) ─
 await client.StartWorkflowAsync(

@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- MAF per-run tool selection is now atomic across provider exposure and workflow dispatch for
+  `AgentWorkflow`, `AgentJobWorkflow`, and containing workflows that call `TemporalAIAgent`.
+  Disabled, empty, subset, malformed, unknown, mixed, and repeated blocked calls fail closed without
+  scheduling interceptor, approval, or tool activities, and tenant-visible blocked results do not
+  reveal whether a name was unknown or excluded.
+- The MAF `PerToolActivities` sample now demonstrates all/subset/empty/disabled per-turn selection,
+  with corrected-version replay fixtures and a concrete pre-release drain/cutover/rollback runbook.
+- The `AmbientAgent` sample now uses unique workflow IDs on every execution so repeated local
+  canary runs cannot attach to completed workflows from an earlier run.
+- The MEAI `ExtensibleDurableTurns` sample now demonstrates ordinary functions wrapped by existing
+  `DelegatingAIFunction` middleware, including attempt-scoped success/error/finally observation,
+  effect-time authorization denial, retry ownership, and fresh DI scopes.
+- Recorded a non-shipping generalized deferred-tool prototype and ADR. The result is **Defer**:
+  no public API or package asset ships, while test-only coverage proves the candidate state machine's
+  cap, duplicate/conflict, timeout/cancel, Continue-as-New, replay, and authorization-freshness rules.
 - Keyed `IChatClientDecorator` results are now checked for inline function-invocation middleware
   before provider dispatch when durable tools are registered, closing a gap in the managed tool-loop
   mixed-pattern protection.
