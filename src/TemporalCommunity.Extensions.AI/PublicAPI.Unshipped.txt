@@ -335,11 +335,6 @@ TemporalCommunity.Extensions.AI.IDurableChatSessionClient.ShutdownAsync(string! 
 TemporalCommunity.Extensions.AI.IDurableChatSessionClient.ResolveApprovalAsync(string! conversationId, TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision! decision, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalResolutionResult!>!
 TemporalCommunity.Extensions.AI.IDurableChatWorkflowInputFactory
 TemporalCommunity.Extensions.AI.IDurableChatWorkflowInputFactory.Create() -> TemporalCommunity.Extensions.AI.DurableChatWorkflowInput!
-TemporalCommunity.Extensions.AI.IDurableSessionControl
-TemporalCommunity.Extensions.AI.IDurableSessionControl.CancelPendingApprovalAsync(string! workflowId, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
-TemporalCommunity.Extensions.AI.IDurableSessionControl.GetPendingApprovalAsync(string! workflowId, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest?>!
-TemporalCommunity.Extensions.AI.IDurableSessionControl.ShutdownAsync(string! workflowId, System.Threading.CancellationToken ct = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
-TemporalCommunity.Extensions.AI.IDurableSessionControl.ResolveApprovalAsync(string! workflowId, TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision! decision, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalResolutionResult!>!
 TemporalCommunity.Extensions.AI.Session.CompactionMarkerEntry
 TemporalCommunity.Extensions.AI.Session.CompactionMarkerEntry.CompactedAt.get -> System.DateTimeOffset
 TemporalCommunity.Extensions.AI.Session.CompactionMarkerEntry.CompactedMessageIds.get -> System.Collections.Generic.IReadOnlyList<string!>!

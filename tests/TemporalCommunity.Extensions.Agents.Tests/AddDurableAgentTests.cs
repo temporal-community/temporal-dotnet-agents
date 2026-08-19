@@ -412,37 +412,9 @@ public class AddDurableAgentTests
     }
 
     [Fact]
-    public void AlwaysScopesStoreKey_Whitespace_ThrowsAtToRegistration()
+    public void ApprovalScopes_DefaultValues_AreAccepted()
     {
         var options = new TemporalAgentsOptions();
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            options.AddDurableAgent("StoreKeyWhitespace", a =>
-            {
-                a.ChatClient = _ => NewChatClient();
-                a.UseApprovalScopes(opts => opts.AlwaysScopesStoreKey = "   ");
-            }));
-        Assert.Contains("AlwaysScopesStoreKey", ex.Message);
-    }
-
-    [Fact]
-    public void AlwaysScopesStoreKey_ReservedSessionKey_ThrowsAtToRegistration()
-    {
-        var options = new TemporalAgentsOptions();
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            options.AddDurableAgent("ReservedKey", a =>
-            {
-                a.ChatClient = _ => NewChatClient();
-                a.UseApprovalScopes(opts => opts.AlwaysScopesStoreKey = "temporal.approval_scopes.session");
-            }));
-        Assert.Contains("temporal.approval_scopes.session", ex.Message);
-        Assert.Contains("reserved", ex.Message);
-    }
-
-    [Fact]
-    public void AlwaysScopesStoreKey_DefaultValue_NoException()
-    {
-        var options = new TemporalAgentsOptions();
-        // Default "temporal.approval_scopes.always" must pass validation.
         options.AddDurableAgent("DefaultKey", a =>
         {
             a.ChatClient = _ => NewChatClient();
@@ -455,55 +427,29 @@ public class AddDurableAgentTests
     }
 
     [Fact]
-    public void MaxAlwaysScopeCacheRecords_Zero_ThrowsAtToRegistration()
+    public void MaxSessionScopeRecords_Zero_ThrowsAtRegistration()
     {
         var options = new TemporalAgentsOptions();
         var ex = Assert.Throws<InvalidOperationException>(() =>
             options.AddDurableAgent("ZeroRecords", a =>
             {
                 a.ChatClient = _ => NewChatClient();
-                a.UseApprovalScopes(opts => opts.MaxAlwaysScopeCacheRecords = 0);
+                a.UseApprovalScopes(opts => opts.MaxSessionScopeRecords = 0);
             }));
-        Assert.Contains("MaxAlwaysScopeCacheRecords", ex.Message);
+        Assert.Contains("MaxSessionScopeRecords", ex.Message);
     }
 
     [Fact]
-    public void MaxAlwaysScopeCacheBytes_Zero_ThrowsAtToRegistration()
+    public void MaxSessionScopeBytes_Zero_ThrowsAtRegistration()
     {
         var options = new TemporalAgentsOptions();
         var ex = Assert.Throws<InvalidOperationException>(() =>
             options.AddDurableAgent("ZeroBytes", a =>
             {
                 a.ChatClient = _ => NewChatClient();
-                a.UseApprovalScopes(opts => opts.MaxAlwaysScopeCacheBytes = 0);
+                a.UseApprovalScopes(opts => opts.MaxSessionScopeBytes = 0);
             }));
-        Assert.Contains("MaxAlwaysScopeCacheBytes", ex.Message);
-    }
-
-    [Fact]
-    public void ApprovalScopeActivityMaximumAttempts_Zero_ThrowsAtToRegistration()
-    {
-        var options = new TemporalAgentsOptions();
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            options.AddDurableAgent("ZeroAttempts", a =>
-            {
-                a.ChatClient = _ => NewChatClient();
-                a.UseApprovalScopes(opts => opts.ApprovalScopeActivityMaximumAttempts = 0);
-            }));
-        Assert.Contains("ApprovalScopeActivityMaximumAttempts", ex.Message);
-    }
-
-    [Fact]
-    public void ApprovalScopeActivityTimeout_Zero_ThrowsAtToRegistration()
-    {
-        var options = new TemporalAgentsOptions();
-        var ex = Assert.Throws<InvalidOperationException>(() =>
-            options.AddDurableAgent("ZeroTimeout", a =>
-            {
-                a.ChatClient = _ => NewChatClient();
-                a.UseApprovalScopes(opts => opts.ApprovalScopeActivityTimeout = TimeSpan.Zero);
-            }));
-        Assert.Contains("ApprovalScopeActivityTimeout", ex.Message);
+        Assert.Contains("MaxSessionScopeBytes", ex.Message);
     }
 
     // ── Internal stubs ──────────────────────────────────────────────────────

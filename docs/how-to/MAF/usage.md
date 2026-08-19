@@ -227,7 +227,7 @@ For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientA
 
 `TemporalCommunity.Extensions.Agents` depends on `TemporalCommunity.Extensions.AI`. Installing the Agents NuGet package pulls in the AI package automatically — no separate `<PackageReference>` for `TemporalCommunity.Extensions.AI` is needed.
 
-The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI`. Agent-specific reusable scopes use `DurableAgentApprovalDecision` from `TemporalCommunity.Extensions.Agents.Approvals`; a generic dashboard resolving through `IDurableSessionControl` always applies `ThisCallOnly` to an agent workflow.
+The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI`. Ordinary decisions apply to one call. MAF reusable session grants use the separately registered `ITemporalAgentApprovalScopeAdministration` capability.
 
 ---
 
@@ -806,8 +806,7 @@ waits for all of them before continuing.
 ## Human-in-the-Loop (HITL) Approval Gates
 
 Agent tools can pause mid-turn and wait for a human decision before proceeding. The backing `AgentWorkflow` exposes
-two approval `[WorkflowUpdate]` handlers — the inherited generic `ResolveApprovalAsync` (for shared dashboards) and
-`ResolveAgentApprovalAsync` (for MAF scopes) — plus `RequestApprovalAsync` (called from inside a tool) and one
+the inherited `ResolveApprovalAsync` update, plus `RequestApprovalAsync` (called from inside a tool) and one
 `[WorkflowQuery]` handler, `GetPendingApproval`, for polling the current pending
 request without modifying workflow state.
 
@@ -871,7 +870,7 @@ if (pending is not null)
 ```csharp
 var result = await client.ResolveApprovalAsync(
     sessionId,
-    new DurableAgentApprovalDecision
+    new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved  = true,
@@ -885,16 +884,7 @@ Console.WriteLine($"Decision status: {result.Status}");
 `AlreadyResolved`, while a changed retry returns `Conflict`. `RequestApprovalAsync` in the tool returns a generic
 `DurableApprovalDecision`.
 
-#### `IDurableSessionControl` — shared approval and lifecycle interface
-
-`ITemporalAgentClient` implements `IDurableSessionControl`, defined in `TemporalCommunity.Extensions.AI`. The same interface is also implemented by `DurableChatSessionClient` in `TemporalCommunity.Extensions.AI`. This gives approval dashboards and ops tooling a single `IDurableSessionControl` dependency that works against either library without coupling to a specific client type.
-
-In addition to `GetPendingApprovalAsync` and retry-safe `ResolveApprovalAsync`, the interface exposes:
-
-- `CancelPendingApprovalAsync(workflowId)` — cancels the pending approval by submitting a rejection on behalf of the external system. No-op when no approval is currently pending.
-- `ShutdownAsync(workflowId)` — sends a graceful shutdown signal so the session workflow exits its loop rather than sitting parked until its TTL expires.
-
-The `workflowId` parameter on `IDurableSessionControl` is the raw Temporal workflow ID (e.g. `ta-{agentName}-{key}`). For MAF callers, derive it from a `TemporalAgentSessionId` via `.WorkflowId`.
+Use `ITemporalAgentClient.CancelPendingApprovalAsync(sessionId)` and `ShutdownAsync(sessionId)` for lifecycle operations. The typed session ID keeps application resource lookup at the caller boundary. It is still a routing locator, not authorization: authenticate and authorize the application resource before constructing or accepting a session ID.
 
 ### Workflow-Parked Approval (compute-free, multi-day waits)
 

@@ -18,6 +18,9 @@ namespace TemporalCommunity.Extensions.Agents.Tests;
 /// </summary>
 public class ScopedApprovalInterceptorTests
 {
+    private static readonly DateTimeOffset EvaluationTime =
+        new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
     private static ApprovalScopesOptions DefaultOpts() => new ApprovalScopesOptions();
 
     private static AgentToolContext MakeContext(
@@ -35,6 +38,7 @@ public class ScopedApprovalInterceptorTests
             StateBag = stateBag,
             Arguments = arguments ?? new Dictionary<string, object?>(),
             CallId = "call-1",
+            ApprovalEvaluationTime = EvaluationTime,
         };
 
     private static AgentSessionStateBag BagWithSessionScope(
@@ -43,8 +47,11 @@ public class ScopedApprovalInterceptorTests
     {
         var record = new ApprovalScopeRecord
         {
+            GrantId = "grant-1",
             ToolName = toolName,
-            GrantedAt = DateTimeOffset.UtcNow,
+            MatchAllArguments = true,
+            GrantedAt = EvaluationTime.AddMinutes(-1),
+            ExpiresAt = EvaluationTime.AddMinutes(30),
             OriginatingRequestId = requestId ?? Guid.NewGuid().ToString("N"),
         };
 

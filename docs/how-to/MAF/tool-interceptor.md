@@ -168,13 +168,11 @@ When both `RequireApproval()` and an interceptor are active, the interceptor's `
 
 ## Approval scope records
 
-When an agent is configured with `UseApprovalScopes()` and a reviewer resolves a `DurableAgentApprovalDecision` with `Scope = ApprovalScope.Session` or `Scope = ApprovalScope.Always`, the workflow writes a scope record so future calls to the same tool can proceed automatically without another human review.
+When an agent is configured with `UseApprovalScopes()`, a trusted backend may use `ITemporalAgentApprovalScopeAdministration` to approve one pending call and create an expiring, constrained grant for later matching calls in the same workflow session.
 
 ### Where scope records live
 
-**Session scope** records are serialized as a `List<ApprovalScopeRecord>` into the session `StateBag` under the key `"temporal.approval_scopes.session"`. They survive `continue-as-new` because the StateBag is carried forward in `AgentWorkflowInput.CarriedStateBag`.
-
-**Always scope** records are appended to an external `IApprovalScopeStore` via the `AppendAlwaysScope` activity. At the start of each workflow run, the `LoadAlwaysScopes` activity reads them back and caches them in StateBag under the key configured in `ApprovalScopesOptions.AlwaysScopesStoreKey` (default: `"temporal.approval_scopes.always"`).
+Session-grant records are serialized into session StateBag under `"temporal.approval_scopes.session"`. They survive Continue-As-New, expire by workflow time, and never cross sessions. Permanent and cross-session grants are unsupported.
 
 ### ApprovalScopeRecord
 
@@ -182,14 +180,17 @@ When an agent is configured with `UseApprovalScopes()` and a reviewer resolves a
 // Namespace: TemporalCommunity.Extensions.Agents.Approvals
 public sealed class ApprovalScopeRecord
 {
+    public required string GrantId { get; init; }
     public required string ToolName { get; init; }
-    public ApprovalScopePattern? Pattern { get; init; }   // null = match any call of this tool
+    public ApprovalScopePattern? Pattern { get; init; }
+    public bool MatchAllArguments { get; init; }
     public required DateTimeOffset GrantedAt { get; init; }
+    public required DateTimeOffset ExpiresAt { get; init; }
     public required string OriginatingRequestId { get; init; }
 }
 ```
 
-`Pattern` is `null` when the reviewer approved without argument constraints. When the reviewer supplies a `ScopePattern` on the `DurableAgentApprovalDecision`, the scope record carries the pattern and `TryMatchScope` evaluates it on every future call.
+Exactly one of `Pattern` or `MatchAllArguments` is set. `TryMatchScope` evaluates the constraint and rejects expired records. These records help decide whether to skip another human prompt; they do not replace effect-time authorization.
 
 ### Reading scope records from a custom interceptor
 
@@ -211,6 +212,7 @@ public class PolicyInterceptor : IAgentToolInterceptor
                 ctx.Arguments,
                 ctx.StateBag,
                 "temporal.approval_scopes.session",
+                ctx.ApprovalEvaluationTime,
                 out var match))
         {
             return Task.FromResult(DurableToolDecision.Proceed(
@@ -234,6 +236,7 @@ public static bool TryMatchScope(
     IReadOnlyDictionary<string, object?> arguments,
     AgentSessionStateBag? bag,
     string storeKey,
+    DateTimeOffset evaluationTime,
     out ApprovalScopeRecord? match);
 ```
 
@@ -256,7 +259,7 @@ When `ApprovalScopePattern.Parameter` is set, the pattern is matched against the
 > The turn loop runs in two phases:
 >
 > 1. **Phase 1 (fan-out):** All `RunToolInterceptor` activities for the current turn are dispatched in parallel and their results are frozen in workflow history.
-> 2. **Phase 2 (sequential dispatch):** Each interceptor result is evaluated. If `PauseForApproval` was returned, the workflow blocks for human input; when the reviewer approves with `Scope = Session`, the scope record is written to StateBag.
+> 2. **Phase 2 (sequential dispatch):** Each interceptor result is evaluated. If `PauseForApproval` was returned, the workflow blocks for human input; when an authorized backend grants an expiring session scope, the record is written to StateBag.
 >
 > Because Phase 1 completes before any approval is processed in Phase 2, a scope record written when Call A is approved during turn N does **not** retroactively satisfy Call B's already-recorded Phase 1 result in the same turn. Call B still requires its own approval in turn N.
 >

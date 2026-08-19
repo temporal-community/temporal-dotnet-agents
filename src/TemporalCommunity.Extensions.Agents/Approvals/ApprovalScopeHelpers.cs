@@ -32,6 +32,7 @@ public static class ApprovalScopeHelpers
     /// <param name="storeKey">
     /// The StateBag key to read scope records from (e.g. <c>"temporal.approval_scopes.session"</c>).
     /// </param>
+    /// <param name="evaluationTime">Deterministic workflow time used for expiry evaluation.</param>
     /// <param name="match">
     /// When the method returns <see langword="true"/>, the first matching record; otherwise <see langword="null"/>.
     /// </param>
@@ -41,6 +42,7 @@ public static class ApprovalScopeHelpers
         IReadOnlyDictionary<string, object?> arguments,
         AgentSessionStateBag? bag,
         string storeKey,
+        DateTimeOffset evaluationTime,
         out ApprovalScopeRecord? match)
     {
         match = null;
@@ -70,7 +72,7 @@ public static class ApprovalScopeHelpers
         {
             try
             {
-                if (IsMatchingRecord(record, toolName, arguments))
+                if (IsMatchingRecord(record, toolName, arguments, evaluationTime))
                 {
                     match = record;
                     return true;
@@ -94,15 +96,21 @@ public static class ApprovalScopeHelpers
     private static bool IsMatchingRecord(
         ApprovalScopeRecord record,
         string toolName,
-        IReadOnlyDictionary<string, object?> arguments)
+        IReadOnlyDictionary<string, object?> arguments,
+        DateTimeOffset evaluationTime)
     {
+        if (record.ExpiresAt <= evaluationTime)
+            return false;
+
         // Tool-name match: case-insensitive (consistent with DurableFunctionRegistry).
         if (!string.Equals(record.ToolName, toolName, StringComparison.OrdinalIgnoreCase))
             return false;
 
-        // Null pattern = wildcard: match any call of this tool regardless of arguments.
-        if (record.Pattern is null)
+        if (record.MatchAllArguments)
             return true;
+
+        if (record.Pattern is null)
+            return false;
 
         var pattern = record.Pattern;
 

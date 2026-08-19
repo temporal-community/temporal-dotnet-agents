@@ -698,43 +698,16 @@ public sealed class DurableAgentBuilder
         // Builder-time validation for approval-scope related combinations.
         if (_useApprovalScopes && _approvalScopesOptions is { } scopeOpts)
         {
-            // Validate AlwaysScopesStoreKey.
-            if (string.IsNullOrWhiteSpace(scopeOpts.AlwaysScopesStoreKey))
+            if (scopeOpts.MaxSessionScopeRecords <= 0)
             {
                 throw new InvalidOperationException(
-                    $"ApprovalScopesOptions.AlwaysScopesStoreKey for agent '{Name}' must be non-null and non-whitespace.");
+                    $"ApprovalScopesOptions.MaxSessionScopeRecords for agent '{Name}' must be a positive integer.");
             }
 
-            if (scopeOpts.AlwaysScopesStoreKey == "temporal.approval_scopes.session")
+            if (scopeOpts.MaxSessionScopeBytes <= 0)
             {
                 throw new InvalidOperationException(
-                    "ApprovalScopesOptions.AlwaysScopesStoreKey cannot be set to 'temporal.approval_scopes.session' — " +
-                    "that key is reserved for session-scope records managed by Feature B internally. Use a different store key.");
-            }
-
-            // Validate numeric bounds.
-            if (scopeOpts.MaxAlwaysScopeCacheRecords <= 0)
-            {
-                throw new InvalidOperationException(
-                    $"ApprovalScopesOptions.MaxAlwaysScopeCacheRecords for agent '{Name}' must be a positive integer.");
-            }
-
-            if (scopeOpts.MaxAlwaysScopeCacheBytes <= 0)
-            {
-                throw new InvalidOperationException(
-                    $"ApprovalScopesOptions.MaxAlwaysScopeCacheBytes for agent '{Name}' must be a positive integer.");
-            }
-
-            if (scopeOpts.ApprovalScopeActivityMaximumAttempts <= 0)
-            {
-                throw new InvalidOperationException(
-                    $"ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts for agent '{Name}' must be a positive integer.");
-            }
-
-            if (scopeOpts.ApprovalScopeActivityTimeout <= TimeSpan.Zero)
-            {
-                throw new InvalidOperationException(
-                    $"ApprovalScopesOptions.ApprovalScopeActivityTimeout for agent '{Name}' must be greater than TimeSpan.Zero.");
+                    $"ApprovalScopesOptions.MaxSessionScopeBytes for agent '{Name}' must be a positive integer.");
             }
         }
 

@@ -69,7 +69,7 @@ public sealed class WorkflowParkedApprovalReviewDataTests
 
         Assert.Equal(
             DurableApprovalResolutionStatus.Accepted,
-            (await client.ResolveApprovalAsync(session.SessionId, new DurableAgentApprovalDecision
+            (await client.ResolveApprovalAsync(session.SessionId, new DurableApprovalDecision
             {
                 RequestId = pending.RequestId,
                 Approved = true,
@@ -110,7 +110,7 @@ public sealed class WorkflowParkedApprovalReviewDataTests
         Assert.NotNull(pending);
         Assert.Null(pending!.ReviewData);
 
-        await client.ResolveApprovalAsync(session.SessionId, new DurableAgentApprovalDecision
+        await client.ResolveApprovalAsync(session.SessionId, new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
             Approved = false,
@@ -158,7 +158,7 @@ public sealed class WorkflowParkedApprovalReviewDataTests
         Assert.NotNull(pendingAfterRestart);
         Assert.Equal(pendingBeforeRestart!.RequestId, pendingAfterRestart!.RequestId);
 
-        await client2.ResolveApprovalAsync(session.SessionId, new DurableAgentApprovalDecision
+        await client2.ResolveApprovalAsync(session.SessionId, new DurableApprovalDecision
         {
             RequestId = pendingAfterRestart.RequestId,
             Approved = true,
@@ -209,7 +209,7 @@ public sealed class WorkflowParkedApprovalReviewDataTests
         var pending = await WaitForPendingAsync(client, session.SessionId);
         Assert.NotNull(pending);
 
-        var decision = new DurableAgentApprovalDecision
+        var decision = new DurableApprovalDecision
         {
             RequestId = pending!.RequestId,
             Approved = true,

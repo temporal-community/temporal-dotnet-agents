@@ -15,6 +15,9 @@ namespace TemporalCommunity.Extensions.Agents.Tests;
 /// </summary>
 public class ApprovalScopeHelpersTests
 {
+    private static readonly DateTimeOffset EvaluationTime =
+        new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static AgentSessionStateBag MakeBagWithScopes(
@@ -37,11 +40,28 @@ public class ApprovalScopeHelpersTests
         string? requestId = null) =>
         new ApprovalScopeRecord
         {
+            GrantId = requestId ?? Guid.NewGuid().ToString("N"),
             ToolName = toolName,
             Pattern = pattern,
-            GrantedAt = DateTimeOffset.UtcNow,
+            MatchAllArguments = pattern is null,
+            GrantedAt = EvaluationTime.AddMinutes(-1),
+            ExpiresAt = EvaluationTime.AddHours(1),
             OriginatingRequestId = requestId ?? Guid.NewGuid().ToString("N"),
         };
+
+    private static bool TryMatchScope(
+        string toolName,
+        IReadOnlyDictionary<string, object?> arguments,
+        AgentSessionStateBag? bag,
+        string storeKey,
+        out ApprovalScopeRecord? match) =>
+        ApprovalScopeHelpers.TryMatchScope(
+            toolName,
+            arguments,
+            bag,
+            storeKey,
+            EvaluationTime,
+            out match);
 
     private static Dictionary<string, object?> Args(params (string key, object? value)[] pairs) =>
         pairs.ToDictionary(p => p.key, p => p.value);
@@ -56,7 +76,7 @@ public class ApprovalScopeHelpersTests
         var bag = MakeBagWithScopes(StoreKey, [MakeRecord("WriteFile")]);
 
         // The tool being called uses a different casing.
-        var matched = ApprovalScopeHelpers.TryMatchScope("writefile", new Dictionary<string, object?>(), bag, StoreKey, out var match);
+        var matched = TryMatchScope("writefile", new Dictionary<string, object?>(), bag, StoreKey, out var match);
 
         Assert.True(matched);
         Assert.NotNull(match);
@@ -68,10 +88,60 @@ public class ApprovalScopeHelpersTests
     {
         var bag = MakeBagWithScopes(StoreKey, [MakeRecord("WriteFile")]);
 
-        var matched = ApprovalScopeHelpers.TryMatchScope("DeleteFile", new Dictionary<string, object?>(), bag, StoreKey, out var match);
+        var matched = TryMatchScope("DeleteFile", new Dictionary<string, object?>(), bag, StoreKey, out var match);
 
         Assert.False(matched);
         Assert.Null(match);
+    }
+
+    [Fact]
+    public void ExpiredGrant_DoesNotMatch()
+    {
+        var record = MakeRecord("WriteFile");
+        record = new ApprovalScopeRecord
+        {
+            GrantId = record.GrantId,
+            ToolName = record.ToolName,
+            MatchAllArguments = true,
+            GrantedAt = EvaluationTime.AddHours(-2),
+            ExpiresAt = EvaluationTime,
+            OriginatingRequestId = record.OriginatingRequestId,
+        };
+        var bag = MakeBagWithScopes(StoreKey, [record]);
+
+        var matched = TryMatchScope(
+            "WriteFile",
+            new Dictionary<string, object?>(),
+            bag,
+            StoreKey,
+            out var match);
+
+        Assert.False(matched);
+        Assert.Null(match);
+    }
+
+    [Fact]
+    public void NullPatternWithoutExplicitMatchAll_DoesNotMatch()
+    {
+        var record = MakeRecord("WriteFile");
+        record = new ApprovalScopeRecord
+        {
+            GrantId = record.GrantId,
+            ToolName = record.ToolName,
+            MatchAllArguments = false,
+            Pattern = null,
+            GrantedAt = record.GrantedAt,
+            ExpiresAt = record.ExpiresAt,
+            OriginatingRequestId = record.OriginatingRequestId,
+        };
+        var bag = MakeBagWithScopes(StoreKey, [record]);
+
+        Assert.False(TryMatchScope(
+            "WriteFile",
+            new Dictionary<string, object?>(),
+            bag,
+            StoreKey,
+            out _));
     }
 
     // ── Null pattern (wildcard) ──────────────────────────────────────────────
@@ -82,7 +152,7 @@ public class ApprovalScopeHelpersTests
         var bag = MakeBagWithScopes(StoreKey, [MakeRecord("WriteFile", pattern: null)]);
 
         // With any arguments, a null pattern always matches.
-        var matched = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matched = TryMatchScope("WriteFile",
             Args(("path", "/tmp/foo.txt"), ("content", "hello")), bag, StoreKey, out _);
 
         Assert.True(matched);
@@ -102,11 +172,11 @@ public class ApprovalScopeHelpersTests
         var bag = MakeBagWithScopes(StoreKey, [MakeRecord("WriteFile", pattern)]);
 
         // Exact match on the correct path.
-        var matchYes = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matchYes = TryMatchScope("WriteFile",
             Args(("path", "/tmp/foo.txt")), bag, StoreKey, out _);
 
         // Different case — Exact uses Ordinal (case-sensitive).
-        var matchNo = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matchNo = TryMatchScope("WriteFile",
             Args(("path", "/tmp/Foo.txt")), bag, StoreKey, out _);
 
         Assert.True(matchYes);
@@ -127,11 +197,11 @@ public class ApprovalScopeHelpersTests
         var bag = MakeBagWithScopes(StoreKey, [MakeRecord("WriteFile", pattern)]);
 
         // Matches: /tmp/foo.txt — single * matches non-/ chars.
-        var matchShallow = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matchShallow = TryMatchScope("WriteFile",
             Args(("path", "/tmp/foo.txt")), bag, StoreKey, out _);
 
         // Does NOT match: /tmp/sub/dir/file.txt — single * cannot cross /.
-        var matchDeep = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matchDeep = TryMatchScope("WriteFile",
             Args(("path", "/tmp/sub/dir/file.txt")), bag, StoreKey, out _);
 
         Assert.True(matchShallow);
@@ -150,7 +220,7 @@ public class ApprovalScopeHelpersTests
         var bag = MakeBagWithScopes(StoreKey, [MakeRecord("WriteFile", pattern)]);
 
         // Double ** matches across directory separators.
-        var matchDeep = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matchDeep = TryMatchScope("WriteFile",
             Args(("path", "/tmp/sub/dir/file.txt")), bag, StoreKey, out _);
 
         Assert.True(matchDeep);
@@ -168,7 +238,7 @@ public class ApprovalScopeHelpersTests
         var bag = MakeBagWithScopes(StoreKey, [MakeRecord("WriteFile", pattern)]);
 
         // /etc/passwd is completely outside the /tmp/ tree.
-        var noMatch = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var noMatch = TryMatchScope("WriteFile",
             Args(("path", "/etc/passwd")), bag, StoreKey, out _);
 
         Assert.False(noMatch);
@@ -188,11 +258,11 @@ public class ApprovalScopeHelpersTests
         var bag = MakeBagWithScopes(StoreKey, [MakeRecord("WriteFile", pattern)]);
 
         // /tmp/foo matches ^/tmp/.*
-        var matchTmp = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matchTmp = TryMatchScope("WriteFile",
             Args(("path", "/tmp/foo")), bag, StoreKey, out _);
 
         // /etc/passwd does not match.
-        var noMatchEtc = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var noMatchEtc = TryMatchScope("WriteFile",
             Args(("path", "/etc/passwd")), bag, StoreKey, out _);
 
         Assert.True(matchTmp);
@@ -212,12 +282,12 @@ public class ApprovalScopeHelpersTests
 
         // Invalid regex must not throw — treated as no match.
         var exception = Record.Exception(() =>
-            ApprovalScopeHelpers.TryMatchScope("WriteFile",
+            TryMatchScope("WriteFile",
                 Args(("path", "/tmp/foo")), bag, StoreKey, out _));
 
         Assert.Null(exception);
 
-        var matched = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matched = TryMatchScope("WriteFile",
             Args(("path", "/tmp/foo")), bag, StoreKey, out _);
 
         Assert.False(matched);
@@ -239,7 +309,7 @@ public class ApprovalScopeHelpersTests
         var input = new string('a', 30) + "!";
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var matched = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matched = TryMatchScope("WriteFile",
             Args(("path", input)), bag, StoreKey, out _);
         sw.Stop();
 
@@ -265,7 +335,7 @@ public class ApprovalScopeHelpersTests
         var bag = MakeBagWithScopes(StoreKey, [MakeRecord("WriteFile", pattern)]);
 
         // Arguments do not contain the "path" key.
-        var matched = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matched = TryMatchScope("WriteFile",
             Args(("content", "hello")), bag, StoreKey, out _);
 
         Assert.False(matched);
@@ -313,7 +383,7 @@ public class ApprovalScopeHelpersTests
     [Fact]
     public void NullBag_ReturnsFalse()
     {
-        var matched = ApprovalScopeHelpers.TryMatchScope("WriteFile", new Dictionary<string, object?>(), bag: null, StoreKey, out var match);
+        var matched = TryMatchScope("WriteFile", new Dictionary<string, object?>(), bag: null, StoreKey, out var match);
 
         Assert.False(matched);
         Assert.Null(match);
@@ -325,7 +395,7 @@ public class ApprovalScopeHelpersTests
         var bag = MakeBagWithScopes("temporal.approval_scopes.always", [MakeRecord("WriteFile")]);
 
         // The session key is empty — scope is under a different key.
-        var matched = ApprovalScopeHelpers.TryMatchScope("WriteFile", new Dictionary<string, object?>(), bag, StoreKey, out _);
+        var matched = TryMatchScope("WriteFile", new Dictionary<string, object?>(), bag, StoreKey, out _);
 
         Assert.False(matched);
     }
@@ -352,7 +422,7 @@ public class ApprovalScopeHelpersTests
 
         // This should succeed without exception.
         var exception = Record.Exception(() =>
-            ApprovalScopeHelpers.TryMatchScope("WriteFile", new Dictionary<string, object?>(), restoredBag, StoreKey, out _));
+            TryMatchScope("WriteFile", new Dictionary<string, object?>(), restoredBag, StoreKey, out _));
 
         Assert.Null(exception);
     }
@@ -374,12 +444,12 @@ public class ApprovalScopeHelpersTests
         var longInput = new string('a', 20000);
 
         var exception = Record.Exception(() =>
-            ApprovalScopeHelpers.TryMatchScope("WriteFile",
+            TryMatchScope("WriteFile",
                 Args(("path", longInput)), bag, StoreKey, out _));
 
         Assert.Null(exception);
 
-        var matched = ApprovalScopeHelpers.TryMatchScope("WriteFile",
+        var matched = TryMatchScope("WriteFile",
             Args(("path", longInput)), bag, StoreKey, out _);
 
         Assert.False(matched);

@@ -174,7 +174,7 @@ while (!agentTask.IsCompleted)
     }
     Console.WriteLine("[Auto-approving for demo]");
 
-    var resolution = await agentClient.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
+    var resolution = await agentClient.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved  = true,
@@ -186,7 +186,7 @@ while (!agentTask.IsCompleted)
     // The reason explains the decision; it must never carry reviewer credentials or roles.
     // The external approval console authenticates reviewers, and the write tool must still
     // authorize the effect against current state.
-    var duplicate = await agentClient.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
+    var duplicate = await agentClient.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved = true,

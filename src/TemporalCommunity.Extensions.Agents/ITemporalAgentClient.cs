@@ -11,7 +11,7 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <summary>
 /// Client for running agents via Temporal workflow updates.
 /// </summary>
-public interface ITemporalAgentClient : IDurableSessionControl
+public interface ITemporalAgentClient
 {
     /// <summary>
     /// Sends a request to an agent session and waits for the response.
@@ -43,14 +43,14 @@ public interface ITemporalAgentClient : IDurableSessionControl
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Resolves a pending agent approval with optional MAF-only reusable-scope semantics.
+    /// Resolves one pending agent-tool approval.
     /// An identical retry returns <see cref="DurableApprovalResolutionStatus.AlreadyResolved"/>;
-    /// a retry that changes any decision or scope field returns
+    /// a retry that changes the decision returns
     /// <see cref="DurableApprovalResolutionStatus.Conflict"/>.
     /// </summary>
     Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
         TemporalAgentSessionId sessionId,
-        DurableAgentApprovalDecision decision,
+        DurableApprovalDecision decision,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -74,7 +74,7 @@ public interface ITemporalAgentClient : IDurableSessionControl
 
         _ = await ResolveApprovalAsync(
             sessionId,
-            new DurableAgentApprovalDecision
+            new DurableApprovalDecision
             {
                 RequestId = pending.RequestId,
                 Approved = false,

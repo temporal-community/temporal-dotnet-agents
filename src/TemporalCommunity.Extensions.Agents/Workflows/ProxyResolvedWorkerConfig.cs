@@ -90,56 +90,45 @@ internal sealed record ProxyResolvedWorkerConfig
     // ── Feature B — Approval Scopes ──────────────────────────────────────────
 
     /// <summary>
-    /// When <see langword="true"/>, the agent has approval scopes enabled via
-    /// <c>UseApprovalScopes()</c>. The workflow loads always-scopes at session start and
-    /// writes scope records after approved decisions.
+    /// When <see langword="true"/>, the agent has session approval scopes enabled via
+    /// <c>UseApprovalScopes()</c>.
     /// </summary>
     public bool UseApprovalScopes { get; init; }
 
     /// <summary>
-    /// When <see langword="true"/>, the agent has an <see cref="Approvals.IApprovalScopeStore"/>
-    /// configured (per-agent or worker-level) AND <see cref="UseApprovalScopes"/> is true.
-    /// The workflow dispatches <c>AppendAlwaysScopeAsync</c> and <c>LoadAlwaysScopesAsync</c>
-    /// activities. This is independent of the workflow's in-event-history conversation state.
+    /// Legacy wire field retained so histories written by the removed cross-session store mode
+    /// remain deserializable. New workflow inputs always set this to false.
     /// </summary>
     public bool UseApprovalScopeStoreMode { get; init; }
 
     /// <summary>
-    /// The logical store key for always-scope records in <see cref="TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore"/>.
-    /// Configured via <see cref="ApprovalScopesOptions.AlwaysScopesStoreKey"/>.
-    /// <see langword="null"/> when approval scopes are not enabled.
+    /// Legacy wire field retained for replay compatibility. New workflow inputs set it to null.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? AlwaysScopesStoreKey { get; init; }
 
     /// <summary>
-    /// When <see langword="true"/>, always-scopes are loaded from the store at session start
-    /// and cached in StateBag. Configured via
-    /// <see cref="ApprovalScopesOptions.ApplyAlwaysScopesAtSessionStart"/>.
+    /// Legacy wire field retained for replay compatibility. New workflow inputs set it to false.
     /// </summary>
     public bool ApplyAlwaysScopesAtSessionStart { get; init; }
 
     /// <summary>
-    /// Maximum number of always-scope records that may be cached into workflow StateBag.
-    /// Configured via <see cref="ApprovalScopesOptions.MaxAlwaysScopeCacheRecords"/>.
+    /// Maximum number of reusable session grants retained in workflow StateBag.
     /// </summary>
     public int MaxAlwaysScopeCacheRecords { get; init; }
 
     /// <summary>
-    /// Maximum serialized byte size for the always-scope StateBag cache value.
-    /// Configured via <see cref="ApprovalScopesOptions.MaxAlwaysScopeCacheBytes"/>.
+    /// Maximum serialized byte size for reusable session grants.
     /// </summary>
     public int MaxAlwaysScopeCacheBytes { get; init; }
 
     /// <summary>
-    /// Start-to-close timeout for approval-scope store activities.
-    /// Configured via <see cref="ApprovalScopesOptions.ApprovalScopeActivityTimeout"/>.
+    /// Legacy wire field retained for replay compatibility.
     /// </summary>
     public TimeSpan ApprovalScopeActivityTimeout { get; init; }
 
     /// <summary>
-    /// Maximum attempts for approval-scope store activities.
-    /// Configured via <see cref="ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts"/>.
+    /// Legacy wire field retained for replay compatibility.
     /// </summary>
     public int ApprovalScopeActivityMaximumAttempts { get; init; }
 

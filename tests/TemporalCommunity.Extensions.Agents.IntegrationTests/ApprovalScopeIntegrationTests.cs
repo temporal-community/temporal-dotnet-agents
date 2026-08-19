@@ -96,6 +96,9 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
         var session = await proxy.CreateSessionAsync();
         var sessionId = ((TemporalAgentSession)session).SessionId;
         var handle = _env.Client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
+        var scopeAdministration = host.Services
+            .GetRequiredService<ITemporalAgentApprovalScopeAdministration>();
+        var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
 
         // ── Turn N ──────────────────────────────────────────────────────────────
 
@@ -117,12 +120,16 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
         // Approve Call A with Scope = Session.
         // This writes the scope record to _currentStateBag, but Call B's interceptor result
         // was already frozen in Phase 1 — Call B cannot see this record in the same turn.
-        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
+        var grant = await scopeAdministration.GrantSessionScopeAsync(sessionId, new SessionApprovalScopeGrantRequest
         {
             RequestId = callARequest!.RequestId,
-            Approved = true,
-            Scope = ApprovalScope.Session,
-        }));
+            MatchAllArguments = true,
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+            Actor = "integration-test-reviewer",
+            Reason = "Approved for this test session.",
+        });
+        Assert.Equal(DurableApprovalResolutionStatus.Accepted, grant.Resolution.Status);
+        Assert.False(string.IsNullOrWhiteSpace(grant.GrantId));
         _output.WriteLine("Turn N, Call A approved with Scope = Session.");
 
         // After Call A resolves, Phase 2 must now wait for Call B's separate approval.
@@ -147,11 +154,11 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
         _output.WriteLine($"Turn N, Call B still pending (one-turn lag confirmed): {callBRequest.RequestId}");
 
         // Approve Call B (plain approval, no scope).
-        await handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
+        await agentClient.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
         {
             RequestId = callBRequest!.RequestId,
             Approved = true,
-        }));
+        });
         _output.WriteLine("Turn N, Call B approved.");
 
         var turnNResponse = await turnNTask;
@@ -182,6 +189,7 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_env.Client);
         builder.Services.AddSingleton(client);
+        builder.Services.AddTemporalAgentApprovalScopeAdministration();
 
         var tool = AIFunctionFactory.Create(
             ([System.ComponentModel.Description("Path to write.")] string path) => $"Wrote {path}",

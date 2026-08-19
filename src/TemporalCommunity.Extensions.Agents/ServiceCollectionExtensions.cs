@@ -14,6 +14,24 @@ namespace TemporalCommunity.Extensions.Agents;
 public static class ServiceCollectionExtensions
 {
     /// <summary>
+    /// Registers the privileged, session-scoped approval-grant administration capability.
+    /// </summary>
+    /// <remarks>
+    /// This is deliberately separate from normal agent/client registration. Register it only in
+    /// an authenticated backend that authorizes the application resource before constructing a
+    /// <c>TemporalAgentSessionId</c>.
+    /// </remarks>
+    public static IServiceCollection AddTemporalAgentApprovalScopeAdministration(
+        this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.TryAddSingleton<ITemporalAgentApprovalScopeAdministration>(provider =>
+            new TemporalAgentApprovalScopeAdministration(
+                provider.GetRequiredService<ITemporalClient>()));
+        return services;
+    }
+
+    /// <summary>
     /// Gets a registered Temporal agent proxy by name.
     /// </summary>
     public static AIAgent GetTemporalAgentProxy(this IServiceProvider services, string name)

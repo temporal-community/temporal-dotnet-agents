@@ -57,4 +57,6 @@ public sealed class AgentToolContext : DurableToolContext
     /// <c>PauseForApproval</c> when no matching scope record is found.
     /// </summary>
     public bool RequiresApproval { get; init; }
+
+    internal DateTimeOffset ApprovalEvaluationTime { get; init; }
 }

@@ -23,6 +23,13 @@ authoritative application data immediately before the effect.
 The repository replay gates cover corrected-version histories containing blocked tool calls. They
 do not promise cross-version replay for this pre-release behavior change.
 
+This cutover also removes the pre-release `ResolveAgentApproval` Update and the cross-session
+approval-store activities. Drain every workflow with a pending approval or an active reusable
+scope before deploying the corrected worker. New workflows use the shared one-call
+`ResolveApproval` Update; a trusted backend may opt into `GrantSessionApprovalScope` and
+`RevokeSessionApprovalScope` for expiring grants in one session. Do not send these new Update names
+to an old worker or the removed Update/activity names to a corrected worker.
+
 ## Before the maintenance window
 
 1. Inventory every task queue that hosts package-owned `AgentWorkflow` or `AgentJobWorkflow` types.

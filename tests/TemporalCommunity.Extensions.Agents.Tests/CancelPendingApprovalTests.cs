@@ -89,7 +89,7 @@ public class CancelPendingApprovalTests
 
         public TemporalAgentSessionId? LastSubmittedSessionId { get; private set; }
 
-        public DurableAgentApprovalDecision? LastSubmittedDecision { get; private set; }
+        public DurableApprovalDecision? LastSubmittedDecision { get; private set; }
 
         public Task<DurableApprovalRequest?> GetPendingApprovalAsync(
             TemporalAgentSessionId sessionId,
@@ -101,7 +101,7 @@ public class CancelPendingApprovalTests
 
         public Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
             TemporalAgentSessionId sessionId,
-            DurableAgentApprovalDecision decision,
+            DurableApprovalDecision decision,
             CancellationToken cancellationToken = default)
         {
             ResolveApprovalCallCount++;
@@ -132,21 +132,5 @@ public class CancelPendingApprovalTests
         public Task ShutdownAsync(TemporalAgentSessionId sessionId, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
-        // IDurableSessionControl explicit implementations — not exercised by these tests but
-        // required to satisfy the interface contract. Delegate to the typed overloads above.
-        Task<DurableApprovalRequest?> IDurableSessionControl.GetPendingApprovalAsync(
-            string workflowId, CancellationToken ct) =>
-            GetPendingApprovalAsync(TemporalAgentSessionId.Parse(workflowId), ct);
-
-        Task<DurableApprovalResolutionResult> IDurableSessionControl.ResolveApprovalAsync(
-            string workflowId, DurableApprovalDecision decision, CancellationToken ct) =>
-            Task.FromResult(new DurableApprovalResolutionResult
-            {
-                RequestId = decision.RequestId,
-                Status = DurableApprovalResolutionStatus.Accepted,
-            });
-
-        Task IDurableSessionControl.ShutdownAsync(string workflowId, CancellationToken ct) =>
-            ShutdownAsync(TemporalAgentSessionId.Parse(workflowId), ct);
     }
 }

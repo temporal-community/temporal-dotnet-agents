@@ -12,7 +12,7 @@ namespace TemporalCommunity.Extensions.Agents.Approvals;
 /// workflow contract.
 /// </remarks>
 [JsonConverter(typeof(ApprovalScopeJsonConverter))]
-public enum ApprovalScope
+internal enum ApprovalScope
 {
     /// <summary>Approves this invocation only. No reusable scope record is written.</summary>
     ThisCallOnly = 0,
@@ -23,11 +23,6 @@ public enum ApprovalScope
     /// </summary>
     Session = 1,
 
-    /// <summary>
-    /// Approves a matching tool invocation for future agent sessions through the configured
-    /// approval-scope store.
-    /// </summary>
-    Always = 2,
 }
 
 /// <summary>Enforces integer-only serialization for <see cref="ApprovalScope"/>.</summary>

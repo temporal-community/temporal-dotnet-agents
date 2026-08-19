@@ -158,32 +158,6 @@ public class ApprovalScopeRegressionTests
         Assert.False(registration.UseApprovalScopes);
     }
 
-    [Fact]
-    public void AgentWithWorkerDefaultApprovalScopeStore_NoUseApprovalScopes_ApprovalScopesOptionsIsNull()
-    {
-        // Feature B off: agents without UseApprovalScopes() do not invoke a worker-level store
-        // factory, even when one is configured. Registration must have null ApprovalScopesOptions.
-        var workerInvocationCount = 0;
-        var options = new TemporalAgentsOptions
-        {
-            ApprovalScopeStore = _ =>
-            {
-                workerInvocationCount++;
-                return new FakeApprovalScopeStore();
-            }
-        };
-
-        var builder = new DurableAgentBuilder("NoScopeAgent");
-        builder.ChatClient = _ => new StubChatClientForRegressionTests();
-        // Intentionally NOT calling UseApprovalScopes().
-
-        var registration = builder.ToRegistration();
-
-        Assert.Null(registration.ApprovalScopesOptions);
-        Assert.False(registration.UseApprovalScopes);
-        Assert.Equal(0, workerInvocationCount); // factory not invoked at registration time
-    }
-
     // ── MAF-only scope decision defaults ────────────────────────────────────
 
     [Fact]

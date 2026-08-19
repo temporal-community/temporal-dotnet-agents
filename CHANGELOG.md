@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- Reduced approval authority to typed, one-call decisions. Removed the raw-workflow-ID session
+  control interface and permanent cross-session approval store, and added an explicitly registered
+  administrative service for constrained, expiring, revocable grants within one MAF session.
+
 - Added worker-owned durable toolsets for MEAI managed sessions and typed custom workflows. Thin
   clients no longer need tool schemas: workers register one implicit group with `AddDurableTools`
   or named groups with `AddDurableToolset`, and workflows resolve and record one immutable,

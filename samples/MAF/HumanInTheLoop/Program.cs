@@ -213,7 +213,7 @@ while (true)
 
         // ResolveApprovalAsync is retry-safe: the returned status distinguishes an
         // accepted decision from a duplicate delivery or a conflicting retry.
-        var resolution = await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
+        var resolution = await client.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
             Approved = choice == "approve",

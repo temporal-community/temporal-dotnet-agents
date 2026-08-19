@@ -111,14 +111,14 @@ internal sealed class DefaultTemporalAgentClient(
     /// <inheritdoc/>
     public async Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
         TemporalAgentSessionId sessionId,
-        DurableAgentApprovalDecision decision,
+        DurableApprovalDecision decision,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(decision);
 
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
         return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-            wf => wf.ResolveAgentApprovalAsync(decision),
+            wf => wf.ResolveApprovalAsync(decision),
             new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
             .ConfigureAwait(false);
     }
@@ -231,42 +231,6 @@ internal sealed class DefaultTemporalAgentClient(
             DurableChatWorkflowBase<AgentResponse>.ShutdownSignalName,
             Array.Empty<object>(),
             new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
-            .ConfigureAwait(false);
-    }
-
-    // ── IDurableSessionControl — explicit implementations ───────────────────
-    // ITemporalAgentClient.GetPendingApprovalAsync / ResolveApprovalAsync / ShutdownAsync take
-    // TemporalAgentSessionId. IDurableSessionControl uses string workflowId so approval
-    // dashboards can address any session directly without constructing a session-ID value.
-
-    async Task<DurableApprovalRequest?> IDurableSessionControl.GetPendingApprovalAsync(
-        string workflowId, CancellationToken ct)
-    {
-        var handle = client.GetWorkflowHandle<AgentWorkflow>(workflowId);
-        return await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
-            wf => wf.GetPendingApproval(),
-            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = ct } })
-            .ConfigureAwait(false);
-    }
-
-    async Task<DurableApprovalResolutionResult> IDurableSessionControl.ResolveApprovalAsync(
-        string workflowId, DurableApprovalDecision decision, CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(decision);
-        var handle = client.GetWorkflowHandle<AgentWorkflow>(workflowId);
-        return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-            wf => wf.ResolveApprovalAsync(decision),
-            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = ct } })
-            .ConfigureAwait(false);
-    }
-
-    async Task IDurableSessionControl.ShutdownAsync(string workflowId, CancellationToken ct)
-    {
-        var handle = client.GetWorkflowHandle(workflowId);
-        await handle.SignalAsync(
-            DurableChatWorkflowBase<AgentResponse>.ShutdownSignalName,
-            Array.Empty<object>(),
-            new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = ct } })
             .ConfigureAwait(false);
     }
 
@@ -401,13 +365,8 @@ internal sealed class DefaultTemporalAgentClient(
 
         // Feature B: resolve approval-scopes config.
         var useApprovalScopes = registration.UseApprovalScopes;
-        bool useApprovalScopeStoreMode = false;
-        string? alwaysScopesStoreKey = null;
-        bool applyAlwaysScopesAtSessionStart = false;
         int maxAlwaysScopeCacheRecords = 0;
         int maxAlwaysScopeCacheBytes = 0;
-        TimeSpan approvalScopeActivityTimeout = TimeSpan.Zero;
-        int approvalScopeActivityMaximumAttempts = 0;
 
         if (useApprovalScopes)
         {
@@ -423,24 +382,13 @@ internal sealed class DefaultTemporalAgentClient(
             var scopeOpts = registration.ApprovalScopesOptions!;
 
             // Options validation (positive bounds).
-            if (scopeOpts.MaxAlwaysScopeCacheRecords <= 0)
-                throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheRecords for agent '{agentName}' must be a positive integer.");
-            if (scopeOpts.MaxAlwaysScopeCacheBytes <= 0)
-                throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheBytes for agent '{agentName}' must be a positive integer.");
-            if (scopeOpts.ApprovalScopeActivityMaximumAttempts <= 0)
-                throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts for agent '{agentName}' must be a positive integer.");
-            if (scopeOpts.ApprovalScopeActivityTimeout <= TimeSpan.Zero)
-                throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityTimeout for agent '{agentName}' must be greater than TimeSpan.Zero.");
+            if (scopeOpts.MaxSessionScopeRecords <= 0)
+                throw new InvalidOperationException($"ApprovalScopesOptions.MaxSessionScopeRecords for agent '{agentName}' must be a positive integer.");
+            if (scopeOpts.MaxSessionScopeBytes <= 0)
+                throw new InvalidOperationException($"ApprovalScopesOptions.MaxSessionScopeBytes for agent '{agentName}' must be a positive integer.");
 
-            var hasScopeStore = scopeOpts.ApprovalScopeStore is not null
-                             || options.ApprovalScopeStore is not null;
-            useApprovalScopeStoreMode = hasScopeStore;
-            alwaysScopesStoreKey = scopeOpts.AlwaysScopesStoreKey;
-            applyAlwaysScopesAtSessionStart = scopeOpts.ApplyAlwaysScopesAtSessionStart;
-            maxAlwaysScopeCacheRecords = scopeOpts.MaxAlwaysScopeCacheRecords;
-            maxAlwaysScopeCacheBytes = scopeOpts.MaxAlwaysScopeCacheBytes;
-            approvalScopeActivityTimeout = scopeOpts.ApprovalScopeActivityTimeout;
-            approvalScopeActivityMaximumAttempts = scopeOpts.ApprovalScopeActivityMaximumAttempts;
+            maxAlwaysScopeCacheRecords = scopeOpts.MaxSessionScopeRecords;
+            maxAlwaysScopeCacheBytes = scopeOpts.MaxSessionScopeBytes;
         }
 
         // Startup validation for scope-aware required tools without UseApprovalScopes.
@@ -497,13 +445,13 @@ internal sealed class DefaultTemporalAgentClient(
                 ScopeAwareTools = scopeAwareTools,
                 ScopeAwareApprovalTools = scopeAwareApprovalTools,
                 UseApprovalScopes = useApprovalScopes,
-                UseApprovalScopeStoreMode = useApprovalScopeStoreMode,
-                AlwaysScopesStoreKey = alwaysScopesStoreKey,
-                ApplyAlwaysScopesAtSessionStart = applyAlwaysScopesAtSessionStart,
+                UseApprovalScopeStoreMode = false,
+                AlwaysScopesStoreKey = null,
+                ApplyAlwaysScopesAtSessionStart = false,
                 MaxAlwaysScopeCacheRecords = maxAlwaysScopeCacheRecords,
                 MaxAlwaysScopeCacheBytes = maxAlwaysScopeCacheBytes,
-                ApprovalScopeActivityTimeout = approvalScopeActivityTimeout,
-                ApprovalScopeActivityMaximumAttempts = approvalScopeActivityMaximumAttempts,
+                ApprovalScopeActivityTimeout = TimeSpan.Zero,
+                ApprovalScopeActivityMaximumAttempts = 0,
             },
         };
     }

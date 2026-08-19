@@ -142,19 +142,6 @@ public sealed class TemporalAgentsOptions
     public string? DefaultHistoryReducerKey { get; set; }
 
     /// <summary>
-    /// Gets or sets the worker-level default <see cref="IApprovalScopeStore"/> factory for
-    /// always-scope persistence. When a per-agent <see cref="ApprovalScopesOptions.ApprovalScopeStore"/>
-    /// is unset, the agent inherits this value when <c>UseApprovalScopes()</c> is configured.
-    /// </summary>
-    /// <remarks>
-    /// A worker-level approval-scope store does not enable Feature B by itself. Approval scopes
-    /// are activated per agent by calling <c>UseApprovalScopes()</c> on the
-    /// <see cref="DurableAgentBuilder"/>. Agents that have not opted in will not invoke this
-    /// factory — even when it is configured.
-    /// </remarks>
-    public Func<IServiceProvider, IApprovalScopeStore>? ApprovalScopeStore { get; set; }
-
-    /// <summary>
     /// Gets or sets the worker-level default interceptor factory. Accepts any factory that
     /// produces an <see cref="IDurableToolInterceptor{TContext}"/> for
     /// <see cref="AgentToolContext"/> — including factories that return

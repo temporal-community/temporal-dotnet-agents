@@ -26,6 +26,9 @@ public class NormalizeScopeTests
             Approved = true,
             Scope = scope,
             ScopePattern = pattern,
+            MatchAllArguments = pattern is null && scope == ApprovalScope.Session,
+            GrantId = scope == ApprovalScope.Session ? "grant-1" : null,
+            ExpiresAt = scope == ApprovalScope.Session ? DateTimeOffset.Parse("2030-01-01T00:00:00Z") : null,
         };
 
     private static ApprovalScopePattern GlobPattern(string patternStr, string? parameter = "path") =>
@@ -60,10 +63,10 @@ public class NormalizeScopeTests
     }
 
     [Fact]
-    public void Always_WhitespaceOnlyPattern_ReturnsThisCallOnly()
+    public void Session_WhitespaceOnlyPattern_ReturnsThisCallOnly()
     {
         var pattern = new ApprovalScopePattern { Type = PatternMatchType.Glob, Pattern = "   ", Parameter = "path" };
-        var decision = Decision(ApprovalScope.Always, pattern);
+        var decision = Decision(ApprovalScope.Session, pattern);
         var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.ThisCallOnly, scope);
@@ -109,10 +112,10 @@ public class NormalizeScopeTests
     // ── Malformed Regex pattern ──────────────────────────────────────────────
 
     [Fact]
-    public void Always_MalformedRegexPattern_ReturnsThisCallOnly()
+    public void Session_MalformedRegexPattern_ReturnsThisCallOnly()
     {
         var pattern = RegexPattern("[unclosed");
-        var decision = Decision(ApprovalScope.Always, pattern);
+        var decision = Decision(ApprovalScope.Session, pattern);
         var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.ThisCallOnly, scope);
@@ -131,16 +134,6 @@ public class NormalizeScopeTests
         Assert.Null(reason);
     }
 
-    [Fact]
-    public void Always_NullScopePattern_ReturnsAlways()
-    {
-        var decision = Decision(ApprovalScope.Always, pattern: null);
-        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
-
-        Assert.Equal(ApprovalScope.Always, scope);
-        Assert.Null(reason);
-    }
-
     // ── Valid patterns pass through unchanged ────────────────────────────────
 
     [Fact]
@@ -150,16 +143,6 @@ public class NormalizeScopeTests
         var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
 
         Assert.Equal(ApprovalScope.Session, scope);
-        Assert.Null(reason);
-    }
-
-    [Fact]
-    public void Always_ValidGlobPattern_ReturnsAlways()
-    {
-        var decision = Decision(ApprovalScope.Always, GlobPattern("/tmp/*"));
-        var (scope, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
-
-        Assert.Equal(ApprovalScope.Always, scope);
         Assert.Null(reason);
     }
 

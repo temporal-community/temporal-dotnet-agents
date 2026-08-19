@@ -1,13 +1,10 @@
-// ApprovalScopes — demonstrates Feature B (Approval Scopes) with all three scope levels:
-// ThisCallOnly, Session, and Always. Uses a JsonFileApprovalScopeStore so Always-scope
-// decisions survive process restarts.
+// ApprovalScopes — demonstrates ordinary one-call approval and explicit, expiring session grants.
 //
 // Run:  dotnet run --project samples/MAF/ApprovalScopes/ApprovalScopes.csproj
 
 using System.ClientModel;
 using System.Collections.Concurrent;
 using System.ComponentModel;
-using System.Diagnostics;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -15,7 +12,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
-using ApprovalScopes;
 using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
@@ -80,9 +76,9 @@ var writeFileTool = AIFunctionFactory.Create(
     description: "Write content to a file. WRITE — non-idempotent. Requires approval.");
 
 // ── DI registration ───────────────────────────────────────────────────────────
-builder.Services.AddSingleton<JsonFileApprovalScopeStore>();
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient());
 builder.Services.AddTemporalClient(temporalAddress, "default");
+builder.Services.AddTemporalAgentApprovalScopeAdministration();
 
 builder.Services
     .AddHostedTemporalWorker("approval-scopes-sample")
@@ -112,13 +108,8 @@ builder.Services
             // ScopedApprovalInterceptor bypass the gate when a matching scope is present.
             agent.AddTool(writeFileTool, t => t.NoRetry().RequireApproval().ScopeAware());
 
-            // UseApprovalScopes installs the built-in ScopedApprovalInterceptor and
-            // wires the JsonFileApprovalScopeStore for Always-scope persistence.
-            agent.UseApprovalScopes(scopes =>
-            {
-                scopes.ApprovalScopeStore =
-                    sp => sp.GetRequiredService<JsonFileApprovalScopeStore>();
-            });
+            // Reusable grants are session-bound, explicitly constrained, and expire.
+            agent.UseApprovalScopes();
         });
     });
 
@@ -140,8 +131,6 @@ Console.WriteLine("║    [0] Deny                                          ║"
 Console.WriteLine("║    [1] Approve (this call only)                      ║");
 Console.WriteLine("║    [2] Approve for this session — any write_file     ║");
 Console.WriteLine("║    [3] Approve for this session — /tmp/* (Glob)      ║");
-Console.WriteLine("║    [4] Approve always — any write_file  [persisted]  ║");
-Console.WriteLine("║    [5] Approve always — /tmp/* (Glob)  [persisted]   ║");
 Console.WriteLine("║  Type 'quit' to exit.                                ║");
 Console.WriteLine("╚══════════════════════════════════════════════════════╝");
 Console.WriteLine();
@@ -153,6 +142,7 @@ Console.WriteLine();
 // ── Resolve services ──────────────────────────────────────────────────────────
 var proxy  = host.Services.GetTemporalAgentProxy("FileAssistant");
 var client = host.Services.GetRequiredService<ITemporalAgentClient>();
+var scopeAdmin = host.Services.GetRequiredService<ITemporalAgentApprovalScopeAdministration>();
 
 // ── Conversation session ──────────────────────────────────────────────────────
 var session = await proxy.CreateSessionAsync();
@@ -212,20 +202,18 @@ while (true)
         Console.WriteLine("    [1] Approve (this call only)");
         Console.WriteLine("    [2] Approve for this session  — any write_file call");
         Console.WriteLine("    [3] Approve for this session  — paths matching /tmp/* (Glob)");
-        Console.WriteLine("    [4] Approve always            — any write_file call  [persisted]");
-        Console.WriteLine("    [5] Approve always            — paths matching /tmp/* (Glob) [persisted]");
 
         string choice;
         do
         {
-            Console.Write("\n  Enter choice [0-5]: ");
+            Console.Write("\n  Enter choice [0-3]: ");
             choice = (Console.ReadLine() ?? string.Empty).Trim();
         }
-        while (choice is not "0" and not "1" and not "2" and not "3" and not "4" and not "5");
+        while (choice is not "0" and not "1" and not "2" and not "3");
 
         if (choice == "0")
         {
-            var denialResolution = await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
+            var denialResolution = await client.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
             {
                 RequestId = pending.RequestId,
                 Approved  = false,
@@ -236,8 +224,8 @@ while (true)
         }
 
         // Build the optional argument-level scope pattern.
-        // Choices 3 and 5 scope to paths matching /tmp/* via Glob on the "path" parameter.
-        ApprovalScopePattern? pattern = choice is "3" or "5"
+        // Choice 3 scopes to paths matching /tmp/* via Glob on the "path" parameter.
+        ApprovalScopePattern? pattern = choice is "3"
             ? new ApprovalScopePattern
               {
                   Type      = PatternMatchType.Glob,
@@ -246,34 +234,32 @@ while (true)
               }
             : null;
 
-        ApprovalScope scope = choice switch
+        if (choice == "1")
         {
-            "2" or "3" => ApprovalScope.Session,
-            "4" or "5" => ApprovalScope.Always,
-            _           => ApprovalScope.ThisCallOnly,
-        };
+            var oneCall = await client.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
+            {
+                RequestId = pending.RequestId,
+                Approved = true,
+            });
+            Console.WriteLine($"\n  Approved [this call only] ({oneCall.Status}) — agent is resuming...\n");
+            continue;
+        }
 
-        // ResolveApprovalAsync is retry-safe and supports MAF-specific scopes.
-        var resolution = await client.ResolveApprovalAsync(sessionId, new DurableAgentApprovalDecision
+        // Session grants are a separate, opt-in administrative capability. A real dashboard
+        // must authenticate the reviewer and authorize the application resource before calling it.
+        var resolution = await scopeAdmin.GrantSessionScopeAsync(sessionId, new SessionApprovalScopeGrantRequest
         {
-            RequestId    = pending.RequestId,
-            Approved     = true,
-            Scope        = scope,
-            ScopePattern = pattern,
+            RequestId = pending.RequestId,
+            Pattern = pattern,
+            MatchAllArguments = pattern is null,
+            ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(30),
+            Actor = "interactive-sample-reviewer",
         });
 
-        var label = (scope, pattern) switch
-        {
-            (ApprovalScope.Session, null)     => "session (any write_file)",
-            (ApprovalScope.Session, not null) => "session (paths matching /tmp/*)",
-            (ApprovalScope.Always,  null)     => "always (any write_file) — persisted",
-            (ApprovalScope.Always,  not null) => "always (paths matching /tmp/*) — persisted",
-            (ApprovalScope.ThisCallOnly, _)   => "this call only",
-            _                                 => throw new UnreachableException("Unexpected scope/pattern combination."),
-        };
-        Console.WriteLine(resolution.Status is DurableApprovalResolutionStatus.Accepted
+        var label = pattern is null ? "session (any write_file)" : "session (paths matching /tmp/*)";
+        Console.WriteLine(resolution.Resolution.Status is DurableApprovalResolutionStatus.Accepted
             ? $"\n  Approved [{label}] — agent is resuming...\n"
-            : $"\n  Approval was not applied: {resolution.Status}.\n");
+            : $"\n  Approval was not applied: {resolution.Resolution.Status}.\n");
         // No break: the agent may call write_file again in the same turn, queuing
         // another approval. The poll loop continues until agentTask completes.
     }

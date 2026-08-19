@@ -21,7 +21,7 @@ internal static class ApprovalScopeCoordinator
 
     /// <summary>
     /// Returns <see langword="true"/> when the given <paramref name="scopes"/> fit within
-    /// both the record-count and byte-size budgets for the always-scope StateBag cache.
+    /// both the record-count and byte-size budgets for the session-scope StateBag cache.
     /// </summary>
     /// <remarks>
     /// Deterministic: serializes using <see cref="TemporalAgentJsonUtilities.DefaultOptions"/>
@@ -29,7 +29,7 @@ internal static class ApprovalScopeCoordinator
     /// returns <see langword="false"/> — the caller skips the always-cache merge for this
     /// run but continues normally.
     /// </remarks>
-    internal static bool IsWithinAlwaysScopeCacheBudget(
+    internal static bool IsWithinSessionScopeBudget(
         IReadOnlyList<ApprovalScopeRecord> scopes,
         int maxRecords,
         int maxBytes,
@@ -39,9 +39,8 @@ internal static class ApprovalScopeCoordinator
         if (scopes.Count > maxRecords)
         {
             logger.LogWarning(
-                "[{SessionId}] Always-scope cache load skipped: loaded {Count} records exceeds " +
-                "MaxAlwaysScopeCacheRecords ({Max}). Scope-aware tools will require normal " +
-                "approval this session.",
+                "[{SessionId}] Session approval grant rejected: {Count} records exceeds " +
+                "MaxSessionScopeRecords ({Max}).",
                 sessionId, scopes.Count, maxRecords);
             return false;
         }
@@ -51,9 +50,8 @@ internal static class ApprovalScopeCoordinator
         if (byteCount > maxBytes)
         {
             logger.LogWarning(
-                "[{SessionId}] Always-scope cache load skipped: serialized size {Bytes:N0} bytes " +
-                "exceeds MaxAlwaysScopeCacheBytes ({Max:N0}). Scope-aware tools will require " +
-                "normal approval this session.",
+                "[{SessionId}] Session approval grant rejected: serialized size {Bytes:N0} bytes " +
+                "exceeds MaxSessionScopeBytes ({Max:N0}).",
                 sessionId, byteCount, maxBytes);
             return false;
         }
@@ -80,10 +78,15 @@ internal static class ApprovalScopeCoordinator
         JsonElement? currentStateBag,
         string toolName,
         ApprovalScopePattern? pattern,
+        bool matchAllArguments,
+        string grantId,
+        DateTimeOffset expiresAt,
+        string? actor,
+        string? reason,
         string originatingRequestId,
         DateTimeOffset grantedAt,
-        int maxAlwaysScopeCacheRecords,
-        int maxAlwaysScopeCacheBytes,
+        int maxSessionScopeRecords,
+        int maxSessionScopeBytes,
         string sessionId,
         ILogger logger)
     {
@@ -102,10 +105,15 @@ internal static class ApprovalScopeCoordinator
 
         var newRecord = new ApprovalScopeRecord
         {
+            GrantId = grantId,
             ToolName = toolName,
             Pattern = pattern,
+            MatchAllArguments = matchAllArguments,
             GrantedAt = grantedAt,
+            ExpiresAt = expiresAt,
             OriginatingRequestId = originatingRequestId,
+            Actor = actor,
+            Reason = reason,
         };
 
         // Dedup by (ToolName, Pattern): drop any prior record with the same identity so the
@@ -122,19 +130,19 @@ internal static class ApprovalScopeCoordinator
         }
         deduped.Add(newRecord);
 
-        // Bound the session cache by reusing the always-scope budget. On overflow, reject the
+        // Bound the session cache. On overflow, reject the
         // new grant (degrade to this-call-only) and keep the pre-existing records untouched.
-        if (!IsWithinAlwaysScopeCacheBudget(
+        if (!IsWithinSessionScopeBudget(
                 deduped,
-                maxAlwaysScopeCacheRecords,
-                maxAlwaysScopeCacheBytes,
+                maxSessionScopeRecords,
+                maxSessionScopeBytes,
                 sessionId,
                 logger))
         {
             logger.LogWarning(
                 "[{SessionId}] Session-scope grant for tool '{ToolName}' (RequestId: {RequestId}) " +
-                "rejected: it would exceed the session-scope budget (reusing MaxAlwaysScopeCacheRecords/" +
-                "MaxAlwaysScopeCacheBytes). Degrading this approval to this-call-only; the tool still runs " +
+                "rejected: it would exceed MaxSessionScopeRecords/MaxSessionScopeBytes. " +
+                "Degrading this approval to this-call-only; the tool still runs " +
                 "but no reusable session record is persisted.",
                 sessionId, toolName, originatingRequestId);
             return currentStateBag;
@@ -155,43 +163,36 @@ internal static class ApprovalScopeCoordinator
         return updatedBag;
     }
 
-    // ── Always-scope merge ───────────────────────────────────────────────────
-
-    /// <summary>
-    /// Replaces the always-scope cache entry in <paramref name="currentStateBag"/> under
-    /// <paramref name="storeKey"/> with <paramref name="scopes"/>.
-    /// Uses replacement semantics (not additive append); deduplicates by
-    /// <see cref="ApprovalScopeRecord.OriginatingRequestId"/> while preserving store order.
-    /// Session scopes under <c>temporal.approval_scopes.session</c> are not affected.
-    /// Returns the updated bag.
-    /// </summary>
-    internal static JsonElement? MergeAlwaysScopesIntoStateBag(
+    internal static (JsonElement? StateBag, bool Removed) RevokeSessionScopeFromStateBag(
         JsonElement? currentStateBag,
-        IReadOnlyList<ApprovalScopeRecord> scopes,
-        string storeKey)
+        string grantId)
     {
-        var bag = currentStateBag is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } bagEl
-            ? AgentSessionStateBag.Deserialize(bagEl)
-            : new AgentSessionStateBag();
-
-        // Deduplication by OriginatingRequestId while preserving store order.
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var deduped = new List<ApprovalScopeRecord>(scopes.Count);
-        foreach (var record in scopes)
+        const string sessionScopeKey = "temporal.approval_scopes.session";
+        if (currentStateBag is not { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } bagElement)
         {
-            if (seen.Add(record.OriginatingRequestId))
-            {
-                deduped.Add(record);
-            }
+            return (currentStateBag, false);
         }
 
-        // Replace (not append) — replacement semantics per spec Section 7.
-        bag.SetValue<List<ApprovalScopeRecord>>(
-            storeKey,
-            deduped,
+        var bag = AgentSessionStateBag.Deserialize(bagElement);
+        bag.TryGetValue<List<ApprovalScopeRecord>>(
+            sessionScopeKey,
+            out var existing,
             TemporalAgentJsonUtilities.DefaultOptions);
+        if (existing is null)
+        {
+            return (currentStateBag, false);
+        }
 
-        return bag.Serialize();
+        var retained = existing
+            .Where(record => !string.Equals(record.GrantId, grantId, StringComparison.Ordinal))
+            .ToList();
+        if (retained.Count == existing.Count)
+        {
+            return (currentStateBag, false);
+        }
+
+        bag.SetValue(sessionScopeKey, retained, TemporalAgentJsonUtilities.DefaultOptions);
+        return (bag.Serialize(), true);
     }
 
     // ── Scope normalization ──────────────────────────────────────────────────
@@ -221,11 +222,23 @@ internal static class ApprovalScopeCoordinator
         if (scope == ApprovalScope.ThisCallOnly)
             return (ApprovalScope.ThisCallOnly, null);
 
-        // scope == Session or Always: validate the ScopePattern if non-null.
+        if (string.IsNullOrWhiteSpace(decision.GrantId) || decision.ExpiresAt is null)
+        {
+            return (ApprovalScope.ThisCallOnly,
+                "Session scope requires a grant ID and expiry from the administrative API.");
+        }
+
+        if ((decision.ScopePattern is null) == !decision.MatchAllArguments)
+        {
+            return (ApprovalScope.ThisCallOnly,
+                "Session scope requires exactly one of an argument pattern or explicit match-all intent.");
+        }
+
+        // Session scope: validate the explicit pattern when present.
         var pattern = decision.ScopePattern;
         if (pattern is null)
         {
-            // Null pattern = wildcard; valid for Session and Always.
+            // Match-all intent was validated above.
             return (scope, null);
         }
 
@@ -289,39 +302,4 @@ internal static class ApprovalScopeCoordinator
             pattern.Pattern);
     }
 
-    // ── Always-scope load helper ─────────────────────────────────────────────
-
-    /// <summary>
-    /// Loads always-scopes and merges them into <paramref name="currentStateBag"/> when the
-    /// budget permits. Returns the (possibly updated) bag and sets
-    /// <paramref name="alwaysScopesLoadedThisRun"/> to <see langword="true"/>.
-    /// </summary>
-    /// <remarks>
-    /// Handles the shared post-load logic for both Sub-section A (direct-start) and
-    /// Sub-section B (proxy-start) injection points in <see cref="AgentWorkflow"/>.
-    /// The activity dispatch and catch remain in the workflow; this helper owns only the
-    /// conditional merge that follows a successful load.
-    /// </remarks>
-    internal static JsonElement? ApplyLoadedAlwaysScopes(
-        JsonElement? currentStateBag,
-        LoadAlwaysScopesResult? loaded,
-        int maxAlwaysScopeCacheRecords,
-        int maxAlwaysScopeCacheBytes,
-        string alwaysScopesStoreKey,
-        string sessionId,
-        ILogger logger)
-    {
-        if (loaded?.Scopes is { Count: > 0 } scopes &&
-            IsWithinAlwaysScopeCacheBudget(
-                scopes,
-                maxAlwaysScopeCacheRecords,
-                maxAlwaysScopeCacheBytes,
-                sessionId,
-                logger))
-        {
-            return MergeAlwaysScopesIntoStateBag(currentStateBag, scopes, alwaysScopesStoreKey);
-        }
-
-        return currentStateBag;
-    }
 }

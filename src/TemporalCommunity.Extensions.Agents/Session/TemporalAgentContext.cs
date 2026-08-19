@@ -121,7 +121,7 @@ public sealed class TemporalAgentContext
     /// The workflow will then reject any new <c>RunAgentAsync</c> updates until the stale approval
     /// is resolved. To recover, submit an explicit denial externally using
     /// <see cref="ITemporalAgentClient.ResolveApprovalAsync"/> with a
-    /// <see cref="DurableAgentApprovalDecision"/> whose <c>Approved</c> is
+    /// <see cref="TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision"/> whose <c>Approved</c> is
     /// <see langword="false"/>.
     /// </para>
     /// </remarks>

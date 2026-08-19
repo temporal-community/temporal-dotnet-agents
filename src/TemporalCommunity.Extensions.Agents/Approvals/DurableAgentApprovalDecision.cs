@@ -6,7 +6,7 @@ namespace TemporalCommunity.Extensions.Agents.Approvals;
 /// A human decision on a pending agent-tool approval request, including the optional
 /// agent-specific reusable approval scope.
 /// </summary>
-public sealed class DurableAgentApprovalDecision
+internal sealed class DurableAgentApprovalDecision
 {
     /// <summary>The request ID this decision applies to.</summary>
     public required string RequestId { get; init; }
@@ -30,4 +30,13 @@ public sealed class DurableAgentApprovalDecision
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ApprovalScopePattern? ScopePattern { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal string? GrantId { get; init; }
+
+    internal bool MatchAllArguments { get; init; }
+
+    internal DateTimeOffset? ExpiresAt { get; init; }
+
+    internal string? Actor { get; init; }
 }

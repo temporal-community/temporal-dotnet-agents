@@ -423,7 +423,7 @@ public async Task ResolveApproval_BeforeTimeout_ReturnsAcceptedResult()
     // Configure a 5-minute approval timeout
     // Start approval in background, then submit decision
 
-    var approvalDecision = new DurableAgentApprovalDecision
+    var approvalDecision = new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
         Approved  = true,
@@ -431,7 +431,7 @@ public async Task ResolveApproval_BeforeTimeout_ReturnsAcceptedResult()
     };
 
     var result = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-        wf => wf.ResolveAgentApprovalAsync(approvalDecision));
+        wf => wf.ResolveApprovalAsync(approvalDecision));
 
     Assert.Equal(DurableApprovalResolutionStatus.Accepted, result.Status);
 }

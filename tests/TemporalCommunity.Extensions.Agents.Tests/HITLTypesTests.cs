@@ -117,7 +117,9 @@ public class HITLTypesTests
         {
             RequestId = "req-scope-pattern",
             Approved = true,
-            Scope = ApprovalScope.Always,
+            Scope = ApprovalScope.Session,
+            GrantId = "grant-1",
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
             ScopePattern = new ApprovalScopePattern
             {
                 Type = PatternMatchType.Glob,

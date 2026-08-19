@@ -57,4 +57,7 @@ internal sealed class DurableToolInterceptorInput
     [System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool RequiresApproval { get; init; }
+
+    /// <summary>Replay-safe workflow time used to evaluate expiring session grants.</summary>
+    public DateTimeOffset? ApprovalEvaluationTime { get; init; }
 }

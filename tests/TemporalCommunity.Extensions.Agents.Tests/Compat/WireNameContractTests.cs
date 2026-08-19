@@ -81,8 +81,6 @@ public class WireNameContractTests
         "TemporalCommunity.Extensions.Agents.ReduceHistoryByKey",
         "TemporalCommunity.Extensions.Agents.RunDurableAgentStep",
         "TemporalCommunity.Extensions.Agents.RunToolInterceptor",
-        "TemporalCommunity.Extensions.Agents.LoadAlwaysScopes",
-        "TemporalCommunity.Extensions.Agents.AppendAlwaysScope",
         "TemporalCommunity.Extensions.Agents.InvokeAgentTool",
     };
 

@@ -15,6 +15,8 @@ namespace TemporalCommunity.Extensions.Agents.State;
 [JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision))]
 [JsonSerializable(typeof(List<TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision>))]
 [JsonSerializable(typeof(IReadOnlyList<TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision>))]
+[JsonSerializable(typeof(SessionApprovalScopeGrantRequest))]
+[JsonSerializable(typeof(SessionApprovalScopeGrantResult))]
 [JsonSerializable(typeof(DurableSessionEntry))]
 [JsonSerializable(typeof(DurableSessionRequest))]
 [JsonSerializable(typeof(DurableSessionResponse))]
@@ -31,10 +33,7 @@ namespace TemporalCommunity.Extensions.Agents.State;
 // TemporalCommunity.Extensions.AI (DurableAIJsonContext already registers them); only the
 // Agents-specific input type needs registration here.
 [JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Workflows.DurableToolInterceptorInput))]
-// Feature B — approval-scope store activity I/O
-[JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Workflows.AppendAlwaysScopeInput))]
-[JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Workflows.LoadAlwaysScopesInput))]
-[JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Workflows.LoadAlwaysScopesResult))]
+// Common dictionary payloads
 [JsonSerializable(typeof(Dictionary<string, string>))]
 // Function call and result content
 [JsonSerializable(typeof(Dictionary<string, object>))]

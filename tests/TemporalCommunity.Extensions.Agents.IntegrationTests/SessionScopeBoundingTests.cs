@@ -151,7 +151,7 @@ public class SessionScopeBoundingTests : IClassFixture<SessionScopeBoundingTests
             await ApproveAsync(handle, p2, ApprovalScope.Session);
             await t2;
 
-            Assert.True(capture.ContainsLog(LogLevel.Warning, "session-scope", "budget"),
+            Assert.True(capture.ContainsLog(LogLevel.Warning, "Session approval grant rejected"),
                 "Expected a session-scope budget-overflow warning for the distinct grant.");
 
             // Turn 3: tool_a still auto-approves (record persisted), tool_b re-prompts (rejected).
@@ -198,13 +198,29 @@ public class SessionScopeBoundingTests : IClassFixture<SessionScopeBoundingTests
         return null;
     }
 
-    private static Task ApproveAsync(WorkflowHandle<AgentWorkflow> handle, DurableApprovalRequest req, ApprovalScope scope) =>
-        handle.ExecuteUpdateAsync(wf => wf.ResolveAgentApprovalAsync(new DurableAgentApprovalDecision
+    private static async Task ApproveAsync(
+        WorkflowHandle<AgentWorkflow> handle,
+        DurableApprovalRequest req,
+        ApprovalScope scope)
+    {
+        if (scope == ApprovalScope.Session)
+        {
+            _ = await handle.ExecuteUpdateAsync(wf => wf.GrantSessionApprovalScopeAsync(
+                new SessionApprovalScopeGrantRequest
+                {
+                    RequestId = req.RequestId,
+                    MatchAllArguments = true,
+                    ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
+                }));
+            return;
+        }
+
+        _ = await handle.ExecuteUpdateAsync(wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
         {
             RequestId = req.RequestId,
             Approved = true,
-            Scope = scope,
         }));
+    }
 
     private IHost BuildSingleToolHost(
         string agentName, IChatClient client, string toolName,
@@ -251,7 +267,7 @@ public class SessionScopeBoundingTests : IClassFixture<SessionScopeBoundingTests
                     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
                     configureTools(agent);
                     // Tight budget so a second distinct session grant overflows.
-                    agent.UseApprovalScopes(o => o.MaxAlwaysScopeCacheRecords = maxRecords);
+                    agent.UseApprovalScopes(o => o.MaxSessionScopeRecords = maxRecords);
                 });
             });
 

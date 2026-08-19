@@ -445,36 +445,21 @@ internal sealed class AgentActivities(
 
                 // Feature B: resolve approval-scopes config for proxy-start resolution.
                 var useApprovalScopes = registration.UseApprovalScopes;
-                bool useApprovalScopeStoreMode = false;
-                string? alwaysScopesStoreKey = null;
-                bool applyAlwaysScopesAtSessionStart = false;
                 int maxAlwaysScopeCacheRecords = 0;
                 int maxAlwaysScopeCacheBytes = 0;
-                TimeSpan approvalScopeActivityTimeout = TimeSpan.Zero;
-                int approvalScopeActivityMaximumAttempts = 0;
 
                 if (useApprovalScopes)
                 {
                     var scopeOpts = registration.ApprovalScopesOptions!;
 
                     // Options validation (positive bounds) — same as direct-start path.
-                    if (scopeOpts.MaxAlwaysScopeCacheRecords <= 0)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheRecords for agent '{registration.Name}' must be a positive integer.");
-                    if (scopeOpts.MaxAlwaysScopeCacheBytes <= 0)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxAlwaysScopeCacheBytes for agent '{registration.Name}' must be a positive integer.");
-                    if (scopeOpts.ApprovalScopeActivityMaximumAttempts <= 0)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityMaximumAttempts for agent '{registration.Name}' must be a positive integer.");
-                    if (scopeOpts.ApprovalScopeActivityTimeout <= TimeSpan.Zero)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.ApprovalScopeActivityTimeout for agent '{registration.Name}' must be greater than TimeSpan.Zero.");
+                    if (scopeOpts.MaxSessionScopeRecords <= 0)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxSessionScopeRecords for agent '{registration.Name}' must be a positive integer.");
+                    if (scopeOpts.MaxSessionScopeBytes <= 0)
+                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxSessionScopeBytes for agent '{registration.Name}' must be a positive integer.");
 
-                    useApprovalScopeStoreMode = scopeOpts.ApprovalScopeStore is not null
-                                             || agentsOptions.ApprovalScopeStore is not null;
-                    alwaysScopesStoreKey = scopeOpts.AlwaysScopesStoreKey;
-                    applyAlwaysScopesAtSessionStart = scopeOpts.ApplyAlwaysScopesAtSessionStart;
-                    maxAlwaysScopeCacheRecords = scopeOpts.MaxAlwaysScopeCacheRecords;
-                    maxAlwaysScopeCacheBytes = scopeOpts.MaxAlwaysScopeCacheBytes;
-                    approvalScopeActivityTimeout = scopeOpts.ApprovalScopeActivityTimeout;
-                    approvalScopeActivityMaximumAttempts = scopeOpts.ApprovalScopeActivityMaximumAttempts;
+                    maxAlwaysScopeCacheRecords = scopeOpts.MaxSessionScopeRecords;
+                    maxAlwaysScopeCacheBytes = scopeOpts.MaxSessionScopeBytes;
                 }
 
                 resolvedConfig = new ProxyResolvedWorkerConfig
@@ -488,13 +473,13 @@ internal sealed class AgentActivities(
                     ScopeAwareTools = scopeAwareTools,
                     ScopeAwareApprovalTools = scopeAwareApprovalTools,
                     UseApprovalScopes = useApprovalScopes,
-                    UseApprovalScopeStoreMode = useApprovalScopeStoreMode,
-                    AlwaysScopesStoreKey = alwaysScopesStoreKey,
-                    ApplyAlwaysScopesAtSessionStart = applyAlwaysScopesAtSessionStart,
+                    UseApprovalScopeStoreMode = false,
+                    AlwaysScopesStoreKey = null,
+                    ApplyAlwaysScopesAtSessionStart = false,
                     MaxAlwaysScopeCacheRecords = maxAlwaysScopeCacheRecords,
                     MaxAlwaysScopeCacheBytes = maxAlwaysScopeCacheBytes,
-                    ApprovalScopeActivityTimeout = approvalScopeActivityTimeout,
-                    ApprovalScopeActivityMaximumAttempts = approvalScopeActivityMaximumAttempts,
+                    ApprovalScopeActivityTimeout = TimeSpan.Zero,
+                    ApprovalScopeActivityMaximumAttempts = 0,
                 };
             }
 
@@ -820,6 +805,7 @@ internal sealed class AgentActivities(
             // Feature B: pass through scope-aware fields so the interceptor can consult scope records.
             ScopeAware = input.ScopeAware,
             RequiresApproval = input.RequiresApproval,
+            ApprovalEvaluationTime = input.ApprovalEvaluationTime ?? DateTimeOffset.MinValue,
         };
 
         // Snapshot the bag's serialized form before the interceptor runs so we can detect
@@ -861,99 +847,6 @@ internal sealed class AgentActivities(
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Loads all always-scope records for an agent and logical store key from the configured
-    /// <see cref="TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore"/>.
-    /// When no store is configured, returns an empty result.
-    /// </summary>
-    /// <remarks>
-    /// Failure handling is delegated to the workflow: the activity itself throws on store errors,
-    /// and the workflow catches <see cref="Temporalio.Activities.ActivityFailureException"/> with
-    /// the <c>when (!IsActivityCancellation(ex))</c> filter to apply fail-open semantics.
-    /// </remarks>
-    [Activity("TemporalCommunity.Extensions.Agents.LoadAlwaysScopes")]
-    public async Task<LoadAlwaysScopesResult> LoadAlwaysScopesAsync(LoadAlwaysScopesInput input)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-
-        var ct = ActivityExecutionContext.Current.CancellationToken;
-        var blueprint = ResolveBlueprint(input.AgentName);
-
-        // Resolve ApprovalScopeStore fresh per call from a scoped service provider.
-        using var scope = serviceScopeFactory.CreateScope();
-        IApprovalScopeStore? approvalScopeStore = null;
-        if (blueprint.Registration.UseApprovalScopes && blueprint.Registration.ApprovalScopesOptions is not null)
-        {
-            var storeFactory = blueprint.Registration.ApprovalScopesOptions.ApprovalScopeStore
-                ?? blueprint.AgentsOptions.ApprovalScopeStore;
-            approvalScopeStore = storeFactory?.Invoke(scope.ServiceProvider);
-        }
-
-        if (approvalScopeStore is null)
-        {
-            // No store configured — return empty result gracefully.
-            return new LoadAlwaysScopesResult { Scopes = [] };
-        }
-
-        var records = await approvalScopeStore
-            .LoadAsync(input.AgentName, input.StoreKey, ct)
-            .ConfigureAwait(false);
-
-        return new LoadAlwaysScopesResult { Scopes = records ?? [] };
-    }
-
-    /// <summary>
-    /// Appends an always-scope record to the configured
-    /// <see cref="TemporalCommunity.Extensions.Agents.Approvals.IApprovalScopeStore"/>.
-    /// Idempotent by <see cref="ApprovalScopeRecord.OriginatingRequestId"/>.
-    /// When no store is configured, logs a warning and returns without error.
-    /// </summary>
-    /// <remarks>
-    /// Failure handling is delegated to the workflow: the activity itself throws on store errors,
-    /// and the workflow catches <see cref="Temporalio.Activities.ActivityFailureException"/> with
-    /// the <c>when (!IsActivityCancellation(ex))</c> filter to apply fail-open semantics.
-    /// </remarks>
-    [Activity("TemporalCommunity.Extensions.Agents.AppendAlwaysScope")]
-    public async Task AppendAlwaysScopeAsync(AppendAlwaysScopeInput input)
-    {
-        ArgumentNullException.ThrowIfNull(input);
-
-        var ct = ActivityExecutionContext.Current.CancellationToken;
-        var blueprint = ResolveBlueprint(input.AgentName);
-
-        // Resolve ApprovalScopeStore fresh per call from a scoped service provider.
-        using var scope = serviceScopeFactory.CreateScope();
-        IApprovalScopeStore? approvalScopeStore = null;
-        if (blueprint.Registration.UseApprovalScopes && blueprint.Registration.ApprovalScopesOptions is not null)
-        {
-            var storeFactory = blueprint.Registration.ApprovalScopesOptions.ApprovalScopeStore
-                ?? blueprint.AgentsOptions.ApprovalScopeStore;
-            approvalScopeStore = storeFactory?.Invoke(scope.ServiceProvider);
-        }
-
-        if (approvalScopeStore is null)
-        {
-            _logger.LogWarning(
-                "[{SessionId}] AppendAlwaysScopeAsync: no IApprovalScopeStore is configured for agent " +
-                "'{AgentName}'. The always-scope record for tool '{ToolName}' (RequestId: {RequestId}) " +
-                "will not be persisted.",
-                input.SessionId, input.AgentName, input.ToolName, input.OriginatingRequestId);
-            return;
-        }
-
-        var record = new ApprovalScopeRecord
-        {
-            ToolName = input.ToolName,
-            Pattern = input.Pattern,
-            GrantedAt = input.GrantedAt,
-            OriginatingRequestId = input.OriginatingRequestId,
-        };
-
-        await approvalScopeStore
-            .AppendAsync(input.AgentName, input.StoreKey, record, ct)
-            .ConfigureAwait(false);
     }
 
     [Activity("TemporalCommunity.Extensions.Agents.InvokeAgentTool")]

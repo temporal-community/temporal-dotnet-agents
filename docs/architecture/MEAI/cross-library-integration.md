@@ -20,8 +20,8 @@ workflow mechanics:
   conversation history. `AgentSessionRequest` and `AgentSessionResponse` derive from the request
   and response types.
 - `DurableApprovalRequest`, `DurableApprovalDecision`, `DurableApprovalResolutionResult`, and
-  the inherited generic approval update/query handlers. MAF defines its scoped
-  `DurableAgentApprovalDecision` separately so the AI package stays scope-free.
+  the inherited approval update/query handlers. MAF's optional reusable session grants remain a
+  separate administrative capability so the AI package stays scope-free.
 - `DurableAIDataConverter` for MEAI message and content serialization.
 - Shared tool-interceptor result and decision types.
 

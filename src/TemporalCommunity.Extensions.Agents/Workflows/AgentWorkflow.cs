@@ -74,10 +74,6 @@ internal class AgentWorkflow :
     // passing null just avoids re-serializing unchanged bytes.
     private int? _lastSentStateBagHash;
 
-    // Feature B: tracks whether the always-scopes load has happened in this workflow run.
-    // Resets automatically on each continue-as-new (new workflow instance). Not serialized.
-    private bool _alwaysScopesLoadedThisRun;
-
     [WorkflowRun]
     public async Task RunAsync(AgentWorkflowInput input)
     {
@@ -132,8 +128,7 @@ internal class AgentWorkflow :
     /// <summary>
     /// Resolves a pending agent approval with optional MAF-only reusable-scope semantics.
     /// </summary>
-    [WorkflowUpdate("ResolveAgentApproval")]
-    public async Task<DurableApprovalResolutionResult> ResolveAgentApprovalAsync(
+    internal async Task<DurableApprovalResolutionResult> ResolveAgentApprovalAsync(
         DurableAgentApprovalDecision decision)
     {
         ArgumentNullException.ThrowIfNull(decision);
@@ -181,6 +176,83 @@ internal class AgentWorkflow :
             _resolvingAgentApprovalDecision = null;
         }
     }
+
+    /// <summary>
+    /// Privileged update used only by the opt-in session-scope administration service.
+    /// </summary>
+    [WorkflowUpdate("GrantSessionApprovalScope")]
+    public async Task<SessionApprovalScopeGrantResult> GrantSessionApprovalScopeAsync(
+        SessionApprovalScopeGrantRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_input is null)
+        {
+            await Workflow.WaitConditionAsync(() => _input is not null).ConfigureAwait(true);
+        }
+
+        if (_input!.UseApprovalScopes != true)
+        {
+            throw ScopeAdministrationFailure(
+                "This agent is not configured for reusable session approval scopes.");
+        }
+        if (string.IsNullOrWhiteSpace(request.RequestId))
+        {
+            throw ScopeAdministrationFailure("RequestId is required.");
+        }
+        if ((request.Pattern is null) == !request.MatchAllArguments)
+        {
+            throw ScopeAdministrationFailure(
+                "Specify exactly one of Pattern or MatchAllArguments.");
+        }
+        if (request.ExpiresAt <= Workflow.UtcNow)
+        {
+            throw ScopeAdministrationFailure("ExpiresAt must be later than workflow time.");
+        }
+
+        var known = FindKnownAgentApproval(request.RequestId);
+        var grantId = known?.GrantId ?? Workflow.NewGuid().ToString("N");
+        var decision = new DurableAgentApprovalDecision
+        {
+            RequestId = request.RequestId,
+            Approved = true,
+            Reason = request.Reason,
+            Scope = ApprovalScope.Session,
+            ScopePattern = request.Pattern,
+            GrantId = grantId,
+            MatchAllArguments = request.MatchAllArguments,
+            ExpiresAt = request.ExpiresAt,
+            Actor = request.Actor,
+        };
+
+        var resolution = await ResolveAgentApprovalAsync(decision).ConfigureAwait(true);
+        return new SessionApprovalScopeGrantResult
+        {
+            Resolution = resolution,
+            GrantId = resolution.Status is DurableApprovalResolutionStatus.Accepted
+                or DurableApprovalResolutionStatus.AlreadyResolved
+                ? grantId
+                : null,
+        };
+    }
+
+    /// <summary>Revokes one reusable session grant by stable grant ID.</summary>
+    [WorkflowUpdate("RevokeSessionApprovalScope")]
+    public Task<bool> RevokeSessionApprovalScopeAsync(string grantId)
+    {
+        if (string.IsNullOrWhiteSpace(grantId))
+        {
+            throw ScopeAdministrationFailure("GrantId is required.");
+        }
+
+        var (updatedStateBag, removed) = ApprovalScopeCoordinator.RevokeSessionScopeFromStateBag(
+            _currentStateBag,
+            grantId);
+        _currentStateBag = updatedStateBag;
+        return Task.FromResult(removed);
+    }
+
+    private static ApplicationFailureException ScopeAdministrationFailure(string message) =>
+        new(message, errorType: "TemporalAgentApprovalScopeInvalidRequest", nonRetryable: true);
 
     // ── Hooks supplied to the base class ────────────────────────────────────
 
@@ -418,61 +490,6 @@ internal class AgentWorkflow :
             // trusted-tier — see StateBagMerge.OverlayTrustedStateBag.
             _currentStateBag = StateBagMerge.OverlayTrustedStateBag(_currentStateBag, stepResult.UpdatedStateBag);
 
-            // Feature B — Sub-section B: load always-scopes at proxy-start session start.
-            // Guard: needsResolution AND all three approval-scope flags true.
-            // Proxy-started sessions have ResolvedWorkerConfig == null at RunAsync and skip
-            // Sub-section A; this is the corresponding injection point for them.
-            // These two injection points are mutually exclusive within a single workflow run.
-            // After a continue-as-new, the resolved config is carried in AgentWorkflowInput
-            // so the next run enters Sub-section A instead.
-            //
-            // Feature B — Sub-section A: load always-scopes at direct-start session start.
-            // Guard: first step of the first turn (!needsResolution means direct-start or post-CAN),
-            // not already loaded this run, and all three approval-scope flags true.
-            // This path fires for direct-start workflows (WorkerSettingsResolved == true) where
-            // the load cannot happen before base.RunAsync because that would create a window where
-            // DurableChatWorkflowBase.Input is not yet set (causing RequiredInput failures when
-            // the RunAgentAsync update handler fires between the first await and base.RunAsync).
-            var shouldLoadAlwaysScopes =
-                _input!.UseApprovalScopes == true &&
-                _input!.UseApprovalScopeStoreMode == true &&
-                _input!.ApplyAlwaysScopesAtSessionStart == true &&
-                (needsResolution || (!_alwaysScopesLoadedThisRun && iteration == 0));
-
-            if (shouldLoadAlwaysScopes)
-            {
-                try
-                {
-                    var loaded = await Workflow.ExecuteActivityAsync(
-                        (AgentActivities a) => a.LoadAlwaysScopesAsync(new LoadAlwaysScopesInput
-                        {
-                            AgentName = _input!.AgentName,
-                            StoreKey = _input!.AlwaysScopesStoreKey!,
-                        }),
-                        ApprovalScopeActivityOptions()).ConfigureAwait(true);
-
-                    _currentStateBag = ApprovalScopeCoordinator.ApplyLoadedAlwaysScopes(
-                        _currentStateBag,
-                        loaded,
-                        _input!.MaxAlwaysScopeCacheRecords,
-                        _input!.MaxAlwaysScopeCacheBytes,
-                        _input!.AlwaysScopesStoreKey!,
-                        Workflow.Info.WorkflowId,
-                        Workflow.Logger);
-                }
-                catch (ActivityFailureException ex) when (!IsActivityCancellation(ex))
-                {
-                    Workflow.Logger.LogWarning(
-                        "[{SessionId}] LoadAlwaysScopesAsync failed after retries exhausted. Always-scope cache not " +
-                        "populated. Scope-aware tools will require normal approval this session. {Exception}",
-                        Workflow.Info.WorkflowId, ex);
-                }
-                finally
-                {
-                    _alwaysScopesLoadedThisRun = true;
-                }
-            }
-
             if (stepResult.Usage is not null)
             {
                 totalUsage ??= new UsageDetails();
@@ -581,6 +598,7 @@ internal class AgentWorkflow :
                             ScopeAware = _input!.ScopeAwareTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
                             RequiresApproval = _input!.RequiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true
                                 || _input!.ScopeAwareApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
+                            ApprovalEvaluationTime = Workflow.UtcNow,
                         };
 
                         // See also: DurableChatWorkflow.ExecutePattern3TurnAsync (MEAI path) — parallel typed dispatch
@@ -703,13 +721,18 @@ internal class AgentWorkflow :
                                 tc.Name, StringComparer.OrdinalIgnoreCase) == true;
 
 
-                            if ((scope == ApprovalScope.Session || scope == ApprovalScope.Always) && isScopeAwareTool)
+                            if (scope == ApprovalScope.Session && isScopeAwareTool)
                             {
                                 // Write session-scope record (pure workflow-thread, no I/O).
                                 _currentStateBag = ApprovalScopeCoordinator.WriteSessionScopeToStateBag(
                                     _currentStateBag,
                                     tc.Name,
                                     agentDecision.ScopePattern,
+                                    agentDecision.MatchAllArguments,
+                                    agentDecision.GrantId!,
+                                    agentDecision.ExpiresAt!.Value,
+                                    agentDecision.Actor,
+                                    agentDecision.Reason,
                                     decision.RequestId,
                                     Workflow.UtcNow,
                                     _input!.MaxAlwaysScopeCacheRecords,
@@ -717,48 +740,13 @@ internal class AgentWorkflow :
                                     Workflow.Info.WorkflowId,
                                     Workflow.Logger);
                             }
-                            else if ((scope == ApprovalScope.Session || scope == ApprovalScope.Always) && !isScopeAwareTool)
+                            else if (scope == ApprovalScope.Session && !isScopeAwareTool)
                             {
                                 Workflow.Logger.LogWarning(
                                     "[{SessionId}] Approval scope '{Scope}' requested for non-scope-aware tool '{ToolName}'. " +
                                     "The scope was ignored. Register the tool with ScopeAware() to persist reusable approvals.",
                                     Workflow.Info.WorkflowId, scope, tc.Name);
                                 scope = ApprovalScope.ThisCallOnly;
-                            }
-
-                            if (scope == ApprovalScope.Always && _input!.UseApprovalScopeStoreMode == true)
-                            {
-                                // Dispatch the always-scope store activity before buffering the tool.
-                                try
-                                {
-                                    await Workflow.ExecuteActivityAsync(
-                                        (AgentActivities a) => a.AppendAlwaysScopeAsync(new AppendAlwaysScopeInput
-                                        {
-                                            AgentName = _input!.AgentName,
-                                            SessionId = Workflow.Info.WorkflowId,
-                                            StoreKey = _input!.AlwaysScopesStoreKey!,
-                                            ToolName = tc.Name,
-                                            Pattern = agentDecision.ScopePattern,
-                                            GrantedAt = Workflow.UtcNow,
-                                            OriginatingRequestId = decision.RequestId,
-                                        }),
-                                        ApprovalScopeActivityOptions()).ConfigureAwait(true);
-                                }
-                                catch (ActivityFailureException ex) when (!IsActivityCancellation(ex))
-                                {
-                                    Workflow.Logger.LogWarning(
-                                        "[{SessionId}] AppendAlwaysScopeAsync failed for tool '{ToolName}' after retries exhausted. " +
-                                        "Always scope degraded to Session for this decision. The approved tool call will proceed. {Exception}",
-                                        Workflow.Info.WorkflowId, tc.Name, ex);
-                                    scope = ApprovalScope.Session;
-                                }
-                            }
-                            else if (scope == ApprovalScope.Always && _input!.UseApprovalScopeStoreMode != true)
-                            {
-                                Workflow.Logger.LogWarning(
-                                    "[{SessionId}] ApprovalScope.Always requested for tool '{ToolName}' but " +
-                                    "approval-scope store mode is not enabled for this agent. Scope degraded to Session.",
-                                    Workflow.Info.WorkflowId, tc.Name);
                             }
 
                             // Buffer the approved tool for dispatch in Phase 2.5.
@@ -872,47 +860,6 @@ internal class AgentWorkflow :
         return abortedResponse;
     }
 
-    // ── Feature B — approval-scope helper methods ──────────────────────────────
-
-    /// <summary>
-    /// Builds <see cref="ActivityOptions"/> for approval-scope store activities
-    /// (<c>LoadAlwaysScopesAsync</c> and <c>AppendAlwaysScopeAsync</c>). Uses dedicated
-    /// bounded timeout and retry policy from the resolved approval-scope options rather than
-    /// the normal tool/LLM activity defaults.
-    /// </summary>
-    private ActivityOptions ApprovalScopeActivityOptions() => new ActivityOptions
-    {
-        StartToCloseTimeout = _input!.ApprovalScopeActivityTimeout,
-        RetryPolicy = new Temporalio.Common.RetryPolicy
-        {
-            MaximumAttempts = _input!.ApprovalScopeActivityMaximumAttempts,
-        },
-        Summary = AgentActivities.BuildActivitySummary(_input!.AgentName),
-    };
-
-    /// <summary>
-    /// Returns <see langword="true"/> when <paramref name="ex"/> represents an
-    /// activity/workflow cancellation rather than a genuine store failure. Used as a
-    /// <c>when</c> filter in the fail-open catch blocks so cancellation always propagates.
-    /// </summary>
-    /// <remarks>
-    /// Deterministic: checks only <see cref="Workflow.CancellationToken"/> (workflow-thread
-    /// signal) and the Temporal failure/cause chain (inert data).  Does not inspect wall-clock
-    /// time, services, or any other non-deterministic state.
-    /// </remarks>
-    private static bool IsActivityCancellation(ActivityFailureException ex)
-    {
-        // Workflow-level cancellation: the token is already set before the exception surfaces.
-        if (Workflow.CancellationToken.IsCancellationRequested)
-        {
-            return true;
-        }
-
-        // Activity-level cancellation: the SDK wraps the cancellation as a
-        // CanceledFailureException in the InnerException chain of ActivityFailureException.
-        return ex.InnerException is Temporalio.Exceptions.CanceledFailureException;
-    }
-
     private void RestoreResolvedAgentApprovals(
         IReadOnlyList<DurableAgentApprovalDecision>? decisions)
     {
@@ -970,7 +917,11 @@ internal class AgentWorkflow :
         left.Approved == right.Approved
         && string.Equals(left.Reason, right.Reason, StringComparison.Ordinal)
         && left.Scope == right.Scope
-        && AreEquivalent(left.ScopePattern, right.ScopePattern);
+        && AreEquivalent(left.ScopePattern, right.ScopePattern)
+        && string.Equals(left.GrantId, right.GrantId, StringComparison.Ordinal)
+        && left.MatchAllArguments == right.MatchAllArguments
+        && left.ExpiresAt == right.ExpiresAt
+        && string.Equals(left.Actor, right.Actor, StringComparison.Ordinal);
 
     private static bool AreEquivalent(ApprovalScopePattern? left, ApprovalScopePattern? right) =>
         ReferenceEquals(left, right)
