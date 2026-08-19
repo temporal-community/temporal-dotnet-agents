@@ -12,16 +12,31 @@ public static class TemporalServiceTestEnvironment
     /// <summary>Temporal CLI release whose embedded server is 1.31.2.</summary>
     public const string TemporalCliDownloadVersion = "v1.8.0";
 
+    /// <summary>Environment variable containing a pre-verified Temporal CLI executable.</summary>
+    public const string TemporalTestServerPathEnvironmentVariable = "TEMPORAL_TEST_SERVER_PATH";
+
     /// <summary>Starts and verifies an embedded Temporal Service 1.31.x environment.</summary>
     public static async Task<WorkflowEnvironment> StartLocalAsync(params string[] extraArgs)
     {
+        var existingPath = Environment.GetEnvironmentVariable(
+            TemporalTestServerPathEnvironmentVariable);
+        var devServerOptions = new DevServerOptions
+        {
+            ExtraArgs = extraArgs,
+        };
+        if (string.IsNullOrWhiteSpace(existingPath))
+        {
+            devServerOptions.DownloadVersion = TemporalCliDownloadVersion;
+        }
+        else
+        {
+            devServerOptions.ExistingPath = existingPath;
+        }
+
         var environment = await WorkflowEnvironment.StartLocalAsync(new()
         {
-            DevServerOptions = new()
-            {
-                DownloadVersion = TemporalCliDownloadVersion,
-                ExtraArgs = extraArgs,
-            },
+            DownloadDirectory = GetDownloadDirectory(),
+            DevServerOptions = devServerOptions,
         }).ConfigureAwait(false);
 
         try
@@ -40,6 +55,24 @@ public static class TemporalServiceTestEnvironment
             await environment.DisposeAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Starts the SDK's time-skipping test server for tests defined only by workflow timers.
+    /// Transport, worker-restart, and activity-retry tests should continue to use
+    /// <see cref="StartLocalAsync(string[])"/>.
+    /// </summary>
+    public static Task<WorkflowEnvironment> StartTimeSkippingAsync() =>
+        WorkflowEnvironment.StartTimeSkippingAsync(new()
+        {
+            DownloadDirectory = GetDownloadDirectory(),
+        });
+
+    private static string GetDownloadDirectory()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "temporal-agents-test-servers");
+        Directory.CreateDirectory(path);
+        return path;
     }
 
     /// <summary>Parses and validates a Temporal Service version returned by GetSystemInfo.</summary>

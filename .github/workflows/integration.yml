@@ -9,6 +9,8 @@ name: Integration Tests
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -25,8 +27,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  discover:
+    name: Discover integration suites
+    runs-on: ubuntu-latest
+    outputs:
+      suites: ${{ steps.projects.outputs.suites }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Verify discovery script
+        run: tests/ci/discover-integration-projects.test.sh
+
+      - name: Discover integration projects
+        id: projects
+        run: echo "suites=$(.github/scripts/discover-integration-projects.sh)" >> "$GITHUB_OUTPUT"
+
   integration:
     name: Integration (${{ matrix.suite.name }})
+    needs: discover
     runs-on: ubuntu-latest
     # Embedded-server suites can occasionally hang on server startup; fail fast
     # rather than burning the 6-hour default job timeout.
@@ -34,11 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite:
-          - name: Agents
-            path: tests/TemporalCommunity.Extensions.Agents.IntegrationTests
-          - name: AI
-            path: tests/TemporalCommunity.Extensions.AI.IntegrationTests
+        suite: ${{ fromJSON(needs.discover.outputs.suites) }}
 
     steps:
       - name: Checkout
@@ -51,14 +66,20 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Restore dotnet tools
-        run: dotnet tool restore
+      - name: Cache verified Temporal CLI
+        uses: actions/cache@v5.0.3
+        with:
+          path: .cache/temporal-cli/v1.8.0
+          key: temporal-cli-${{ runner.os }}-${{ runner.arch }}-v1.8.0
 
-      - name: Setup just
-        uses: extractions/setup-just@v4.0.0
+      - name: Prepare verified Temporal CLI
+        run: echo "TEMPORAL_TEST_SERVER_PATH=$(.github/scripts/prepare-temporal-cli.sh .cache/temporal-cli/v1.8.0)" >> "$GITHUB_ENV"
 
-      - name: Build
-        run: just build
+      - name: Restore selected suite
+        run: dotnet restore ${{ matrix.suite.project }}
+
+      - name: Build selected suite
+        run: dotnet build ${{ matrix.suite.project }} --configuration Release --no-restore
 
       - name: Integration tests (${{ matrix.suite.name }})
         # console logger streams per-test Starting/Finished so a hang is visible in the log.
@@ -66,7 +87,7 @@ jobs:
         # (most integration tests finish in seconds), turning an opaque 20-min job hang into a
         # named culprit and a fast failure. --blame-hang-dump-type none skips the (large) dump.
         run: >
-          dotnet test ${{ matrix.suite.path }}
+          dotnet test ${{ matrix.suite.project }}
           --configuration Release
           --no-build
           --filter "Category!=HistoryCapture"
@@ -80,5 +101,5 @@ jobs:
         if: always()
         with:
           name: integration-test-results-${{ matrix.suite.name }}
-          path: ${{ matrix.suite.path }}/**/*.trx
+          path: tests/**/TestResults/**/*.trx
           if-no-files-found: ignore

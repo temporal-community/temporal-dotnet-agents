@@ -3,6 +3,8 @@ name: Build
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 # Least-privilege default for all jobs. Equivalent to the read-only default, but
 # explicit so it stays restricted if repo/org defaults change or this workflow is

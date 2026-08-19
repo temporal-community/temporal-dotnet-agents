@@ -30,9 +30,9 @@ activity, one real tool activity with state completion, a final model activity, 
 completed Update. Ordinary test runs exclude `Category=HistoryCapture` so they never rewrite the
 checked-in corpus.
 
-Every checked-in history must also have an entry in
-`tests/TemporalCommunity.Extensions.AI.Tests/Compat/replay-fixture-dispositions.json`. The unit-test
-catalog rejects both unclassified histories and stale disposition entries. A successful replay
+Every checked-in history must also have an entry in its package's
+`Compat/replay-fixture-dispositions.json` catalog under `tests/TemporalCommunity.Extensions.*.Tests`.
+The unit-test catalogs reject both unclassified histories and stale disposition entries. A successful replay
 fixture must retain a focused replay test; an expected-nondeterminism fixture must retain a negative
 test proving that replay fails for the intended reason. Do not delete a replay consumer while
 regenerating histories for an unrelated feature change.
@@ -372,3 +372,15 @@ Agents integration tests use `TestEnvironmentHelper.StartLocalAsync()`, which de
 same pinned/version-checked helper and pre-registers the `AgentName`, `SessionCreatedAt`, and
 `TurnCount` search attributes enabled by default. Do not add bare
 `WorkflowEnvironment.StartLocalAsync()` calls, because they silently float the tested server.
+
+Pull requests run both workflows with read-only token permissions. Integration projects are
+discovered from `tests/*IntegrationTests/*.csproj`; adding a project automatically adds a matrix
+job. Each job restores and builds only that project, excludes `Category=HistoryCapture`, applies a
+four-minute per-test hang limit and a twenty-minute job limit, and always uploads TRX results.
+The workflow caches Temporal CLI v1.8.0 by OS/architecture, verifies the official release SHA-256
+before extracting it, and supplies the verified executable through `TEMPORAL_TEST_SERVER_PATH`.
+Run `tests/ci/discover-integration-projects.test.sh` locally after changing discovery behavior.
+
+Use `TemporalServiceTestEnvironment.StartTimeSkippingAsync()` only when the behavior under test is
+defined entirely by workflow timers. Keep transport, worker restart, activity retry, and real
+server behavior on `StartLocalAsync()`.

@@ -279,7 +279,7 @@ public class DurableToolInterceptorIntegrationTests
     [Fact]
     public async Task RequireApproval_PerToolTimeout_AutoDeniesWithoutToolDispatch()
     {
-        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        await using var env = await TemporalServiceTestEnvironment.StartTimeSkippingAsync();
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("delete_records", "Deletes records.", _ => "deleted");
