@@ -22,7 +22,7 @@ public sealed class DurableToolsetCatalogTests
             options.HeartbeatTimeout = TimeSpan.FromSeconds(20);
             options.ApprovalTimeout = TimeSpan.FromHours(4);
         });
-        worker.AddDurableTools(
+        worker.AddDurableTool(
             AIFunctionFactory.Create((string city) => city, "weather"),
             tool => tool.WithMaxAttempts(2).RequireApproval());
         worker.AddDurableTools(AIFunctionFactory.Create(() => "ok", "status"));

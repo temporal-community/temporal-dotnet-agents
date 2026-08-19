@@ -63,8 +63,8 @@ Program.cs
     ├─ AddDurableAI(opts => opts.DefaultToolInterceptor = ...)
     │       └─ AuditInterceptor registered in DurableExecutionOptions
     │
-    ├─ AddDurableTools(readFileTool,   opts => opts.SkipInterceptor())
-    ├─ AddDurableTools(deleteFileTool, opts => opts.NoRetry().RequireApproval())
+    ├─ AddDurableTool(readFileTool,   opts => opts.SkipInterceptor())
+    ├─ AddDurableTool(deleteFileTool, opts => opts.NoRetry().RequireApproval())
     │
     └─ DurableChatSessionClient.SendAsync(...)
            │

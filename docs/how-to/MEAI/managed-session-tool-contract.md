@@ -1,7 +1,7 @@
 # MEAI managed-session tool contract
 
 `TemporalCommunity.Extensions.AI` has one worker-owned managed-session tool model. Use
-`AddDurableTools` for one implicit default group, or `AddDurableToolset` plus
+`AddDurableTool`/`AddDurableTools` for one implicit default group, or `AddDurableToolset` plus
 `DefaultToolsetIds` for several named groups. The thin client carries neither schemas nor
 implementations. The workflow records one resolved manifest, supplies its declarations to the
 model, and dispatches each enabled invocation as an `InvokeFunction` Temporal activity.
@@ -9,7 +9,8 @@ model, and dispatches each enabled invocation as an `InvokeFunction` Temporal ac
 ## Required setup
 
 1. Register a bare `IChatClient` for the durable session.
-2. Register each callable function through `AddDurableTools(...)` or `AddDurableToolset(...)` on
+2. Register one callable function through `AddDurableTool(...)`, a uniform collection through
+   `AddDurableTools(...)`, or a named group through `AddDurableToolset(...)` on
    every worker that serves the task queue.
 3. Keep function names and schemas stable across workers serving the same task queue.
 4. Use `NoRetry()` for a side-effecting function when an activity retry would be unsafe; otherwise

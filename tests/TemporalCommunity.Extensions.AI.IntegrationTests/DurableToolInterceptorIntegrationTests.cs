@@ -234,7 +234,7 @@ public class DurableToolInterceptorIntegrationTests
         var taskQueue = $"interceptor-approval-{Guid.NewGuid():N}";
         // No interceptor registered — RequireApproval works without one.
         using var host = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
-            builder.AddDurableTools(tool, o => o.RequireApproval()));
+            builder.AddDurableTool(tool, o => o.RequireApproval()));
         await host.StartAsync();
 
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
@@ -289,7 +289,7 @@ public class DurableToolInterceptorIntegrationTests
 
         var taskQueue = $"interceptor-approval-timeout-{Guid.NewGuid():N}";
         using var host = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
-            builder.AddDurableTools(tool, o =>
+            builder.AddDurableTool(tool, o =>
                 o.RequireApproval().WithApprovalTimeout(TimeSpan.FromSeconds(1))));
         await host.StartAsync();
 
@@ -485,7 +485,7 @@ public class DurableToolInterceptorIntegrationTests
         var taskQueue = $"ai-approval-restart-{Guid.NewGuid():N}";
 
         using var host1 = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
-            builder.AddDurableTools(tool, options => options.RequireApproval()));
+            builder.AddDurableTool(tool, options => options.RequireApproval()));
         await host1.StartAsync();
         var client1 = host1.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"approval-restart-{Guid.NewGuid():N}";
@@ -496,7 +496,7 @@ public class DurableToolInterceptorIntegrationTests
 
         await host1.StopAsync();
         using var host2 = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
-            builder.AddDurableTools(tool, options => options.RequireApproval()));
+            builder.AddDurableTool(tool, options => options.RequireApproval()));
         await host2.StartAsync();
         var client2 = host2.Services.GetRequiredService<DurableChatSessionClient>();
         var pendingAfterRestart = await WaitForPendingApprovalAsync(client2, conversationId);
@@ -529,7 +529,7 @@ public class DurableToolInterceptorIntegrationTests
             "Write complete.");
         var taskQueue = $"ai-approval-race-{Guid.NewGuid():N}";
         using var host = BuildHostNoInterceptor(env.Client, taskQueue, scripted, builder =>
-            builder.AddDurableTools(tool, options => options.RequireApproval()));
+            builder.AddDurableTool(tool, options => options.RequireApproval()));
         await host.StartAsync();
 
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
@@ -575,7 +575,7 @@ public class DurableToolInterceptorIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTools(tool, o => o.RequireApproval()),
+            builder => builder.AddDurableTool(tool, o => o.RequireApproval()),
             options => options.MaxEntryCount = 2);
         await host.StartAsync();
 
@@ -684,7 +684,7 @@ public class DurableToolInterceptorIntegrationTests
 
         var taskQueue = $"interceptor-skip-flag-{Guid.NewGuid():N}";
         using var host = BuildHost(env.Client, taskQueue, scripted, builder =>
-            builder.AddDurableTools(tool, o => o.SkipInterceptor()), interceptor);
+            builder.AddDurableTool(tool, o => o.SkipInterceptor()), interceptor);
         await host.StartAsync();
 
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();

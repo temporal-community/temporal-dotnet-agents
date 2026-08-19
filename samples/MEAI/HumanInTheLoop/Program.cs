@@ -79,7 +79,7 @@ builder.Services
         opts.ApprovalTimeout   = TimeSpan.FromHours(24);
         opts.SessionTimeToLive = TimeSpan.FromHours(26);
     })
-    .AddDurableTools(deleteTool, tool =>
+    .AddDurableTool(deleteTool, tool =>
         tool.NoRetry().RequireApproval().WithApprovalTimeout(TimeSpan.FromHours(24)));
 
 // ── Build and start host ──────────────────────────────────────────────────────

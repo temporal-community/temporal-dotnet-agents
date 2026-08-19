@@ -26,6 +26,24 @@ var expectedAsset = args.SingleOrDefault() switch
 AssertPackageAssembly("TemporalCommunity.Extensions.AI", expectedAsset);
 AssertPackageAssembly("TemporalCommunity.Extensions.Agents", expectedAsset);
 
+// Exercise the public registration family from the packed asset, including IEnumerable overloads.
+var registrationProbeServices = new ServiceCollection();
+var registrationProbeWorker = registrationProbeServices
+    .AddHostedTemporalWorker("packed-registration-probe")
+    .AddDurableAI(options => options.RegisterDefaultWorkflow = false);
+registrationProbeWorker.AddDurableTool(
+    AIFunctionFactory.Create(() => "single", "single_tool"));
+registrationProbeWorker.AddDurableTools((IEnumerable<AIFunction>)new[]
+{
+    AIFunctionFactory.Create(() => "first", "first_tool"),
+    AIFunctionFactory.Create(() => "second", "second_tool"),
+});
+registrationProbeWorker.AddDurableToolset("collection", tools => tools.AddTools(new[]
+{
+    AIFunctionFactory.Create(() => "third", "third_tool"),
+}));
+using var registrationProbeProvider = registrationProbeServices.BuildServiceProvider();
+
 await using var environment = await WorkflowEnvironment.StartLocalAsync(new()
 {
     DevServerOptions = new() { DownloadVersion = "v1.8.0" },

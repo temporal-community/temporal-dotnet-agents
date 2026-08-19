@@ -12,7 +12,7 @@ builder.Services
         options.ApprovalTimeout = TimeSpan.FromHours(24);
         options.SessionTimeToLive = TimeSpan.FromHours(26);
     })
-    .AddDurableTools(deleteRecords, tool => tool.NoRetry().RequireApproval());
+    .AddDurableTool(deleteRecords, tool => tool.NoRetry().RequireApproval());
 ```
 
 `RequireApproval()` is an absolute configuration-time floor: an interceptor cannot turn it into a
@@ -65,7 +65,7 @@ Every pending request includes `ExpiresAt`, the workflow-time deadline used for 
 Set a tool-specific deadline when approval urgency differs by operation:
 
 ```csharp
-worker.AddDurableTools(deleteRecords, tool =>
+worker.AddDurableTool(deleteRecords, tool =>
     tool.NoRetry().RequireApproval().WithApprovalTimeout(TimeSpan.FromHours(2)));
 ```
 

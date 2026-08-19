@@ -48,26 +48,26 @@ public class DurableAIServiceCollectionExtensionsTests
     public void AddDurableTools_ThrowsOnNullBuilder()
     {
         Assert.Throws<ArgumentNullException>(
-            () => DurableAIServiceCollectionExtensions.AddDurableTools(null!));
+            () => DurableAIServiceCollectionExtensions.AddDurableTools(null!, Array.Empty<AIFunction>()));
     }
 
     [Fact]
-    public void AddDurableTools_ThrowsInvalidOperation_WhenAddDurableAINotCalled()
+    public void AddDurableTool_ThrowsInvalidOperation_WhenAddDurableAINotCalled()
     {
         var services = new ServiceCollection();
         var workerBuilder = services.AddHostedTemporalWorker("my-queue");
         var tool = AIFunctionFactory.Create(() => "ok", "my_tool");
 
         var ex = Assert.Throws<InvalidOperationException>(
-            () => workerBuilder.AddDurableTools(tool));
+            () => workerBuilder.AddDurableTool(tool));
 
         Assert.Equal(
-            "AddDurableTools requires AddDurableAI to be called first on the same worker builder.",
+            "AddDurableTool requires AddDurableAI to be called first on the same worker builder.",
             ex.Message);
     }
 
     [Fact]
-    public void AddDurableTools_Succeeds_WhenAddDurableAICalledFirst()
+    public void AddDurableTool_Succeeds_WhenAddDurableAICalledFirst()
     {
         var services = new ServiceCollection();
         services.AddSingleton(A.Fake<ITemporalClient>());
@@ -76,7 +76,7 @@ public class DurableAIServiceCollectionExtensionsTests
             .AddDurableAI();
         var tool = AIFunctionFactory.Create(() => "ok", "my_tool");
 
-        var returned = workerBuilder.AddDurableTools(tool);
+        var returned = workerBuilder.AddDurableTool(tool);
 
         Assert.Same(workerBuilder, returned);
 
@@ -163,6 +163,70 @@ public class DurableAIServiceCollectionExtensionsTests
         var toolset = Assert.Single(provider.GetServices<DurableToolsetRegistration>());
         Assert.True(toolset.IsImplicitDefault);
         Assert.Equal(["a", "b"], toolset.FunctionNames);
+    }
+
+    [Fact]
+    public void AddDurableTools_Enumerable_EnumeratesOnceAndPreservesOrderAndIdentity()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+        var first = AIFunctionFactory.Create(() => "a", "a");
+        var second = AIFunctionFactory.Create(() => "b", "b");
+        var enumerationCount = 0;
+
+        IEnumerable<AIFunction> OneShot()
+        {
+            enumerationCount++;
+            yield return first;
+            yield return second;
+        }
+
+        worker.AddDurableTools(OneShot());
+
+        Assert.Equal(1, enumerationCount);
+        using var provider = services.BuildServiceProvider();
+        var toolset = Assert.Single(provider.GetServices<DurableToolsetRegistration>());
+        Assert.Equal(["a", "b"], toolset.FunctionNames);
+        var registry = provider.GetRequiredService<DurableFunctionRegistry>();
+        Assert.Same(first, registry["a"]);
+        Assert.Same(second, registry["b"]);
+    }
+
+    [Fact]
+    public void AddDurableTools_Enumerable_EmptyIsNoOpAndNullInputsFail()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+
+        Assert.Same(worker, worker.AddDurableTools(Array.Empty<AIFunction>()));
+        Assert.Throws<ArgumentNullException>(() =>
+            worker.AddDurableTools((IEnumerable<AIFunction>)null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            worker.AddDurableTools(new AIFunction[] { null! }));
+    }
+
+    [Fact]
+    public void AddDurableToolset_AddTools_UsesTheSameOrderedInstances()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+        var tools = new[]
+        {
+            AIFunctionFactory.Create(() => "a", "a"),
+            AIFunctionFactory.Create(() => "b", "b"),
+        };
+
+        worker.AddDurableToolset("catalog", set => set.AddTools(tools));
+
+        using var provider = services.BuildServiceProvider();
+        var toolset = Assert.Single(provider.GetServices<DurableToolsetRegistration>());
+        Assert.Equal(["a", "b"], toolset.FunctionNames);
+        var registry = provider.GetRequiredService<DurableFunctionRegistry>();
+        Assert.Same(tools[0], registry["a"]);
+        Assert.Same(tools[1], registry["b"]);
     }
 
     [Theory]

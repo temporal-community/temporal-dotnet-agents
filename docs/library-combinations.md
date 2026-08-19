@@ -47,7 +47,7 @@ builder.Services
         opts.ActivityTimeout   = TimeSpan.FromMinutes(5);
         opts.SessionTimeToLive = TimeSpan.FromHours(24);
     })
-    .AddDurableTools(weatherTool); // one implicit worker-owned default toolset
+    .AddDurableTool(weatherTool); // one implicit worker-owned default toolset
 ```
 
 ### Usage
@@ -64,7 +64,7 @@ var response = await sessionClient.SendAsync(
 
 - Crash recovery for every LLM call — if the worker restarts mid-activity, Temporal retries and returns the result from history on replay.
 - Full conversation history stored in workflow state, surviving restarts and `ContinueAsNew` transitions.
-- Managed tool-call durability through one implicit `AddDurableTools()` group or ordered named
+- Managed tool-call durability through one implicit `AddDurableTool()`/`AddDurableTools()` group or ordered named
   `AddDurableToolset(...)` groups. The worker owns schemas and implementations, the client remains
   thin, and each tool invocation becomes its own activity with its own retry policy.
 - Durable embedding generation via `DurableEmbeddingGenerator`.

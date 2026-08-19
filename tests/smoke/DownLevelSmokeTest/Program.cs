@@ -157,7 +157,7 @@ namespace DownLevelSmokeTest
                     opts.HeartbeatTimeout = TimeSpan.FromSeconds(15);
                     opts.SessionTimeToLive = TimeSpan.FromMinutes(5);
                 })
-                .AddDurableTools(weatherTool);
+                .AddDurableTool(weatherTool);
 
             worker.AddTemporalAgents(opts =>
             {

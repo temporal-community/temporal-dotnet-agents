@@ -38,6 +38,21 @@ public sealed class DurableToolsetBuilder
     }
 
     /// <summary>
+    /// Adds an ordered sequence of already-created functions with default durable activity
+    /// policy. The sequence is enumerated exactly once; an empty sequence is a no-op.
+    /// </summary>
+    public DurableToolsetBuilder AddTools(IEnumerable<AIFunction> functions)
+    {
+        ArgumentNullException.ThrowIfNull(functions);
+        foreach (var function in functions)
+        {
+            Add(function);
+        }
+
+        return this;
+    }
+
+    /// <summary>
     /// Adds a stable declaration and an activity-attempt factory to this toolset.
     /// </summary>
     public DurableToolsetBuilder AddDurableToolFactory<TRequestData, TTurnState>(

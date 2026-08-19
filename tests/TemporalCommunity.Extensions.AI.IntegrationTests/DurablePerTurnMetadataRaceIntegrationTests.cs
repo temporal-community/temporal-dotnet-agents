@@ -92,7 +92,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
             taskQueue,
             ("key-1", client1),
             ("key-2", client2),
-            workerBuilder => workerBuilder.AddDurableTools(blockingTool, o => o.NoRetry()));
+            workerBuilder => workerBuilder.AddDurableTool(blockingTool, o => o.NoRetry()));
         await host.StartAsync();
 
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();

@@ -93,7 +93,8 @@ from durable transport because they cannot be safely resumed.
 
 ## Durable tools
 
-Register functions on the worker. `AddDurableTools` creates one implicit default toolset. The
+Register functions on the worker. `AddDurableTool` and `AddDurableTools` contribute to one implicit
+default toolset. The
 client-side `SendAsync` request contains no schemas or implementations; the stock workflow resolves
 the worker toolset once through `ResolveDurableToolsets`, records the returned manifest, and uses it
 for every model/tool iteration and Continue-as-New run.
@@ -102,8 +103,8 @@ for every model/tool iteration and Continue-as-New run.
 builder.Services
     .AddHostedTemporalWorker("durable-chat")
     .AddDurableAI()
-    .AddDurableTools(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)))
-    .AddDurableTools(writeTool, tool => tool.NoRetry());
+    .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)))
+    .AddDurableTool(writeTool, tool => tool.NoRetry());
 ```
 
 Do not call `UseFunctionInvocation()` on the session's chat client and do not pass

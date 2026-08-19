@@ -52,7 +52,7 @@ const string TaskQueue = "tool-interceptor-meai";
 
 // ── Setup: FakeFileSystem and tool functions ──────────────────────────────────
 // FakeFileSystem holds the in-memory files. The tool implementations (ReadFile,
-// DeleteFile) are plain methods — registering them via AddDurableTools() below
+// DeleteFile) are plain methods — registering them via AddDurableTool() below
 // is what makes each call run as a separate Temporal activity in the managed tool loop.
 var fs = new FakeFileSystem();
 
@@ -121,7 +121,7 @@ var workerBuilder = builder.Services
 // interceptor activity is not dispatched and read_file proceeds directly to
 // InvokeFunction. Appropriate for read-only tools where policy evaluation adds
 // no value. The tool still runs as its own Temporal activity.
-workerBuilder.AddDurableTools(readFileTool, opts => opts.SkipInterceptor());
+workerBuilder.AddDurableTool(readFileTool, opts => opts.SkipInterceptor());
 
 // ── Tool registration: delete_file with RequireApproval() + NoRetry() ────────
 // RequireApproval() is the Rule 2 absolute floor: even if the interceptor returns
@@ -132,7 +132,7 @@ workerBuilder.AddDurableTools(readFileTool, opts => opts.SkipInterceptor());
 // NoRetry() prevents double-execution: if the activity fails after the file has
 // already been deleted, a retry would silently succeed on a non-existent file.
 // Write-style tools should always use NoRetry().
-workerBuilder.AddDurableTools(deleteFileTool, opts => opts.NoRetry().RequireApproval());
+workerBuilder.AddDurableTool(deleteFileTool, opts => opts.NoRetry().RequireApproval());
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 var host = builder.Build();

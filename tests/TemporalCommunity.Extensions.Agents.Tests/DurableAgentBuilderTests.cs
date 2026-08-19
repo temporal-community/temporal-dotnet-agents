@@ -155,7 +155,43 @@ public class DurableAgentBuilderTests
     public void AddTools_NullArray_Throws()
     {
         var builder = NewBuilder();
-        Assert.Throws<ArgumentNullException>(() => builder.AddTools(null!));
+        Assert.Throws<ArgumentNullException>(() => builder.AddTools((AIFunction[])null!));
+    }
+
+    [Fact]
+    public void AddTools_Enumerable_EnumeratesOnceAndPreservesInstances()
+    {
+        var builder = NewBuilder();
+        var first = NewTool("a");
+        var second = NewTool("b");
+        var enumerationCount = 0;
+
+        IEnumerable<AIFunction> OneShot()
+        {
+            enumerationCount++;
+            yield return first;
+            yield return second;
+        }
+
+        builder.AddTools(OneShot());
+
+        Assert.Equal(1, enumerationCount);
+        Assert.Equal(["a", "b"], builder.ToolRegistrations.Select(tool => tool.Name));
+        Assert.Same(first, builder.ToolRegistrations[0].Factory(null!));
+        Assert.Same(second, builder.ToolRegistrations[1].Factory(null!));
+    }
+
+    [Fact]
+    public void AddTools_Enumerable_EmptyIsNoOpAndNullInputsFail()
+    {
+        var builder = NewBuilder();
+
+        Assert.Same(builder, builder.AddTools(Array.Empty<AIFunction>()));
+        Assert.Empty(builder.ToolRegistrations);
+        Assert.Throws<ArgumentNullException>(() =>
+            builder.AddTools((IEnumerable<AIFunction>)null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            builder.AddTools(new AIFunction[] { null! }));
     }
 
     [Fact]

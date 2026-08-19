@@ -33,7 +33,7 @@ var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnect
 builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 
 // ── Setup: Weather tool (registered in DurableFunctionRegistry) ───────────────
-// GetCurrentWeather is the real implementation — registered via AddDurableTools()
+// GetCurrentWeather is the real implementation — registered via AddDurableTool()
 // so DurableFunctionActivities can resolve it by name ("get_current_weather")
 // when WeatherReportWorkflow dispatches a durable tool call.
 static async Task<string> GetCurrentWeather(string city)
@@ -72,7 +72,7 @@ builder.Services
         opts.ActivityTimeout = TimeSpan.FromMinutes(5);
         opts.RegisterDefaultWorkflow = false;   // no DurableChatSessionClient used here
     })
-    .AddDurableTools(weatherTool)
+    .AddDurableTool(weatherTool)
     .AddWorkflow<WeatherReportWorkflow>();
 
 // ── Start ─────────────────────────────────────────────────────────────────────

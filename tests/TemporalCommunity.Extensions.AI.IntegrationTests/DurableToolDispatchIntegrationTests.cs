@@ -254,7 +254,7 @@ public class DurableToolDispatchIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTools(alwaysFails, o => o.NoRetry()),
+            builder => builder.AddDurableTool(alwaysFails, o => o.NoRetry()),
             opts => opts.MaximumConsecutiveErrorsPerRequest = 0);
         await host.StartAsync();
 
@@ -392,7 +392,7 @@ public class DurableToolDispatchIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTools(flakyTool, o => o.NoRetry()),
+            builder => builder.AddDurableTool(flakyTool, o => o.NoRetry()),
             opts =>
             {
                 opts.MaximumConsecutiveErrorsPerRequest = 3; // tolerate the failure
@@ -450,7 +450,7 @@ public class DurableToolDispatchIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTools(alwaysFails, o => o.NoRetry()),
+            builder => builder.AddDurableTool(alwaysFails, o => o.NoRetry()),
             opts =>
             {
                 opts.MaxToolCallsPerTurn = threshold + 5;
@@ -525,7 +525,7 @@ public class DurableToolDispatchIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTools(sequenceTool, o => o.NoRetry()),
+            builder => builder.AddDurableTool(sequenceTool, o => o.NoRetry()),
             opts =>
             {
                 opts.MaxToolCallsPerTurn = 10;
@@ -589,7 +589,7 @@ public class DurableToolDispatchIntegrationTests
             builder =>
             {
                 builder.AddDurableTools(good);
-                builder.AddDurableTools(bad, o => o.NoRetry());
+                builder.AddDurableTool(bad, o => o.NoRetry());
             },
             opts =>
             {
@@ -646,7 +646,7 @@ public class DurableToolDispatchIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTools(bad, o => o.NoRetry()),
+            builder => builder.AddDurableTool(bad, o => o.NoRetry()),
             opts => opts.MaximumConsecutiveErrorsPerRequest = 0);
         await host.StartAsync();
 
@@ -721,7 +721,7 @@ public class DurableToolDispatchIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTools(blockingTool, o => o.NoRetry()),
+            builder => builder.AddDurableTool(blockingTool, o => o.NoRetry()),
             // MaximumConsecutiveErrorsPerRequest = 0 is the tightest setting:
             // even one error immediately throws. This was the trigger for the bug.
             opts => opts.MaximumConsecutiveErrorsPerRequest = 0);
@@ -839,7 +839,7 @@ public class DurableToolDispatchIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTools(tool, o => o.WithTimeout(TimeSpan.FromSeconds(25))),
+            builder => builder.AddDurableTool(tool, o => o.WithTimeout(TimeSpan.FromSeconds(25))),
             opts =>
             {
                 opts.MaxToolCallsPerTurn = maxToolCallsPerTurn;

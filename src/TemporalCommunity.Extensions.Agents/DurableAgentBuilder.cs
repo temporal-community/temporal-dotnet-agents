@@ -319,6 +319,17 @@ public sealed class DurableAgentBuilder
     public DurableAgentBuilder AddTools(params AIFunction[] tools)
     {
         ArgumentNullException.ThrowIfNull(tools);
+        return AddTools((IEnumerable<AIFunction>)tools);
+    }
+
+    /// <summary>
+    /// Registers an ordered sequence of concrete tools. The sequence is enumerated exactly once.
+    /// </summary>
+    /// <param name="tools">The tools to register. An empty sequence is a no-op.</param>
+    /// <returns>This builder, for fluent chaining.</returns>
+    public DurableAgentBuilder AddTools(IEnumerable<AIFunction> tools)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
         foreach (var tool in tools)
         {
             AddTool(tool);

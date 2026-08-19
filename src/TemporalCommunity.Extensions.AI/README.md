@@ -47,7 +47,7 @@ workflow use does not change the durable-session tool contract below.
 ## Managed-session tool contract
 
 Worker tool registrations are the source of both model-visible schemas and worker implementations.
-Use `AddDurableTools` for one implicit default group or `AddDurableToolset` for named groups. Do not
+Use `AddDurableTool`/`AddDurableTools` for one implicit default group or `AddDurableToolset` for named groups. Do not
 put functions in `ChatOptions.Tools` when calling
 `DurableChatSessionClient.SendAsync`; the client rejects that configuration. Do not add
 `UseFunctionInvocation()` to the `IChatClient` pipeline used by a managed durable session.
@@ -89,10 +89,10 @@ builder.Services
         options.SessionTimeToLive = TimeSpan.FromHours(24);
         options.MaxToolCallsPerTurn = 10;
     })
-    .AddDurableTools(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
+    .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
 ```
 
-`AddDurableTools` creates one implicit worker-owned default toolset. The stock client request stays
+`AddDurableTool` and `AddDurableTools` contribute to one implicit worker-owned default toolset. The stock client request stays
 thin: it carries no implementation or schema. On a new session, the workflow schedules
 `ResolveDurableToolsets` once before `GetChatStep`; Temporal records the returned versioned manifest
 and Continue-as-New carries it unchanged. Changed defaults affect new sessions; workers must retain

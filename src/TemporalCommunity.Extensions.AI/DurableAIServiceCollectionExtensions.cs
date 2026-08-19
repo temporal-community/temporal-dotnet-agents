@@ -135,9 +135,26 @@ public static class DurableAIServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(tools);
 
+        return AddDurableTools(builder, (IEnumerable<AIFunction>)tools);
+    }
+
+    /// <summary>
+    /// Registers an ordered sequence of <see cref="AIFunction"/> tools with default durable
+    /// activity policy. The sequence is enumerated exactly once.
+    /// </summary>
+    /// <param name="builder">The worker options builder returned by <see cref="AddDurableAI"/>.</param>
+    /// <param name="tools">The tools to register. An empty sequence is a no-op.</param>
+    /// <returns>The same builder for further chaining.</returns>
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableTools(
+        this ITemporalWorkerServiceOptionsBuilder builder,
+        IEnumerable<AIFunction> tools)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(tools);
+
         foreach (var tool in tools)
         {
-            AddDurableTools(builder, tool, configure: null);
+            AddDurableTool(builder, tool);
         }
 
         return builder;
@@ -170,15 +187,15 @@ public static class DurableAIServiceCollectionExtensions
     /// retry.
     /// </para>
     /// </remarks>
-    public static ITemporalWorkerServiceOptionsBuilder AddDurableTools(
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableTool(
         this ITemporalWorkerServiceOptionsBuilder builder,
         AIFunction tool,
-        Action<DurableChatToolOptions>? configure)
+        Action<DurableChatToolOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(tool);
 
-        EnsureDurableAIRegistered(builder, nameof(AddDurableTools));
+        EnsureDurableAIRegistered(builder, nameof(AddDurableTool));
         var toolset = GetOrAddImplicitDefaultToolset(builder.Services);
         toolset.Add(RegisterDurableFunction(builder.Services, tool, configure));
 
@@ -591,7 +608,7 @@ internal sealed class DurableFunctionRegistry : Dictionary<string, AIFunction>
 
 /// <summary>
 /// Registry of per-tool <see cref="DurableChatToolOptions"/> overrides. Populated by
-/// <see cref="DurableAIServiceCollectionExtensions.AddDurableTools(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction, System.Action{DurableChatToolOptions}?)"/>
+/// <see cref="DurableAIServiceCollectionExtensions.AddDurableTool(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction, System.Action{DurableChatToolOptions}?)"/>
 /// — every registered tool gets an entry, even if the caller passed
 /// <see langword="null"/> for <c>configure</c>. Worker-owned manifest resolution consumes this
 /// policy through the toolset registration; the advanced caller-owned input factory uses the
@@ -606,7 +623,7 @@ internal sealed class DurableChatToolOptionsRegistry
     /// <summary>
     /// Initializes a new <see cref="DurableChatToolOptionsRegistry"/> by invoking each of
     /// the supplied configurators against the empty registry. Configurators are registered
-    /// by <see cref="DurableAIServiceCollectionExtensions.AddDurableTools(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction, System.Action{DurableChatToolOptions}?)"/>
+    /// by <see cref="DurableAIServiceCollectionExtensions.AddDurableTool(global::Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, global::Microsoft.Extensions.AI.AIFunction, System.Action{DurableChatToolOptions}?)"/>
     /// and resolved as a service-collection enumerable.
     /// </summary>
     internal DurableChatToolOptionsRegistry(

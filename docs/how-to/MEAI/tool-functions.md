@@ -30,7 +30,7 @@ builder.Services
         options.MaxToolCallsPerTurn = 10;
         options.RetryPolicy = new RetryPolicy { MaximumAttempts = 3 };
     })
-    .AddDurableTools(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
+    .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
 ```
 
 The equivalent named grouping is:
@@ -50,8 +50,9 @@ worker.AddDurableToolset("catalog", tools => tools.Add(searchCatalog));
 worker.AddDurableToolset("orders", tools => tools.Add(checkOrder));
 ```
 
-`null` selects the single implicit toolset registered through `AddDurableTools`; an empty list
-creates a deliberate no-tools baseline. Do not combine explicit defaults with `AddDurableTools`.
+`null` selects the single implicit toolset populated through
+`AddDurableTool`/`AddDurableTools`; an empty list creates a deliberate no-tools baseline. Do not
+combine explicit defaults with the implicit toolset.
 
 Toolset IDs and model-visible function names use exact ordinal comparison. Named toolsets cannot
 be empty, and members retain their registration order. `weather` and `Weather` are different IDs;

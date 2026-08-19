@@ -129,6 +129,7 @@ TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddTool(Microsoft.Extens
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddTool(string! name, System.Func<System.IServiceProvider!, Microsoft.Extensions.AI.AIFunction!>! factory, System.Action<TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions!>? configure = null) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddToolInterceptor(System.Func<System.IServiceProvider!, TemporalCommunity.Extensions.AI.Tools.IDurableToolInterceptor<TemporalCommunity.Extensions.Agents.Tools.AgentToolContext!>!>! factory) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddTools(params Microsoft.Extensions.AI.AIFunction![]! tools) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
+TemporalCommunity.Extensions.Agents.DurableAgentBuilder.AddTools(System.Collections.Generic.IEnumerable<Microsoft.Extensions.AI.AIFunction!>! tools) -> TemporalCommunity.Extensions.Agents.DurableAgentBuilder!
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ApprovalTimeout.get -> System.TimeSpan?
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ApprovalTimeout.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.ChatClient.get -> System.Func<System.IServiceProvider!, Microsoft.Extensions.AI.IChatClient!>?

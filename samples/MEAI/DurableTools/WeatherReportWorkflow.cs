@@ -18,7 +18,7 @@ internal sealed class WeatherReportWorkflow
         // Wrap the function with AsDurable() so that calling InvokeAsync inside
         // this workflow dispatches to DurableFunctionActivities as a separate
         // Temporal activity. The activity resolves "get_current_weather" from
-        // the DurableFunctionRegistry populated via AddDurableTools() at startup.
+        // the DurableFunctionRegistry populated via AddDurableTool() at startup.
         //
         // The inner lambda below is a stub — it is only reached when
         // Workflow.InWorkflow is false (i.e., outside a workflow context).

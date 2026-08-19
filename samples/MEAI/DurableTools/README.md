@@ -8,7 +8,8 @@ activity. Each tool call gets its own retry policy, timeout, and event history e
 individually in the Temporal Web UI.
 
 - `AsDurable()` — wraps any `AIFunction` so workflow context triggers `DurableFunctionActivities`
-- `AddDurableTools()` — registers functions in `DurableFunctionRegistry` on the worker
+- `AddDurableTool()` registers one function; `AddDurableTools()` registers an ordered collection
+  with the default policy
 - `WeatherReportWorkflow` — custom workflow that calls a durable tool directly (not via `DurableChatSessionClient`)
 - Per-tool retry isolation: a failing tool is retried without re-running the LLM call
 - Bounded defaults: an omitted policy allows at most five attempts, with exponential backoff capped
@@ -20,7 +21,7 @@ individually in the Temporal Web UI.
 ```
 Program.cs
     │
-    ├─ AddDurableTools(weatherTool)  →  DurableFunctionRegistry["get_current_weather"]
+    ├─ AddDurableTool(weatherTool)  →  DurableFunctionRegistry["get_current_weather"]
     │
     └─ DurableToolDemo.RunAsync()
            │
@@ -33,12 +34,12 @@ Program.cs
 
 ## Highlights
 
-- **Direct custom-workflow tool dispatch.** `AsDurable()` is for a workflow that explicitly invokes a known function. Managed `DurableChatSessionClient` tool calls use `AddDurableTools()` and the workflow-owned model/tool loop instead.
+- **Direct custom-workflow tool dispatch.** `AsDurable()` is for a workflow that explicitly invokes a known function. Managed `DurableChatSessionClient` tool calls use `AddDurableTool()`/`AddDurableTools()` and the workflow-owned model/tool loop instead.
 - **Stub inner function.** The lambda passed to `AIFunctionFactory.Create` inside `WeatherReportWorkflow` is never reached — `Workflow.InWorkflow == true` intercepts the call before the stub executes. The real implementation lives in `Program.cs` and is resolved from the `DurableFunctionRegistry` by name.
 - **Registry lookup by name.** `DurableFunctionActivities` resolves functions from `DurableFunctionRegistry` using the function's `Name` property as the key. The name must match between the workflow-side stub and the `AddDurableTools` registration.
 - **No `DurableChatSessionClient` required.** `AsDurable()` works in any `[Workflow]` class — you are not limited to the stock `DurableChatWorkflow` session model.
 - **Same task queue.** The function activity runs on the calling workflow's task queue, whose
-  worker registers the implementation with `AddDurableTools()`. Setting
+  worker registers the implementation with `AddDurableTool()`. Setting
   `DurableExecutionOptions.TaskQueue` on `AsDurable()` does not reroute the function activity.
 
 ## Getting Started
