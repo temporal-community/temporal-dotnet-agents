@@ -104,3 +104,7 @@ publish API before **Adopt**. Adoption requires all of the following:
 9. A domain-neutral end-to-end sample and operational documentation.
 
 Until those gates are met, application-owned workflow composition is the supported approach.
+
+MCP Tasks provide a second concrete deferred-work protocol, but the current investigation also ends
+at **Defer** because durable Task creation and server execution ownership are unresolved. See the
+[MCP Task research ADR](../MCP/durable-mcp-task-research.md).

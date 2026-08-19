@@ -28,6 +28,7 @@
     <!-- MCP is consumed only by samples/tests. Production library projects remain MCP-free. -->
     <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
     <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <PackageVersion Include="ModelContextProtocol.Extensions.Tasks" Version="2.2.0" />
     <!-- OpenAI -->
     <PackageVersion Include="OpenAI" Version="2.12.0" />
     <!-- OpenTelemetry -->
