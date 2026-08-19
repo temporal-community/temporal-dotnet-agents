@@ -218,6 +218,40 @@ public sealed class DurableToolsetCatalogTests
     }
 
     [Fact]
+    public void Manifest_DuplicateSchemaProperty_FailsNonRetryably()
+    {
+        var services = CreateServices();
+        var worker = services.AddHostedTemporalWorker("queue").AddDurableAI();
+        worker.AddDurableToolset("allowed", tools => tools
+            .Add(AIFunctionFactory.Create(() => "ok", "allowed_tool")));
+        using var provider = services.BuildServiceProvider();
+        var manifest = provider.GetRequiredService<DurableToolsetCatalog>().Resolve(new()
+        {
+            ToolsetIds = ["allowed"],
+        });
+        using var duplicateSchema = JsonDocument.Parse(
+            """{"type":"string","type":"number"}""");
+        var invalid = manifest with
+        {
+            Members =
+            [
+                manifest.Members[0] with
+                {
+                    Declaration = manifest.Members[0].Declaration with
+                    {
+                        JsonSchema = duplicateSchema.RootElement.Clone(),
+                    },
+                },
+            ],
+        };
+
+        var exception = Assert.Throws<ApplicationFailureException>(invalid.Validate);
+
+        Assert.True(exception.NonRetryable);
+        Assert.Equal(nameof(TemporalCommunity.Extensions.AI.Exceptions.DurableConfigurationException), exception.ErrorType);
+    }
+
+    [Fact]
     public void Authority_RejectsCallerDeclarationsCombinedWithWorkerManifest()
     {
         var declaration = DurableFunctionDeclarationSnapshot.Create(

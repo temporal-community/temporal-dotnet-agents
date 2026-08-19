@@ -123,26 +123,35 @@ internal static class DurableJsonSchemaFingerprint
 {
     public static string Create(JsonElement schema)
     {
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
+        try
         {
-            WriteCanonical(writer, schema);
-        }
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                WriteCanonical(writer, schema);
+            }
 
-        var bytes = stream.ToArray();
+            var bytes = stream.ToArray();
 #if NET10_0_OR_GREATER
-        var hash = SHA256.HashData(bytes);
+            var hash = SHA256.HashData(bytes);
 #else
-        using var sha256 = SHA256.Create();
-        var hash = sha256.ComputeHash(bytes);
+            using var sha256 = SHA256.Create();
+            var hash = sha256.ComputeHash(bytes);
 #endif
-        var result = new StringBuilder(hash.Length * 2);
-        foreach (var value in hash)
-        {
-            result.Append(value.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
-        }
+            var result = new StringBuilder(hash.Length * 2);
+            foreach (var value in hash)
+            {
+                result.Append(value.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
+            }
 
-        return result.ToString();
+            return result.ToString();
+        }
+        catch (ArgumentException exception)
+        {
+            throw new DurableConfigurationException(
+                "JSON schema contains a value that cannot be canonicalized.",
+                exception);
+        }
     }
 
     private static void WriteCanonical(Utf8JsonWriter writer, JsonElement value)
@@ -190,7 +199,9 @@ internal static class DurableJsonSchemaFingerprint
                 {
                     writer.WriteNumberValue(decimalValue);
                 }
-                else if (value.TryGetDouble(out var doubleValue))
+                else if (value.TryGetDouble(out var doubleValue)
+                    && !double.IsNaN(doubleValue)
+                    && !double.IsInfinity(doubleValue))
                 {
                     writer.WriteNumberValue(doubleValue);
                 }

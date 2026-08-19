@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Exceptions;
 using Temporalio.Workflows;
 
@@ -28,6 +29,32 @@ internal sealed record DurableToolsetManifest
     public required string Fingerprint { get; init; }
 
     internal void Validate()
+    {
+        try
+        {
+            ValidateCore();
+        }
+        catch (ApplicationFailureException)
+        {
+            throw;
+        }
+        catch (DurableConfigurationException exception)
+        {
+            throw Failure(
+                exception.Message,
+                DurableToolsetValidationReasons.InvalidDeclaration,
+                exception);
+        }
+        catch (ArgumentException exception)
+        {
+            throw Failure(
+                "The durable toolset manifest contains an invalid declaration value.",
+                DurableToolsetValidationReasons.InvalidDeclaration,
+                exception);
+        }
+    }
+
+    private void ValidateCore()
     {
         if (ManifestVersion != CurrentVersion)
         {
@@ -123,9 +150,10 @@ internal sealed record DurableToolsetManifest
 
     internal static ApplicationFailureException Failure(
         string message,
-        string reason = DurableToolsetValidationReasons.ManifestMismatch) => new(
+        string reason = DurableToolsetValidationReasons.ManifestMismatch,
+        Exception? innerException = null) => new(
             message,
-            new DurableToolsetValidationException(reason, message),
+            new DurableToolsetValidationException(reason, message, innerException),
             errorType: nameof(Exceptions.DurableConfigurationException),
             nonRetryable: true);
 }

@@ -125,4 +125,62 @@ public class DurableFunctionDeclarationSnapshotTests
         Assert.Throws<DurableConfigurationException>(
             () => DurableJsonSchemaFingerprint.Create(schema.RootElement));
     }
+
+    [Theory]
+    [InlineData("1", "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b")]
+    [InlineData("1.0", "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6")]
+    [InlineData("1.00", "cf9dcf6da8a82be1335c398a4005def7ee3a53d4698c59dbc6b2b14e72d1263c")]
+    public void SchemaFingerprint_VersionOnePreservesNumericRepresentation(
+        string json,
+        string expectedFingerprint)
+    {
+        using var schema = JsonDocument.Parse(json);
+
+        var fingerprint = DurableJsonSchemaFingerprint.Create(schema.RootElement);
+
+        Assert.Equal(expectedFingerprint, fingerprint);
+    }
+
+    [Fact]
+    public void SchemaFingerprint_NumberOutsideDoubleRange_UsesValidatedRawNumber()
+    {
+        using var schema = JsonDocument.Parse("1e400");
+
+        var fingerprint = DurableJsonSchemaFingerprint.Create(schema.RootElement);
+
+        Assert.Equal(
+            "f2bba4568fecd4b9729970732e571ac9373a33fb2d6a960794a41f0f2ecdbc25",
+            fingerprint);
+    }
+
+    [Fact]
+    public void ValidateImplementation_DuplicateSchemaProperty_FailsNonRetryably()
+    {
+        var declared = AIFunctionFactory.Create(() => "declared", "tool");
+        var snapshot = DurableFunctionDeclarationSnapshot.Create(declared.AsDeclarationOnly());
+        var implementation = new DuplicatePropertyFunction();
+
+        var exception = Assert.Throws<ApplicationFailureException>(
+            () => snapshot.ValidateImplementation(implementation));
+
+        Assert.True(exception.NonRetryable);
+        Assert.Equal(nameof(DurableConfigurationException), exception.ErrorType);
+        Assert.IsType<DurableConfigurationException>(exception.InnerException);
+    }
+
+    private sealed class DuplicatePropertyFunction : AIFunction
+    {
+        private static readonly JsonDocument Schema =
+            JsonDocument.Parse("""{"type":"string","type":"number"}""");
+
+        public override string Name => "tool";
+
+        public override string Description => string.Empty;
+
+        public override JsonElement JsonSchema => Schema.RootElement;
+
+        protected override ValueTask<object?> InvokeCoreAsync(
+            AIFunctionArguments arguments,
+            CancellationToken cancellationToken) => ValueTask.FromResult<object?>("implemented");
+    }
 }

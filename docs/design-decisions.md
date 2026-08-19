@@ -47,3 +47,10 @@ claim transparent support for arbitrary `AIAgent` subclasses such as A2A or grap
 tools are not automatically durable and require an explicit agent-side durable registration path.
 
 The eventual Temporal Harness profile remains a planned follow-on, not an out-of-the-box promise.
+
+## Freeze persisted schema fingerprints
+
+Durable declaration and toolset fingerprints are persisted deployment-drift checks. Version 1 keeps
+its successful canonical output stable, including representation-sensitive JSON numbers, and maps
+invalid history-carried declarations to non-retryable Temporal failures. See
+[Schema fingerprint v1](./architecture/MEAI/schema-fingerprint-v1.md).

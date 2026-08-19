@@ -12,8 +12,11 @@ internal static class DurableToolsetValidationReasons
     internal const string InvalidPolicy = "invalid_policy";
 }
 
-internal sealed class DurableToolsetValidationException(string reason, string message)
-    : Exception(message)
+internal sealed class DurableToolsetValidationException(
+    string reason,
+    string message,
+    Exception? innerException = null)
+    : Exception(message, innerException)
 {
     internal string Reason { get; } = reason;
 }

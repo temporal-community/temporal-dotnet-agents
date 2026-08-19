@@ -106,3 +106,5 @@ The v1 fingerprint is `tai-toolset-v1:` plus the lowercase SHA-256 hash of the c
 representation of manifest version, ordered toolset IDs, and ordered members. Object properties are
 sorted ordinally; array order is preserved. The empty v1 manifest vector is
 `tai-toolset-v1:60051ad63143350993d6849484391752110cd71d72234847dd6275a93bc5623d`.
+The complete frozen scalar and failure contract is documented in
+[Schema fingerprint v1](./schema-fingerprint-v1.md).
