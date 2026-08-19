@@ -2,6 +2,9 @@
 
 Detailed usage patterns and configuration for TemporalCommunity.Extensions.Agents. For a quick overview, see the [README](../../../README.md).
 
+For externally reachable session or approval endpoints, apply the normative
+[security boundary](../../security.md) before calling a durable client.
+
 ---
 
 ## Durable Agents (`AddDurableAgent`)

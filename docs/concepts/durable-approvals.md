@@ -2,6 +2,9 @@
 
 Durable approvals let a reviewer resolve a tool call after its workflow has parked. The pending request is workflow state, so no activity worker is occupied during a workflow-parked wait and the request survives worker restarts.
 
+The normative authentication, resource-authorization, payload, and effect-time rules are in the
+[security boundary](../security.md).
+
 ## One-call decisions
 
 Both libraries expose the shared `DurableApprovalRequest`, `DurableApprovalDecision`, and `DurableApprovalResolutionResult` contracts. Use the library-specific typed client so the application retains ownership of resource lookup:

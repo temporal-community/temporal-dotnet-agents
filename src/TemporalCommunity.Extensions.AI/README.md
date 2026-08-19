@@ -28,7 +28,8 @@ SendAsync -> DurableChatWorkflow -> GetChatStep activity
 ## Supported capabilities
 
 - Durable multi-turn chat sessions with `SendAsync` and `GetHistoryAsync`.
-- Worker-owned durable tools through `AddDurableTools` or named `AddDurableToolset` groups; every
+- Worker-owned durable tools through `AddDurableTool`/`AddDurableTools` or named
+  `AddDurableToolset` groups; every
   enabled model-requested invocation is a Temporal activity with independently configurable
   timeout and retry behavior.
 - Pre-tool decisions through `IDurableToolInterceptor<DurableToolContext>`, including block,

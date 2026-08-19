@@ -10,6 +10,24 @@ This sample demonstrates:
 - `ITemporalAgentClient.ResolveApprovalAsync()` resolving the workflow with a retry-safe decision
 - `ActivityTimeout` set to 24 hours to accommodate human review time
 
+The console is only a demonstration reviewer. A real endpoint first authenticates the principal,
+loads an application-owned resource, authorizes approval of that resource, and only then reads its
+server-held `TemporalAgentSessionId`:
+
+```csharp
+Authenticate(request.User);
+var resource = await operations.FindAsync(routeResourceId);
+await authorization.RequireApprovalPermissionAsync(request.User, resource);
+
+var pending = await agentClient.GetPendingApprovalAsync(resource.SessionId);
+var result = await agentClient.ResolveApprovalAsync(
+    resource.SessionId,
+    new DurableApprovalDecision { RequestId = pending!.RequestId, Approved = approved });
+```
+
+The `send_email` tool must reauthorize current authoritative state immediately before delivery.
+See the repository [security boundary](../../../docs/security.md).
+
 ## Architecture
 
 ```

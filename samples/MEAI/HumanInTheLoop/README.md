@@ -18,6 +18,23 @@ sessionClient.SendAsync(...)
 The sample auto-approves so the complete path can run unattended. Replace that block with a UI,
 webhook, or other review system in a real application.
 
+A real endpoint derives the conversation ID from an authorized application resource; it does not
+accept a caller-supplied ID as authority. Framework-neutral sketch:
+
+```csharp
+Authenticate(request.User);
+var resource = await conversations.FindAsync(routeResourceId);
+await authorization.RequireApprovalPermissionAsync(request.User, resource);
+
+var pending = await sessionClient.GetPendingApprovalAsync(resource.ConversationId);
+var result = await sessionClient.ResolveApprovalAsync(
+    resource.ConversationId,
+    new DurableApprovalDecision { RequestId = pending!.RequestId, Approved = approved });
+```
+
+The `delete_records` activity must independently re-read current tenant, ownership, and policy data
+immediately before deletion. See the repository [security boundary](../../../docs/security.md).
+
 ## Important details
 
 - `RequireApproval()` is a workflow-owned gate. The tool does not call Temporal APIs and no

@@ -1,5 +1,8 @@
 # Human-in-the-Loop Patterns
 
+Approval routing and application authorization are separate. Follow the normative
+[security boundary](../../security.md) for reviewer endpoints and effectful tools.
+
 Managed durable sessions can require approval for individual registered tools. Configure the tool
 at worker registration; the workflow owns the wait and does not dispatch the tool activity until a
 reviewer approves it.

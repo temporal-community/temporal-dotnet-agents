@@ -4,6 +4,9 @@
 workflow. A conversation ID becomes a workflow ID; each `SendAsync` is a workflow update; model
 calls and registered tool calls execute as activities.
 
+For externally reachable session or approval endpoints, apply the normative
+[security boundary](../../security.md) before calling a durable client.
+
 ## Worker setup
 
 Both worker and caller must use `DurableAIDataConverter.Instance`. Registration through

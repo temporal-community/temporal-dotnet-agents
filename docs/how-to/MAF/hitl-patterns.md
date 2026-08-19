@@ -1,5 +1,8 @@
 # Human-in-the-loop patterns
 
+Approval routing and application authorization are separate. Follow the normative
+[security boundary](../../security.md) for reviewer endpoints and effectful tools.
+
 Temporal-backed agents support two approval shapes. Choose based on how long the review may take.
 
 ## Workflow-parked approval

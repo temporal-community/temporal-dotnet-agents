@@ -97,5 +97,9 @@ public interface IDurableChatSessionClient
     /// </summary>
     /// <param name="conversationId">The conversation identifier.</param>
     /// <returns>The workflow ID used by the session workflow for this conversation.</returns>
+    /// <remarks>
+    /// The returned value is a routing locator, not proof that a caller owns or may access the
+    /// conversation. Perform application authentication and resource authorization first.
+    /// </remarks>
     string GetWorkflowId(string conversationId);
 }

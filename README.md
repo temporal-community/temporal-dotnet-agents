@@ -40,6 +40,8 @@ dotnet add package TemporalCommunity.Extensions.Agents
 For help choosing between the two packages, see the [Library Combinations Guide](docs/library-combinations.md).
 For the shared approval lifecycle, retry outcomes, and MAF-only scope boundary, see
 [Durable approvals](docs/concepts/durable-approvals.md).
+For externally reachable session, approval, or tool endpoints, follow the normative
+[security boundary](docs/security.md).
 
 ## How It Works
 

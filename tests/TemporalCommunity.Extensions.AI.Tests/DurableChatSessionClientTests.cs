@@ -86,6 +86,20 @@ public class DurableChatSessionClientTests
         Assert.Equal(id1, id2);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void GetWorkflowId_RejectsMissingConversationId(string? conversationId)
+    {
+        var client = A.Fake<ITemporalClient>();
+        var sessionClient = new DurableChatSessionClient(
+            client,
+            new DurableExecutionOptions { TaskQueue = "test" });
+
+        Assert.ThrowsAny<ArgumentException>(() => sessionClient.GetWorkflowId(conversationId!));
+    }
+
     [Fact]
     public async Task SendAsync_CallerSuppliedTools_ThrowsBeforeWorkflowDispatch()
     {
