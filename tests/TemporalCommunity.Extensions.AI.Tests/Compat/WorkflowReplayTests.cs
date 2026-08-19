@@ -89,6 +89,20 @@ public class WorkflowReplayTests
     // ── Happy-path replays ──────────────────────────────────────────────────
 
     /// <summary>
+    /// The baseline no-tool history remains replayable.
+    /// </summary>
+    [Fact]
+    public async Task Pattern1_SimpleTurn_ReplaysWithoutError()
+    {
+        var replayer = BuildReplayer();
+        var history = LoadHistory("pattern-1-simple-turn.json");
+
+        var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
+    /// <summary>
     /// A Pattern-3 history (one tool call: GetChatStep → InvokeFunction → GetChatStep final)
     /// replays cleanly. This validates the durable tool dispatch loop wire-names:
     /// <c>TemporalCommunity.Extensions.AI.GetChatStep</c> and
@@ -100,6 +114,20 @@ public class WorkflowReplayTests
     {
         var replayer = BuildReplayer();
         var history = LoadHistory("pattern-3-with-tool.json");
+
+        var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
+    /// <summary>
+    /// The post-Continue-as-New history remains replayable.
+    /// </summary>
+    [Fact]
+    public async Task CanTransition_PostCanHistory_ReplaysWithoutError()
+    {
+        var replayer = BuildReplayer();
+        var history = LoadHistory("can-transition.json");
 
         var result = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
 

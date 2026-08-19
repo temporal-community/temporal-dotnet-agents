@@ -1,0 +1,11 @@
+{
+  "can-transition.json": "ReplaySuccess",
+  "direct-middleware-options-v1.json": "ReplaySuccess",
+  "pattern-1-nondeterminism.json": "ExpectedNondeterminism",
+  "pattern-1-simple-turn.json": "ReplaySuccess",
+  "pattern-3-with-tool.json": "ReplaySuccess",
+  "typed-durable-turn-v1.json": "ReplaySuccess",
+  "typed-iteration-limit-v0_12_0.json": "ReplaySuccess",
+  "typed-worker-owned-toolset-v1.json": "ReplaySuccess",
+  "worker-owned-toolset-v1.json": "ReplaySuccess"
+}

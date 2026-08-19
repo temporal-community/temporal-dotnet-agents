@@ -30,6 +30,13 @@ activity, one real tool activity with state completion, a final model activity, 
 completed Update. Ordinary test runs exclude `Category=HistoryCapture` so they never rewrite the
 checked-in corpus.
 
+Every checked-in history must also have an entry in
+`tests/TemporalCommunity.Extensions.AI.Tests/Compat/replay-fixture-dispositions.json`. The unit-test
+catalog rejects both unclassified histories and stale disposition entries. A successful replay
+fixture must retain a focused replay test; an expected-nondeterminism fixture must retain a negative
+test proving that replay fails for the intended reason. Do not delete a replay consumer while
+regenerating histories for an unrelated feature change.
+
 Before adopting or publishing the typed API, run its clean NuGet consumer:
 
 ```bash

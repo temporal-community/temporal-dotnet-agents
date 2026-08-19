@@ -121,6 +121,20 @@ public class DurableChatWorkflowInputFactoryTests
         Assert.Equal(input.MaxToolCallsPerTurn, actual.MaxToolCallsPerTurn);
     }
 
+    [Fact]
+    public void Create_WithNoCallerOwnedTools_DoesNotSerializeLegacyEmptyAuthority()
+    {
+        var factory = new DurableChatWorkflowInputFactory(
+            CreateOptions(),
+            new DurableFunctionRegistry(),
+            new DurableChatToolOptionsRegistry());
+
+        var input = factory.Create();
+
+        Assert.Null(input.ToolDeclarations);
+        Assert.Null(input.ToolActivityOptions);
+    }
+
     private static DurableExecutionOptions CreateOptions() => new()
     {
         TaskQueue = "durable-ai",

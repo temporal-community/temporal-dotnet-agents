@@ -38,7 +38,12 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     {
         ArgumentNullException.ThrowIfNull(input);
         var authority = Internal.DurableToolsetAuthority.Resolve(input);
-        if (authority == Internal.DurableToolsetAuthorityKind.None)
+        // Legacy caller-owned histories serialized an empty ToolActivityOptions dictionary.
+        // Current worker-owned starts omit that field and resolve their default toolsets once.
+        // This wire-shape distinction preserves both command sequences without consulting live
+        // worker state during replay.
+        if (authority == Internal.DurableToolsetAuthorityKind.None
+            && input.ToolActivityOptions is null)
         {
             var resolverOptions = new ActivityOptions
             {

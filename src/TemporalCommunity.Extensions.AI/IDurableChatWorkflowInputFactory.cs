@@ -97,7 +97,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
     {
         var toolNames = _declarationRegistry?.Keys
             ?? (IEnumerable<string>?)_functionRegistry?.Keys;
-        if (toolNames is null)
+        if (toolNames is null || !toolNames.Any())
         {
             return null;
         }
