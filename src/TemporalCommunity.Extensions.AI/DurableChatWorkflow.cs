@@ -37,6 +37,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     public new async Task RunAsync(DurableChatWorkflowInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        InitializeInput(input);
         var authority = Internal.DurableToolsetAuthority.Resolve(input);
         // Legacy caller-owned histories serialized an empty ToolActivityOptions dictionary.
         // Current worker-owned starts omit that field and resolve their default toolsets once.

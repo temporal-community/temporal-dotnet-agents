@@ -33,20 +33,59 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private int _turnCount;
 
     /// <summary>
-    /// The workflow input set at the start of <see cref="RunAsync"/>.
-    /// Available to subclasses after the first call to <see cref="RunAsync"/>.
+    /// The workflow input set by <see cref="InitializeInput"/>.
     /// </summary>
     protected DurableChatWorkflowInput? Input { get; private set; }
 
     /// <summary>
     /// Non-nullable accessor for <see cref="Input"/>. Throws <see cref="InvalidOperationException"/>
-    /// when accessed before <see cref="RunAsync"/> has set the input. Prefer this over
-    /// <c>Input!</c> suppression — the type system cannot enforce the FIFO scheduler invariant
-    /// that guarantees <see cref="Input"/> is non-null before any update handler executes.
+    /// when accessed before <see cref="InitializeInput"/> has set the input. Prefer this over
+    /// <c>Input!</c> suppression. Custom workflow run methods must call
+    /// <see cref="InitializeInput"/> before their first await.
     /// </summary>
     protected DurableChatWorkflowInput RequiredInput =>
         Input ?? throw new InvalidOperationException(
             "RequiredInput accessed before RunAsync initialized Input.");
+
+    /// <summary>
+    /// Initializes start-input state synchronously before a workflow run method first yields.
+    /// </summary>
+    /// <remarks>
+    /// Custom workflow run methods must call this immediately after validating their input and
+    /// before their first await. The base run method calls it defensively. A later call in the same
+    /// run may replace a provisional input with its resolved copy, but never clears pending or
+    /// newly retained approval state. Workflow Update validators are synchronous and must not call
+    /// workflow awaitables or depend on state that has not been initialized.
+    /// </remarks>
+    protected void InitializeInput(DurableChatWorkflowInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var firstInitialization = Input is null;
+        Input = input;
+        if (firstInitialization)
+        {
+            _approvalMixin.RestoreResolvedApprovals(input.ApprovalResolutionHistory);
+        }
+    }
+
+    /// <summary>
+    /// Waits deterministically until the workflow run input has been initialized.
+    /// </summary>
+    /// <remarks>
+    /// Use this only from asynchronous workflow handlers. Workflow Update validators are
+    /// synchronous and must never call this method or any other workflow awaitable. A validator
+    /// should admit an Update when initialization-dependent state is not ready so the handler can
+    /// wait and then perform authoritative validation.
+    /// </remarks>
+    protected async Task<DurableChatWorkflowInput> WaitForInputAsync()
+    {
+        if (Input is null)
+        {
+            await Workflow.WaitConditionAsync(() => Input is not null).ConfigureAwait(true);
+        }
+
+        return RequiredInput;
+    }
 
     /// <summary>
     /// Returns <see langword="true"/> once a <c>Shutdown</c> signal has been received.
@@ -241,8 +280,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// </summary>
     protected virtual async Task RunAsync(DurableChatWorkflowInput input)
     {
-        Input = input;
-        _approvalMixin.RestoreResolvedApprovals(input.ApprovalResolutionHistory);
+        InitializeInput(input);
 
         // Restore history carried forward from a previous run (continue-as-new).
         if (input.CarriedHistory is { Count: > 0 })
@@ -581,15 +619,25 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// Validates a tool approval request before it enters workflow history.
     /// </summary>
     [WorkflowUpdateValidator(nameof(RequestApprovalAsync))]
-    public void ValidateRequestApproval(DurableApprovalRequest request) =>
+    public void ValidateRequestApproval(DurableApprovalRequest request)
+    {
+        // An Update-With-Start validator can run before the workflow run method's first user
+        // statement. Admit it so the async handler can wait for initialization, then revalidate.
+        if (Input is null)
+        {
+            return;
+        }
+
         _approvalMixin.ValidateRequestApproval(request);
+    }
 
     [WorkflowUpdate("RequestApproval")]
     public async Task<DurableApprovalDecision> RequestApprovalAsync(DurableApprovalRequest request)
     {
+        var input = await WaitForInputAsync().ConfigureAwait(true);
         var decision = await _approvalMixin.RequestApprovalAsync(
             request,
-            approvalTimeout: RequiredInput.ApprovalTimeout,
+            approvalTimeout: input.ApprovalTimeout,
             onRequested: req => Workflow.Logger.LogInformation(
                 "[{ConversationId}] Approval requested (RequestId: {RequestId}, Description: {Description})",
                 Workflow.Info.WorkflowId, req.RequestId, req.Description ?? req.RequestId),

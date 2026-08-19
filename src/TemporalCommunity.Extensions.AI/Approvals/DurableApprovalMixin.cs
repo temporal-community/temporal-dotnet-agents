@@ -1,4 +1,5 @@
 using Temporalio.Workflows;
+using Temporalio.Exceptions;
 
 namespace TemporalCommunity.Extensions.AI.Approvals;
 
@@ -20,6 +21,10 @@ namespace TemporalCommunity.Extensions.AI.Approvals;
 /// </remarks>
 internal sealed class DurableApprovalMixin
 {
+    internal const string InvalidRequestErrorType = "DurableApprovalInvalidRequest";
+    internal const string AlreadyPendingErrorType = "DurableApprovalAlreadyPending";
+    private const string AlreadyPendingMessage =
+        "An approval request is already pending. Submit or timeout the current request before sending another.";
     private const int MaxRetainedResolutions = 32;
     private DurableApprovalRequest? _pendingApproval;
     private DurableApprovalDecision? _approvalDecision;
@@ -56,12 +61,10 @@ internal sealed class DurableApprovalMixin
     /// </summary>
     public void ValidateRequestApproval(DurableApprovalRequest request)
     {
-        ArgumentNullException.ThrowIfNull(request);
-        if (string.IsNullOrEmpty(request.RequestId))
-            throw new ArgumentException("RequestId must not be null or empty.");
+        if (request is null || string.IsNullOrWhiteSpace(request.RequestId))
+            throw Failure("RequestId must not be null, empty, or whitespace.", InvalidRequestErrorType);
         if (_pendingApproval is not null)
-            throw new InvalidOperationException(
-                "An approval request is already pending. Submit or timeout the current request before sending another.");
+            throw Failure(AlreadyPendingMessage, AlreadyPendingErrorType);
     }
 
     // ── Updates ─────────────────────────────────────────────────────────────
@@ -87,13 +90,11 @@ internal sealed class DurableApprovalMixin
         Action<DurableApprovalRequest>? onRequested = null,
         Action<DurableApprovalDecision>? onResolved = null)
     {
-        // Guard against concurrent requests. ValidateRequestApproval runs this check on the
+        // Guard against invalid and concurrent requests. ValidateRequestApproval runs this check on the
         // [WorkflowUpdateValidator] path (update arrives over the wire), but direct turn-loop
         // calls bypass that callback entirely. Running the check here means both paths are
         // protected; the double-check on the update path is harmless.
-        if (_pendingApproval is not null)
-            throw new InvalidOperationException(
-                "An approval request is already pending. Submit or timeout the current request before sending another.");
+        ValidateRequestApproval(request);
 
         // The caller supplies the request content; the workflow is the authority for its
         // deadline. Copy rather than mutate so a request object reused by a caller cannot
@@ -220,4 +221,7 @@ internal sealed class DurableApprovalMixin
             RequestId = requestId,
             Status = status,
         };
+
+    private static ApplicationFailureException Failure(string message, string errorType) =>
+        new(message, errorType, nonRetryable: true);
 }

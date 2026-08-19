@@ -175,6 +175,7 @@ TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.GetHistory() ->
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.GetPendingApproval() -> TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest?
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.History.get -> System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.Input.get -> TemporalCommunity.Extensions.AI.DurableChatWorkflowInput?
+TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.InitializeInput(TemporalCommunity.Extensions.AI.DurableChatWorkflowInput! input) -> void
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.IsShutdownRequested.get -> bool
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.RequestApprovalAsync(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest! request) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision!>!
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.RequestApprovalFromTurnLoopAsync(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest! request, System.TimeSpan approvalTimeout, System.Action<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest!>? onRequested = null, System.Action<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision!>? onResolved = null) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision!>!
@@ -213,6 +214,7 @@ TemporalCommunity.Extensions.AI.DurableToolInvocationMetadata.WorkflowRunId.get 
 virtual TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.OnApprovalResolutionAccepted(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision! decision) -> void
 virtual TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.OnApprovalRequestResolved(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision! decision) -> void
 TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.ValidateRequestApproval(TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest! request) -> void
+TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.WaitForInputAsync() -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.DurableChatWorkflowInput!>!
 TemporalCommunity.Extensions.AI.DurableChatWorkflowInput
 TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.ActivityTimeout.get -> System.TimeSpan
 TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.ActivityTimeout.init -> void

@@ -40,6 +40,7 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
     protected sealed override async Task RunAsync(DurableChatWorkflowInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        InitializeInput(input);
         var authority = Internal.DurableToolsetAuthority.Resolve(input);
         if (authority == Internal.DurableToolsetAuthorityKind.None)
         {

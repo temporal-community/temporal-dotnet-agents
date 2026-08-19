@@ -24,7 +24,12 @@ public sealed class ApplicationWorkflow
         ["catalog", "operations"];
 
     [WorkflowRun]
-    public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
+    public new async Task RunAsync(DurableChatWorkflowInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        InitializeInput(input); // synchronously, before the first await
+        await base.RunAsync(input).ConfigureAwait(true);
+    }
 
     [WorkflowUpdate("Turn")]
     public Task<DurableTurnResult<ApplicationTurnState>> TurnAsync(
@@ -32,6 +37,13 @@ public sealed class ApplicationWorkflow
         RunDurableTurnAsync(request);
 }
 ```
+
+`InitializeInput` must be the first workflow-state operation in a custom run method, before its
+first await. Temporal may admit an Update-With-Start handler before the run method executes user
+code. An asynchronous handler that needs input may call the protected `WaitForInputAsync`; an Update
+validator cannot await and must admit the request when initialization-dependent state is not ready,
+leaving authoritative validation to the handler. Validators are an early rejection optimization,
+not the only invariant check.
 
 The protected baseline is resolved once and is the workflow's maximum tool authority. A turn may
 deterministically narrow it without carrying schemas or implementations in the Update:

@@ -1,4 +1,7 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Api.Enums.V1;
+using Temporalio.Client;
+using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using Xunit;
@@ -193,6 +196,84 @@ public class DurableApprovalIntegrationTests
 
         var pending = await _fixture.SessionClient.GetPendingApprovalAsync(conversationId);
         Assert.Null(pending);
+    }
+
+    [Fact]
+    public async Task ApprovalUpdateWithStart_InitializesBeforeResolverAwait_AndSessionRemainsHealthy()
+    {
+        var conversationId = $"approval-early-{Guid.NewGuid():N}";
+        var workflowId = _fixture.SessionClient.GetWorkflowId(conversationId);
+        var input = new DurableChatWorkflowInput
+        {
+            TimeToLive = TimeSpan.FromMinutes(5),
+            ActivityTimeout = TimeSpan.FromSeconds(30),
+            HeartbeatTimeout = TimeSpan.FromSeconds(10),
+            ApprovalTimeout = TimeSpan.FromMinutes(1),
+            // Legacy caller-owned no-tools authority avoids making this test depend on the
+            // fixture's worker-owned toolset catalog; initialization ordering is the subject.
+            ToolActivityOptions = new Dictionary<string, Temporalio.Workflows.ActivityOptions>(),
+        };
+        var request = new DurableApprovalRequest
+        {
+            RequestId = $"req-{Guid.NewGuid():N}",
+            Description = "Early update",
+        };
+        var start = WithStartWorkflowOperation.Create(
+            (DurableChatWorkflow workflow) => workflow.RunAsync(input),
+            new WorkflowOptions(workflowId, IntegrationTestFixture.TaskQueue)
+            {
+                IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+            });
+
+        var first = _fixture.Client.ExecuteUpdateWithStartWorkflowAsync<DurableChatWorkflow, DurableApprovalDecision>(
+            workflow => workflow.RequestApprovalAsync(request),
+            new WorkflowUpdateWithStartOptions(start));
+
+        var handle = _fixture.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        DurableApprovalRequest? pending = null;
+        for (var attempt = 0; attempt < 30 && pending is null; attempt++)
+        {
+            await Task.Delay(100);
+            try
+            {
+                pending = await handle.QueryAsync(workflow => workflow.GetPendingApproval());
+            }
+            catch (RpcException exception) when (exception.Code == RpcException.StatusCode.NotFound)
+            {
+                // The update-with-start RPC is still being admitted.
+            }
+        }
+        var history = pending is null ? await handle.FetchHistoryAsync() : null;
+        var workflowTaskFailures = history?.Events
+            .Select(item => item.WorkflowTaskFailedEventAttributes?.Failure?.Message)
+            .Where(message => !string.IsNullOrWhiteSpace(message));
+        Assert.True(
+            pending is not null,
+            $"Approval did not become pending. Update status: {first.Status}; " +
+            $"error: {(first.Exception?.GetBaseException().Message ?? "none")}; " +
+            $"workflow task failures: {string.Join(" | ", workflowTaskFailures ?? [])}");
+        Assert.Equal(request.RequestId, pending.RequestId);
+
+        var secondRequest = new DurableApprovalRequest
+        {
+            RequestId = $"req-{Guid.NewGuid():N}",
+            Description = "Concurrent request",
+        };
+        var conflict = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            handle.ExecuteUpdateAsync(workflow => workflow.RequestApprovalAsync(secondRequest)));
+        var conflictFailure = Assert.IsType<ApplicationFailureException>(conflict.InnerException);
+        Assert.Equal(DurableApprovalMixin.AlreadyPendingErrorType, conflictFailure.ErrorType);
+        Assert.True(conflictFailure.NonRetryable);
+
+        var resolution = await handle.ExecuteUpdateAsync(workflow => workflow.ResolveApprovalAsync(
+            new DurableApprovalDecision { RequestId = request.RequestId, Approved = false }));
+        Assert.Equal(DurableApprovalResolutionStatus.Accepted, resolution.Status);
+        Assert.False((await first).Approved);
+
+        var response = await _fixture.SessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "Still healthy")]);
+        Assert.NotEmpty(response.Messages);
     }
 
     /// <summary>

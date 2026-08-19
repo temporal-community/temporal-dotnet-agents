@@ -78,6 +78,7 @@ internal class AgentWorkflow :
     public async Task RunAsync(AgentWorkflowInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        InitializeInput(input);
         _input = input;
         _currentStateBag = input.CarriedStateBag;
         RestoreResolvedAgentApprovals(input.AgentApprovalResolutionHistory);

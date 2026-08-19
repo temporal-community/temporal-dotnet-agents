@@ -22,7 +22,12 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
     private readonly Dictionary<string, string> _conversationIdByCorrelation = new();
 
     [WorkflowRun]
-    public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
+    public new async Task RunAsync(DurableChatWorkflowInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        InitializeInput(input);
+        await base.RunAsync(input).ConfigureAwait(true);
+    }
 
     /// <summary>
     /// Validates a shopping turn request before it enters workflow history.
