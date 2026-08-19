@@ -1,0 +1,24 @@
+[
+  {
+    "name": "lookup_inventory",
+    "description": "Look up current inventory for a product SKU.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sku": { "type": "string" }
+      },
+      "required": ["sku"]
+    }
+  },
+  {
+    "name": "delete_inventory",
+    "description": "Delete an inventory record. This is a destructive write.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "sku": { "type": "string" }
+      },
+      "required": ["sku"]
+    }
+  }
+]

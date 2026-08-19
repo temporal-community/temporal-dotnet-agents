@@ -25,6 +25,9 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
+    <!-- MCP is consumed only by samples/tests. Production library projects remain MCP-free. -->
+    <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
     <!-- OpenAI -->
     <PackageVersion Include="OpenAI" Version="2.12.0" />
     <!-- OpenTelemetry -->

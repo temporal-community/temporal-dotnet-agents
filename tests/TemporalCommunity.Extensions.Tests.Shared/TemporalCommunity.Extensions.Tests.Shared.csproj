@@ -23,8 +23,10 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.AI" />
     <PackageReference Include="Temporalio" />
+    <PackageReference Include="ModelContextProtocol" />
   </ItemGroup>
 
 </Project>

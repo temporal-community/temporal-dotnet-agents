@@ -41,6 +41,8 @@ SendAsync -> DurableChatWorkflow -> GetChatStep activity
   `WithChatClientKey(...)` override.
 - Direct custom-workflow adapters: `UseDurableExecution()` for `IChatClient` and embedding
   generators, plus `AIFunction.AsDurable()` for an explicitly invoked known function.
+- Ordinary MCP client tools through the same `AIFunction` registration surface; see the
+  [MCP guide](../../docs/how-to/MEAI/mcp-tools.md).
 
 The managed session and the direct adapters are separate APIs. In particular, direct custom
 workflow use does not change the durable-session tool contract below.

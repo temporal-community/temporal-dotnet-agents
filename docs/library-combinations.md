@@ -73,6 +73,8 @@ var response = await sessionClient.SendAsync(
 - Custom workflow output — subclass `DurableChatWorkflowBase<TOutput>` to return domain-specific types from workflow Update handlers. The session loop, history, HITL, and continue-as-new are all inherited. See [custom-workflow-output.md](how-to/MEAI/custom-workflow-output.md).
 - Extensible typed turns — subclass `DurableToolWorkflowBase<TRequestData, TTurnState>` to retain
   package-owned per-tool activities while supplying typed request data and sequential turn state.
+- MCP client tools are ordinary `AIFunction` registrations; choose trusted dynamic discovery or
+  reviewed pinned schemas as described in the [MEAI MCP guide](how-to/MEAI/mcp-tools.md).
 
 ### Limitations
 

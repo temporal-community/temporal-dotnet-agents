@@ -96,6 +96,8 @@ from durable transport because they cannot be safely resumed.
 
 ## Durable tools
 
+Remote MCP tools use the same durable function surface; see [MCP tools](mcp-tools.md).
+
 Register functions on the worker. `AddDurableTool` and `AddDurableTools` contribute to one implicit
 default toolset. The
 client-side `SendAsync` request contains no schemas or implementations; the stock workflow resolves

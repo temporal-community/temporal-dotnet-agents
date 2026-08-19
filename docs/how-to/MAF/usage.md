@@ -1054,41 +1054,46 @@ await client.RunAgentDelayedAsync(
 
 ## MCP Tool Integration
 
-[Model Context Protocol](https://modelcontextprotocol.io/) tool servers expose `AIFunction`-shaped tools (`McpClientTool : AIFunction`) that plug into a durable agent's tool list. Because tool factories on `DurableAgentBuilder` are evaluated lazily at first activity dispatch, you can connect to the MCP server inside a tool factory using a singleton-cached `McpClient`.
-
-Add the `ModelContextProtocol` NuGet package to your project, then register the MCP client and tools:
+[Model Context Protocol](https://modelcontextprotocol.io/) servers expose `McpClientTool` objects,
+which already derive from `AIFunction`. Connect and enumerate tools asynchronously before building
+the host. Keep the client alive for the worker lifetime; do not store it in workflow state.
 
 ```csharp
-// 1. Register the MCP client as a singleton — one connection per worker process.
-builder.Services.AddSingleton(async sp =>
-    await McpClientFactory.CreateAsync(
-        new SseServerTransport("http://localhost:3000/sse")));
-builder.Services.AddSingleton<IReadOnlyList<AIFunction>>(sp =>
+await using var mcp = await McpClient.CreateAsync(new HttpClientTransport(new()
 {
-    var mcp = sp.GetRequiredService<Task<McpClient>>().GetAwaiter().GetResult();
-    return mcp.ListToolsAsync().GetAwaiter().GetResult().Cast<AIFunction>().ToList();
-});
+    Endpoint = new Uri("https://mcp.example.com"),
+    Name = "inventory",
+}));
 
-builder.Services.AddChatClient(openAiClient.GetChatClient("gpt-4o").AsIChatClient());
+IList<McpClientTool> discovered = await mcp.ListToolsAsync();
+
+var byName = discovered.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+var lookup = byName.TryGetValue("lookup_inventory", out var read)
+    ? read
+    : throw new InvalidOperationException("Required MCP tool is missing.");
+var delete = byName.TryGetValue("delete_inventory", out var write)
+    ? write
+    : throw new InvalidOperationException("Required MCP tool is missing.");
 
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("McpAgent", agent =>
         {
             agent.Instructions = "You can call the configured MCP tools.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-
-            // Resolve MCP tools at first dispatch — the singleton above caches the client.
-            // Each tool factory below registers one tool against the agent's per-agent tool registry.
-            // For a non-trivial number of tools, prefer enumerating ListToolsAsync() during
-            // host construction and calling agent.AddTool(...) per discovered tool there.
+            agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+            agent.AddTool(lookup);
+            agent.AddTool(delete, policy => policy.NoRetry().RequireApproval());
         });
     });
 ```
 
-For very large MCP catalogs, register the discovered tools at host-construction time (before `builder.Build()`) and call `agent.AddTool(tool)` on the builder for each one — the builder accepts concrete `AIFunction` instances directly via the `AddTool(AIFunction, ...)` and `AddTools(params AIFunction[])` overloads.
+Dynamic discovery is appropriate only when the whole authenticated server catalog is trusted. For
+production allowlists, construct `McpClientTool` from reviewed, checked-in `Protocol.Tool`
+definitions and use exact ordinal lookup. That pins the model-visible schema; it does not
+authenticate the server or prove the remote implementation is compatible. See the complete
+[MAF MCP guide](mcp-tools.md) and runnable [McpTools sample](../../../samples/MAF/McpTools).
 
 ---
 

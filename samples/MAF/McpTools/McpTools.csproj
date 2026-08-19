@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions.Agents.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="ModelContextProtocol" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../MCP/Shared/McpSampleInfrastructure.cs" Link="McpSampleInfrastructure.cs" />
+    <Content Include="../../MCP/Shared/pinned-tools.json" Link="pinned-tools.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

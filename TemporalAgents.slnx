@@ -22,6 +22,7 @@
     <Project Path="samples/MEAI/CustomWorkflow/CustomWorkflow.csproj" />
     <Project Path="samples/MEAI/ExtensibleDurableTurns/ExtensibleDurableTurns.csproj" />
     <Project Path="samples/MEAI/ToolInterceptor/ToolInterceptor.csproj" />
+    <Project Path="samples/MEAI/McpTools/McpTools.csproj" />
   </Folder>
   <Folder Name="/samples/" />
   <Folder Name="/samples/MAF/">
@@ -41,6 +42,7 @@
     <Project Path="samples/MAF/ApprovalScopes/ApprovalScopes.csproj" />
     <Project Path="samples/MAF/MixedActivities/MixedActivities.csproj" />
     <Project Path="samples/MAF/DurableContextProvider/DurableContextProvider.csproj" />
+    <Project Path="samples/MAF/McpTools/McpTools.csproj" />
   </Folder>
   <Folder Name="/samples/MAF/SplitWorkerClient/">
     <Project Path="samples/MAF/SplitWorkerClient/Client/Client.csproj" />

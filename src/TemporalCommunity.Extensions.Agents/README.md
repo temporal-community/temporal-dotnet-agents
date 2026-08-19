@@ -25,7 +25,8 @@ Key benefits over in-memory agent frameworks:
 - Human-in-the-loop approval gates via `[WorkflowUpdate]`
 - Typed structured output with `RunAsync<T>` (markdown fence stripping + retry)
 - Recurring and one-time scheduled agent runs
-- MCP tool integration via async agent factory
+- MCP tool integration through ordinary `AddTool`/`AddTools` registration; see the
+  [MCP guide](../../docs/how-to/MAF/mcp-tools.md)
 - External memory with `AIContextProvider` and `AgentSessionStateBag` persistence
 - Completed request/response only; `RunStreamingAsync` is not supported
 - Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`)
