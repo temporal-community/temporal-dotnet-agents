@@ -50,7 +50,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
             {
                 StartToCloseTimeout = input.ActivityTimeout,
                 HeartbeatTimeout = input.HeartbeatTimeout,
-                RetryPolicy = Internal.DefaultRetryPolicy.Resolve(input.RetryPolicy),
+                RetryPolicy = Internal.DefaultRetryPolicy.ResolveForTool(input.RetryPolicy),
                 Summary = "Resolve durable toolsets",
             };
             var manifest = await Workflow.ExecuteActivityAsync(

@@ -83,13 +83,9 @@ public sealed class DurableAIFunction : DelegatingAIFunction
         var activityOptions = new ActivityOptions
         {
             StartToCloseTimeout = options.ActivityTimeout,
+            RetryPolicy = Internal.DefaultRetryPolicy.ResolveForTool(options.RetryPolicy),
             Summary = BuildActivitySummary(functionName),
         };
-
-        if (options.RetryPolicy is not null)
-        {
-            activityOptions.RetryPolicy = options.RetryPolicy;
-        }
 
         return activityOptions;
     }

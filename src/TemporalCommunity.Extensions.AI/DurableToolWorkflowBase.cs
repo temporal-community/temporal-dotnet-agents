@@ -49,7 +49,7 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
             {
                 StartToCloseTimeout = input.ActivityTimeout,
                 HeartbeatTimeout = input.HeartbeatTimeout,
-                RetryPolicy = Internal.DefaultRetryPolicy.Resolve(input.RetryPolicy),
+                RetryPolicy = Internal.DefaultRetryPolicy.ResolveForTool(input.RetryPolicy),
                 Summary = "Resolve durable toolsets",
             };
             var resolutionRequest = baselineIds is null

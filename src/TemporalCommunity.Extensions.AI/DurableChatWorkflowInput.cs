@@ -37,16 +37,16 @@ public record class DurableChatWorkflowInput
     public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// Retry policy applied to dispatched activities (LLM calls and the durable tool-dispatch
-    /// fallback). Resolved at session start from <c>DurableExecutionOptions.RetryPolicy</c>.
+    /// Explicit retry policy applied to dispatched activities. When unset, each dispatch path
+    /// resolves its workload-appropriate bounded model or tool default.
     /// </summary>
     /// <remarks>
     /// When a durable tool has no per-tool entry in <see cref="ToolActivityOptions"/>
     /// (defensive fallback in <c>DurableChatWorkflow.ResolveToolActivityOptions</c>), this value
     /// is applied so the tool activity does not fall back to Temporal's default policy
     /// (unlimited retries). A non-idempotent unregistered tool would otherwise retry forever.
-    /// May be <see langword="null"/> when no policy was configured, in which case the per-tool
-    /// options dictionary already carries the resolved policy for every registered tool.
+    /// May be <see langword="null"/> when no policy was configured. Registered tool entries carry
+    /// their resolved tool policy; defensive fallbacks also resolve the bounded tool default.
     /// </remarks>
     public RetryPolicy? RetryPolicy { get; init; }
 

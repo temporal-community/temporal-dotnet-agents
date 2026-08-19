@@ -538,7 +538,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             {
                 StartToCloseTimeout = RequiredInput.ActivityTimeout,
                 HeartbeatTimeout = RequiredInput.HeartbeatTimeout,
-                RetryPolicy = Internal.DefaultRetryPolicy.Resolve(RequiredInput.RetryPolicy),
+                RetryPolicy = Internal.DefaultRetryPolicy.ResolveForModel(RequiredInput.RetryPolicy),
                 Summary = DurableChatClient.BuildActivitySummary(chatOptions),
             };
 

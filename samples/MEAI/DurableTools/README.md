@@ -11,6 +11,9 @@ individually in the Temporal Web UI.
 - `AddDurableTools()` — registers functions in `DurableFunctionRegistry` on the worker
 - `WeatherReportWorkflow` — custom workflow that calls a durable tool directly (not via `DurableChatSessionClient`)
 - Per-tool retry isolation: a failing tool is retried without re-running the LLM call
+- Bounded defaults: an omitted policy allows at most five attempts, with exponential backoff capped
+  at 30 seconds. This is not exactly-once execution; configure `MaximumAttempts = 1` for an unsafe
+  non-idempotent effect.
 
 ## Architecture
 

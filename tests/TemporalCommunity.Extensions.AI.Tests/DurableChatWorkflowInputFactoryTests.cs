@@ -135,6 +135,35 @@ public class DurableChatWorkflowInputFactoryTests
         Assert.Null(input.ToolActivityOptions);
     }
 
+    [Fact]
+    public void Create_WhenRetryPolicyUnset_KeepsModelSettingUnsetAndBoundsToolActivities()
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "durable-ai",
+            ActivityTimeout = TimeSpan.FromMinutes(6),
+            HeartbeatTimeout = TimeSpan.FromMinutes(2),
+        };
+        var functions = new DurableFunctionRegistry();
+        functions.Register(AIFunctionFactory.Create(() => "ok", "read_record"));
+        var factory = new DurableChatWorkflowInputFactory(
+            options,
+            functions,
+            new DurableChatToolOptionsRegistry());
+
+        var input = factory.Create();
+
+        Assert.Null(input.RetryPolicy);
+        var retry = input.ToolActivityOptions!["read_record"].RetryPolicy!;
+        Assert.Equal(
+            global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumAttempts,
+            retry.MaximumAttempts);
+        Assert.Equal(
+            TimeSpan.FromSeconds(
+                global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultToolMaximumIntervalSeconds),
+            retry.MaximumInterval);
+    }
+
     private static DurableExecutionOptions CreateOptions() => new()
     {
         TaskQueue = "durable-ai",

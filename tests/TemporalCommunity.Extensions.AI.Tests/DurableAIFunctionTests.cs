@@ -83,4 +83,21 @@ public class DurableAIFunctionTests
         Assert.Equal("GetWeather", activityOptions.Summary);
         Assert.Same(retryPolicy, activityOptions.RetryPolicy);
     }
+
+    [Fact]
+    public void CreateActivityOptions_WhenRetryPolicyUnset_UsesBoundedToolDefault()
+    {
+        var activityOptions = DurableAIFunction.CreateActivityOptions(
+            "GetWeather",
+            new DurableExecutionOptions { ActivityTimeout = TimeSpan.FromSeconds(47) });
+
+        Assert.NotNull(activityOptions.RetryPolicy);
+        Assert.Equal(
+            global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumAttempts,
+            activityOptions.RetryPolicy.MaximumAttempts);
+        Assert.Equal(
+            TimeSpan.FromSeconds(
+                global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultToolMaximumIntervalSeconds),
+            activityOptions.RetryPolicy.MaximumInterval);
+    }
 }

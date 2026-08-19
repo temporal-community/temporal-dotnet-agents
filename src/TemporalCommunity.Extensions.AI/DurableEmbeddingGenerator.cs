@@ -68,7 +68,7 @@ public sealed class DurableEmbeddingGenerator(
             StartToCloseTimeout = _durableOptions.ActivityTimeout,
             HeartbeatTimeout = _durableOptions.HeartbeatTimeout,
             // A null policy would otherwise delegate to Temporal's unlimited server default.
-            RetryPolicy = Internal.DefaultRetryPolicy.Resolve(_durableOptions.RetryPolicy),
+            RetryPolicy = Internal.DefaultRetryPolicy.ResolveForModel(_durableOptions.RetryPolicy),
             Summary = BuildActivitySummary(options),
         };
 

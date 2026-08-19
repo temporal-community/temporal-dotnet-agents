@@ -270,6 +270,13 @@ dispatch use case. The function activity runs on the calling workflow's task que
 `AsDurable()` accepts the shared `DurableExecutionOptions` type, its `TaskQueue` property applies
 only to managed sessions and direct chat/embedding adapters and does not reroute the function.
 
+When `RetryPolicy` is omitted, the activity uses a bounded five-attempt tool default with
+exponential backoff capped at 30 seconds. This is a termination backstop, not a total time budget
+or exactly-once guarantee. Temporal does not infer HTTP `Retry-After`; translate provider-specific
+delay behavior in the activity or configure an explicit policy. Use `MaximumAttempts = 1` for an
+effect that is not safe to repeat. An activity already scheduled before a deployment retains the
+policy recorded in its `ActivityTaskScheduled` event.
+
 For the complete managed-session boundary, see the
 [managed-session tool contract](managed-session-tool-contract.md).
 

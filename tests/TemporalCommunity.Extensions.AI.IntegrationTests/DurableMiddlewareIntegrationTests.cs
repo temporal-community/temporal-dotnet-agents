@@ -4,6 +4,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Common;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
 using Temporalio.Workflows;
@@ -159,6 +160,87 @@ public class DurableMiddlewareIntegrationTests
         Assert.Equal("tool-result", result);
 
         await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task DurableAIFunction_RetryDefaults_AreBoundedAndPreserveExplicitNoRetry()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+
+        var permanentAttempts = 0;
+        var transientAttempts = 0;
+        var noRetryAttempts = 0;
+        var successAttempts = 0;
+        var tools = new[]
+        {
+            AIFunctionFactory.Create(
+                () =>
+                {
+                    Interlocked.Increment(ref permanentAttempts);
+                    throw new InvalidOperationException("permanent");
+                },
+                "permanent_failure"),
+            AIFunctionFactory.Create(
+                () => Interlocked.Increment(ref transientAttempts) < 3
+                    ? throw new InvalidOperationException("transient")
+                    : "recovered",
+                "transient_failure"),
+            AIFunctionFactory.Create(
+                () =>
+                {
+                    Interlocked.Increment(ref noRetryAttempts);
+                    throw new InvalidOperationException("no retry");
+                },
+                "no_retry_failure"),
+            AIFunctionFactory.Create(
+                () =>
+                {
+                    Interlocked.Increment(ref successAttempts);
+                    return "success";
+                },
+                "success"),
+        };
+
+        const string taskQueue = "test-durable-function-retries";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(new MinimalChatClient());
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new StubEmbeddingGenerator(4));
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI()
+            .AddDurableTools(tools)
+            .AddWorkflow<RetryingToolWorkflow>();
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() => RunToolAsync("permanent_failure", null));
+            Assert.Equal(5, permanentAttempts);
+
+            Assert.Equal("recovered", await RunToolAsync("transient_failure", null));
+            Assert.Equal(3, transientAttempts);
+
+            await Assert.ThrowsAnyAsync<Exception>(() => RunToolAsync("no_retry_failure", 1));
+            Assert.Equal(1, noRetryAttempts);
+
+            Assert.Equal("success", await RunToolAsync("success", null));
+            Assert.Equal(1, successAttempts);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+
+        async Task<string> RunToolAsync(string functionName, int? maximumAttempts)
+        {
+            var handle = await env.Client.StartWorkflowAsync(
+                (RetryingToolWorkflow wf) => wf.RunAsync(functionName, maximumAttempts),
+                new WorkflowOptions($"durable-function-retry-{Guid.NewGuid():N}", taskQueue));
+            return await handle.GetResultAsync();
+        }
     }
 
     // ── Test 5: Durable embedding generator ──────────────────────────────────
@@ -512,6 +594,26 @@ public sealed class ToolDispatchWorkflow
 
         var result = await function.InvokeAsync();
         return result?.ToString() ?? string.Empty;
+    }
+}
+
+[Workflow("RetryingToolWorkflow")]
+public sealed class RetryingToolWorkflow
+{
+    [WorkflowRun]
+    public async Task<string> RunAsync(string functionName, int? maximumAttempts)
+    {
+        var options = new DurableExecutionOptions
+        {
+            ActivityTimeout = TimeSpan.FromMinutes(2),
+            RetryPolicy = maximumAttempts.HasValue
+                ? new RetryPolicy { MaximumAttempts = maximumAttempts.Value }
+                : null,
+        };
+        var function = AIFunctionFactory.Create(
+            (Func<string>)(() => throw new InvalidOperationException("Workflow stub must not run.")),
+            functionName).AsDurable(options);
+        return (await function.InvokeAsync())?.ToString() ?? string.Empty;
     }
 }
 

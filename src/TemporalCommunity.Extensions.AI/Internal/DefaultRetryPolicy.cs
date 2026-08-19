@@ -3,8 +3,8 @@ using Temporalio.Common;
 namespace TemporalCommunity.Extensions.AI.Internal;
 
 /// <summary>
-/// Provides the bounded backstop <see cref="RetryPolicy"/> applied to LLM-call (and related)
-/// activities when the user has NOT configured one.
+/// Provides workload-appropriate bounded <see cref="RetryPolicy"/> defaults when the user has
+/// not configured one.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -34,21 +34,42 @@ internal static class DefaultRetryPolicy
     /// </summary>
     /// <remarks>
     /// The bounded default also caps the inter-attempt backoff at
-    /// <see cref="DefaultMaximumIntervalSeconds"/> seconds (vs the server default of 100s). Bounding
+    /// <see cref="DefaultModelMaximumIntervalSeconds"/> seconds (vs the server default of 100s). Bounding
     /// both the attempt <em>count</em> and the backoff <em>interval</em> keeps a permanently-failing
     /// LLM step from taking minutes to surface its terminal failure — the whole point of the
     /// hardening is that the caller's <c>SendAsync</c> returns promptly instead of hanging.
     /// </remarks>
     /// <param name="configured">The user-configured policy, or <see langword="null"/> when unset.</param>
-    internal static RetryPolicy Resolve(RetryPolicy? configured) =>
+    internal static RetryPolicy ResolveForModel(RetryPolicy? configured) =>
         configured ?? new RetryPolicy
         {
             MaximumAttempts = DefaultMaximumAttempts,
-            MaximumInterval = TimeSpan.FromSeconds(DefaultMaximumIntervalSeconds),
+            MaximumInterval = TimeSpan.FromSeconds(DefaultModelMaximumIntervalSeconds),
         };
 
     /// <summary>
-    /// Caps the inter-attempt backoff for the bounded default policy (seconds).
+    /// Returns <paramref name="configured"/> unchanged when supplied; otherwise returns the
+    /// bounded default used for tool and policy activities.
     /// </summary>
-    internal const int DefaultMaximumIntervalSeconds = 2;
+    /// <remarks>
+    /// Tool work gets a longer maximum backoff than an interactive model call so a transient
+    /// dependency has a meaningful recovery window. This is not a total execution budget and
+    /// does not interpret provider-specific retry-after headers.
+    /// </remarks>
+    internal static RetryPolicy ResolveForTool(RetryPolicy? configured) =>
+        configured ?? new RetryPolicy
+        {
+            MaximumAttempts = DefaultMaximumAttempts,
+            MaximumInterval = TimeSpan.FromSeconds(DefaultToolMaximumIntervalSeconds),
+        };
+
+    /// <summary>
+    /// Caps the inter-attempt backoff for the bounded model default policy (seconds).
+    /// </summary>
+    internal const int DefaultModelMaximumIntervalSeconds = 2;
+
+    /// <summary>
+    /// Caps the inter-attempt backoff for the bounded tool default policy (seconds).
+    /// </summary>
+    internal const int DefaultToolMaximumIntervalSeconds = 30;
 }

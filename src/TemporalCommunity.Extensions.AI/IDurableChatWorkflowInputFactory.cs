@@ -70,7 +70,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         TimeToLive = _options.SessionTimeToLive,
         ActivityTimeout = _options.ActivityTimeout,
         HeartbeatTimeout = _options.HeartbeatTimeout,
-        RetryPolicy = EffectiveRetryPolicy,
+        RetryPolicy = _options.RetryPolicy,
         ApprovalTimeout = _options.ApprovalTimeout,
         EnableSearchAttributes = _options.EnableSearchAttributes,
         MaxEntryCount = _options.MaxEntryCount,
@@ -90,8 +90,8 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
             : null,
     };
 
-    private Temporalio.Common.RetryPolicy EffectiveRetryPolicy =>
-        Internal.DefaultRetryPolicy.Resolve(_options.RetryPolicy);
+    private Temporalio.Common.RetryPolicy EffectiveToolRetryPolicy =>
+        Internal.DefaultRetryPolicy.ResolveForTool(_options.RetryPolicy);
 
     private IReadOnlyDictionary<string, ActivityOptions>? BuildToolActivityOptions()
     {
@@ -115,7 +115,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
             {
                 StartToCloseTimeout = perTool?.StartToCloseTimeout ?? _options.ActivityTimeout,
                 HeartbeatTimeout = perTool?.HeartbeatTimeout ?? _options.HeartbeatTimeout,
-                RetryPolicy = perTool?.RetryPolicy ?? EffectiveRetryPolicy,
+                RetryPolicy = perTool?.RetryPolicy ?? EffectiveToolRetryPolicy,
                 Summary = toolName,
             };
         }
@@ -134,7 +134,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         {
             StartToCloseTimeout = _options.ActivityTimeout,
             HeartbeatTimeout = _options.HeartbeatTimeout,
-            RetryPolicy = EffectiveRetryPolicy,
+            RetryPolicy = EffectiveToolRetryPolicy,
         };
     }
 
@@ -155,7 +155,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
                 {
                     StartToCloseTimeout = kvp.Value.InterceptorTimeout,
                     HeartbeatTimeout = _options.HeartbeatTimeout,
-                    RetryPolicy = EffectiveRetryPolicy,
+                    RetryPolicy = EffectiveToolRetryPolicy,
                 };
             }
         }

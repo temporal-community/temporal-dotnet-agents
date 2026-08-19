@@ -28,7 +28,7 @@ internal sealed class WeatherReportWorkflow
             (string city) => $"[stub — not invoked in workflow context]",
             name: "get_current_weather",
             description: "Returns the current weather conditions for a given city."
-        ).AsDurable();
+        ).AsDurable(); // Omitted policy uses the bounded five-attempt tool default.
 
         // This call dispatches to DurableFunctionActivities as its own activity.
         // Each tool invocation gets independent retry, timeout, and event history

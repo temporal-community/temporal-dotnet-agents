@@ -168,7 +168,7 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
             HeartbeatTimeout = chatOptions.GetHeartbeatTimeout() ?? _durableOptions.HeartbeatTimeout,
             // A null policy would otherwise delegate to Temporal's unlimited server default.
             // Keep custom-workflow middleware consistent with managed chat sessions.
-            RetryPolicy = Internal.DefaultRetryPolicy.Resolve(_durableOptions.RetryPolicy),
+            RetryPolicy = Internal.DefaultRetryPolicy.ResolveForModel(_durableOptions.RetryPolicy),
             Summary = BuildActivitySummary(chatOptions),
         };
 

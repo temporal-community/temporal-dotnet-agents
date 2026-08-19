@@ -1128,7 +1128,7 @@ For a deep dive into how StateBag persistence works, see [Session StateBag & Con
 
 ## Per-Tool Activity Configuration
 
-Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity (`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). The default policy is the worker-level `opts.DefaultRetryPolicy` (or Temporal SDK defaults when null). Override per tool via the `configure` callback on `AddTool`.
+Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity (`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). An explicit worker-level `opts.DefaultRetryPolicy` is inherited exactly. When it is null, tools use the library's bounded five-attempt default with exponential backoff capped at 30 seconds. Override per tool via the `configure` callback on `AddTool`.
 
 | Property / Method on `DurableToolOptions` | Purpose |
 |---|---|

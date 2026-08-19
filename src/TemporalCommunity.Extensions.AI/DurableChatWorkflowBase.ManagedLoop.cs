@@ -579,7 +579,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             // Apply the configured retry policy so an unmapped tool does not fall back to
             // Temporal's default (unlimited retries) — a non-idempotent unregistered tool
             // would otherwise retry forever. Bounded default when unset. The MAF path already does this.
-            RetryPolicy = Internal.DefaultRetryPolicy.Resolve(RequiredInput.RetryPolicy),
+            RetryPolicy = Internal.DefaultRetryPolicy.ResolveForTool(RequiredInput.RetryPolicy),
             Summary = toolName,
         };
     }

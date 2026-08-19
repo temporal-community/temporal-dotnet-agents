@@ -265,8 +265,8 @@ internal sealed class DurableChatActivities(
             _logger.LogChatActivityFailed(ex, input.ConversationId, input.TurnNumber);
 
             // Retry-hardening: a deterministic LLM error (HTTP 400/401/403/404/422) will never
-            // succeed on retry. With RetryPolicy defaults (unlimited attempts) it would loop
-            // forever and hang the workflow. Rethrow it as a non-retryable ApplicationFailure so
+            // succeed on retry. Relying on an attempt cap would only delay the inevitable terminal
+            // result. Rethrow it as a non-retryable ApplicationFailure so
             // Temporal stops immediately; retryable/transient errors propagate unchanged so the
             // activity's RetryPolicy governs them. ErrorType lets workflow callers recognize it.
             if (Internal.LlmFailurePolicy.CreateNonRetryableFailure(ex) is { } nonRetryableFailure)

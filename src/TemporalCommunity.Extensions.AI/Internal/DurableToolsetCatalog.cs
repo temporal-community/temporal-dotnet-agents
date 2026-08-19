@@ -128,7 +128,8 @@ internal sealed class DurableToolsetCatalog
         string toolsetId,
         DurableToolsetMemberRegistration member)
     {
-        var retryPolicy = member.Options.RetryPolicy ?? DefaultRetryPolicy.Resolve(options.RetryPolicy);
+        var retryPolicy = DefaultRetryPolicy.ResolveForTool(
+            member.Options.RetryPolicy ?? options.RetryPolicy);
         var interceptorEnabled = options.DefaultToolInterceptor is not null;
         return new DurableToolsetManifestMember
         {
@@ -152,7 +153,7 @@ internal sealed class DurableToolsetCatalog
                 {
                     StartToCloseTimeout = member.Options.InterceptorTimeout ?? options.ActivityTimeout,
                     HeartbeatTimeout = options.HeartbeatTimeout,
-                    RetryPolicy = Clone(DefaultRetryPolicy.Resolve(options.RetryPolicy)),
+                    RetryPolicy = Clone(DefaultRetryPolicy.ResolveForTool(options.RetryPolicy)),
                     Summary = member.Declaration.Name,
                 }
                 : null,

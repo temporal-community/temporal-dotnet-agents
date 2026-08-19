@@ -96,6 +96,61 @@ public class SplitDeploymentTests
         }
     }
 
+    [Fact]
+    public async Task SplitDeployment_UnconfiguredToolRetry_UsesBoundedToolDefault()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var recorder = new RecordingTool
+        {
+            Name = "bounded_failure",
+            Behavior = RecordingToolBehavior.AlwaysFail,
+        };
+        var call = new FunctionCallContent(
+            "call-1",
+            "bounded_failure",
+            new Dictionary<string, object?> { ["input"] = "data" });
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal([call], "unreachable");
+        var taskQueue = $"split-deploy-bounded-{Guid.NewGuid():N}";
+
+        using var workerHost = BuildWorkerHost(
+            env.Client,
+            scripted,
+            taskQueue,
+            agent => agent.AddTool(recorder.Build()));
+        await workerHost.StartAsync();
+        try
+        {
+            using var clientHost = BuildClientHost(env.Client, taskQueue);
+            var proxy = clientHost.Services.GetTemporalAgentProxy("DurableAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+
+            await Assert.ThrowsAnyAsync<Exception>(() => proxy.RunAsync("Hello", session));
+
+            Assert.Equal(5, recorder.CallCount);
+            var handle = env.Client.GetWorkflowHandle(session.SessionId.WorkflowId);
+            await foreach (var ev in handle.FetchHistoryEventsAsync())
+            {
+                if (ev.ActivityTaskScheduledEventAttributes is { } scheduled
+                    && scheduled.ActivityType.Name == InvokeAgentToolActivity)
+                {
+                    Assert.Equal(5, scheduled.RetryPolicy.MaximumAttempts);
+                    Assert.Equal(
+                        TimeSpan.FromSeconds(30),
+                        scheduled.RetryPolicy.MaximumInterval.ToTimeSpan());
+                    return;
+                }
+            }
+
+            Assert.Fail("Expected an InvokeAgentTool ActivityTaskScheduled event.");
+        }
+        finally
+        {
+            await workerHost.StopAsync();
+        }
+    }
+
     // ── Host builders ────────────────────────────────────────────────────────────
 
     private static IHost BuildWorkerHost(

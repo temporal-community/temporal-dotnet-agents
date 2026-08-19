@@ -147,8 +147,8 @@ internal sealed class AgentActivities(
                 ?? agentsOptions.DefaultActivityTimeout;
             var effectiveHeartbeatTimeout = registration.HeartbeatTimeout
                 ?? agentsOptions.DefaultHeartbeatTimeout;
-            var effectiveRetryPolicy = registration.RetryPolicy
-                ?? agentsOptions.DefaultRetryPolicy;
+            var effectiveRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
+                registration.RetryPolicy ?? agentsOptions.DefaultRetryPolicy);
 
             resolvedToolOpts = DefaultTemporalAgentClient.BuildDurableAgentToolActivityOptions(
                 registration,
@@ -411,8 +411,8 @@ internal sealed class AgentActivities(
                         ?? agentsOptions.DefaultActivityTimeout;
                     var effectiveHeartbeat = registration.HeartbeatTimeout
                         ?? agentsOptions.DefaultHeartbeatTimeout;
-                    var effectiveRetry = registration.RetryPolicy
-                        ?? agentsOptions.DefaultRetryPolicy;
+                    var effectiveRetry = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
+                        registration.RetryPolicy ?? agentsOptions.DefaultRetryPolicy);
 
                     interceptorActivityOpts = new ActivityOptions
                     {
@@ -517,8 +517,8 @@ internal sealed class AgentActivities(
             }
 
             // Retry-hardening: a deterministic LLM error (HTTP 400/401/403/404/422) never succeeds
-            // on retry. With RetryPolicy defaults (unlimited attempts) it loops forever and hangs the
-            // agent workflow. Rethrow as a non-retryable ApplicationFailure so Temporal stops
+            // on retry. Relying on an attempt cap would only delay the inevitable terminal result.
+            // Rethrow as a non-retryable ApplicationFailure so Temporal stops
             // immediately; retryable/transient errors propagate unchanged for the RetryPolicy to
             // govern. Cancellation is never reclassified. Uses the same classifier + ErrorType as the
             // MEAI path (DurableChatActivities.LlmNonRetryableErrorType).

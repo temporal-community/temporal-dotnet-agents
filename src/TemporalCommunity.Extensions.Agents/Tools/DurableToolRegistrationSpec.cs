@@ -11,7 +11,8 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <para>
 /// <b>Non-idempotent tools (code execution, file writes, external API calls) MUST set
 /// <c>Configure = opts => opts.NoRetry()</c></b> to prevent double-execution on activity retry.
-/// The default inherits the worker-level <c>DefaultRetryPolicy</c> (potentially unlimited retries).
+/// The default inherits an explicit worker-level <c>DefaultRetryPolicy</c>, or the library's
+/// bounded five-attempt tool policy when the worker policy is unset.
 /// </para>
 /// </remarks>
 public sealed record DurableToolRegistrationSpec(

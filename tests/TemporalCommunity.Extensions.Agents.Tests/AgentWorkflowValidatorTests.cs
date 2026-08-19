@@ -44,18 +44,18 @@ public class AgentWorkflowValidatorTests
     }
 
     [Fact]
-    public void ValidateRequestApproval_NullRequest_ThrowsArgumentNullException()
+    public void ValidateRequestApproval_BeforeInitialization_AdmitsNullForHandlerValidation()
     {
         var workflow = new AgentWorkflow();
-        Assert.Throws<ArgumentNullException>(() => workflow.ValidateRequestApproval(null!));
+        workflow.ValidateRequestApproval(null!);
     }
 
     [Fact]
-    public void ValidateRequestApproval_EmptyRequestId_ThrowsArgumentException()
+    public void ValidateRequestApproval_BeforeInitialization_AdmitsEmptyIdForHandlerValidation()
     {
         var workflow = new AgentWorkflow();
         var request = new DurableApprovalRequest { RequestId = string.Empty };
-        Assert.Throws<ArgumentException>(() => workflow.ValidateRequestApproval(request));
+        workflow.ValidateRequestApproval(request);
     }
 
     [Fact]

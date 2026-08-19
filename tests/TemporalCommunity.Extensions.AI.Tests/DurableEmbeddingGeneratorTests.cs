@@ -66,7 +66,7 @@ public class DurableEmbeddingGeneratorTests
             activityOptions.RetryPolicy.MaximumAttempts);
         Assert.Equal(
             TimeSpan.FromSeconds(
-                global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumIntervalSeconds),
+                global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultModelMaximumIntervalSeconds),
             activityOptions.RetryPolicy.MaximumInterval);
     }
 

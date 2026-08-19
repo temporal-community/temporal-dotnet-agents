@@ -170,6 +170,29 @@ public class DurableAgentSettingsInheritanceTests
         Assert.Same(workerPolicy, input.RetryPolicy);
     }
 
+    [Fact]
+    public void WhenRetryPoliciesUnset_ModelAndToolUseSeparateBoundedDefaults()
+    {
+        var options = OptionsWithDurableAgent(
+            configureAgent: agent => agent.AddTool(
+                AIFunctionFactory.Create(() => "ok", "lookup")));
+
+        var input = Build(options);
+
+        Assert.Equal(
+            TimeSpan.FromSeconds(
+                global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultModelMaximumIntervalSeconds),
+            input.RetryPolicy!.MaximumInterval);
+        var toolRetry = input.DurableAgentToolActivityOptions!["lookup"].RetryPolicy!;
+        Assert.Equal(
+            global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumAttempts,
+            toolRetry.MaximumAttempts);
+        Assert.Equal(
+            TimeSpan.FromSeconds(
+                global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultToolMaximumIntervalSeconds),
+            toolRetry.MaximumInterval);
+    }
+
     // ── MaxEntryCount ───────────────────────────────────────────────────────────
 
     [Fact]

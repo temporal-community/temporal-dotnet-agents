@@ -284,8 +284,11 @@ internal sealed class DefaultTemporalAgentClient(
         // bounded default (MaximumAttempts = 5) instead of null. A null RetryPolicy is transmitted
         // as the server default (unlimited retries), which lets an unrecoverable LLM error loop
         // forever and hang the agent workflow. See TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.
-        var perAgentRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.Resolve(
-            registration.RetryPolicy ?? options.DefaultRetryPolicy);
+        var configuredRetryPolicy = registration.RetryPolicy ?? options.DefaultRetryPolicy;
+        var perAgentModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
+            configuredRetryPolicy);
+        var perAgentToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
+            configuredRetryPolicy);
         var perAgentMaxEntryCount = registration.MaxEntryCount ?? options.DefaultMaxEntryCount;
         var perAgentHistoryReducer = registration.HistoryReducer ?? options.DefaultHistoryReducer;
         var perAgentHistoryReducerKey = registration.HistoryReducerKey ?? options.DefaultHistoryReducerKey;
@@ -294,7 +297,7 @@ internal sealed class DefaultTemporalAgentClient(
             registration,
             perAgentActivityTimeout,
             perAgentHeartbeatTimeout,
-            perAgentRetryPolicy);
+            perAgentToolRetryPolicy);
 
         // Feature L: pre-compute interceptor config (interceptor presence + skip/require-approval lists).
         // requiresApprovalTools is populated unconditionally — RequireApproval() is an absolute
@@ -339,7 +342,7 @@ internal sealed class DefaultTemporalAgentClient(
             {
                 StartToCloseTimeout = perAgentActivityTimeout,
                 HeartbeatTimeout = perAgentHeartbeatTimeout,
-                RetryPolicy = perAgentRetryPolicy,
+                RetryPolicy = perAgentToolRetryPolicy,
             };
 
             foreach (var toolReg in registration.Tools)
@@ -357,7 +360,7 @@ internal sealed class DefaultTemporalAgentClient(
                     {
                         StartToCloseTimeout = toolReg.Options.InterceptorTimeout,
                         HeartbeatTimeout = perAgentHeartbeatTimeout,
-                        RetryPolicy = perAgentRetryPolicy,
+                        RetryPolicy = perAgentToolRetryPolicy,
                     };
                 }
             }
@@ -419,7 +422,7 @@ internal sealed class DefaultTemporalAgentClient(
             ActivityTimeout = perAgentActivityTimeout,
             HeartbeatTimeout = perAgentHeartbeatTimeout,
             ApprovalTimeout = perAgentApprovalTimeout,
-            RetryPolicy = perAgentRetryPolicy,
+            RetryPolicy = perAgentModelRetryPolicy,
             MaxEntryCount = perAgentMaxEntryCount,
             // Both reducer forms are set:
             // - HistoryReducer: [JsonIgnore] delegate for in-process / embedded-test use
@@ -470,8 +473,11 @@ internal sealed class DefaultTemporalAgentClient(
         var effectiveActivityTimeout = options.DefaultActivityTimeout;
         var effectiveHeartbeatTimeout = options.DefaultHeartbeatTimeout;
         // Bounded backstop (MaximumAttempts = 5) when unset — see DefaultRetryPolicy.
-        var effectiveRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.Resolve(
-            options.DefaultRetryPolicy);
+        var configuredRetryPolicy = options.DefaultRetryPolicy;
+        var effectiveModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
+            configuredRetryPolicy);
+        var effectiveToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
+            configuredRetryPolicy);
         Dictionary<string, ActivityOptions>? toolActivityOptions = null;
         ActivityOptions? interceptorActivityOpts = null;
         Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
@@ -484,10 +490,13 @@ internal sealed class DefaultTemporalAgentClient(
         {
             effectiveActivityTimeout = registration.ActivityTimeout ?? options.DefaultActivityTimeout;
             effectiveHeartbeatTimeout = registration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
-            effectiveRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.Resolve(
-                registration.RetryPolicy ?? options.DefaultRetryPolicy);
+            configuredRetryPolicy = registration.RetryPolicy ?? options.DefaultRetryPolicy;
+            effectiveModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
+                configuredRetryPolicy);
+            effectiveToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
+                configuredRetryPolicy);
             toolActivityOptions = BuildDurableAgentToolActivityOptions(
-                registration, effectiveActivityTimeout, effectiveHeartbeatTimeout, effectiveRetryPolicy);
+                registration, effectiveActivityTimeout, effectiveHeartbeatTimeout, effectiveToolRetryPolicy);
 
             // Feature B: RequiresApprovalTools exclusion guard — scope-aware required tools
             // go into scopeAwareApprovalTools, NOT requiresApprovalTools.
@@ -541,7 +550,7 @@ internal sealed class DefaultTemporalAgentClient(
                 {
                     StartToCloseTimeout = effectiveActivityTimeout,
                     HeartbeatTimeout = effectiveHeartbeatTimeout,
-                    RetryPolicy = effectiveRetryPolicy,
+                    RetryPolicy = effectiveToolRetryPolicy,
                 };
 
                 foreach (var toolReg in registration.Tools)
@@ -556,7 +565,7 @@ internal sealed class DefaultTemporalAgentClient(
                         {
                             StartToCloseTimeout = toolReg.Options.InterceptorTimeout,
                             HeartbeatTimeout = effectiveHeartbeatTimeout,
-                            RetryPolicy = effectiveRetryPolicy,
+                            RetryPolicy = effectiveToolRetryPolicy,
                         };
                     }
                 }
@@ -570,7 +579,7 @@ internal sealed class DefaultTemporalAgentClient(
             Request = request,
             ActivityTimeout = effectiveActivityTimeout,
             HeartbeatTimeout = effectiveHeartbeatTimeout,
-            RetryPolicy = effectiveRetryPolicy,
+            RetryPolicy = effectiveModelRetryPolicy,
             DurableAgentToolActivityOptions = toolActivityOptions,
             MaxToolCallsPerTurn = registration?.MaxToolCallsPerTurn ?? 20,
             InterceptorActivityOptions = interceptorActivityOpts,
@@ -608,7 +617,7 @@ internal sealed class DefaultTemporalAgentClient(
             HeartbeatTimeout = options.DefaultHeartbeatTimeout,
             ApprovalTimeout = options.DefaultApprovalTimeout,
             // Bounded backstop (MaximumAttempts = 5) when unset — see DefaultRetryPolicy.
-            RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.Resolve(
+            RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
                 options.DefaultRetryPolicy),
             MaxEntryCount = options.DefaultMaxEntryCount,
             HistoryReducer = options.DefaultHistoryReducer,
@@ -637,7 +646,8 @@ internal sealed class DefaultTemporalAgentClient(
             {
                 StartToCloseTimeout = toolOpts.StartToCloseTimeout ?? defaultActivityTimeout,
                 HeartbeatTimeout = toolOpts.HeartbeatTimeout ?? defaultHeartbeatTimeout,
-                RetryPolicy = toolOpts.RetryPolicy ?? defaultRetryPolicy,
+                RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
+                    toolOpts.RetryPolicy ?? defaultRetryPolicy),
                 Summary = tool.Name,
             };
         }
