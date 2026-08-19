@@ -50,6 +50,7 @@ static TemporalCommunity.Extensions.AI.Approvals.DurableApprovalMeaiAdapter.ToDu
 static TemporalCommunity.Extensions.AI.Approvals.DurableApprovalMeaiAdapter.ToMeaiRequest(this TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest! request) -> Microsoft.Extensions.AI.ToolApprovalRequestContent!
 static TemporalCommunity.Extensions.AI.ChatClientBuilderExtensions.UseDurableExecution(this Microsoft.Extensions.AI.ChatClientBuilder! builder, System.Action<TemporalCommunity.Extensions.AI.DurableExecutionOptions!>? configure = null) -> Microsoft.Extensions.AI.ChatClientBuilder!
 static TemporalCommunity.Extensions.AI.DurableAIDataConverter.Instance.get -> Temporalio.Converters.DataConverter!
+static TemporalCommunity.Extensions.AI.DurableAIDataConverter.CreateDataConverter(Temporalio.Converters.IPayloadCodec? payloadCodec = null) -> Temporalio.Converters.DataConverter!
 static TemporalCommunity.Extensions.AI.DurableAIJsonUtilities.DefaultOptions.get -> System.Text.Json.JsonSerializerOptions!
 static TemporalCommunity.Extensions.AI.DurableAIServiceCollectionExtensions.AddDurableAI(this Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder! builder, System.Action<TemporalCommunity.Extensions.AI.DurableExecutionOptions!>? configure = null) -> Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder!
 static TemporalCommunity.Extensions.AI.DurableAIServiceCollectionExtensions.AddDurableTool(this Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder! builder, Microsoft.Extensions.AI.AIFunction! tool, System.Action<TemporalCommunity.Extensions.AI.DurableChatToolOptions!>? configure = null) -> Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder!
@@ -109,6 +110,29 @@ TemporalCommunity.Extensions.AI.Approvals.DurableApprovalResolutionStatus.Reques
 TemporalCommunity.Extensions.AI.Approvals.DurableApprovalResolutionStatus.Conflict = 4 -> TemporalCommunity.Extensions.AI.Approvals.DurableApprovalResolutionStatus
 TemporalCommunity.Extensions.AI.ChatClientBuilderExtensions
 TemporalCommunity.Extensions.AI.DurableAIDataConverter
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodec
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodec.DurableAIGzipPayloadCodec(TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions! options) -> void
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodec.DecodeAsync(System.Collections.Generic.IReadOnlyCollection<Temporalio.Api.Common.V1.Payload!>! payloads) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyCollection<Temporalio.Api.Common.V1.Payload!>!>!
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodec.EncodeAsync(System.Collections.Generic.IReadOnlyCollection<Temporalio.Api.Common.V1.Payload!>! payloads) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyCollection<Temporalio.Api.Common.V1.Payload!>!>!
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.DurableAIGzipPayloadCodecOptions() -> void
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.CompressionLevel.get -> System.IO.Compression.CompressionLevel
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.CompressionLevel.init -> void
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.MaximumDecodedPayloadSizeBytes.get -> int
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.MaximumDecodedPayloadSizeBytes.init -> void
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.MaximumEncodedPayloadSizeBytes.get -> int
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.MaximumEncodedPayloadSizeBytes.init -> void
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.MinimumCompressionSavingsRatio.get -> double
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.MinimumCompressionSavingsRatio.init -> void
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.MinimumPayloadSizeBytes.get -> int
+TemporalCommunity.Extensions.AI.DurableAIGzipPayloadCodecOptions.MinimumPayloadSizeBytes.init -> void
+TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError
+TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError.CorruptPayload = 3 -> TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError
+TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError.DecodedPayloadTooLarge = 2 -> TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError
+TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError.EncodedPayloadTooLarge = 1 -> TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError
+TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError.UnsupportedVersion = 0 -> TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError
+TemporalCommunity.Extensions.AI.DurableAIPayloadCodecException
+TemporalCommunity.Extensions.AI.DurableAIPayloadCodecException.Error.get -> TemporalCommunity.Extensions.AI.DurableAIPayloadCodecError
 TemporalCommunity.Extensions.AI.DurableAIFunction
 TemporalCommunity.Extensions.AI.DurableAIFunction.DurableAIFunction(Microsoft.Extensions.AI.AIFunction! innerFunction, TemporalCommunity.Extensions.AI.DurableExecutionOptions? options = null) -> void
 TemporalCommunity.Extensions.AI.DurableAIJsonUtilities

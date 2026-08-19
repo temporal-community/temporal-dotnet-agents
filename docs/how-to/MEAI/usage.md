@@ -29,8 +29,12 @@ builder.Services
         options.ActivityTimeout = TimeSpan.FromMinutes(5);
         options.SessionTimeToLive = TimeSpan.FromHours(24);
         options.MaxToolCallsPerTurn = 10;
-    });
+});
 ```
+
+`DurableAIDataConverter.Instance` remains uncompressed. For large histories, the optional bounded
+gzip codec requires an explicit shared converter and a decoder-first deployment; see
+[payload codecs](payload-codecs.md).
 
 ### Sharing a worker with non-AI workflows
 

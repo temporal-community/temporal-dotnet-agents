@@ -7,14 +7,17 @@
   administrative service for constrained, expiring, revocable grants within one MAF session.
 - Added explicit custom-workflow input initialization and an asynchronous handler readiness barrier;
   concurrent approval requests now fail their Update non-retryably instead of retrying workflow tasks.
+- Added an opt-in, bounded gzip payload codec and MEAI-compatible converter factory. Compression is
+  disabled by default, skips payloads without sufficient savings, and requires a decoder-first
+  rollout across all Temporal readers.
 
 - Added worker-owned durable toolsets for MEAI managed sessions and typed custom workflows. Thin
   clients no longer need tool schemas: workers register one implicit group with `AddDurableTools`
   or named groups with `AddDurableToolset`, and workflows resolve and record one immutable,
   versioned manifest before model dispatch.
 - Added `AddDurableToolFactory` for cached method declarations and fresh activity-attempt
-  implementations with scoped DI. This replaces the pre-release `AddDurableTool` name; no
-  compatibility alias is provided.
+  implementations with scoped DI. `AddDurableTool` registers one concrete function and its policy;
+  `AddDurableTools` registers a collection with default policy.
 - Removed the pre-release `IChatClientDecorator` abstraction and keyed decorator lookup. Compose
   ordinary MEAI chat middleware when registering each keyed or unkeyed `IChatClient` pipeline.
 - Added toolset resolution and validation diagnostics through the package `ActivitySource`, a new

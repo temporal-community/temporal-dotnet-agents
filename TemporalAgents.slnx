@@ -24,6 +24,7 @@
     <Project Path="samples/MEAI/ExtensibleDurableTurns/ExtensibleDurableTurns.csproj" />
     <Project Path="samples/MEAI/ToolInterceptor/ToolInterceptor.csproj" />
     <Project Path="samples/MEAI/McpTools/McpTools.csproj" />
+    <Project Path="samples/MEAI/PayloadCodec/PayloadCodec.csproj" />
   </Folder>
   <Folder Name="/samples/" />
   <Folder Name="/samples/MAF/">

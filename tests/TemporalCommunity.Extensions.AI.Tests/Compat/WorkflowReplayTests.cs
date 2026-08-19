@@ -75,9 +75,12 @@ public class WorkflowReplayTests
     /// </remarks>
     private static WorkflowReplayer BuildReplayer()
     {
+        // A decode-capable reader must continue to replay histories written before encoding was
+        // enabled. The checked-in corpus is intentionally uncompressed and exercises that path.
+        var codec = new DurableAIGzipPayloadCodec(new DurableAIGzipPayloadCodecOptions());
         var opts = new WorkflowReplayerOptions
         {
-            DataConverter = DurableAIDataConverter.Instance,
+            DataConverter = DurableAIDataConverter.CreateDataConverter(codec),
         };
         var plugin = new DurableAIPlugin();
         plugin.ConfigureReplayer(opts);

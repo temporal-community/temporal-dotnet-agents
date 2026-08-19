@@ -43,6 +43,8 @@ SendAsync -> DurableChatWorkflow -> GetChatStep activity
   generators, plus `AIFunction.AsDurable()` for an explicitly invoked known function.
 - Ordinary MCP client tools through the same `AIFunction` registration surface; see the
   [MCP guide](../../docs/how-to/MEAI/mcp-tools.md).
+- Opt-in, bounded payload compression through `DurableAIDataConverter.CreateDataConverter(...)`;
+  see the [payload codec guide](../../docs/how-to/MEAI/payload-codecs.md).
 
 The managed session and the direct adapters are separate APIs. In particular, direct custom
 workflow use does not change the durable-session tool contract below.

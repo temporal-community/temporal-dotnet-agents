@@ -26,6 +26,17 @@ var expectedAsset = args.SingleOrDefault() switch
 AssertPackageAssembly("TemporalCommunity.Extensions.AI", expectedAsset);
 AssertPackageAssembly("TemporalCommunity.Extensions.Agents", expectedAsset);
 
+var packedCodec = new DurableAIGzipPayloadCodec(new DurableAIGzipPayloadCodecOptions
+{
+    MinimumPayloadSizeBytes = 1024,
+    MaximumEncodedPayloadSizeBytes = 1024 * 1024,
+    MaximumDecodedPayloadSizeBytes = 2 * 1024 * 1024,
+});
+var packedConverter = DurableAIDataConverter.CreateDataConverter(packedCodec);
+Assert(
+    ReferenceEquals(packedConverter.PayloadCodec, packedCodec),
+    "Packed converter factory did not retain the supplied payload codec.");
+
 // Exercise the public registration family from the packed asset, including IEnumerable overloads.
 var registrationProbeServices = new ServiceCollection();
 var registrationProbeWorker = registrationProbeServices

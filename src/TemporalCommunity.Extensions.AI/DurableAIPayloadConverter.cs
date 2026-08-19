@@ -45,7 +45,19 @@ public static class DurableAIDataConverter
     /// A <see cref="DataConverter"/> whose JSON serializer uses <see cref="AIJsonUtilities.DefaultOptions"/>,
     /// which correctly handles polymorphic <see cref="AIContent"/> types.
     /// </summary>
-    public static DataConverter Instance { get; } = new(
+    public static DataConverter Instance { get; } = CreateDataConverter();
+
+    /// <summary>
+    /// Creates a data converter that preserves MEAI's polymorphic JSON contracts and optionally
+    /// applies a caller-supplied Temporal payload codec.
+    /// </summary>
+    /// <param name="payloadCodec">
+    /// Optional payload codec. The caller owns codec composition and must configure every client,
+    /// worker, replayer, and operational reader that can read the encoded payloads.
+    /// </param>
+    /// <returns>A newly-created compatible data converter.</returns>
+    public static DataConverter CreateDataConverter(IPayloadCodec? payloadCodec = null) => new(
         new DefaultPayloadConverter(DurableAIJsonUtilities.DefaultOptions),
-        new DefaultFailureConverter());
+        new DefaultFailureConverter(),
+        payloadCodec);
 }
