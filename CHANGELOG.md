@@ -10,6 +10,9 @@
 - Added an opt-in, bounded gzip payload codec and MEAI-compatible converter factory. Compression is
   disabled by default, skips payloads without sufficient savings, and requires a decoder-first
   rollout across all Temporal readers.
+- Added an authenticated ordinary MCP server sample that starts or joins tenant-scoped Temporal
+  workflows, recovers terminal business results safely, and documents cancellation and retention
+  boundaries without adding a TemporalCommunity MCP adapter.
 
 - Added worker-owned durable toolsets for MEAI managed sessions and typed custom workflows. Thin
   clients no longer need tool schemas: workers register one implicit group with `AddDurableTools`

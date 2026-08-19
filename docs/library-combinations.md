@@ -75,6 +75,9 @@ var response = await sessionClient.SendAsync(
   package-owned per-tool activities while supplying typed request data and sequential turn state.
 - MCP client tools are ordinary `AIFunction` registrations; choose trusted dynamic discovery or
   reviewed pinned schemas as described in the [MEAI MCP guide](how-to/MEAI/mcp-tools.md).
+- An ordinary MCP server tool can start or join an application workflow without another library
+  adapter. See the [workflow-backed MCP server guide](how-to/MCP/workflow-tool-server.md) for the
+  authentication, tenant identity, retry, cancellation, and retention boundaries.
 
 ### Limitations
 

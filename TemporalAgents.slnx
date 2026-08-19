@@ -26,7 +26,9 @@
     <Project Path="samples/MEAI/McpTools/McpTools.csproj" />
     <Project Path="samples/MEAI/PayloadCodec/PayloadCodec.csproj" />
   </Folder>
-  <Folder Name="/samples/" />
+  <Folder Name="/samples/">
+    <Project Path="samples/MCP/WorkflowToolServer/WorkflowToolServer.csproj" />
+  </Folder>
   <Folder Name="/samples/MAF/">
     <Project Path="samples/MAF/BasicAgent/BasicAgent.csproj" />
     <Project Path="samples/MAF/WorkflowOrchestration/WorkflowOrchestration.csproj" />

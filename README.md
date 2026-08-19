@@ -90,6 +90,12 @@ down-level limitations.
 | [CustomWorkflow](samples/MEAI/CustomWorkflow) | `Extensions.AI` | Extend the durable chat workflow with a domain-typed result |
 | [ExtensibleDurableTurns](samples/MEAI/ExtensibleDurableTurns) | `Extensions.AI` | Typed request/state with package-managed model and per-tool activities |
 
+### MCP server composition
+
+| Sample | Package | Description |
+|--------|---------|-------------|
+| [WorkflowToolServer](samples/MCP/WorkflowToolServer) | Temporal .NET + MCP SDK | Authenticated ordinary MCP tools that start or join tenant-scoped Temporal workflows |
+
 ### `TemporalCommunity.Extensions.Agents`
 
 | Sample | Package | Description |
