@@ -44,12 +44,15 @@ conversation ID, requested model, and final response usage.
 | `temporal.ai.toolset.resolver.attempts` | Counter | Completed resolver activity attempts, tagged only with `outcome=success|failure` |
 | `temporal.ai.toolset.resolver.selected_toolsets` | Histogram | Number of selected groups on successful resolution |
 | `temporal.ai.toolset.resolver.selected_functions` | Histogram | Number of selected functions on successful resolution |
+| `temporal.ai.toolset.declaration_snapshot.size` | Histogram (`By`) | Serialized bytes in the once-per-session worker manifest |
 | `temporal.ai.toolset.validation.rejections` | Counter | Activity-side rejection, tagged with one bounded reason |
 
 Rejection reasons are restricted to `unknown_toolset`, `duplicate_selection`, `name_collision`,
 `invalid_manifest_version`, `manifest_mismatch`, `authority_mismatch`, `invalid_declaration`, and
 `invalid_policy`. Metrics and resolver spans never use toolset/function names, conversation or
 tenant IDs, fingerprints, exception text, schemas, request data, or turn state as dimensions.
+The snapshot-size histogram has no dimensions and is measured only when the resolver already has
+the manifest; it does not reserialize declarations on each model activity.
 
 These are attempt-scoped operational signals, not durable audit or billing counts. An activity
 retry can emit another attempt, and process failure around measurement export can omit or duplicate

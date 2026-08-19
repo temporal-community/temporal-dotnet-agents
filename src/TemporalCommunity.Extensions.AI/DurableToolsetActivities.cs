@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
@@ -27,6 +28,10 @@ internal sealed class DurableToolsetActivities(
             DurableChatTelemetry.ToolsetResolverAttempts.Add(1, tags);
             DurableChatTelemetry.ToolsetResolverSelectedToolsets.Record(manifest.ToolsetIds.Count);
             DurableChatTelemetry.ToolsetResolverSelectedFunctions.Record(manifest.Members.Count);
+            DurableChatTelemetry.ToolsetDeclarationSnapshotBytes.Record(
+                JsonSerializer.SerializeToUtf8Bytes(
+                    manifest,
+                    DurableAIJsonUtilities.DefaultOptions).LongLength);
             span?.SetTag("temporal.ai.toolset.manifest.version", manifest.ManifestVersion);
             span?.SetTag("temporal.ai.toolset.selected_toolsets", manifest.ToolsetIds.Count);
             span?.SetTag("temporal.ai.toolset.selected_functions", manifest.Members.Count);

@@ -28,6 +28,7 @@ public sealed class DurableToolsetTelemetryTests
 
         Assert.Equal(
             [
+                "temporal.ai.toolset.declaration_snapshot.size",
                 "temporal.ai.toolset.resolver.attempts",
                 "temporal.ai.toolset.resolver.selected_functions",
                 "temporal.ai.toolset.resolver.selected_toolsets",
@@ -57,6 +58,10 @@ public sealed class DurableToolsetTelemetryTests
         AssertMeasurement(capture, "temporal.ai.toolset.resolver.attempts", 1, "outcome", "success");
         AssertMeasurement(capture, "temporal.ai.toolset.resolver.selected_toolsets", 1);
         AssertMeasurement(capture, "temporal.ai.toolset.resolver.selected_functions", 1);
+        var snapshot = Assert.Single(capture.Measurements, measurement =>
+            measurement.Instrument == "temporal.ai.toolset.declaration_snapshot.size");
+        Assert.True(snapshot.Value > 0);
+        Assert.Empty(snapshot.Tags);
         Assert.DoesNotContain(capture.Measurements,
             measurement => measurement.Instrument == "temporal.ai.toolset.validation.rejections");
         var span = Assert.Single(capture.Activities);

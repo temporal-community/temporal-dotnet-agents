@@ -206,6 +206,13 @@ benchmark-statebag: restore
         --configuration Release --no-restore -- \
         --filter "*StateBagRollbackBenchmarks*"
 
+# Measure Temporal AI payload conversion and thresholded gzip locally. Results are evidence;
+# elapsed-time thresholds are intentionally not a CI gate.
+benchmark-ai-payloads: restore
+    dotnet run --project benchmarks/TemporalCommunity.Extensions.AI.Benchmarks \
+        --configuration Release --no-restore -- \
+        --filter "*AIPayloadCodecBenchmarks*"
+
 # Merge all coverage XML files into an HTML report and print line/branch summary
 coverage-report: test-coverage
     dotnet tool run reportgenerator \

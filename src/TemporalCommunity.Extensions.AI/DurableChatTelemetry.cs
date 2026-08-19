@@ -32,6 +32,11 @@ public static class DurableChatTelemetry
         Meter.CreateHistogram<int>("temporal.ai.toolset.resolver.selected_toolsets");
     internal static readonly Histogram<int> ToolsetResolverSelectedFunctions =
         Meter.CreateHistogram<int>("temporal.ai.toolset.resolver.selected_functions");
+    internal static readonly Histogram<long> ToolsetDeclarationSnapshotBytes =
+        Meter.CreateHistogram<long>(
+            "temporal.ai.toolset.declaration_snapshot.size",
+            unit: "By",
+            description: "Serialized bytes in the once-per-session durable toolset manifest.");
     internal static readonly Counter<long> ToolsetValidationRejections = Meter.CreateCounter<long>(
         "temporal.ai.toolset.validation.rejections");
 
