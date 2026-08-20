@@ -8,4 +8,7 @@
     <PackageReference Include="Temporalio" />
     <PackageReference Include="Temporalio.Extensions.Hosting" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="TemporalCommunity.Extensions.AI.IntegrationTests" />
+  </ItemGroup>
 </Project>

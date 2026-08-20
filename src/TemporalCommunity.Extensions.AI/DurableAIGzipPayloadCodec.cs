@@ -76,12 +76,21 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
     private const int CopyBufferSize = 81_920;
 
     private readonly DurableAIGzipPayloadCodecOptions options;
+    private readonly ArrayPool<byte> bufferPool;
 
     /// <summary>Initializes a new instance of the codec.</summary>
     /// <param name="options">Compression and safety bounds.</param>
     public DurableAIGzipPayloadCodec(DurableAIGzipPayloadCodecOptions options)
+        : this(options, ArrayPool<byte>.Shared)
+    {
+    }
+
+    internal DurableAIGzipPayloadCodec(
+        DurableAIGzipPayloadCodecOptions options,
+        ArrayPool<byte> bufferPool)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(bufferPool);
         ArgumentOutOfRangeException.ThrowIfNegative(options.MinimumPayloadSizeBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.MaximumEncodedPayloadSizeBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.MaximumDecodedPayloadSizeBytes);
@@ -94,6 +103,7 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
         }
 
         this.options = options;
+        this.bufferPool = bufferPool;
     }
 
     /// <inheritdoc/>
@@ -211,7 +221,7 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
             using var input = new MemoryStream(payload.Data.ToByteArray(), writable: false);
             using var gzip = new GZipStream(input, CompressionMode.Decompress);
             using var restored = new MemoryStream();
-            var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+            var buffer = bufferPool.Rent(CopyBufferSize);
             try
             {
                 while (true)
@@ -235,7 +245,7 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
             }
             finally
             {
-                ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+                bufferPool.Return(buffer, clearArray: true);
             }
 
             if (restored.Length == 0)

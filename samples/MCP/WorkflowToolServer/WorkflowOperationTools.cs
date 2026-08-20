@@ -49,8 +49,9 @@ public sealed class WorkflowOperationTools(WorkflowOperationService operations)
             workItem,
             cancellationToken).ConfigureAwait(false));
 
-    private static CallToolResult ToCallToolResult(WorkflowToolResult result)
+    internal static CallToolResult ToCallToolResult(WorkflowToolResult result)
     {
+        ArgumentNullException.ThrowIfNull(result);
         var structured = JsonSerializer.SerializeToElement(result, McpJsonUtilities.DefaultOptions);
         return new CallToolResult
         {

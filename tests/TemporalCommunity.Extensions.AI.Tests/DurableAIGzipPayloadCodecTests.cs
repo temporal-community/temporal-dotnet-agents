@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using Google.Protobuf;
 using Temporalio.Api.Common.V1;
@@ -107,6 +108,25 @@ public sealed class DurableAIGzipPayloadCodecTests
             () => codec.DecodeAsync([payload]));
 
         Assert.Equal(DurableAIPayloadCodecError.CorruptPayload, exception.Error);
+    }
+
+    [Fact]
+    public async Task CorruptPayload_ReturnsAndClearsRentedBuffer()
+    {
+        var pool = new TrackingArrayPool();
+        var codec = CreateCodec(pool);
+        var payload = CreateEncodedPayload(Encoding.UTF8.GetBytes("not-gzip"));
+
+        var exception = await Assert.ThrowsAsync<DurableAIPayloadCodecException>(
+            () => codec.DecodeAsync([payload]));
+
+        Assert.Equal(DurableAIPayloadCodecError.CorruptPayload, exception.Error);
+        Assert.Equal(1, pool.RentCount);
+        Assert.Equal(1, pool.ReturnCount);
+        var buffer = Assert.IsType<byte[]>(pool.Buffer);
+        Assert.Same(buffer, pool.ReturnedBuffer);
+        Assert.True(pool.ClearArrayRequested);
+        Assert.DoesNotContain(buffer, value => value != 0);
     }
 
     [Fact]
@@ -225,6 +245,46 @@ public sealed class DurableAIGzipPayloadCodecTests
             MaximumDecodedPayloadSizeBytes = maximumDecodedSize,
             MinimumCompressionSavingsRatio = minimumSavingsRatio,
         });
+
+    private static DurableAIGzipPayloadCodec CreateCodec(ArrayPool<byte> bufferPool) => new(
+        new DurableAIGzipPayloadCodecOptions
+        {
+            MinimumPayloadSizeBytes = 1,
+            MinimumCompressionSavingsRatio = 0,
+        },
+        bufferPool);
+
+    private sealed class TrackingArrayPool : ArrayPool<byte>
+    {
+        public byte[]? Buffer { get; private set; }
+
+        public byte[]? ReturnedBuffer { get; private set; }
+
+        public int RentCount { get; private set; }
+
+        public int ReturnCount { get; private set; }
+
+        public bool ClearArrayRequested { get; private set; }
+
+        public override byte[] Rent(int minimumLength)
+        {
+            Buffer = new byte[minimumLength];
+            Array.Fill(Buffer, (byte)0xA5);
+            RentCount++;
+            return Buffer;
+        }
+
+        public override void Return(byte[] array, bool clearArray = false)
+        {
+            ReturnCount++;
+            ReturnedBuffer = array;
+            ClearArrayRequested = clearArray;
+            if (clearArray)
+            {
+                Array.Clear(array);
+            }
+        }
+    }
 
     private sealed class RecordingCodec(string name, List<string> calls) : IPayloadCodec
     {
