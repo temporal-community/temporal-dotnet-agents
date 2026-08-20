@@ -19,5 +19,9 @@ compression, but it costs CPU and allocations and changes what Temporal Web and 
 without a codec server. It preserves an input uncompressed when the complete encoded payload does
 not meet the configured savings ratio.
 
+The sample sets `CompressionLevel.Fastest`, which is also the library default. Other levels trade
+more CPU for potentially smaller payloads; benchmark representative inputs before changing it. See
+the [recorded codec benchmark](../../../docs/benchmarks/ai-payload-codecs.md).
+
 Compression is not encryption. Secrets still require an authenticated encryption codec, composed
 by the application in the intended encode order and reverse decode order.

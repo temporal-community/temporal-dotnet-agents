@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
@@ -15,6 +16,7 @@ static Temporalio.Converters.DataConverter CreateDataConverter() =>
     DurableAIDataConverter.CreateDataConverter(new DurableAIGzipPayloadCodec(
         new DurableAIGzipPayloadCodecOptions
         {
+            CompressionLevel = CompressionLevel.Fastest,
             MinimumPayloadSizeBytes = 1024,
             MaximumEncodedPayloadSizeBytes = 2 * 1024 * 1024,
             MaximumDecodedPayloadSizeBytes = 4 * 1024 * 1024,

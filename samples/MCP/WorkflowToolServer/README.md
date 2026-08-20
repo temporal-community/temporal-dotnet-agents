@@ -4,6 +4,13 @@ This sample exposes ordinary MCP tools over Streamable HTTP. Each authorized cal
 Temporal Workflow and returns its business result. It adds no TemporalCommunity MCP adapter and does
 not use the negotiated MCP Tasks extension.
 
+## Prerequisites
+
+- .NET 10 SDK;
+- a local Temporal service at `localhost:7233`;
+- no model API key—this is an MCP server and Temporal workflow sample, not a model-provider sample;
+- no separate worker process—the checked-in app hosts both the HTTP MCP server and sample worker.
+
 ```bash
 temporal server start-dev
 dotnet run --project samples/MCP/WorkflowToolServer --urls http://127.0.0.1:5100

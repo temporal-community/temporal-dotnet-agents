@@ -13,6 +13,9 @@ public sealed class WorkflowOperationTools(WorkflowOperationService operations)
 {
     [McpServerTool(
         Name = "start_unique_operation",
+        Destructive = true,
+        ReadOnly = false,
+        Idempotent = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(WorkflowToolResult))]
     [Authorize(Policy = WorkflowToolServerConstants.StartPolicy)]
@@ -29,6 +32,9 @@ public sealed class WorkflowOperationTools(WorkflowOperationService operations)
 
     [McpServerTool(
         Name = "start_or_join_operation",
+        Destructive = true,
+        ReadOnly = false,
+        Idempotent = false,
         UseStructuredContent = true,
         OutputSchemaType = typeof(WorkflowToolResult))]
     [Authorize(Policy = WorkflowToolServerConstants.StartPolicy)]

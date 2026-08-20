@@ -7,6 +7,7 @@ compresses the complete serialized `Payload`, including its original metadata.
 ```csharp
 var codec = new DurableAIGzipPayloadCodec(new DurableAIGzipPayloadCodecOptions
 {
+    CompressionLevel = CompressionLevel.Fastest,
     MinimumPayloadSizeBytes = 1024,
     MaximumEncodedPayloadSizeBytes = 2 * 1024 * 1024,
     MaximumDecodedPayloadSizeBytes = 4 * 1024 * 1024,
@@ -19,6 +20,12 @@ var dataConverter = DurableAIDataConverter.CreateDataConverter(codec);
 Set that converter on every participating Temporal client and worker. The codec passes through
 small payloads and payloads whose compressed representation does not meet the requested savings.
 Decode rejects unsupported versions, corrupt data, and payloads that cross either configured bound.
+
+`CompressionLevel` defaults to `CompressionLevel.Fastest`. Faster compression generally spends less
+CPU but may produce larger payloads; denser levels may reduce stored bytes at higher CPU cost. Measure
+representative application payloads before changing it. The
+[payload-codec benchmark](../../benchmarks/ai-payload-codecs.md) is evidence for this repository's
+fixtures, not a universal recommendation.
 
 ## Decoder-first rollout
 

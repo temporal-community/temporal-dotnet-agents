@@ -59,7 +59,11 @@ public sealed class WorkflowToolServerIntegrationTests
         Assert.Equal(
             ["start_or_join_operation", "start_unique_operation"],
             tools.Select(tool => tool.Name).Order(StringComparer.Ordinal).ToArray());
-        Assert.All(tools, AssertWorkflowResultSchema);
+        Assert.All(tools, tool =>
+        {
+            AssertWorkflowResultSchema(tool);
+            AssertWorkflowToolAnnotations(tool);
+        });
 
         var allowed = await writer.CallToolAsync(
             "start_or_join_operation",
@@ -352,6 +356,15 @@ public sealed class WorkflowToolServerIntegrationTests
         Assert.Equal("string", properties.GetProperty("status").GetProperty("type").GetString());
         Assert.True(properties.TryGetProperty("result", out _));
         Assert.True(properties.TryGetProperty("errorCode", out _));
+    }
+
+    private static void AssertWorkflowToolAnnotations(McpClientTool tool)
+    {
+        var annotations = tool.ProtocolTool.Annotations
+            ?? throw new Xunit.Sdk.XunitException($"Tool '{tool.Name}' did not advertise annotations.");
+        Assert.True(annotations.DestructiveHint);
+        Assert.False(annotations.ReadOnlyHint);
+        Assert.False(annotations.IdempotentHint);
     }
 
     private static void AssertTenantSafe(CallToolResult result, string derivedWorkflowId)
