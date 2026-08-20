@@ -36,7 +36,8 @@ guarantees.
 | Production-codec workload | Mean | Allocation | Result |
 |---|---:|---:|---|
 | Encode, 50-tool/4-KiB repetitive declaration snapshot | 57.4 us | 18.0 KiB | 208,082 B to 2,575 B |
-| Decode, same snapshot | 87.7 us | 1,050.8 KiB | original complete `Payload` restored |
+| Decode, same snapshot, initial implementation | 87.7 us | 1,050.8 KiB | original complete `Payload` restored |
+| Decode, same snapshot, pooled/stream-parsed implementation | 91.0 us | 800.8 KiB | original complete `Payload` restored |
 | Encode, below threshold | 31.0 ns | 216 B | original `Payload` reference retained |
 | Encode, 64-KiB deterministic high entropy | 345.1 us | 398.2 KiB | savings test failed; original reference retained |
 
@@ -45,12 +46,14 @@ the original object. The repetitive snapshot encoded to 1.24% of its original si
 case establishes that gzip can consume material CPU and allocation even when the savings check
 correctly declines to store the compressed representation.
 
-The first production-codec run also identifies a concrete optimization target: decode allocated
-about five times the 208-KiB restored payload size. The implementation currently copies the encoded
-`ByteString`, allocates an 80-KiB buffer, copies decompressed bytes into a `MemoryStream`, calls
-`ToArray`, and then parses the protobuf. Any follow-up optimization must remove measured copies while
-preserving encoded/decoded bounds, secret-data clearing, corrupt-input behavior, and cross-version
-readability.
+The first production-codec run identified a concrete optimization target: decode allocated about
+five times the 208-KiB restored payload size. Pooling and clearing the 80-KiB copy buffer, parsing the
+restored protobuf directly from its stream, and avoiding the compressed-output `ToArray` copy reduced
+representative decode allocation by 23.8%. The two short runs measured 87.7 us before and 91.0 us
+after; their confidence ranges overlap, so these data do not establish a timing regression or an
+improvement. A fixed version-one wire vector verifies that the optimized implementation reads the
+previous encoding and emits the same bytes. The remaining allocation is dominated by protobuf object
+materialization and `MemoryStream` growth; further complexity is not justified by this measurement.
 
 ## Decision
 

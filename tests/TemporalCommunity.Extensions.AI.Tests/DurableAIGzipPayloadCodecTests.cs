@@ -8,6 +8,9 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 
 public sealed class DurableAIGzipPayloadCodecTests
 {
+    private const string V1EncodedDataBase64 =
+        "H4sIAAAAAAAEE+IS4+JIzUvOT8nMSxfiyirOz9MvyEnMzANMqIlJqWKEAyUAnD3j2B0BAAA=";
+
     [Fact]
     public async Task BelowThreshold_PassesThroughSamePayload()
     {
@@ -35,6 +38,22 @@ public sealed class DurableAIGzipPayloadCodecTests
             DurableAIGzipPayloadCodec.EncodingValue,
             encoded.Metadata[DurableAIGzipPayloadCodec.EncodingMetadataKey].ToStringUtf8());
         Assert.Equal(originalBytes, decoded.ToByteArray());
+    }
+
+    [Fact]
+    public async Task VersionOneCompatibilityVector_DecodesAndReencodesWithoutWireChanges()
+    {
+        var original = CreatePayload(new string('x', 256));
+        var encoded = CreateEncodedPayload(Convert.FromBase64String(V1EncodedDataBase64));
+        var codec = CreateCodec();
+
+        var decoded = Assert.Single(await codec.DecodeAsync([encoded]));
+        var reencoded = Assert.Single(await codec.EncodeAsync([original]));
+
+        Assert.Equal(
+            new string('x', 256),
+            DurableAIDataConverter.Instance.PayloadConverter.ToValue<string>(decoded));
+        Assert.Equal(V1EncodedDataBase64, Convert.ToBase64String(reencoded.Data.ToByteArray()));
     }
 
     [Fact]

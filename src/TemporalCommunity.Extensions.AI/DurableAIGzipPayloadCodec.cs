@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using Google.Protobuf;
 using Temporalio.Api.Common.V1;
@@ -171,7 +172,13 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
                 $"of {options.MaximumEncodedPayloadSizeBytes} bytes.");
         }
 
-        var encoded = new Payload { Data = ByteString.CopyFrom(output.ToArray()) };
+        var encoded = new Payload
+        {
+            Data = ByteString.CopyFrom(
+                output.GetBuffer(),
+                0,
+                checked((int)output.Length)),
+        };
         encoded.Metadata[EncodingMetadataKey] = ByteString.CopyFromUtf8(EncodingValue);
 
         var requiredMaximumSize = originalSize * (1 - options.MinimumCompressionSavingsRatio);
@@ -204,24 +211,31 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
             using var input = new MemoryStream(payload.Data.ToByteArray(), writable: false);
             using var gzip = new GZipStream(input, CompressionMode.Decompress);
             using var restored = new MemoryStream();
-            var buffer = new byte[CopyBufferSize];
-            while (true)
+            var buffer = ArrayPool<byte>.Shared.Rent(CopyBufferSize);
+            try
             {
-                var read = gzip.Read(buffer, 0, buffer.Length);
-                if (read == 0)
+                while (true)
                 {
-                    break;
-                }
+                    var read = gzip.Read(buffer, 0, buffer.Length);
+                    if (read == 0)
+                    {
+                        break;
+                    }
 
-                if (restored.Length + read > options.MaximumDecodedPayloadSizeBytes)
-                {
-                    throw new DurableAIPayloadCodecException(
-                        DurableAIPayloadCodecError.DecodedPayloadTooLarge,
-                        $"Restored payload exceeds the configured decoded limit " +
-                        $"of {options.MaximumDecodedPayloadSizeBytes} bytes.");
-                }
+                    if (restored.Length + read > options.MaximumDecodedPayloadSizeBytes)
+                    {
+                        throw new DurableAIPayloadCodecException(
+                            DurableAIPayloadCodecError.DecodedPayloadTooLarge,
+                            $"Restored payload exceeds the configured decoded limit " +
+                            $"of {options.MaximumDecodedPayloadSizeBytes} bytes.");
+                    }
 
-                restored.Write(buffer, 0, read);
+                    restored.Write(buffer, 0, read);
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
             }
 
             if (restored.Length == 0)
@@ -231,7 +245,8 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
                     "The gzip payload did not contain a serialized Temporal payload.");
             }
 
-            return Payload.Parser.ParseFrom(restored.ToArray());
+            restored.Position = 0;
+            return Payload.Parser.ParseFrom(restored);
         }
         catch (DurableAIPayloadCodecException)
         {
