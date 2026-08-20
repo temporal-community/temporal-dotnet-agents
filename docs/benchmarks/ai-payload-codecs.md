@@ -71,3 +71,15 @@ reference or any change to activity input contracts.
 The public metric `temporal.ai.toolset.declaration_snapshot.size` (`By`) reports the serialized
 once-per-session manifest size without high-cardinality dimensions. It is measured during toolset
 resolution, not on every model activity.
+
+## Managed-history flattening decision
+
+`ManagedHistoryFlatteningBenchmarks` compares the current `SelectMany(...).ToList()` implementation
+with a two-pass implementation that counts messages before calling `AddRange`. It covers 0, 20, and
+200 history entries with 1, 4, and 20 messages per entry.
+
+For the representative 200-entry, 20-message case, the current implementation measured 3.32 us and
+31.40 KiB per operation. The pre-counted candidate measured 9.02 us and 31.37 KiB. The allocation
+difference was immaterial while the candidate was 2.7 times slower, so the production implementation
+remains unchanged. This result rejects the proposed optimization; it is not a general performance
+guarantee for every runtime.
