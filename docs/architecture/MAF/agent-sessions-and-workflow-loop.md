@@ -268,6 +268,17 @@ Signals do not return a value to the caller, so this handler kicks off a
 detached task that follows the same pattern as `RunAgentAsync` but with no
 return path. It uses the same `RunTurnAsync` helper internally.
 
+The default client starts new sessions atomically: synchronous turns use
+Update-With-Start, while immediate and delayed fire-and-forget turns use
+Signal-With-Start. Temporal may admit those first handlers before the workflow run task has
+initialized `AgentWorkflowInput`, so both handler paths cross an internal deterministic readiness
+barrier before reading or changing turn state. The barrier completes synchronously for established
+sessions and does not schedule a timer or activity.
+
+Custom workflow Update validators remain synchronous and cannot wait for initialization. A validator
+may reject malformed request data that does not depend on workflow input. Initialization-dependent
+checks belong in the Update handler after its own deterministic readiness barrier.
+
 ### Conversation History as Workflow State
 
 Every request/response pair is recorded in `_history` as a `DurableSessionEntry`. The MAF library

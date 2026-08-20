@@ -29,6 +29,7 @@ public class AgentWorkflowReplayTests
     }
 
     [Theory]
+    [InlineData("first-update-with-start-agent-workflow.json", typeof(AgentWorkflow))]
     [InlineData("tool-selection-agent-workflow.json", typeof(AgentWorkflow))]
     [InlineData("tool-selection-agent-job-workflow.json", typeof(AgentJobWorkflow))]
     [InlineData("tool-selection-temporal-ai-agent.json", typeof(ToolSelectionContainingWorkflow))]

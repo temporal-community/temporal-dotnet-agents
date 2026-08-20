@@ -107,6 +107,8 @@ internal class AgentWorkflow :
     [WorkflowUpdate("Run")]
     public async Task<AgentResponse> RunAgentAsync(RunRequest request)
     {
+        await WaitForAgentInputAsync().ConfigureAwait(true);
+
         var requestEntry = AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow);
 
         var (output, _) = await RunTurnAsync(requestEntry, chatOptions: null);
@@ -1097,6 +1099,8 @@ internal class AgentWorkflow :
     {
         try
         {
+            await WaitForAgentInputAsync().ConfigureAwait(true);
+
             var requestEntry = AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow);
             await RunTurnAsync(requestEntry, chatOptions: null).ConfigureAwait(true);
         }
@@ -1105,6 +1109,19 @@ internal class AgentWorkflow :
             Workflow.Logger.LogFireAndForgetActivityFailed(
                 _input?.AgentName ?? "unknown", Workflow.Info.WorkflowId, ex);
             // Swallow — fire-and-forget errors must not crash the session.
+        }
+    }
+
+    /// <summary>
+    /// Waits until the workflow run method has initialized the typed agent input.
+    /// Update-With-Start and Signal-With-Start handlers can be admitted before the run task
+    /// executes its first user statement, so every first-turn handler must cross this barrier.
+    /// </summary>
+    private async Task WaitForAgentInputAsync()
+    {
+        if (_input is null)
+        {
+            await Workflow.WaitConditionAsync(() => _input is not null).ConfigureAwait(true);
         }
     }
 

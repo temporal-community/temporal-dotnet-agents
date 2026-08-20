@@ -21,6 +21,41 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 public sealed class ToolSelectionHistoryCaptureTests
 {
     [Fact]
+    public async Task Capture_AgentWorkflow_FirstUpdateWithStart()
+    {
+        await using var environment = await TestEnvironmentHelper.StartLocalAsync();
+        environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var taskQueue = $"first-update-with-start-capture-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(environment.Client);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options => options.AddDurableAgent(
+                "FirstTurnReplayAgent",
+                agent => agent.ChatClient = _ => new EchoChatClient()));
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("FirstTurnReplayAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+            var response = await proxy.RunAsync("Capture first Update-With-Start.", session);
+
+            Assert.Equal("Echo [1]: Capture first Update-With-Start.", response.Messages[^1].Text);
+            var handle = environment.Client.GetWorkflowHandle(session.SessionId.WorkflowId);
+            await SaveHistoryAsync(
+                "first-update-with-start-agent-workflow.json",
+                await handle.FetchHistoryAsync());
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public Task Capture_AgentWorkflow_BlockedToolCall() =>
         CaptureAsync(CaptureKind.AgentWorkflow, "tool-selection-agent-workflow.json");
 
