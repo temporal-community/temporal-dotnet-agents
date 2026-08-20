@@ -1,10 +1,8 @@
-using System.IO.Compression;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Jobs;
 using Google.Protobuf;
 using Temporalio.Api.Common.V1;
-using Temporalio.Converters;
 
 namespace TemporalCommunity.Extensions.AI.Benchmarks;
 
@@ -22,7 +20,9 @@ public enum AIPayloadKind
 public class AIPayloadCodecBenchmarks
 {
     private Payload payload = null!;
-    private Payload encoded = null!;
+    private IReadOnlyCollection<Payload> input = null!;
+    private IReadOnlyCollection<Payload> encoded = null!;
+    private DurableAIGzipPayloadCodec codec = null!;
 
     [Params(1, 50, 250)]
     public int ToolCount { get; set; }
@@ -45,53 +45,86 @@ public class AIPayloadCodecBenchmarks
             SchemaBytes,
             Incompressible);
         payload = DurableAIDataConverter.Instance.PayloadConverter.ToPayload(fixture);
-        encoded = BenchmarkGzip.Encode(payload, thresholdBytes: 256);
+        input = [payload];
+        codec = CreateCodec(minimumPayloadSizeBytes: 256, minimumSavingsRatio: 0.05);
+        encoded = codec.EncodeAsync(input).GetAwaiter().GetResult();
+
+        var encodedPayload = encoded.Single();
+        Console.WriteLine(
+            $"[production-codec-fixture] kind={PayloadKind}; tools={ToolCount}; schema={SchemaBytes}; " +
+            $"incompressible={Incompressible}; raw={payload.CalculateSize()}; " +
+            $"encoded={encodedPayload.CalculateSize()}; passThrough={ReferenceEquals(payload, encodedPayload)}");
     }
 
     [Benchmark(Baseline = true)]
-    public Payload CurrentConverter() => payload.Clone();
+    public Payload CloneUnencodedPayload() => payload.Clone();
 
     [Benchmark]
-    public Payload EncodeThresholdedGzip() => BenchmarkGzip.Encode(payload, thresholdBytes: 256);
+    public Task<IReadOnlyCollection<Payload>> EncodeProductionCodec() => codec.EncodeAsync(input);
 
     [Benchmark]
-    public Payload DecodeThresholdedGzip() => BenchmarkGzip.Decode(encoded);
+    public Task<IReadOnlyCollection<Payload>> DecodeProductionCodec() => codec.DecodeAsync(encoded);
+
+    private static DurableAIGzipPayloadCodec CreateCodec(
+        int minimumPayloadSizeBytes,
+        double minimumSavingsRatio) => new(new DurableAIGzipPayloadCodecOptions
+        {
+            MinimumPayloadSizeBytes = minimumPayloadSizeBytes,
+            MaximumEncodedPayloadSizeBytes = 16 * 1024 * 1024,
+            MaximumDecodedPayloadSizeBytes = 32 * 1024 * 1024,
+            MinimumCompressionSavingsRatio = minimumSavingsRatio,
+        });
 }
 
-internal static class BenchmarkGzip
+[MemoryDiagnoser]
+[ShortRunJob(RuntimeMoniker.Net10_0)]
+[JsonExporterAttribute.Full]
+public class AIPayloadCodecBenchmarksPassThrough
 {
-    private const string Encoding = "binary/gzip-temporal-ai-benchmark-v1";
+    private IReadOnlyCollection<Payload> belowThreshold = null!;
+    private IReadOnlyCollection<Payload> insufficientSavings = null!;
+    private DurableAIGzipPayloadCodec thresholdCodec = null!;
+    private DurableAIGzipPayloadCodec savingsCodec = null!;
 
-    internal static Payload Encode(Payload payload, int thresholdBytes)
+    [GlobalSetup]
+    public void Setup()
     {
-        if (payload.CalculateSize() < thresholdBytes)
-        {
-            return payload.Clone();
-        }
+        var small = DurableAIDataConverter.Instance.PayloadConverter.ToPayload("small");
+        var random = new Random(1729);
+        var bytes = new byte[64 * 1024];
+        random.NextBytes(bytes);
+        var highEntropy = new Payload { Data = ByteString.CopyFrom(bytes) };
 
-        using var output = new MemoryStream();
-        using (var gzip = new GZipStream(output, CompressionLevel.Fastest, leaveOpen: true))
+        belowThreshold = [small];
+        insufficientSavings = [highEntropy];
+        thresholdCodec = new(new DurableAIGzipPayloadCodecOptions
         {
-            payload.WriteTo(gzip);
-        }
+            MinimumPayloadSizeBytes = small.CalculateSize() + 1,
+            MaximumEncodedPayloadSizeBytes = 1024 * 1024,
+            MaximumDecodedPayloadSizeBytes = 1024 * 1024,
+        });
+        savingsCodec = new(new DurableAIGzipPayloadCodecOptions
+        {
+            MinimumPayloadSizeBytes = 1,
+            MaximumEncodedPayloadSizeBytes = 1024 * 1024,
+            MaximumDecodedPayloadSizeBytes = 1024 * 1024,
+            MinimumCompressionSavingsRatio = 0.05,
+        });
 
-        var encoded = new Payload { Data = ByteString.CopyFrom(output.ToArray()) };
-        encoded.Metadata["encoding"] = ByteString.CopyFromUtf8(Encoding);
-        return encoded;
+        var thresholdResult = thresholdCodec.EncodeAsync(belowThreshold).GetAwaiter().GetResult().Single();
+        var savingsResult = savingsCodec.EncodeAsync(insufficientSavings).GetAwaiter().GetResult().Single();
+        Console.WriteLine(
+            $"[production-codec-pass-through] belowThreshold={ReferenceEquals(small, thresholdResult)}; " +
+            $"insufficientSavings={ReferenceEquals(highEntropy, savingsResult)}");
     }
 
-    internal static Payload Decode(Payload payload)
-    {
-        if (!payload.Metadata.TryGetValue("encoding", out var encoding)
-            || encoding.ToStringUtf8() != Encoding)
-        {
-            return payload.Clone();
-        }
+    [Benchmark(Baseline = true)]
+    public Task<IReadOnlyCollection<Payload>> EncodeBelowThreshold() =>
+        thresholdCodec.EncodeAsync(belowThreshold);
 
-        using var input = new MemoryStream(payload.Data.ToByteArray());
-        using var gzip = new GZipStream(input, CompressionMode.Decompress);
-        return Payload.Parser.ParseFrom(gzip);
-    }
+    [Benchmark]
+    public Task<IReadOnlyCollection<Payload>> EncodeInsufficientSavings() =>
+        savingsCodec.EncodeAsync(insufficientSavings);
 }
 
 internal sealed record AIPayloadFixture(
