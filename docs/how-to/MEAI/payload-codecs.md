@@ -38,8 +38,10 @@ fixtures, not a universal recommendation.
    out or have been deliberately drained.
 
 A reader without the codec fails when it encounters the library-owned encoding; it cannot infer or
-repair the configuration. Temporal Web and CLI require a compatible codec server to display encoded
-payloads.
+repair the configuration. This includes workflow replay: a history produced with the gzip codec
+replays with the compatible converter and fails explicitly with the default/no-codec converter; it
+does not deserialize encoded values as empty or default data. Temporal Web and CLI require a
+compatible codec server to display encoded payloads.
 
 ## Composition and security
 

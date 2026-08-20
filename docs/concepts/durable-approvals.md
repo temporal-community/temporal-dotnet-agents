@@ -37,6 +37,13 @@ Resolution is retry-safe:
 
 The most recent 32 decisions are retained across Continue-As-New. A timeout resolves the request as rejected.
 
+## Invalid requests
+
+`RequestApproval` requires a non-empty, non-whitespace `RequestId`. A malformed request fails that
+Update terminally with the stable error type `DurableApprovalInvalidRequest`; it does not create a
+pending approval, schedule an activity, or poison the workflow for later valid turns. Treat this as
+an application/request bug rather than retrying the same payload.
+
 ## MAF reusable session grants
 
 Reusable approval is a separate privileged capability. It is not available on `ITemporalAgentClient.ResolveApprovalAsync`, which always decides one call. A trusted administrative backend may explicitly register and use:
