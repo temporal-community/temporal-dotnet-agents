@@ -33,6 +33,25 @@ rechecks the authenticated tenant and scope immediately before starting durable 
 | Timeout | `failed` | `operation_timed_out` |
 | Termination | `failed` | `operation_terminated` |
 
+Both tools advertise a JSON output schema and return the same tenant-safe result in two MCP channels:
+
+- `structuredContent` contains `operationId`, `status`, `result`, and `errorCode`;
+- text `content` contains the equivalent JSON for clients that do not consume structured output.
+
+Completed operations return `isError: false`. Conflicts and closed workflow failures return
+`isError: true` with their stable public error code, so an MCP client or model can distinguish a
+business failure from a successful tool execution without parsing exception text. Protocol errors
+such as an unknown tool or malformed request remain MCP protocol errors.
+
+```json
+{
+  "operationId": "refresh-2026-08-19",
+  "status": "completed",
+  "result": "inventory-refresh completed",
+  "errorCode": null
+}
+```
+
 Callers supply an application operation ID, never a Temporal workflow ID. The server derives an
 opaque tenant-scoped workflow ID and does not return it. Request cancellation stops that caller's
 wait; it does not cancel the durable workflow.

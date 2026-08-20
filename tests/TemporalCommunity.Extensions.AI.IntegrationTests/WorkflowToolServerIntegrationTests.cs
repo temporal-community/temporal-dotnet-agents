@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Protocol;
 using TemporalCommunity.Extensions.Tests.Shared;
 using TemporalCommunity.Samples.Mcp.WorkflowToolServer;
 using Temporalio.Api.Enums.V1;
@@ -54,9 +55,12 @@ public sealed class WorkflowToolServerIntegrationTests
             () => environment.Client.GetWorkflowHandle(derivedId).DescribeAsync());
 
         await using var writer = await CreateMcpClientAsync(endpoint, "sample:tenant-a:writer");
+        var tools = await writer.ListToolsAsync();
         Assert.Equal(
             ["start_or_join_operation", "start_unique_operation"],
-            (await writer.ListToolsAsync()).Select(tool => tool.Name).Order(StringComparer.Ordinal).ToArray());
+            tools.Select(tool => tool.Name).Order(StringComparer.Ordinal).ToArray());
+        Assert.All(tools, AssertWorkflowResultSchema);
+
         var allowed = await writer.CallToolAsync(
             "start_or_join_operation",
             new Dictionary<string, object?>
@@ -64,11 +68,48 @@ public sealed class WorkflowToolServerIntegrationTests
                 ["operationId"] = operationId,
                 ["workItem"] = "inventory-refresh",
             });
+        var allowedResult = DeserializeResult(allowed);
         Assert.NotEqual(true, allowed.IsError);
-        Assert.DoesNotContain(
-            derivedId,
-            JsonSerializer.Serialize(allowed),
-            StringComparison.Ordinal);
+        Assert.Equal(operationId, allowedResult.OperationId);
+        Assert.Equal("completed", allowedResult.Status);
+        Assert.NotNull(allowedResult.Result);
+        Assert.Null(allowedResult.ErrorCode);
+        Assert.Equal(allowedResult, JsonSerializer.Deserialize<WorkflowToolResult>(ReadText(allowed), McpJsonUtilities.DefaultOptions));
+        AssertTenantSafe(allowed, derivedId);
+
+        await worker.StopAsync();
+    }
+
+    [Fact]
+    public async Task StartUnique_DuplicateReturnsStructuredConflict()
+    {
+        await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        using var worker = BuildWorker(environment.Client);
+        await worker.StartAsync();
+        await using var app = await StartServerAsync(environment.Client);
+        await using var writer = await CreateMcpClientAsync(GetEndpoint(app), "sample:tenant-a:writer");
+        var operationId = $"structured-conflict-{Guid.NewGuid():N}";
+        var arguments = new Dictionary<string, object?>
+        {
+            ["operationId"] = operationId,
+            ["workItem"] = "inventory-refresh",
+        };
+
+        var completed = await writer.CallToolAsync("start_unique_operation", arguments);
+        var conflict = await writer.CallToolAsync("start_unique_operation", arguments);
+
+        Assert.NotEqual(true, completed.IsError);
+        Assert.Equal("completed", DeserializeResult(completed).Status);
+        var conflictResult = DeserializeResult(conflict);
+        Assert.True(conflict.IsError);
+        Assert.Equal(operationId, conflictResult.OperationId);
+        Assert.Equal("conflict", conflictResult.Status);
+        Assert.Null(conflictResult.Result);
+        Assert.Equal("operation_already_exists", conflictResult.ErrorCode);
+        Assert.Equal(conflictResult, JsonSerializer.Deserialize<WorkflowToolResult>(ReadText(conflict), McpJsonUtilities.DefaultOptions));
+        AssertTenantSafe(
+            conflict,
+            WorkflowOperationService.DeriveWorkflowId("tenant-a", operationId));
 
         await worker.StopAsync();
     }
@@ -142,7 +183,8 @@ public sealed class WorkflowToolServerIntegrationTests
         Assert.Equal("completed", first.Status);
         Assert.Equal("operation_already_exists", duplicate.ErrorCode);
         Assert.Equal("completed", otherTenant.Status);
-        Assert.NotEqual(first.Result, otherTenant.Result);
+        Assert.Equal("reconcile completed", first.Result);
+        Assert.Equal(first.Result, otherTenant.Result);
 
         await worker.StopAsync();
     }
@@ -152,7 +194,7 @@ public sealed class WorkflowToolServerIntegrationTests
     [InlineData("cancel", "operation_canceled")]
     [InlineData("terminate", "operation_terminated")]
     [InlineData("timeout", "operation_timed_out")]
-    public async Task StartOrJoin_ClosedFailureReturnsTenantSafeOutcome(
+    public async Task StartOrJoin_ClosedFailureReturnsStructuredTenantSafeError(
         string closure,
         string expectedErrorCode)
     {
@@ -183,18 +225,24 @@ public sealed class WorkflowToolServerIntegrationTests
         }
 
         await Assert.ThrowsAsync<WorkflowFailedException>(() => handle.GetResultAsync());
-        var result = await new WorkflowOperationService(
-            environment.Client,
-            new InMemoryWorkflowOperationLedger()).StartOrJoinAsync(
-                "tenant-a",
-                operationId,
-                "ignored-on-retry",
-                CancellationToken.None);
+        await using var app = await StartServerAsync(environment.Client);
+        await using var writer = await CreateMcpClientAsync(GetEndpoint(app), "sample:tenant-a:writer");
+        var callResult = await writer.CallToolAsync(
+            "start_or_join_operation",
+            new Dictionary<string, object?>
+            {
+                ["operationId"] = operationId,
+                ["workItem"] = "ignored-on-retry",
+            });
+        var result = DeserializeResult(callResult);
 
+        Assert.True(callResult.IsError);
+        Assert.Equal(operationId, result.OperationId);
         Assert.Equal("failed", result.Status);
         Assert.Equal(expectedErrorCode, result.ErrorCode);
         Assert.Null(result.Result);
-        Assert.DoesNotContain(workflowId, result.ToString(), StringComparison.Ordinal);
+        Assert.Equal(result, JsonSerializer.Deserialize<WorkflowToolResult>(ReadText(callResult), McpJsonUtilities.DefaultOptions));
+        AssertTenantSafe(callResult, workflowId);
 
         await worker.StopAsync();
     }
@@ -286,4 +334,32 @@ public sealed class WorkflowToolServerIntegrationTests
                 ["Authorization"] = $"Bearer {token}",
             },
         }));
+
+    private static WorkflowToolResult DeserializeResult(CallToolResult result) =>
+        result.StructuredContent?.Deserialize<WorkflowToolResult>(McpJsonUtilities.DefaultOptions)
+        ?? throw new Xunit.Sdk.XunitException("The MCP result did not contain structured content.");
+
+    private static string ReadText(CallToolResult result) =>
+        Assert.Single(result.Content.OfType<TextContentBlock>()).Text;
+
+    private static void AssertWorkflowResultSchema(McpClientTool tool)
+    {
+        var schema = tool.ProtocolTool.OutputSchema
+            ?? throw new Xunit.Sdk.XunitException($"Tool '{tool.Name}' did not advertise an output schema.");
+        Assert.Equal("object", schema.GetProperty("type").GetString());
+        var properties = schema.GetProperty("properties");
+        Assert.Equal("string", properties.GetProperty("operationId").GetProperty("type").GetString());
+        Assert.Equal("string", properties.GetProperty("status").GetProperty("type").GetString());
+        Assert.True(properties.TryGetProperty("result", out _));
+        Assert.True(properties.TryGetProperty("errorCode", out _));
+    }
+
+    private static void AssertTenantSafe(CallToolResult result, string derivedWorkflowId)
+    {
+        var serialized = JsonSerializer.Serialize(result, McpJsonUtilities.DefaultOptions);
+        Assert.DoesNotContain("tenant-a", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain(derivedWorkflowId, serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("WorkflowFailedException", serialized, StringComparison.Ordinal);
+        Assert.DoesNotContain("stack", serialized, StringComparison.OrdinalIgnoreCase);
+    }
 }

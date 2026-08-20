@@ -23,6 +23,6 @@ public sealed class WorkflowOperationWorkflow
                 nonRetryable: true);
         }
 
-        return new(input.OperationId, $"{input.WorkItem} completed for tenant {input.TenantId}");
+        return new(input.OperationId, $"{input.WorkItem} completed");
     }
 }

@@ -51,6 +51,24 @@ workflow completes. If a closed execution produces `WorkflowAlreadyStartedExcept
 retrieves that execution's handle and obtains its terminal result. Raw run IDs, stack traces, and
 failure details are not returned.
 
+## MCP result semantics
+
+The sample's application service returns a protocol-neutral `WorkflowToolResult`. The MCP adapter
+maps that result to `CallToolResult` and advertises `WorkflowToolResult` as the tool output schema.
+It populates both `structuredContent` and JSON text `content` from the same result object.
+
+The three failure layers remain distinct:
+
+| Layer | MCP representation | Example |
+|---|---|---|
+| Successful durable operation | structured result with `isError: false` | `status=completed` |
+| Expected tool/domain failure | structured result with `isError: true` | duplicate conflict or closed workflow |
+| MCP protocol failure | protocol error response | unknown tool, malformed request, authorization filter rejection |
+
+Tenant IDs, derived Temporal workflow IDs, run IDs, stack traces, and raw exception messages are not
+included in either content channel. The application-owned operation ID is returned because it is the
+caller's correlation key, not Temporal authority.
+
 ## Cancellation
 
 MCP request cancellation stops that caller's wait. It does not cancel or terminate accepted durable
