@@ -135,6 +135,60 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
     // ── Fire-and-forget vs synchronous race ────────────────────────────────────
 
     [Fact]
+    public async Task UpdateWithStart_FirstTurnInitializesBeforeUpdateAndWorkflowRemainsHealthy()
+    {
+        var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
+
+        var first = await _fixture.AgentProxy.RunAsync("First update-with-start", session);
+        var second = await _fixture.AgentProxy.RunAsync("Healthy follow-up", session);
+
+        Assert.Contains("Echo [1]: First update-with-start", first.Messages[0].Text);
+        Assert.Contains("Echo [2]: Healthy follow-up", second.Messages[0].Text);
+
+        var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
+        await AssertNoWorkflowTaskFailuresAsync(handle);
+    }
+
+    [Fact]
+    public async Task SignalWithStart_FirstFireAndForgetTurnInitializesBeforeProcessing()
+    {
+        var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
+
+        var response = await _fixture.AgentProxy.RunAsync(
+            "First signal-with-start",
+            session,
+            new TemporalAgentRunOptions { IsFireAndForget = true });
+
+        Assert.Empty(response.Messages);
+
+        var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
+        await WaitForHistoryEntriesAsync(handle, expectedCount: 2);
+
+        var followUp = await _fixture.AgentProxy.RunAsync("After fire-and-forget", session);
+        Assert.Contains("Echo [2]: After fire-and-forget", followUp.Messages[0].Text);
+        await AssertNoWorkflowTaskFailuresAsync(handle);
+    }
+
+    [Fact]
+    public async Task DelayedSignalWithStart_FirstTurnInitializesBeforeProcessing()
+    {
+        var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
+        var proxy = Assert.IsType<TemporalAIAgentProxy>(_fixture.AgentProxy);
+
+        await proxy.RunDelayedAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "Delayed first signal")],
+            session,
+            TimeSpan.FromMilliseconds(100));
+
+        var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
+        await WaitForHistoryEntriesAsync(handle, expectedCount: 2);
+
+        var followUp = await _fixture.AgentProxy.RunAsync("After delayed signal", session);
+        Assert.Contains("Echo [2]: After delayed signal", followUp.Messages[0].Text);
+        await AssertNoWorkflowTaskFailuresAsync(handle);
+    }
+
+    [Fact]
     public async Task FireAndForget_AndSynchronousUpdate_BothComplete()
     {
         // Send a fire-and-forget signal and a synchronous update to the same session.
@@ -397,5 +451,36 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
             .AddHostedTemporalWorker(taskQueue)
             .AddTemporalAgents(options => { options.EnableSearchAttributes = false; options.AddDurableAgent("EchoAgent", a => a.ChatClient = _ => new Helpers.EchoChatClient()); });
         return builder.Build();
+    }
+
+    private static async Task WaitForHistoryEntriesAsync(
+        WorkflowHandle<AgentWorkflow> handle,
+        int expectedCount)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!timeout.IsCancellationRequested)
+        {
+            var history = await handle.QueryAsync(wf => wf.GetHistory());
+            if (history.Count >= expectedCount)
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(50), timeout.Token);
+        }
+
+        throw new TimeoutException($"Workflow did not record {expectedCount} history entries.");
+    }
+
+    private static async Task AssertNoWorkflowTaskFailuresAsync(WorkflowHandle<AgentWorkflow> handle)
+    {
+        var eventTypes = new List<EventType>();
+        await foreach (var historyEvent in handle.FetchHistoryEventsAsync())
+        {
+            eventTypes.Add(historyEvent.EventType);
+        }
+
+        Assert.DoesNotContain(EventType.WorkflowTaskFailed, eventTypes);
+        Assert.DoesNotContain(EventType.WorkflowTaskTimedOut, eventTypes);
     }
 }

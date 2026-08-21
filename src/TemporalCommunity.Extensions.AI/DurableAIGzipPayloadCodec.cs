@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Compression;
 using Google.Protobuf;
 using Temporalio.Api.Common.V1;
@@ -75,12 +76,21 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
     private const int CopyBufferSize = 81_920;
 
     private readonly DurableAIGzipPayloadCodecOptions options;
+    private readonly ArrayPool<byte> bufferPool;
 
     /// <summary>Initializes a new instance of the codec.</summary>
     /// <param name="options">Compression and safety bounds.</param>
     public DurableAIGzipPayloadCodec(DurableAIGzipPayloadCodecOptions options)
+        : this(options, ArrayPool<byte>.Shared)
+    {
+    }
+
+    internal DurableAIGzipPayloadCodec(
+        DurableAIGzipPayloadCodecOptions options,
+        ArrayPool<byte> bufferPool)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(bufferPool);
         ArgumentOutOfRangeException.ThrowIfNegative(options.MinimumPayloadSizeBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.MaximumEncodedPayloadSizeBytes);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(options.MaximumDecodedPayloadSizeBytes);
@@ -93,6 +103,7 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
         }
 
         this.options = options;
+        this.bufferPool = bufferPool;
     }
 
     /// <inheritdoc/>
@@ -171,7 +182,13 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
                 $"of {options.MaximumEncodedPayloadSizeBytes} bytes.");
         }
 
-        var encoded = new Payload { Data = ByteString.CopyFrom(output.ToArray()) };
+        var encoded = new Payload
+        {
+            Data = ByteString.CopyFrom(
+                output.GetBuffer(),
+                0,
+                checked((int)output.Length)),
+        };
         encoded.Metadata[EncodingMetadataKey] = ByteString.CopyFromUtf8(EncodingValue);
 
         var requiredMaximumSize = originalSize * (1 - options.MinimumCompressionSavingsRatio);
@@ -204,24 +221,31 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
             using var input = new MemoryStream(payload.Data.ToByteArray(), writable: false);
             using var gzip = new GZipStream(input, CompressionMode.Decompress);
             using var restored = new MemoryStream();
-            var buffer = new byte[CopyBufferSize];
-            while (true)
+            var buffer = bufferPool.Rent(CopyBufferSize);
+            try
             {
-                var read = gzip.Read(buffer, 0, buffer.Length);
-                if (read == 0)
+                while (true)
                 {
-                    break;
-                }
+                    var read = gzip.Read(buffer, 0, buffer.Length);
+                    if (read == 0)
+                    {
+                        break;
+                    }
 
-                if (restored.Length + read > options.MaximumDecodedPayloadSizeBytes)
-                {
-                    throw new DurableAIPayloadCodecException(
-                        DurableAIPayloadCodecError.DecodedPayloadTooLarge,
-                        $"Restored payload exceeds the configured decoded limit " +
-                        $"of {options.MaximumDecodedPayloadSizeBytes} bytes.");
-                }
+                    if (restored.Length + read > options.MaximumDecodedPayloadSizeBytes)
+                    {
+                        throw new DurableAIPayloadCodecException(
+                            DurableAIPayloadCodecError.DecodedPayloadTooLarge,
+                            $"Restored payload exceeds the configured decoded limit " +
+                            $"of {options.MaximumDecodedPayloadSizeBytes} bytes.");
+                    }
 
-                restored.Write(buffer, 0, read);
+                    restored.Write(buffer, 0, read);
+                }
+            }
+            finally
+            {
+                bufferPool.Return(buffer, clearArray: true);
             }
 
             if (restored.Length == 0)
@@ -231,7 +255,8 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
                     "The gzip payload did not contain a serialized Temporal payload.");
             }
 
-            return Payload.Parser.ParseFrom(restored.ToArray());
+            restored.Position = 0;
+            return Payload.Parser.ParseFrom(restored);
         }
         catch (DurableAIPayloadCodecException)
         {

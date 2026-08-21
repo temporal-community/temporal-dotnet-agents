@@ -54,6 +54,21 @@ public sealed class PayloadCodecIntegrationTests
                 .ReplayWorkflowAsync(history, throwOnReplayFailure: false);
 
             Assert.Null(replayResult.ReplayFailure);
+
+            var incompatibleOptions = new WorkflowReplayerOptions();
+            incompatibleOptions.AddWorkflow<PayloadCodecEchoWorkflow>();
+            var incompatibleReplay = await new WorkflowReplayer(incompatibleOptions)
+                .ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+            var replayFailure = Assert.IsAssignableFrom<Exception>(incompatibleReplay.ReplayFailure);
+            Assert.Contains(
+                "encoding",
+                replayFailure.ToString(),
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(
+                DurableAIGzipPayloadCodec.EncodingValue,
+                replayFailure.ToString(),
+                StringComparison.Ordinal);
         }
         finally
         {

@@ -7,6 +7,7 @@ compresses the complete serialized `Payload`, including its original metadata.
 ```csharp
 var codec = new DurableAIGzipPayloadCodec(new DurableAIGzipPayloadCodecOptions
 {
+    CompressionLevel = CompressionLevel.Fastest,
     MinimumPayloadSizeBytes = 1024,
     MaximumEncodedPayloadSizeBytes = 2 * 1024 * 1024,
     MaximumDecodedPayloadSizeBytes = 4 * 1024 * 1024,
@@ -20,6 +21,12 @@ Set that converter on every participating Temporal client and worker. The codec 
 small payloads and payloads whose compressed representation does not meet the requested savings.
 Decode rejects unsupported versions, corrupt data, and payloads that cross either configured bound.
 
+`CompressionLevel` defaults to `CompressionLevel.Fastest`. Faster compression generally spends less
+CPU but may produce larger payloads; denser levels may reduce stored bytes at higher CPU cost. Measure
+representative application payloads before changing it. The
+[payload-codec benchmark](../../benchmarks/ai-payload-codecs.md) is evidence for this repository's
+fixtures, not a universal recommendation.
+
 ## Decoder-first rollout
 
 1. Deploy decode-capable configuration to every client, worker, replayer, codec server, and
@@ -31,8 +38,10 @@ Decode rejects unsupported versions, corrupt data, and payloads that cross eithe
    out or have been deliberately drained.
 
 A reader without the codec fails when it encounters the library-owned encoding; it cannot infer or
-repair the configuration. Temporal Web and CLI require a compatible codec server to display encoded
-payloads.
+repair the configuration. This includes workflow replay: a history produced with the gzip codec
+replays with the compatible converter and fails explicitly with the default/no-codec converter; it
+does not deserialize encoded values as empty or default data. Temporal Web and CLI require a
+compatible codec server to display encoded payloads.
 
 ## Composition and security
 

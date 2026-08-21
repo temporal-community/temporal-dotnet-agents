@@ -274,6 +274,15 @@ AgentResponse response = await agentProxy.RunAsync("Hello, agent!", session);
 Console.WriteLine(response.Messages[0].Text);
 ```
 
+For a new session, the built-in client delivers the first call with Temporal Update-With-Start. The
+workflow waits deterministically for its typed input before processing that Update. Fire-and-forget
+and delayed starts use the equivalent Signal-With-Start path and share the same readiness guarantee;
+callers do not need a separate start or retry step.
+
+If you author a custom workflow, keep Update validators synchronous. Validators cannot await workflow
+initialization; put checks that depend on initialized workflow input in the Update handler after a
+deterministic readiness wait.
+
 The session ID encodes the agent name and a unique key as a Temporal workflow ID (`ta-myagent-{key}`). Passing the same
 session across calls routes all messages to the same `AgentWorkflow` instance, preserving conversation history.
 

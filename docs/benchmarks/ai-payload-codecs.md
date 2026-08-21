@@ -9,8 +9,9 @@ activity DTO or establish a timing gate for CI.
 
 ## Workloads
 
-`AIPayloadCodecBenchmarks` uses the library's current MEAI-aware payload converter and deterministic
-fixtures for declaration snapshots, function inputs, message history, and Continue-as-New state.
+`AIPayloadCodecBenchmarks` uses the library's current MEAI-aware payload converter and the production
+`DurableAIGzipPayloadCodec` API with deterministic fixtures for declaration snapshots, function
+inputs, message history, and Continue-as-New state.
 It covers 1, 50, and 250 tools; approximately 256-byte and 4-KiB schema content; and both repetitive
 and deterministic high-entropy text. The benchmark serializes the complete Temporal `Payload`
 before gzip, including its metadata.
@@ -32,22 +33,27 @@ BenchmarkDotNet 0.15.8, using the `ShortRun` job. The representative run used 50
 schema content. These measurements are evidence for the design decision, not portable performance
 guarantees.
 
-| Payload | Content | Encode mean | Decode mean | Encode allocation | Decode allocation |
-|---|---|---:|---:|---:|---:|
-| Declaration snapshot | Repetitive | 56.5 us | 64.4 us | 17.8 KiB | 416.4 KiB |
-| Continue-as-New | Repetitive | 64.2 us | 72.1 us | 18.5 KiB | 468.0 KiB |
-| Declaration snapshot | High entropy | 1.23 ms | 301.8 us | 894.3 KiB | 615.9 KiB |
-| Continue-as-New | High entropy | 1.47 ms | 358.2 us | 944.5 KiB | 692.3 KiB |
+| Production-codec workload | Mean | Allocation | Result |
+|---|---:|---:|---|
+| Encode, 50-tool/4-KiB repetitive declaration snapshot | 57.4 us | 18.0 KiB | 208,082 B to 2,575 B |
+| Decode, same snapshot, initial implementation | 87.7 us | 1,050.8 KiB | original complete `Payload` restored |
+| Decode, same snapshot, pooled/stream-parsed implementation | 91.0 us | 800.8 KiB | original complete `Payload` restored |
+| Encode, below threshold | 31.0 ns | 216 B | original `Payload` reference retained |
+| Encode, 64-KiB deterministic high entropy | 345.1 us | 398.2 KiB | savings test failed; original reference retained |
 
-The deterministic structural fixture (100 tools with 4-KiB schemas) also records size directly:
+The benchmark records the complete production codec result, including whether the codec returned
+the original object. The repetitive snapshot encoded to 1.24% of its original size. The adverse
+case establishes that gzip can consume material CPU and allocation even when the savings check
+correctly declines to store the compressed representation.
 
-| Content | Raw bytes | Gzip bytes | Encoded/raw |
-|---|---:|---:|---:|
-| Repetitive | 412,590 | 4,770 | 1.16% |
-| High entropy | 412,590 | 410,314 | 99.45% |
-
-Both fixtures round-trip byte-for-byte. The adverse case establishes that gzip can consume material
-CPU and allocation for effectively no history reduction.
+The first production-codec run identified a concrete optimization target: decode allocated about
+five times the 208-KiB restored payload size. Pooling and clearing the 80-KiB copy buffer, parsing the
+restored protobuf directly from its stream, and avoiding the compressed-output `ToArray` copy reduced
+representative decode allocation by 23.8%. The two short runs measured 87.7 us before and 91.0 us
+after; their confidence ranges overlap, so these data do not establish a timing regression or an
+improvement. A fixed version-one wire vector verifies that the optimized implementation reads the
+previous encoding and emits the same bytes. The remaining allocation is dominated by protobuf object
+materialization and `MemoryStream` growth; further complexity is not justified by this measurement.
 
 ## Decision
 
@@ -65,3 +71,15 @@ reference or any change to activity input contracts.
 The public metric `temporal.ai.toolset.declaration_snapshot.size` (`By`) reports the serialized
 once-per-session manifest size without high-cardinality dimensions. It is measured during toolset
 resolution, not on every model activity.
+
+## Managed-history flattening decision
+
+`ManagedHistoryFlatteningBenchmarks` compares the current `SelectMany(...).ToList()` implementation
+with a two-pass implementation that counts messages before calling `AddRange`. It covers 0, 20, and
+200 history entries with 1, 4, and 20 messages per entry.
+
+For the representative 200-entry, 20-message case, the current implementation measured 3.32 us and
+31.40 KiB per operation. The pre-counted candidate measured 9.02 us and 31.37 KiB. The allocation
+difference was immaterial while the candidate was 2.7 times slower, so the production implementation
+remains unchanged. This result rejects the proposed optimization; it is not a general performance
+guarantee for every runtime.

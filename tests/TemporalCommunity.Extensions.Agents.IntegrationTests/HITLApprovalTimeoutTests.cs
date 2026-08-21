@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
+using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
@@ -26,6 +28,43 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
     {
         _fixture = fixture;
         _output = output;
+    }
+
+    [Fact]
+    public async Task RequestApproval_EmptyRequestIdFailsTerminallyAndWorkflowRemainsHealthy()
+    {
+        var proxy = _fixture.AgentProxy;
+        var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+        var first = await proxy.RunAsync("Establish approval workflow", session);
+        Assert.Contains("Echo [1]:", first.Messages[0].Text);
+
+        var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
+        var scheduledBefore = await CountScheduledActivitiesAsync(handle);
+        var invalid = new DurableApprovalRequest
+        {
+            RequestId = string.Empty,
+            Description = "Invalid request must not park the workflow.",
+        };
+
+        var updateFailure = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
+                workflow => workflow.RequestApprovalAsync(invalid)));
+        var applicationFailure = Assert.IsType<ApplicationFailureException>(updateFailure.InnerException);
+        Assert.Equal("DurableApprovalInvalidRequest", applicationFailure.ErrorType);
+        Assert.True(applicationFailure.NonRetryable);
+        Assert.Null(await handle.QueryAsync(workflow => workflow.GetPendingApproval()));
+        Assert.Equal(scheduledBefore, await CountScheduledActivitiesAsync(handle));
+
+        var followUp = await proxy.RunAsync("Healthy after invalid approval", session);
+        Assert.Contains("Echo [2]: Healthy after invalid approval", followUp.Messages[0].Text);
+
+        var eventTypes = new List<EventType>();
+        await foreach (var historyEvent in handle.FetchHistoryEventsAsync())
+        {
+            eventTypes.Add(historyEvent.EventType);
+        }
+        Assert.DoesNotContain(EventType.WorkflowTaskFailed, eventTypes);
+        Assert.DoesNotContain(EventType.WorkflowTaskTimedOut, eventTypes);
     }
 
     [Fact]
@@ -231,5 +270,18 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
         {
             await host.StopAsync();
         }
+    }
+
+    private static async Task<int> CountScheduledActivitiesAsync(WorkflowHandle<AgentWorkflow> handle)
+    {
+        var count = 0;
+        await foreach (var historyEvent in handle.FetchHistoryEventsAsync())
+        {
+            if (historyEvent.EventType == EventType.ActivityTaskScheduled)
+            {
+                count++;
+            }
+        }
+        return count;
     }
 }

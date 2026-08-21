@@ -24,6 +24,13 @@ Here `delete_inventory` is `NoRetry` and requires workflow-parked approval; the 
 `server_admin` tool is not exposed in pinned mode. Dynamic discovery deliberately exposes the
 trusted catalog and is therefore intended for development or controlled servers.
 
+## Prerequisites
+
+- .NET 10 SDK;
+- a local Temporal service at `localhost:7233` (for example, `temporal server start-dev`);
+- no model API key—the sample uses a deterministic in-process chat client;
+- no external MCP service—the sample MCP transport and server run in-process.
+
 Ownership:
 
 - the application process owns the Temporal worker and MCP connection;

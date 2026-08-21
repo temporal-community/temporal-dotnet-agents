@@ -15,6 +15,13 @@ implementation is compatible. Exact ordinal lookup fails startup when a required
 missing. `delete_inventory` is registered explicitly with `NoRetry` and workflow-parked approval;
 the server's unexpected `server_admin` tool is excluded.
 
+## Prerequisites
+
+- .NET 10 SDK;
+- a local Temporal service at `localhost:7233` (for example, `temporal server start-dev`);
+- no model API key—the sample uses a deterministic in-process chat client;
+- no external MCP service—the sample MCP transport and server run in-process.
+
 Ownership:
 
 - the application process owns the MCP connection and Temporal worker;
