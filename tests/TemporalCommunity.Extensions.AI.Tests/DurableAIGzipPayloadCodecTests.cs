@@ -54,7 +54,14 @@ public sealed class DurableAIGzipPayloadCodecTests
         Assert.Equal(
             new string('x', 256),
             DurableAIDataConverter.Instance.PayloadConverter.ToValue<string>(decoded));
-        Assert.Equal(V1EncodedDataBase64, Convert.ToBase64String(reencoded.Data.ToByteArray()));
+        Assert.Equal(original.ToByteArray(), decoded.ToByteArray());
+        Assert.Equal(
+            DurableAIGzipPayloadCodec.EncodingValue,
+            reencoded.Metadata[DurableAIGzipPayloadCodec.EncodingMetadataKey].ToStringUtf8());
+        var roundTripped = Assert.Single(await codec.DecodeAsync([reencoded]));
+        Assert.Equal(
+            new string('x', 256),
+            DurableAIDataConverter.Instance.PayloadConverter.ToValue<string>(roundTripped));
     }
 
     [Fact]
