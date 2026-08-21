@@ -46,7 +46,7 @@ if [[ "$actual" != "$expected" ]]; then
   exit 1
 fi
 
-binary_directory="$cache_root/bin"
+binary_directory="$(cd "$cache_root" && pwd)/bin"
 mkdir -p "$binary_directory"
 tar -xzf "$archive" -C "$binary_directory" temporal
 chmod +x "$binary_directory/temporal"
