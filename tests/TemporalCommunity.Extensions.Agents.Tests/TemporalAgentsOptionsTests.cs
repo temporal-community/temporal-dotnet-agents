@@ -52,13 +52,6 @@ public class TemporalAgentsOptionsTests
     }
 
     [Fact]
-    public void DefaultHistoryReducer_DefaultsToNull()
-    {
-        var options = new TemporalAgentsOptions();
-        Assert.Null(options.DefaultHistoryReducer);
-    }
-
-    [Fact]
     public void EnableSearchAttributes_DefaultsTrue()
     {
         var options = new TemporalAgentsOptions();

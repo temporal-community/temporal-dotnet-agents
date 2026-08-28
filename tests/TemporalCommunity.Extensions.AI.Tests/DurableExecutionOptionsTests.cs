@@ -1,6 +1,4 @@
-using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.AI;
-using TemporalCommunity.Extensions.AI.Session;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -125,42 +123,6 @@ public class DurableExecutionOptionsTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
         Assert.Contains("ApprovalTimeout", ex.Message);
-    }
-
-    [Fact]
-    public void HistoryReducer_IsNullByDefault()
-    {
-        var options = new DurableExecutionOptions();
-        Assert.Null(options.HistoryReducer);
-    }
-
-    [Fact]
-    public void HistoryReducer_CanBeSetWithEntryShapedDelegate()
-    {
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> reducer =
-            entries => entries.TakeLast(10).ToList();
-        var options = new DurableExecutionOptions { HistoryReducer = reducer };
-
-        Assert.Same(reducer, options.HistoryReducer);
-    }
-
-    [Fact]
-    public void HistoryReducer_AppliesDelegateToEntries()
-    {
-        var entries = new List<DurableSessionEntry>
-        {
-            DurableSessionRequest.FromMessages([new ChatMessage(ChatRole.User, "msg1")], "id1", DateTimeOffset.UtcNow),
-            DurableSessionRequest.FromMessages([new ChatMessage(ChatRole.User, "msg2")], "id2", DateTimeOffset.UtcNow),
-            DurableSessionRequest.FromMessages([new ChatMessage(ChatRole.User, "msg3")], "id3", DateTimeOffset.UtcNow),
-        };
-
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> reducer =
-            xs => xs.TakeLast(2).ToList();
-        var result = reducer(entries);
-
-        Assert.Equal(2, result.Count);
-        Assert.Equal("id2", result[0].CorrelationId);
-        Assert.Equal("id3", result[1].CorrelationId);
     }
 
     // ── MaxEntryCount ──────────────────────────────────────────────────

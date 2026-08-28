@@ -142,8 +142,6 @@ TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Description.get -> strin
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Description.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HeartbeatTimeout.get -> System.TimeSpan?
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HeartbeatTimeout.set -> void
-TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducer.get -> System.Func<System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!, System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!>?
-TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducer.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducerKey.get -> string?
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.HistoryReducerKey.set -> void
 TemporalCommunity.Extensions.Agents.DurableAgentBuilder.Instructions.get -> string?
@@ -290,8 +288,6 @@ TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultConfigureAgentP
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultConfigureAgentPipeline.set -> void
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHeartbeatTimeout.get -> System.TimeSpan
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHeartbeatTimeout.set -> void
-TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHistoryReducer.get -> System.Func<System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!, System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!>?
-TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHistoryReducer.set -> void
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHistoryReducerKey.get -> string?
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultHistoryReducerKey.set -> void
 TemporalCommunity.Extensions.Agents.TemporalAgentsOptions.DefaultMaxEntryCount.get -> int

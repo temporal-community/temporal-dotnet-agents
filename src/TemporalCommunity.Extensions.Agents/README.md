@@ -169,7 +169,7 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 |--------|------|---------|-------------|
 | `EnableSearchAttributes` | `bool` | `true` | Upsert `AgentName`, `SessionCreatedAt`, `TurnCount` on each workflow run |
 | `DefaultMaxEntryCount` | `int` | `1000` | Cap on `DurableSessionEntry` records (request + response pairs) before triggering continue-as-new |
-| `DefaultHistoryReducer` | `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>?` | `null` | Custom strategy for trimming history at continue-as-new boundaries. Operates on entries, preserving per-turn `Usage` and `CorrelationId` |
+| `DefaultHistoryReducerKey` | `string?` | `null` | Key of a history reducer registered in DI and executed as an activity at continue-as-new boundaries |
 | `DefaultRetryPolicy` | `RetryPolicy?` | `null` | Override the default retry policy for agent activities |
 | `DefaultActivityTimeout` | `TimeSpan` | `5 min` | Default start-to-close timeout for agent activities |
 | `DefaultApprovalTimeout` | `TimeSpan` | `7 days` | How long a HITL gate waits before auto-rejecting |

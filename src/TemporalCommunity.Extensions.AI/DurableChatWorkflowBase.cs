@@ -325,19 +325,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount) && !_shutdownRequested)
         {
-            // Reducer selection (priority order):
+            // Reducer selection:
             //
-            // 1. HistoryReducerKey — durable path: dispatch a ReduceHistoryByKey activity so
+            // 1. HistoryReducerKey — dispatch a ReduceHistoryByKey activity so
             //    the reducer delegate is resolved from DI on the worker side. The activity result
-            //    is stored in Temporal history and survives replay deterministically. This is the
-            //    correct fix for the [JsonIgnore] silent-failure bug: the key is serialized and
-            //    travels on the wire; the delegate never does.
+            //    is stored in Temporal history and survives replay deterministically. The key is
+            //    serialized and travels on the wire; the delegate never does.
             //
-            // 2. HistoryReducer (inline delegate) — kept for unit-test and in-process use where a
-            //    delegate can be supplied without DI. NOT reliable in production durable workflows
-            //    (the [JsonIgnore] strips it on every serialize/deserialize round-trip).
-            //
-            // 3. DefaultBoundedTrim (C-2 fallback) — no reducer configured. Keeps the most-recent
+            // 2. DefaultBoundedTrim (C-2 fallback) — no reducer configured. Keeps the most-recent
             //    Max(1, MaxEntryCount/2) entries so the fresh run has headroom before the next CAN.
             //    Pure and order-preserving (TakeLast) — replay-safe. External-store mode (MAF only)
             //    nulls CarriedHistory in its CreateContinueAsNewException override, making this a
@@ -352,10 +347,6 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 };
                 carriedHistory = await ApplyKeyedHistoryReducerAsync(
                     input.HistoryReducerKey, _history, reducerActivityOptions).ConfigureAwait(true);
-            }
-            else if (input.HistoryReducer is not null)
-            {
-                carriedHistory = input.HistoryReducer(_history).ToList();
             }
             else
             {
@@ -408,7 +399,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
     /// <summary>
     /// Deterministic default history trim applied at continue-as-new when no
-    /// <see cref="DurableChatWorkflowInput.HistoryReducer"/> is configured (C-2).
+    /// <see cref="DurableChatWorkflowInput.HistoryReducerKey"/> is configured (C-2).
     /// </summary>
     /// <remarks>
     /// <para>

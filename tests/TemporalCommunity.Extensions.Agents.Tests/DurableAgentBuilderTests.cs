@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.AI;
-using TemporalCommunity.Extensions.AI.Session;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.Tests;
@@ -45,7 +44,6 @@ public class DurableAgentBuilderTests
         Assert.Null(builder.HeartbeatTimeout);
         Assert.Null(builder.RetryPolicy);
         Assert.Null(builder.MaxEntryCount);
-        Assert.Null(builder.HistoryReducer);
         Assert.Equal(20, builder.MaxToolCallsPerTurn);
         Assert.Empty(builder.ToolRegistrations);
         Assert.Empty(builder.ContextProviderFactories);
@@ -268,7 +266,6 @@ public class DurableAgentBuilderTests
     public void ToRegistration_FlattensState()
     {
         var chatClient = new TestChatClient();
-        var reducer = new Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>(list => list);
         var provider = new TestContextProvider();
 
         var builder = NewBuilder("Agent42");
@@ -283,7 +280,6 @@ public class DurableAgentBuilderTests
         builder.RetryPolicy = new Temporalio.Common.RetryPolicy { MaximumAttempts = 3 };
         builder.MaxEntryCount = 500;
         builder.MaxToolCallsPerTurn = 7;
-        builder.HistoryReducer = reducer;
         builder.AddTool(NewTool("t1"));
         builder.AddContextProvider(provider);
 
@@ -301,7 +297,6 @@ public class DurableAgentBuilderTests
         Assert.Equal(3, reg.RetryPolicy!.MaximumAttempts);
         Assert.Equal(500, reg.MaxEntryCount);
         Assert.Equal(7, reg.MaxToolCallsPerTurn);
-        Assert.Same(reducer, reg.HistoryReducer);
         Assert.Single(reg.Tools);
         Assert.Equal("t1", reg.Tools[0].Name);
         Assert.Single(reg.ContextProviderFactories);
@@ -324,7 +319,6 @@ public class DurableAgentBuilderTests
         Assert.Null(reg.HeartbeatTimeout);
         Assert.Null(reg.RetryPolicy);
         Assert.Null(reg.MaxEntryCount);
-        Assert.Null(reg.HistoryReducer);
         Assert.Equal(20, reg.MaxToolCallsPerTurn);
         Assert.Empty(reg.Tools);
         Assert.Empty(reg.ContextProviderFactories);

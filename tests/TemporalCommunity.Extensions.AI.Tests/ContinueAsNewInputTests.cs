@@ -62,7 +62,6 @@ public class ContinueAsNewInputTests
             ApprovalResolutionHistory = [new DurableApprovalDecision { RequestId = "old" }],
             EnableSearchAttributes = true,
             MaxEntryCount = 321,
-            HistoryReducer = entries => entries,
             HistoryReducerKey = "reducer-v2",
             OriginalCreatedAt = DateTimeOffset.UnixEpoch,
             ToolActivityOptions = toolOptions,
@@ -101,7 +100,6 @@ public class ContinueAsNewInputTests
         Assert.Same(approvals, actual.ApprovalResolutionHistory);
         Assert.Equal(original.EnableSearchAttributes, actual.EnableSearchAttributes);
         Assert.Equal(original.MaxEntryCount, actual.MaxEntryCount);
-        Assert.Same(original.HistoryReducer, actual.HistoryReducer);
         Assert.Equal("reducer-v2", actual.HistoryReducerKey);
         Assert.Equal(createdAt, actual.OriginalCreatedAt);
         Assert.Same(toolOptions, actual.ToolActivityOptions);

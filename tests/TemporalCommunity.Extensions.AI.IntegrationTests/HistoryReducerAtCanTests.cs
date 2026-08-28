@@ -12,14 +12,12 @@ using Xunit.Abstractions;
 namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 
 /// <summary>
-/// Tests that a configured <c>HistoryReducer</c> (via <c>DurableExecutionOptions.HistoryReducerKey</c>)
+/// Tests that a configured reducer (via <c>DurableExecutionOptions.DefaultHistoryReducerKey</c>)
 /// actually fires at continue-as-new and produces the expected trimmed history.
 ///
 /// <para>
-/// Before the fix: <see cref="DurableChatWorkflowInput.HistoryReducer"/> was <c>[JsonIgnore]</c>
-/// and stripped on the wire, so the reducer never fired — <c>DefaultBoundedTrim</c>
-/// silently took over. The existing MAF test asserted <c>carried.Count &lt; maxEntryCount</c>,
-/// which the fallback trim also satisfies, so it could not detect the bug.
+/// The reducer key crosses the workflow boundary while the registered delegate remains in the
+/// worker's DI container. The workflow dispatches an activity to resolve and execute it.
 /// </para>
 /// <para>
 /// This test uses a keep-last-1 sentinel reducer: if the reducer fires, the carried
@@ -157,7 +155,6 @@ public class HistoryReducerAtCanTests
                 opts.SessionTimeToLive = TimeSpan.FromMinutes(10);
                 opts.ActivityTimeout = TimeSpan.FromSeconds(30);
                 opts.DefaultHistoryReducerKey = reducerKey;
-                opts.HistoryReducer = reducer; // still set for local/test use; key used for durable path
             });
 
         // Register the reducer under the key so the activity can resolve it.

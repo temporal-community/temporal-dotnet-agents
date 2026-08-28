@@ -3,7 +3,6 @@ using Microsoft.Extensions.AI;
 using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Tools;
-using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
 
 namespace TemporalCommunity.Extensions.Agents;
@@ -28,7 +27,6 @@ internal sealed record DurableAgentRegistration(
     RetryPolicy? RetryPolicy,
     int? MaxEntryCount,
     int MaxToolCallsPerTurn,
-    Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer,
     string? HistoryReducerKey,
     Action<AIAgentBuilder>? ConfigureAgentPipeline,
     Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? ToolInterceptorFactory = null,

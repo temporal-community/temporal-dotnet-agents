@@ -1,6 +1,5 @@
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
-using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
 
 namespace TemporalCommunity.Extensions.AI;
@@ -89,31 +88,6 @@ public sealed class DurableExecutionOptions
     /// Per-call overrides via <see cref="TemporalChatOptionsExtensions.WithChatClientKey"/> take precedence.
     /// </summary>
     public string? DefaultChatClientKey { get; set; }
-
-    /// <summary>
-    /// Gets or sets a reducer applied to conversation history before a continue-as-new transition.
-    /// When <see langword="null"/> (default) and <see cref="DefaultHistoryReducerKey"/> is also
-    /// <see langword="null"/>, <c>DefaultBoundedTrim</c> is applied: it keeps the most-recent
-    /// <c>Max(1, MaxEntryCount/2)</c> entries when history reaches <c>MaxEntryCount</c>; when
-    /// <c>MaxEntryCount</c> is not the trigger (SDK-suggested CAN), history is carried forward
-    /// unchanged.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// This property is provided for in-process and unit-test scenarios where a delegate can be
-    /// supplied directly. For production durable workflows, prefer
-    /// <see cref="DefaultHistoryReducerKey"/> — the key is serialized and survives the wire,
-    /// so the reducer reliably fires at every continue-as-new boundary including after worker
-    /// restarts and replay. If both are set, <see cref="DefaultHistoryReducerKey"/> takes
-    /// precedence for the durable path.
-    /// </para>
-    /// <para>
-    /// <b>Workflow determinism:</b> the reducer runs inside a Temporal activity (not on the
-    /// workflow thread) and may be async-capable, but the delegate itself must be pure and
-    /// deterministic — same inputs must always produce the same output.
-    /// </para>
-    /// </remarks>
-    public Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer { get; set; }
 
     /// <summary>
     /// Gets or sets the keyed-service key used to resolve the history-reducer delegate from DI.

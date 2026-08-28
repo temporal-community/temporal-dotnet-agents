@@ -129,7 +129,7 @@ AgentWorkflow : DurableChatWorkflowBase<AgentResponse>     ← in TemporalCommun
 ```
 
 `AgentWorkflowInput` itself inherits from `DurableChatWorkflowInput`, so the
-shared fields (`MaxEntryCount`, `HistoryReducer`, `EnableSearchAttributes`, etc.)
+shared fields (`MaxEntryCount`, `HistoryReducerKey`, `EnableSearchAttributes`, etc.)
 come from the base, while MAF-only fields (`AgentName`, `TaskQueue`,
 `CarriedStateBag`, `RetryPolicy`) live on the subclass.
 

@@ -290,7 +290,6 @@ internal sealed class DefaultTemporalAgentClient(
         var perAgentToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
             configuredRetryPolicy);
         var perAgentMaxEntryCount = registration.MaxEntryCount ?? options.DefaultMaxEntryCount;
-        var perAgentHistoryReducer = registration.HistoryReducer ?? options.DefaultHistoryReducer;
         var perAgentHistoryReducerKey = registration.HistoryReducerKey ?? options.DefaultHistoryReducerKey;
 
         var toolActivityOptions = BuildDurableAgentToolActivityOptions(
@@ -424,15 +423,9 @@ internal sealed class DefaultTemporalAgentClient(
             ApprovalTimeout = perAgentApprovalTimeout,
             RetryPolicy = perAgentModelRetryPolicy,
             MaxEntryCount = perAgentMaxEntryCount,
-            // Both reducer forms are set:
-            // - HistoryReducer: [JsonIgnore] delegate for in-process / embedded-test use
-            //   (survives within the same process; stripped on wire serialization).
-            // - HistoryReducerKey: serialized key for production durable workflows. When set,
+            // HistoryReducerKey is serialized for durable workflows. When set,
             //   the workflow dispatches a ReduceHistoryByKey activity that resolves the delegate
             //   from DI — surviving wire serialization, worker restarts, and replay correctly.
-            // The durable CAN path uses HistoryReducerKey when present; falls back to
-            // HistoryReducer (inline) only when HistoryReducerKey is null.
-            HistoryReducer = perAgentHistoryReducer,
             HistoryReducerKey = perAgentHistoryReducerKey,
             EnableSearchAttributes = options.EnableSearchAttributes,
             // Worker-side settings are baked in. A non-null bundle means this workflow does not
@@ -620,7 +613,6 @@ internal sealed class DefaultTemporalAgentClient(
             RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
                 options.DefaultRetryPolicy),
             MaxEntryCount = options.DefaultMaxEntryCount,
-            HistoryReducer = options.DefaultHistoryReducer,
             HistoryReducerKey = options.DefaultHistoryReducerKey,
             EnableSearchAttributes = options.EnableSearchAttributes,
             // Proxy-only construction: leave ResolvedWorkerConfig null. The worker resolves

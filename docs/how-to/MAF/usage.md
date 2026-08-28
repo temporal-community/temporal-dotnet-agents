@@ -72,7 +72,7 @@ builder.Services
 | `AddContextProvider(AIContextProvider provider, IEnumerable<DurableToolRegistrationSpec>? durableTools = null)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the chat pipeline. `Invoking/InvokedAsync` fire once per LLM call. Concrete providers can also contribute durable tools through specs or `IDurableToolSource`. |
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
 | `RetryPolicy` | Retry policy for the agent's `RunAgentStep` activity (the LLM call). Per-tool retry is configured separately via `DurableToolOptions`. |
-| `MaxEntryCount`, `HistoryReducer` | Per-agent continue-as-new bounds and reducer. Inherit worker defaults when unset. |
+| `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
 | `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
 | `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
 
@@ -100,7 +100,7 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.HeartbeatTimeout` | `opts.DefaultHeartbeatTimeout` |
 | `agent.RetryPolicy` | `opts.DefaultRetryPolicy` |
 | `agent.MaxEntryCount` | `opts.DefaultMaxEntryCount` |
-| `agent.HistoryReducer` | `opts.DefaultHistoryReducer` |
+| `agent.HistoryReducerKey` | `opts.DefaultHistoryReducerKey` |
 | `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
 | `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
 

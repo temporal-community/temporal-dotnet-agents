@@ -624,7 +624,7 @@ public class PolymorphicSerializationAuditTests
         Assert.Equal(100, deserialized.Usage!.InputTokenCount);
     }
 
-    // ─── DurableChatWorkflowInput.HistoryReducer (JsonIgnore) and ToolActivityOptions ─────
+    // ─── DurableChatWorkflowInput.ToolActivityOptions ───────────────────────────────
 
     /// <summary>
     /// <see cref="DurableChatWorkflowInput.ToolActivityOptions"/> is

@@ -10,7 +10,7 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// <summary>
 /// Input passed to <see cref="AgentWorkflow"/> when starting a new run.
 /// Inherits shared session-loop fields (<see cref="DurableChatWorkflowInput.MaxEntryCount"/>,
-/// <see cref="DurableChatWorkflowInput.HistoryReducer"/>, <see cref="DurableChatWorkflowInput.OriginalCreatedAt"/>,
+/// <see cref="DurableChatWorkflowInput.HistoryReducerKey"/>, <see cref="DurableChatWorkflowInput.OriginalCreatedAt"/>,
 /// <see cref="DurableChatWorkflowInput.EnableSearchAttributes"/>, <see cref="DurableChatWorkflowInput.CarriedHistory"/>)
 /// from <see cref="DurableChatWorkflowInput"/> per Layer 3 Decision #1.
 /// MAF-specific fields (<see cref="AgentName"/>, <see cref="TaskQueue"/>,

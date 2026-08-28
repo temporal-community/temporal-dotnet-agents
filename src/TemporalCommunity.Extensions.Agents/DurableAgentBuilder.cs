@@ -181,13 +181,6 @@ public sealed class DurableAgentBuilder
     public int MaxToolCallsPerTurn { get; set; } = 20;
 
     /// <summary>
-    /// Gets or sets a deterministic, pure reducer applied to the agent's accumulated history before
-    /// continue-as-new. Kept for in-process and unit-test use. For production durable workflows,
-    /// prefer <see cref="HistoryReducerKey"/> which is serialized and survives the wire.
-    /// </summary>
-    public Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? HistoryReducer { get; set; }
-
-    /// <summary>
     /// Gets or sets the keyed-service key used to resolve the history-reducer delegate from DI.
     /// When non-null, the session client sets this key on the workflow input and the worker
     /// dispatches a <c>ReduceHistoryByKey</c> activity at continue-as-new time. Inherits
@@ -775,7 +768,6 @@ public sealed class DurableAgentBuilder
             RetryPolicy: RetryPolicy,
             MaxEntryCount: MaxEntryCount,
             MaxToolCallsPerTurn: MaxToolCallsPerTurn,
-            HistoryReducer: HistoryReducer,
             HistoryReducerKey: HistoryReducerKey,
             ConfigureAgentPipeline: ConfigureAgentPipeline,
             ToolInterceptorFactory: _toolInterceptorFactory,

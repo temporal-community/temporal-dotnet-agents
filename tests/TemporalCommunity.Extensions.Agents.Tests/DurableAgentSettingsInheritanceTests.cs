@@ -1,7 +1,6 @@
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
 using TemporalCommunity.Extensions.AI;
-using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Xunit;
 
@@ -216,39 +215,6 @@ public class DurableAgentSettingsInheritanceTests
         var input = Build(options);
 
         Assert.Equal(5000, input.MaxEntryCount);
-    }
-
-    // ── HistoryReducer ──────────────────────────────────────────────────────────
-
-    [Fact]
-    public void WhenPerAgentHistoryReducerSet_OverridesWorkerDefault()
-    {
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> workerReducer =
-            list => list;
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> agentReducer =
-            list => list.Take(1).ToList();
-
-        var options = OptionsWithDurableAgent(
-            configureAgent: a => a.HistoryReducer = agentReducer,
-            configureOptions: o => o.DefaultHistoryReducer = workerReducer);
-
-        var input = Build(options);
-
-        Assert.Same(agentReducer, input.HistoryReducer);
-    }
-
-    [Fact]
-    public void WhenPerAgentHistoryReducerNull_InheritsWorkerDefault()
-    {
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> workerReducer =
-            list => list;
-
-        var options = OptionsWithDurableAgent(
-            configureOptions: o => o.DefaultHistoryReducer = workerReducer);
-
-        var input = Build(options);
-
-        Assert.Same(workerReducer, input.HistoryReducer);
     }
 
     // ── MaxToolCallsPerTurn (per-agent only — no worker fallback) ───────────────

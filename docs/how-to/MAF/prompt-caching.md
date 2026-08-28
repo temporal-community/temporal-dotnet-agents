@@ -282,18 +282,21 @@ builder.Services
     });
 ```
 
-Pair with a `HistoryReducer` to control which entries are retained at the boundary. The reducer signature is now `Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>?` — entry-shaped on both libraries, matching the unified entry-layer wire format:
+Pair the bound with a keyed history reducer to control which entries are retained at the boundary.
+Register the reducer in the worker's DI container, then configure its key:
 
 ```csharp
+services.AddKeyedSingleton<Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
+    "keep-recent-30",
+    (_, _) => entries => entries.TakeLast(30).ToList());
+
 opts.DefaultMaxEntryCount = 50;
-opts.DefaultHistoryReducer = entries =>
-{
-    // Keep the most recent 30 entries; drop older ones
-    return entries.TakeLast(30).ToList();
-};
+opts.DefaultHistoryReducerKey = "keep-recent-30";
 ```
 
-`HistoryReducer` is called with the full history immediately before continue-as-new. The returned subset becomes the initial history for the new run. A `null` reducer (the default) retains all entries up to `MaxEntryCount`, dropping the oldest. The reducer must be synchronous and deterministic — it runs in workflow context.
+At continue-as-new, the workflow dispatches a Temporal activity that resolves the keyed reducer and
+passes it the full history. The activity result becomes the initial history for the new run and is
+recorded in workflow history. Without a configured key, the library applies its bounded default trim.
 
 ### 5. Use ResponseFormat to Get Structured Output
 

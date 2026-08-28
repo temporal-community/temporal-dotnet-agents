@@ -7,7 +7,7 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 
 /// <summary>
 /// C-2 (no-reducer fallback) — unit tests for the deterministic <c>DefaultBoundedTrim</c> applied at
-/// continue-as-new when no <see cref="DurableChatWorkflowInput.HistoryReducer"/> is configured.
+/// continue-as-new when no <see cref="DurableChatWorkflowInput.HistoryReducerKey"/> is configured.
 ///
 /// <para>
 /// Before this fix the no-reducer path carried the full history into the fresh run. When CAN was

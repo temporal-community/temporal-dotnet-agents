@@ -48,7 +48,7 @@ public class HistoryReducerAtCanTests
         var scripted = new ScriptedChatClient(
             Enumerable.Range(1, 40).Select(i => new ChatResponse(new ChatMessage(ChatRole.Assistant, $"r{i}"))));
 
-        using var host = BuildHost(env.Client, scripted, maxEntryCount, reducer: null);
+        using var host = BuildHost(env.Client, scripted, maxEntryCount);
         await host.StartAsync();
         try
         {
@@ -190,66 +190,10 @@ public class HistoryReducerAtCanTests
         }
     }
 
-    [Fact]
-    public async Task ConfiguredReducer_AcrossCan_CarriesReducedShape()
-    {
-        await using var env = await TestEnvironmentHelper.StartLocalAsync();
-        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
-
-        const int maxEntryCount = 6;
-        var scripted = new ScriptedChatClient(
-            Enumerable.Range(1, 40).Select(i => new ChatResponse(new ChatMessage(ChatRole.Assistant, $"r{i}"))));
-
-        // Sentinel reducer: keep only the last 1 entry — clearly distinct from the default trim.
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> keepLast1 =
-            entries => entries.Count > 0 ? [entries[^1]] : [];
-
-        using var host = BuildHost(env.Client, scripted, maxEntryCount, reducer: keepLast1);
-        await host.StartAsync();
-        try
-        {
-            var proxy = host.Services.GetTemporalAgentProxy("CanAgent");
-            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
-            var handle = env.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
-
-            await proxy.RunAsync("turn 1", session);
-            var initialRunId = (await handle.DescribeAsync()).RunId;
-
-            var canFired = false;
-            for (var i = 2; i <= 12 && !canFired; i++)
-            {
-                try { await proxy.RunAsync($"turn {i}", session); }
-                catch (Temporalio.Exceptions.WorkflowUpdateFailedException) { }
-                if ((await handle.DescribeAsync()).RunId != initialRunId) canFired = true;
-            }
-            Assert.True(canFired, "Expected count-driven CAN to fire.");
-
-            await Task.Delay(TimeSpan.FromSeconds(1));
-            var carried = await handle.QueryAsync<AgentWorkflow, IReadOnlyList<DurableSessionEntry>>(
-                wf => wf.GetHistory());
-            _output.WriteLine($"Carried history count after reducer CAN: {carried.Count}");
-
-            // The reducer kept exactly 1 entry at CAN. The fresh run may have processed a couple
-            // more turns by query time, but the carried base is the single reduced entry —
-            // the count is far below the unreduced ~MaxEntryCount/2 default-trim shape would carry
-            // for the same drive, and strictly below MaxEntryCount.
-            Assert.True(carried.Count < maxEntryCount,
-                $"Reduced carried history ({carried.Count}) must stay below MaxEntryCount ({maxEntryCount}).");
-
-            await host.StopAsync();
-        }
-        catch
-        {
-            await host.StopAsync();
-            throw;
-        }
-    }
-
     private static IHost BuildHost(
         ITemporalClient client,
         ScriptedChatClient scripted,
-        int maxEntryCount,
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? reducer)
+        int maxEntryCount)
     {
         var taskQueue = $"history-reducer-can-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
@@ -260,7 +204,6 @@ public class HistoryReducerAtCanTests
             .AddHostedTemporalWorker(taskQueue)
             .AddTemporalAgents(opts =>
             {
-                if (reducer is not null) opts.DefaultHistoryReducer = reducer;
                 opts.AddDurableAgent("CanAgent", agent =>
                 {
                     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();

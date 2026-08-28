@@ -339,7 +339,6 @@ internal class AgentWorkflow :
             ApprovalTimeout = input.ApprovalTimeout,
             EnableSearchAttributes = input.EnableSearchAttributes,
             MaxEntryCount = input.MaxEntryCount,
-            HistoryReducer = input.HistoryReducer,
             HistoryReducerKey = input.HistoryReducerKey,
             OriginalCreatedAt = input.OriginalCreatedAt,
             ActivityTimeout = input.ActivityTimeout,

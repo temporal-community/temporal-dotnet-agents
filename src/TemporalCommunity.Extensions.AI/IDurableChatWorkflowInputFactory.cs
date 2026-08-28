@@ -74,7 +74,6 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         ApprovalTimeout = _options.ApprovalTimeout,
         EnableSearchAttributes = _options.EnableSearchAttributes,
         MaxEntryCount = _options.MaxEntryCount,
-        HistoryReducer = _options.HistoryReducer,
         HistoryReducerKey = _options.DefaultHistoryReducerKey,
         ToolActivityOptions = _useWorkerToolsets ? null : _toolActivityOptions.Value,
         MaxToolCallsPerTurn = _options.MaxToolCallsPerTurn,

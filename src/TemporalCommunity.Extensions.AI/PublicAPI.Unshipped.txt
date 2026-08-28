@@ -253,8 +253,6 @@ TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.EnableSearchAttributes.
 TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.EnableSearchAttributes.init -> void
 TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.HeartbeatTimeout.get -> System.TimeSpan
 TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.HeartbeatTimeout.init -> void
-TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.HistoryReducer.get -> System.Func<System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!, System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!>?
-TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.HistoryReducer.init -> void
 TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.HistoryReducerKey.get -> string?
 TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.HistoryReducerKey.init -> void
 TemporalCommunity.Extensions.AI.DurableChatWorkflowInput.IncludeDetailedErrors.get -> bool
@@ -303,8 +301,6 @@ TemporalCommunity.Extensions.AI.DurableExecutionOptions.EnableSearchAttributes.g
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.EnableSearchAttributes.set -> void
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.HeartbeatTimeout.get -> System.TimeSpan
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.HeartbeatTimeout.set -> void
-TemporalCommunity.Extensions.AI.DurableExecutionOptions.HistoryReducer.get -> System.Func<System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!, System.Collections.Generic.IList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!>?
-TemporalCommunity.Extensions.AI.DurableExecutionOptions.HistoryReducer.set -> void
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.IncludeDetailedErrors.get -> bool
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.IncludeDetailedErrors.set -> void
 TemporalCommunity.Extensions.AI.DurableExecutionOptions.MaxEntryCount.get -> int
