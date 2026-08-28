@@ -11,8 +11,6 @@ namespace TemporalCommunity.Extensions.AI;
 /// <remarks>
 /// Search attributes must be pre-registered with the Temporal server before use.
 /// Use the Temporal CLI: <c>temporal operator search-attribute create</c>.
-/// The same key names are used by <c>AgentWorkflow</c> in <c>TemporalCommunity.Extensions.Agents</c>,
-/// allowing a single Temporal list query to span both workflow types.
 /// </remarks>
 public sealed class DurableSessionAttributes
 {

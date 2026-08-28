@@ -1,20 +1,18 @@
 namespace TemporalCommunity.Extensions.AI.Exceptions;
 
 /// <summary>
-/// Thrown when a chat pipeline that the durable agent libraries are wiring up already
-/// contains a function-invocation middleware (for example,
-/// <c>FunctionInvocationDelegatingAgent</c> from Microsoft.Agents.AI or
-/// <c>FunctionInvokingChatClient</c> from Microsoft.Extensions.AI).
+/// Thrown when a chat pipeline being configured for durable execution already contains
+/// function-invocation middleware, such as <c>FunctionInvokingChatClient</c> from
+/// Microsoft.Extensions.AI.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The durable libraries are responsible for invoking tools as separate Temporal activities
-/// (<c>InvokeAgentTool</c> for <c>TemporalCommunity.Extensions.Agents</c>, <c>InvokeFunction</c> for
-/// <c>TemporalCommunity.Extensions.AI</c>). If a user composes their pipeline with
-/// <c>UseFunctionInvocation()</c> and then hands that pipeline to <c>AddDurableAgent</c>, both
-/// layers would attempt to handle tool calls — yielding double-execution, lost durability
-/// guarantees, or silent skipped activities depending on layering order. Detecting the conflict
-/// up front and throwing this exception forces the user to remove the redundant middleware.
+/// The library invokes tools as separate <c>TemporalCommunity.Extensions.AI.InvokeFunction</c>
+/// activities. If a user composes the chat pipeline with <c>UseFunctionInvocation()</c> before
+/// configuring durable execution, both layers would attempt to handle tool calls—yielding
+/// double-execution, lost durability guarantees, or silently skipped activities depending on
+/// layering order. Detecting the conflict up front forces the user to remove the conflicting
+/// middleware.
 /// </para>
 /// <para>
 /// This type is intentionally stable (no <c>[Experimental]</c> attribute) — once a release
@@ -28,8 +26,8 @@ public sealed class DurableFunctionInvocationConflictException : DurableConfigur
 {
     /// <summary>
     /// Gets the fully-qualified type name of the offending middleware that was detected in the
-    /// user's chat pipeline (e.g. <c>Microsoft.Agents.AI.FunctionInvocationDelegatingAgent</c> or
-    /// <c>Microsoft.Extensions.AI.FunctionInvokingChatClient</c>).
+    /// user's chat pipeline, such as
+    /// <c>Microsoft.Extensions.AI.FunctionInvokingChatClient</c>.
     /// </summary>
     public required string OffendingType { get; init; }
 

@@ -19,10 +19,6 @@ namespace TemporalCommunity.Extensions.AI;
 /// charge a card) so non-idempotent re-execution does not occur on activity retry.
 /// Read-style tools generally inherit the default retry policy.
 /// </para>
-/// <para>
-/// This type mirrors <c>TemporalCommunity.Extensions.Agents.Tools.DurableToolOptions</c> verbatim
-/// for cross-library symmetry.
-/// </para>
 /// </remarks>
 public sealed class DurableChatToolOptions
 {

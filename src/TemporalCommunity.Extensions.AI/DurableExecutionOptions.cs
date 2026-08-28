@@ -8,13 +8,6 @@ namespace TemporalCommunity.Extensions.AI;
 /// <summary>
 /// Configuration options for durable AI execution via Temporal.
 /// </summary>
-/// <remarks>
-/// Property names on this class are unprefixed (e.g. <c>ActivityTimeout</c>). The MAF
-/// counterpart <c>TemporalCommunity.Extensions.Agents.TemporalAgentsOptions</c> uses
-/// <c>Default*</c>-prefixed names for worker-level defaults (e.g. <c>DefaultActivityTimeout</c>).
-/// This asymmetry is intentional — do not rename properties on either class.
-/// </remarks>
-/// <seealso cref="global::TemporalCommunity.Extensions.Agents.TemporalAgentsOptions"/>
 public sealed class DurableExecutionOptions
 {
     /// <summary>

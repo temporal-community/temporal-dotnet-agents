@@ -4,8 +4,7 @@ namespace TemporalCommunity.Extensions.AI;
 
 /// <summary>
 /// Centralized <see cref="LoggerMessage"/> source-gen delegates for the
-/// <c>TemporalCommunity.Extensions.AI</c> library. Mirrors the pattern used in the
-/// <c>TemporalCommunity.Extensions.Agents</c> library (<c>Agents/Logs.cs</c>).
+/// <c>TemporalCommunity.Extensions.AI</c> library.
 /// All high-frequency log paths must use these delegates to avoid per-call allocations.
 /// </summary>
 internal static partial class Logs

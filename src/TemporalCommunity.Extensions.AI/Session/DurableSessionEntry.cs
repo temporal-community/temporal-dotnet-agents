@@ -5,18 +5,13 @@ using Microsoft.Extensions.AI;
 namespace TemporalCommunity.Extensions.AI.Session;
 
 /// <summary>
-/// Wire shape for durable session history entries shared across both
-/// <c>TemporalCommunity.Extensions.AI</c> (chat) and <c>TemporalCommunity.Extensions.Agents</c> (agent)
-/// libraries. Concrete subclasses are <see cref="DurableSessionRequest"/> and
-/// <see cref="DurableSessionResponse"/>.
+/// Wire shape for durable chat session history entries. Concrete subclasses are
+/// <see cref="DurableSessionRequest"/> and <see cref="DurableSessionResponse"/>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The <c>$type</c> discriminator strings (<c>"ai_request"</c>, <c>"ai_response"</c>)
 /// are wire-format constants embedded in workflow event history forever — do not change.
-/// MAF subclasses register additional discriminators (<c>"agent_request"</c>,
-/// <c>"agent_response"</c>) at runtime via a <see cref="System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver"/>
-/// modifier in <c>TemporalAgentJsonUtilities</c>.
 /// </para>
 /// </remarks>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]

@@ -9,8 +9,8 @@ namespace TemporalCommunity.Extensions.AI.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The MAF <c>AIAgent</c> traversal lives in the Agents package. Keeping that dependency out of
-/// this package ensures a bare MEAI consumer does not acquire Microsoft Agent Framework.
+/// This package limits traversal to <see cref="IChatClient"/> chains so a bare MEAI consumer does
+/// not acquire Microsoft Agent Framework.
 /// </para>
 /// <para>
 /// <b>Dual traversal strategy.</b> Each walk performs two independent lookups, in this order:

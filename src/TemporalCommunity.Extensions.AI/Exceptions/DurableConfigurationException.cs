@@ -1,8 +1,7 @@
 namespace TemporalCommunity.Extensions.AI.Exceptions;
 
 /// <summary>
-/// Base type for configuration / wiring failures surfaced by the durable AI
-/// libraries (<c>TemporalCommunity.Extensions.AI</c> and <c>TemporalCommunity.Extensions.Agents</c>).
+/// Base type for configuration and wiring failures surfaced by the durable AI library.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,7 +14,7 @@ namespace TemporalCommunity.Extensions.AI.Exceptions;
 /// <para>
 /// This type is intentionally stable (no <c>[Experimental]</c> attribute) so
 /// that user-facing <c>catch</c> blocks remain valid across preview-to-stable
-/// transitions of the durable libraries.
+/// transitions of the library.
 /// </para>
 /// </remarks>
 public class DurableConfigurationException : Exception
