@@ -145,4 +145,14 @@ internal static partial class Logs
         int turnNumber,
         int modelIteration,
         int callIndex);
+
+    [LoggerMessage(EventId = 26, Level = LogLevel.Warning,
+        Message = "Durable chat step rejected provider output for conversation {ConversationId}, turn {TurnNumber} (FinishReason={FinishReason}, ToolCalls={ToolCallCount}, Contradictory={IsContradictory}); no tool calls from this response will be dispatched")]
+    public static partial void LogChatStepProviderOutputRejected(
+        this ILogger logger,
+        string? conversationId,
+        int turnNumber,
+        string finishReason,
+        int toolCallCount,
+        bool isContradictory);
 }

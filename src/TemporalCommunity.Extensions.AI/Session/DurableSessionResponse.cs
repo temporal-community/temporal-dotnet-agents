@@ -14,6 +14,18 @@ public class DurableSessionResponse : DurableSessionEntry
     /// </summary>
     public UsageDetails? Usage { get; init; }
 
+    /// <summary>Gets the provider-reported reason the terminal model step stopped.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ChatFinishReason? FinishReason { get; init; }
+
+    /// <summary>
+    /// Gets why the package-managed turn returned. The default preserves session entries written
+    /// before this property was introduced.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public DurableTurnCompletionReason CompletionReason { get; init; } =
+        DurableTurnCompletionReason.FinalResponse;
+
     /// <summary>
     /// Returns the text of the last assistant message in <see cref="DurableSessionEntry.Messages"/>,
     /// or an empty string if no assistant message is present. Convenience accessor for the common
@@ -38,7 +50,26 @@ public class DurableSessionResponse : DurableSessionEntry
     public static DurableSessionResponse FromChatResponse(
         string correlationId,
         ChatResponse response,
-        DateTimeOffset timestamp)
+        DateTimeOffset timestamp) =>
+        FromChatResponse(
+            correlationId,
+            response,
+            timestamp,
+            DurableTurnCompletionReason.FinalResponse);
+
+    /// <summary>
+    /// Creates a response entry from a <see cref="ChatResponse"/> and its package-level completion
+    /// reason.
+    /// </summary>
+    /// <param name="correlationId">Correlation ID of the originating request.</param>
+    /// <param name="response">The chat response to capture.</param>
+    /// <param name="timestamp">Fallback creation timestamp.</param>
+    /// <param name="completionReason">The package-level reason the managed turn returned.</param>
+    public static DurableSessionResponse FromChatResponse(
+        string correlationId,
+        ChatResponse response,
+        DateTimeOffset timestamp,
+        DurableTurnCompletionReason completionReason)
     {
         ArgumentNullException.ThrowIfNull(response);
 
@@ -59,6 +90,8 @@ public class DurableSessionResponse : DurableSessionEntry
             CreatedAt = createdAt,
             Messages = response.Messages.ToList(),
             Usage = response.Usage,
+            FinishReason = response.FinishReason,
+            CompletionReason = completionReason,
         };
     }
 }

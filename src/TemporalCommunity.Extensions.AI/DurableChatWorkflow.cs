@@ -19,10 +19,12 @@ namespace TemporalCommunity.Extensions.AI;
 /// Each turn uses the workflow-owned model/tool loop: <c>GetChatStepAsync</c> performs one
 /// model call, every returned tool request is dispatched as an <c>InvokeFunctionAsync</c>
 /// activity, and results are fed to the next model call until a final assistant response is
-/// produced or <see cref="DurableChatWorkflowInput.MaxToolCallsPerTurn"/> is exceeded.
+/// produced, the provider reports an incomplete response, or
+/// <see cref="DurableChatWorkflowInput.MaxToolCallsPerTurn"/> is exceeded. Only calls authorized
+/// by the provider finish reason (or a legacy null reason) are dispatched.
 /// </remarks>
 [Workflow("TemporalCommunity.Extensions.AI.DurableChatWorkflow")]
-internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse>
+internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManagedLoopResult>
 {
     // Per-turn metadata keyed by DurableSessionRequest object reference.
     // Using ReferenceEqualityComparer because DurableSessionRequest.FromMessages always
@@ -99,8 +101,15 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
         _perTurnMeta[requestEntry] = (input.ClientKey, input.ConversationId);
         try
         {
-            var (_, responseEntry) = await RunTurnAsync(requestEntry, input.Options);
-            return responseEntry;
+            var (output, responseEntry) = await RunTurnAsync(requestEntry, input.Options);
+
+            // The history entry may contain a protocol-safe sentinel. The caller receives the
+            // original diagnostic response and its terminal metadata.
+            return DurableSessionResponse.FromChatResponse(
+                requestEntry.CorrelationId,
+                output.Response,
+                responseEntry.CreatedAt,
+                output.CompletionReason);
         }
         finally
         {
@@ -114,9 +123,20 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
     /// </summary>
     protected override DurableSessionResponse BuildResponseEntry(
         string correlationId,
-        ChatResponse output,
-        DateTimeOffset createdAt) =>
-        DurableSessionResponse.FromChatResponse(correlationId, output, createdAt);
+        DurableManagedLoopResult output,
+        DateTimeOffset createdAt)
+    {
+        var historyResponse = output.CompletionReason ==
+            DurableTurnCompletionReason.IncompleteResponse
+                ? DurableManagedLoopHistory.ForIncompleteResponse(output.Response)
+                : output.Response;
+
+        return DurableSessionResponse.FromChatResponse(
+            correlationId,
+            historyResponse,
+            createdAt,
+            output.CompletionReason);
+    }
 
     /// <inheritdoc/>
     protected override Task<List<Session.DurableSessionEntry>> ApplyKeyedHistoryReducerAsync(
@@ -128,7 +148,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
                 new ReduceHistoryByKeyInput { ReducerKey = reducerKey, History = history }),
             activityOptions);
 
-    protected override async Task<ChatResponse> ExecuteTurnAsync(
+    protected override async Task<DurableManagedLoopResult> ExecuteTurnAsync(
         ActivityOptions activityOptions,
         DurableSessionRequest requestEntry,
         ChatOptions? chatOptions)
@@ -139,14 +159,13 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<ChatResponse
                 $"Per-turn metadata missing for request {requestEntry.CorrelationId}. This is a bug.");
         }
 
-        var result = await ExecuteManagedToolLoopTurnAsync(
+        return await ExecuteManagedToolLoopTurnAsync(
             activityOptions,
             requestEntry,
             chatOptions,
             metadata.ClientKey,
             metadata.ConversationId,
             dispatchMode: DurableToolDispatchMode.Parallel).ConfigureAwait(true);
-        return result.Response;
     }
 
     protected override ContinueAsNewException CreateContinueAsNewException(

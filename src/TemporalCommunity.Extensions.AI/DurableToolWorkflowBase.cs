@@ -194,8 +194,12 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
         DateTimeOffset createdAt)
     {
         var historyResponse = output.Response;
-        if (output.CompletionReason == DurableTurnCompletionReason.IterationLimitReached &&
-            Workflow.Patched(IterationLimitHistoryPatchId))
+        if (output.CompletionReason == DurableTurnCompletionReason.IncompleteResponse)
+        {
+            historyResponse = DurableManagedLoopHistory.ForIncompleteResponse(output.Response);
+        }
+        else if (output.CompletionReason == DurableTurnCompletionReason.IterationLimitReached &&
+                 Workflow.Patched(IterationLimitHistoryPatchId))
         {
             // The caller still receives the complete response, including the executed function
             // protocol. Only persisted conversation history is reduced. This prevents a later
@@ -210,7 +214,8 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
         return DurableSessionResponse.FromChatResponse(
             correlationId,
             historyResponse,
-            createdAt);
+            createdAt,
+            output.CompletionReason);
     }
 
     /// <inheritdoc/>

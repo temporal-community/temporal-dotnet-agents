@@ -147,6 +147,54 @@ public class SerializationTests
     }
 
     [Fact]
+    public void DurableChatStepResult_RoundTrip_PreservesFinishReasonAndCompletionReason()
+    {
+        var result = new DurableChatStepResult
+        {
+            IsFinal = true,
+            AssistantMessage = new ChatMessage(ChatRole.Assistant, []),
+            FinishReason = ChatFinishReason.Length,
+            CompletionReason = DurableTurnCompletionReason.IncompleteResponse,
+        };
+
+        var json = JsonSerializer.Serialize(result, DurableAIJsonUtilities.DefaultOptions);
+        var restored = JsonSerializer.Deserialize<DurableChatStepResult>(
+            json,
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(restored);
+        Assert.True(restored.IsFinal);
+        Assert.Equal(ChatFinishReason.Length, restored.FinishReason);
+        Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, restored.CompletionReason);
+        Assert.Empty(restored.AssistantMessage.Contents);
+    }
+
+    [Fact]
+    public void DurableChatStepResult_LegacyPayloadWithoutMetadata_DefaultsToFinalResponse()
+    {
+        var legacyShape = new DurableChatStepResult
+        {
+            IsFinal = true,
+            AssistantMessage = new ChatMessage(ChatRole.Assistant, "legacy final"),
+        };
+        var json = JsonSerializer.Serialize(
+            legacyShape,
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.DoesNotContain("finishReason", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("completionReason", json, StringComparison.Ordinal);
+
+        var restored = JsonSerializer.Deserialize<DurableChatStepResult>(
+            json,
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(restored);
+        Assert.Null(restored.FinishReason);
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, restored.CompletionReason);
+        Assert.Equal("legacy final", restored.AssistantMessage.Text);
+    }
+
+    [Fact]
     public void DurableChatWorkflowInput_RoundTrips()
     {
         var input = new DurableChatWorkflowInput

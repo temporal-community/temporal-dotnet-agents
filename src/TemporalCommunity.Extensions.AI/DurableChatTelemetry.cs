@@ -39,7 +39,6 @@ public static class DurableChatTelemetry
             description: "Serialized bytes in the once-per-session durable toolset manifest.");
     internal static readonly Counter<long> ToolsetValidationRejections = Meter.CreateCounter<long>(
         "temporal.ai.toolset.validation.rejections");
-
     // ── Span names ───────────────────────────────────────────────────────────
 
     /// <summary>
@@ -82,11 +81,27 @@ public static class DurableChatTelemetry
     /// <summary>The model ID from the response.</summary>
     public const string ResponseModelAttribute = "gen_ai.response.model";
 
+    /// <summary>The configured maximum number of output tokens.</summary>
+    public const string RequestMaxTokensAttribute = "gen_ai.request.max_tokens";
+
+    /// <summary>The provider-reported response finish reasons.</summary>
+    public const string ResponseFinishReasonsAttribute = "gen_ai.response.finish_reasons";
+
     /// <summary>Number of input tokens consumed.</summary>
     public const string InputTokensAttribute = "gen_ai.usage.input_tokens";
 
     /// <summary>Number of output tokens produced.</summary>
     public const string OutputTokensAttribute = "gen_ai.usage.output_tokens";
+
+    /// <summary>Number of reasoning output tokens produced.</summary>
+    public const string ReasoningOutputTokensAttribute = "gen_ai.usage.reasoning.output_tokens";
+
+    /// <summary>The package-level reason the durable managed turn completed.</summary>
+    public const string TurnCompletionReasonAttribute = "temporal.ai.turn.completion_reason";
+
+    /// <summary>Whether the provider response contains no visible assistant text.</summary>
+    public const string EmptyVisibleTextAttribute =
+        "temporal.durable_ai.response.empty_visible_text";
 
     /// <summary>The name of the tool being invoked.</summary>
     public const string ToolNameAttribute = "gen_ai.tool.name";

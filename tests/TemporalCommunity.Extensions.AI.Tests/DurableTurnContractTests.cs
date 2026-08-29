@@ -50,10 +50,11 @@ public class DurableTurnContractTests
     {
         Assert.Equal(0, (int)DurableTurnCompletionReason.FinalResponse);
         Assert.Equal(1, (int)DurableTurnCompletionReason.IterationLimitReached);
+        Assert.Equal(2, (int)DurableTurnCompletionReason.IncompleteResponse);
         Assert.Equal(
-            "1",
+            "2",
             JsonSerializer.Serialize(
-                DurableTurnCompletionReason.IterationLimitReached,
+                DurableTurnCompletionReason.IncompleteResponse,
                 DurableAIJsonUtilities.DefaultOptions));
     }
 

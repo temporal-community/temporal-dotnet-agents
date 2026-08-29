@@ -15,7 +15,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// <c>GetChatStepAsync</c> (one LLM call, returns raw <see cref="FunctionCallContent"/>)
     /// and one <c>InvokeFunctionAsync</c> activity per tool call (fanned out in parallel via
     /// <see cref="Workflow.WhenAllAsync{TResult}(IEnumerable{Task{TResult}})"/>). Loop exits
-    /// when the LLM returns a final assistant message or
+    /// when the LLM returns a final assistant message, reports an incomplete terminal response, or
     /// <see cref="DurableChatWorkflowInput.MaxToolCallsPerTurn"/> is exceeded — the latter
     /// synthesizes a sentinel <see cref="ChatResponse"/> rather than throwing, matching the
     /// behavior of MAF's <c>AgentWorkflow</c>.
@@ -115,21 +115,32 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             if (stepResult.Usage is not null)
             {
                 totalUsage ??= new UsageDetails();
-                totalUsage.InputTokenCount =
-                    (totalUsage.InputTokenCount ?? 0) + (stepResult.Usage.InputTokenCount ?? 0);
-                totalUsage.OutputTokenCount =
-                    (totalUsage.OutputTokenCount ?? 0) + (stepResult.Usage.OutputTokenCount ?? 0);
-                totalUsage.TotalTokenCount =
-                    (totalUsage.TotalTokenCount ?? 0) + (stepResult.Usage.TotalTokenCount ?? 0);
+                totalUsage.Add(stepResult.Usage);
             }
 
             accumulated.Add(stepResult.AssistantMessage);
             allTurnMessages.Add(stepResult.AssistantMessage);
 
+            if (stepResult.CompletionReason == DurableTurnCompletionReason.IncompleteResponse)
+            {
+                return new DurableManagedLoopResult(
+                    new ChatResponse(allTurnMessages)
+                    {
+                        Usage = totalUsage,
+                        FinishReason = stepResult.FinishReason,
+                    },
+                    DurableTurnCompletionReason.IncompleteResponse,
+                    currentTurnState);
+            }
+
             if (stepResult.IsFinal || stepResult.ToolCalls is null || stepResult.ToolCalls.Count == 0)
             {
                 return new DurableManagedLoopResult(
-                    new ChatResponse(allTurnMessages) { Usage = totalUsage },
+                    new ChatResponse(allTurnMessages)
+                    {
+                        Usage = totalUsage,
+                        FinishReason = stepResult.FinishReason,
+                    },
                     DurableTurnCompletionReason.FinalResponse,
                     currentTurnState);
             }
@@ -252,66 +263,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 switch (outcome)
                 {
                     case DurableToolOutcome.Proceed:
-                    {
-                        // Buffer for dispatch after all approval waits resolve (BLOCK-4).
-                        pendingToolDispatches.Add((i, new DurableFunctionInput
                         {
-                            FunctionName = tc.Name,
-                            Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
-                            Declaration = declaration,
-                            ToolsetId = manifestMember?.ToolsetId,
-                            ActivationKey = manifestMember?.ActivationKey,
-                            MemberIdentityFingerprint = manifestMember?.MemberIdentityFingerprint,
-                            ManifestFingerprint = toolsetManifest?.Fingerprint,
-                            AuthorityBindingFingerprint = manifestMember is null
-                                ? null
-                                : Internal.DurableToolsetAuthorityBindingFingerprint.Create(
-                                    toolsetManifest!.Fingerprint,
-                                    manifestMember.MemberIdentityFingerprint),
-                            RequestData = requestData,
-                            TurnState = currentTurnState,
-                            DispatchMode = dispatchMode,
-                            ToolCallId = tc.CallId,
-                            ModelIteration = iteration,
-                            CallIndex = i,
-                            ConversationId = conversationId,
-                            CorrelationId = requestEntry.CorrelationId,
-                            IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
-                        }, ResolveToolActivityOptions(tc.Name, manifestMember)));
-                        break;
-                    }
-
-                    case DurableToolOutcome.PauseForApproval:
-                    {
-                        // Park the turn loop; wait for a human decision via DurableApprovalMixin
-                        // (compute-free durable wait).
-                        var approvalRequest = new DurableApprovalRequest
-                        {
-                            RequestId = $"{tc.CallId ?? tc.Name}-{Workflow.NewGuid():N}",
-                            FunctionName = tc.Name,
-                            CallId = tc.CallId,
-                            Description = DurableToolDecisionPolicy.GetApprovalDescription(interceptorResult, tc.Name),
-                            // Metadata is deliberately interceptor-authored. Do not expose raw
-                            // model function arguments to a reviewer unless an interceptor has
-                            // first reduced them to explicit, safe review data.
-                            ReviewData = interceptorResult?.Metadata,
-                        };
-
-                        // Sequential: the mixin enforces one pending approval at a time.
-                        var decision = await RequestApprovalFromTurnLoopAsync(
-                            approvalRequest,
-                            ResolveApprovalTimeout(tc.Name, manifestMember),
-                            onRequested: req => Workflow.Logger.LogInformation(
-                                "[{SessionId}] Approval requested for tool '{ToolName}' (RequestId: {RequestId})",
-                                Workflow.Info.WorkflowId, req.FunctionName, req.RequestId),
-                            onResolved: dec => Workflow.Logger.LogInformation(
-                                "[{SessionId}] Approval resolved for tool '{ToolName}' (RequestId: {RequestId}, Approved: {Approved})",
-                                Workflow.Info.WorkflowId, approvalRequest.FunctionName, dec.RequestId, dec.Approved))
-                            .ConfigureAwait(true);
-
-                        if (decision.Approved)
-                        {
-                            // Buffer the approved tool for dispatch in Phase 2.5.
+                            // Buffer for dispatch after all approval waits resolve (BLOCK-4).
                             pendingToolDispatches.Add((i, new DurableFunctionInput
                             {
                                 FunctionName = tc.Name,
@@ -336,17 +289,75 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                                 CorrelationId = requestEntry.CorrelationId,
                                 IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
                             }, ResolveToolActivityOptions(tc.Name, manifestMember)));
+                            break;
                         }
-                        else
+
+                    case DurableToolOutcome.PauseForApproval:
                         {
-                            // Denied or timed out — inject an error result.
-                            var denialReason = string.IsNullOrEmpty(decision.Reason)
-                                ? "Tool call was denied or timed out."
-                                : decision.Reason;
-                            syntheticResults[i] = DurableToolDecisionPolicy.DenialMessage(denialReason);
+                            // Park the turn loop; wait for a human decision via DurableApprovalMixin
+                            // (compute-free durable wait).
+                            var approvalRequest = new DurableApprovalRequest
+                            {
+                                RequestId = $"{tc.CallId ?? tc.Name}-{Workflow.NewGuid():N}",
+                                FunctionName = tc.Name,
+                                CallId = tc.CallId,
+                                Description = DurableToolDecisionPolicy.GetApprovalDescription(interceptorResult, tc.Name),
+                                // Metadata is deliberately interceptor-authored. Do not expose raw
+                                // model function arguments to a reviewer unless an interceptor has
+                                // first reduced them to explicit, safe review data.
+                                ReviewData = interceptorResult?.Metadata,
+                            };
+
+                            // Sequential: the mixin enforces one pending approval at a time.
+                            var decision = await RequestApprovalFromTurnLoopAsync(
+                                approvalRequest,
+                                ResolveApprovalTimeout(tc.Name, manifestMember),
+                                onRequested: req => Workflow.Logger.LogInformation(
+                                    "[{SessionId}] Approval requested for tool '{ToolName}' (RequestId: {RequestId})",
+                                    Workflow.Info.WorkflowId, req.FunctionName, req.RequestId),
+                                onResolved: dec => Workflow.Logger.LogInformation(
+                                    "[{SessionId}] Approval resolved for tool '{ToolName}' (RequestId: {RequestId}, Approved: {Approved})",
+                                    Workflow.Info.WorkflowId, approvalRequest.FunctionName, dec.RequestId, dec.Approved))
+                                .ConfigureAwait(true);
+
+                            if (decision.Approved)
+                            {
+                                // Buffer the approved tool for dispatch in Phase 2.5.
+                                pendingToolDispatches.Add((i, new DurableFunctionInput
+                                {
+                                    FunctionName = tc.Name,
+                                    Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
+                                    Declaration = declaration,
+                                    ToolsetId = manifestMember?.ToolsetId,
+                                    ActivationKey = manifestMember?.ActivationKey,
+                                    MemberIdentityFingerprint = manifestMember?.MemberIdentityFingerprint,
+                                    ManifestFingerprint = toolsetManifest?.Fingerprint,
+                                    AuthorityBindingFingerprint = manifestMember is null
+                                        ? null
+                                        : Internal.DurableToolsetAuthorityBindingFingerprint.Create(
+                                            toolsetManifest!.Fingerprint,
+                                            manifestMember.MemberIdentityFingerprint),
+                                    RequestData = requestData,
+                                    TurnState = currentTurnState,
+                                    DispatchMode = dispatchMode,
+                                    ToolCallId = tc.CallId,
+                                    ModelIteration = iteration,
+                                    CallIndex = i,
+                                    ConversationId = conversationId,
+                                    CorrelationId = requestEntry.CorrelationId,
+                                    IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
+                                }, ResolveToolActivityOptions(tc.Name, manifestMember)));
+                            }
+                            else
+                            {
+                                // Denied or timed out — inject an error result.
+                                var denialReason = string.IsNullOrEmpty(decision.Reason)
+                                    ? "Tool call was denied or timed out."
+                                    : decision.Reason;
+                                syntheticResults[i] = DurableToolDecisionPolicy.DenialMessage(denialReason);
+                            }
+                            break;
                         }
-                        break;
-                    }
 
                     case DurableToolOutcome.Skip:
                         syntheticResults[i] = DurableToolDecisionPolicy.SkipMessage(interceptorResult?.Message);
@@ -542,7 +553,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         allTurnMessages.Add(sentinel);
 
         return new DurableManagedLoopResult(
-            new ChatResponse(allTurnMessages) { Usage = totalUsage },
+            new ChatResponse(allTurnMessages)
+            {
+                Usage = totalUsage,
+                // The library, not the provider, terminated this aggregate turn.
+                FinishReason = null,
+            },
             DurableTurnCompletionReason.IterationLimitReached,
             currentTurnState);
     }
