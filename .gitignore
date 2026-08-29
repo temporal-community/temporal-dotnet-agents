@@ -441,3 +441,5 @@ Desktop.ini
 
 # agent session memory — volatile per-session logs, not source
 .claude/agent-memory/
+
+.testagent/
