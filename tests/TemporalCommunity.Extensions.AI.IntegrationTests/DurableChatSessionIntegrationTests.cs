@@ -86,6 +86,82 @@ public class DurableChatSessionIntegrationTests
     }
 
     [Fact]
+    public async Task IncompleteResponse_ReturnsDiagnosticsAndPersistsOnlySentinel()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, []))
+            {
+                FinishReason = ChatFinishReason.Length,
+                Usage = new UsageDetails { OutputTokenCount = 4000 },
+            },
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "recovered next turn"))
+            {
+                FinishReason = ChatFinishReason.Stop,
+            },
+        ]);
+        var taskQueue = $"ordinary-incomplete-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
+            new NoopEmbeddingGenerator());
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options =>
+            {
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+                options.SessionTimeToLive = TimeSpan.FromMinutes(5);
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var sessionClient = host.Services.GetRequiredService<IDurableChatSessionClient>();
+            var conversationId = $"ordinary-incomplete-{Guid.NewGuid():N}";
+
+            var incomplete = await sessionClient.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "produce a long answer")]);
+
+            Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, incomplete.CompletionReason);
+            Assert.Equal(ChatFinishReason.Length, incomplete.FinishReason);
+            Assert.Equal(4000, incomplete.Usage!.OutputTokenCount);
+            Assert.Empty(Assert.Single(incomplete.Messages).Contents);
+
+            var history = await sessionClient.GetHistoryAsync(conversationId);
+            var stored = Assert.IsType<DurableSessionResponse>(history[1]);
+            Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, stored.CompletionReason);
+            Assert.Equal(ChatFinishReason.Length, stored.FinishReason);
+            Assert.Equal(
+                DurableManagedLoopHistory.IncompleteResponseSentinelText,
+                Assert.Single(stored.Messages).Text);
+            Assert.DoesNotContain(
+                stored.Messages.SelectMany(message => message.Contents),
+                content => content is FunctionCallContent or FunctionResultContent);
+
+            var next = await sessionClient.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "try a shorter answer")]);
+
+            Assert.Equal(DurableTurnCompletionReason.FinalResponse, next.CompletionReason);
+            Assert.Equal(ChatFinishReason.Stop, next.FinishReason);
+            Assert.Contains(scripted.Calls[1].Messages, message =>
+                message.Text == DurableManagedLoopHistory.IncompleteResponseSentinelText);
+            Assert.DoesNotContain(
+                scripted.Calls[1].Messages.SelectMany(message => message.Contents),
+                content => content is FunctionCallContent or FunctionResultContent);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task SingleTurn_SendsMessageAndReceivesResponse()
     {
         var conversationId = $"single-turn-{Guid.NewGuid():N}";

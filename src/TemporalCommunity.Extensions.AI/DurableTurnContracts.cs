@@ -48,9 +48,10 @@ public sealed class DurableTurnResult<TTurnState>
 
     /// <summary>
     /// Gets the last successfully recorded state for this turn. When
-    /// <see cref="CompletionReason"/> is <see cref="DurableTurnCompletionReason.IterationLimitReached"/>,
-    /// the caller must decide whether to commit or discard this state; the package does not carry
-    /// it into the next turn.
+    /// <see cref="CompletionReason"/> is not <see cref="DurableTurnCompletionReason.FinalResponse"/>,
+    /// this state is provisional and diagnostic only. Applications must commit state only for
+    /// <see cref="DurableTurnCompletionReason.FinalResponse"/>. The package does not carry
+    /// provisional state into the next turn.
     /// </summary>
     public TTurnState? FinalTurnState { get; init; }
 }
@@ -92,8 +93,15 @@ public enum DurableTurnCompletionReason
 
     /// <summary>
     /// The configured model/tool iteration limit was exhausted. The returned response and state
-    /// contain the completed work for diagnostics and explicit caller policy, while persisted
+    /// contain the completed work as provisional diagnostics, while persisted
     /// conversation history carries only the terminal limit message into subsequent turns.
     /// </summary>
     IterationLimitReached = 1,
+
+    /// <summary>
+    /// The provider stopped before producing a complete final response, or returned a finish
+    /// reason that was inconsistent with its content. No tool calls from the terminal response
+    /// are dispatched, and any returned state is provisional and diagnostic only.
+    /// </summary>
+    IncompleteResponse = 2,
 }

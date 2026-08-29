@@ -11,9 +11,9 @@ namespace TemporalCommunity.Extensions.AI;
 internal sealed class DurableChatStepResult
 {
     /// <summary>
-    /// True when the LLM produced no tool-call requests and the assistant message
-    /// represents the final response for this turn. False when the workflow must
-    /// dispatch the contained <see cref="ToolCalls"/> and call back into the LLM.
+    /// True when this step terminates the managed loop, either with a final response or an
+    /// incomplete response. False only when the workflow must dispatch the contained
+    /// <see cref="ToolCalls"/> and call back into the LLM.
     /// </summary>
     public required bool IsFinal { get; init; }
 
@@ -26,7 +26,8 @@ internal sealed class DurableChatStepResult
 
     /// <summary>
     /// The tool-call requests extracted from <see cref="AssistantMessage"/>, in the
-    /// order they appeared. Null or empty when <see cref="IsFinal"/> is <c>true</c>.
+    /// order they appeared. Null when the step is terminal, including when provider output
+    /// contained calls that the completion policy did not authorize for dispatch.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<FunctionCallContent>? ToolCalls { get; init; }
@@ -36,4 +37,16 @@ internal sealed class DurableChatStepResult
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public UsageDetails? Usage { get; init; }
+
+    /// <summary>The provider-reported reason that this model step stopped, when available.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ChatFinishReason? FinishReason { get; init; }
+
+    /// <summary>
+    /// Gets the terminal completion reason when this step must end the managed loop. The default
+    /// preserves legacy activity payloads that predate this field.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public DurableTurnCompletionReason CompletionReason { get; init; } =
+        DurableTurnCompletionReason.FinalResponse;
 }

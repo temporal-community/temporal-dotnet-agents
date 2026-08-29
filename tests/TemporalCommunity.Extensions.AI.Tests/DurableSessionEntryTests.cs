@@ -381,6 +381,7 @@ public class DurableSessionEntryTests
             new ChatMessage(ChatRole.Assistant, [new TextContent("an answer")]))
         {
             CreatedAt = responseCreatedAt,
+            FinishReason = ChatFinishReason.Stop,
             Usage = new UsageDetails
             {
                 InputTokenCount = 10,
@@ -397,6 +398,8 @@ public class DurableSessionEntryTests
         Assert.Equal(ChatRole.Assistant, entry.Messages[0].Role);
         Assert.NotNull(entry.Usage);
         Assert.Equal(30, entry.Usage!.TotalTokenCount);
+        Assert.Equal(ChatFinishReason.Stop, entry.FinishReason);
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, entry.CompletionReason);
         Assert.Equal("an answer", entry.Text);
     }
 
@@ -412,6 +415,65 @@ public class DurableSessionEntryTests
 
         Assert.Equal(fallback, entry.CreatedAt);
         Assert.Null(entry.Usage);
+    }
+
+    [Fact]
+    public void FromChatResponse_WithCompletionMetadata_PreservesFinishAndCompletionReasons()
+    {
+        var chatResponse = new ChatResponse(new ChatMessage(ChatRole.Assistant, []))
+        {
+            FinishReason = ChatFinishReason.Length,
+        };
+
+        var entry = DurableSessionResponse.FromChatResponse(
+            "corr-incomplete",
+            chatResponse,
+            DateTimeOffset.UnixEpoch,
+            DurableTurnCompletionReason.IncompleteResponse);
+
+        Assert.Equal(ChatFinishReason.Length, entry.FinishReason);
+        Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, entry.CompletionReason);
+        Assert.Empty(entry.Messages[0].Contents);
+    }
+
+    [Fact]
+    public void CompletionMetadata_DefaultAndNonDefaultWireShapes_AreCompatible()
+    {
+        const string legacyJson =
+            "{\"correlationId\":\"legacy\",\"createdAt\":\"1970-01-01T00:00:00+00:00\",\"messages\":[]}";
+
+        var legacy = JsonSerializer.Deserialize<DurableSessionResponse>(
+            legacyJson,
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(legacy);
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, legacy.CompletionReason);
+        Assert.Null(legacy.FinishReason);
+
+        var defaultJson = JsonSerializer.Serialize(
+            legacy,
+            DurableAIJsonUtilities.DefaultOptions);
+        using var defaultDocument = JsonDocument.Parse(defaultJson);
+        Assert.False(defaultDocument.RootElement.TryGetProperty("completionReason", out _));
+        Assert.False(defaultDocument.RootElement.TryGetProperty("finishReason", out _));
+
+        var incomplete = new DurableSessionResponse
+        {
+            CorrelationId = "incomplete",
+            CreatedAt = DateTimeOffset.UnixEpoch,
+            CompletionReason = DurableTurnCompletionReason.IncompleteResponse,
+            FinishReason = ChatFinishReason.Length,
+        };
+        var incompleteJson = JsonSerializer.Serialize(
+            incomplete,
+            DurableAIJsonUtilities.DefaultOptions);
+        using var incompleteDocument = JsonDocument.Parse(incompleteJson);
+        Assert.Equal(
+            2,
+            incompleteDocument.RootElement.GetProperty("completionReason").GetInt32());
+        Assert.Equal(
+            ChatFinishReason.Length.Value,
+            incompleteDocument.RootElement.GetProperty("finishReason").GetString());
     }
 
     [Fact]

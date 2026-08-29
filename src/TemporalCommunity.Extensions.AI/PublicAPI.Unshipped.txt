@@ -24,14 +24,19 @@ const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ToolsetResolveSpanNam
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ChatOperationName = "chat" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ChatSendSpanName = "durable_chat.send" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ConversationIdAttribute = "conversation.id" -> string!
+const TemporalCommunity.Extensions.AI.DurableChatTelemetry.EmptyVisibleTextAttribute = "temporal.durable_ai.response.empty_visible_text" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ExecuteToolOperationName = "execute_tool" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.InputTokensAttribute = "gen_ai.usage.input_tokens" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.OperationNameAttribute = "gen_ai.operation.name" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.OutputTokensAttribute = "gen_ai.usage.output_tokens" -> string!
+const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ReasoningOutputTokensAttribute = "gen_ai.usage.reasoning.output_tokens" -> string!
+const TemporalCommunity.Extensions.AI.DurableChatTelemetry.RequestMaxTokensAttribute = "gen_ai.request.max_tokens" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.RequestModelAttribute = "gen_ai.request.model" -> string!
+const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ResponseFinishReasonsAttribute = "gen_ai.response.finish_reasons" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ResponseModelAttribute = "gen_ai.response.model" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ToolCallIdAttribute = "gen_ai.tool.call.id" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatTelemetry.ToolNameAttribute = "gen_ai.tool.name" -> string!
+const TemporalCommunity.Extensions.AI.DurableChatTelemetry.TurnCompletionReasonAttribute = "temporal.ai.turn.completion_reason" -> string!
 const TemporalCommunity.Extensions.AI.DurableChatWorkflowBase<TOutput>.ShutdownSignalName = "Shutdown" -> string!
 const TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.ActivityTimeoutKey = "temporal.activity.timeout" -> string!
 const TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.ChatClientKeySettingKey = "temporal.chatClientKey" -> string!
@@ -59,6 +64,7 @@ static TemporalCommunity.Extensions.AI.DurableAIServiceCollectionExtensions.AddD
 static TemporalCommunity.Extensions.AI.EmbeddingGeneratorBuilderExtensions.UseDurableExecution(this Microsoft.Extensions.AI.EmbeddingGeneratorBuilder<string!, Microsoft.Extensions.AI.Embedding<float>!>! builder, System.Action<TemporalCommunity.Extensions.AI.DurableExecutionOptions!>? configure = null) -> Microsoft.Extensions.AI.EmbeddingGeneratorBuilder<string!, Microsoft.Extensions.AI.Embedding<float>!>!
 static TemporalCommunity.Extensions.AI.Session.DurableSessionRequest.FromMessages(System.Collections.Generic.IReadOnlyList<Microsoft.Extensions.AI.ChatMessage!>! messages, string? correlationId = null, System.DateTimeOffset? timestamp = null) -> TemporalCommunity.Extensions.AI.Session.DurableSessionRequest!
 static TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.FromChatResponse(string! correlationId, Microsoft.Extensions.AI.ChatResponse! response, System.DateTimeOffset timestamp) -> TemporalCommunity.Extensions.AI.Session.DurableSessionResponse!
+static TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.FromChatResponse(string! correlationId, Microsoft.Extensions.AI.ChatResponse! response, System.DateTimeOffset timestamp, TemporalCommunity.Extensions.AI.DurableTurnCompletionReason completionReason) -> TemporalCommunity.Extensions.AI.Session.DurableSessionResponse!
 static TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.WithActivityTimeout(this Microsoft.Extensions.AI.ChatOptions! options, System.TimeSpan timeout) -> Microsoft.Extensions.AI.ChatOptions!
 static TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.WithChatClientKey(this Microsoft.Extensions.AI.ChatOptions! options, string! key) -> Microsoft.Extensions.AI.ChatOptions!
 static TemporalCommunity.Extensions.AI.TemporalChatOptionsExtensions.WithChatClientTag(this Microsoft.Extensions.AI.ChatOptions! options, string! name, string! value) -> Microsoft.Extensions.AI.ChatOptions!
@@ -382,7 +388,11 @@ TemporalCommunity.Extensions.AI.Session.DurableSessionEntry.Messages.init -> voi
 TemporalCommunity.Extensions.AI.Session.DurableSessionRequest
 TemporalCommunity.Extensions.AI.Session.DurableSessionRequest.DurableSessionRequest() -> void
 TemporalCommunity.Extensions.AI.Session.DurableSessionResponse
+TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.CompletionReason.get -> TemporalCommunity.Extensions.AI.DurableTurnCompletionReason
+TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.CompletionReason.init -> void
 TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.DurableSessionResponse() -> void
+TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.FinishReason.get -> Microsoft.Extensions.AI.ChatFinishReason?
+TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.FinishReason.init -> void
 TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.Text.get -> string!
 TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.Usage.get -> Microsoft.Extensions.AI.UsageDetails?
 TemporalCommunity.Extensions.AI.Session.DurableSessionResponse.Usage.init -> void
@@ -456,6 +466,7 @@ TemporalCommunity.Extensions.AI.DurableToolWorkflowBase<TRequestData, TTurnState
 TemporalCommunity.Extensions.AI.DurableToolWorkflowBase<TRequestData, TTurnState>.RunDurableTurnAsync(TemporalCommunity.Extensions.AI.DurableTurnRequest<TRequestData, TTurnState>! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TemporalCommunity.Extensions.AI.DurableTurnResult<TTurnState>!>!
 TemporalCommunity.Extensions.AI.DurableTurnCompletionReason
 TemporalCommunity.Extensions.AI.DurableTurnCompletionReason.FinalResponse = 0 -> TemporalCommunity.Extensions.AI.DurableTurnCompletionReason
+TemporalCommunity.Extensions.AI.DurableTurnCompletionReason.IncompleteResponse = 2 -> TemporalCommunity.Extensions.AI.DurableTurnCompletionReason
 TemporalCommunity.Extensions.AI.DurableTurnCompletionReason.IterationLimitReached = 1 -> TemporalCommunity.Extensions.AI.DurableTurnCompletionReason
 TemporalCommunity.Extensions.AI.DurableTurnOptions
 TemporalCommunity.Extensions.AI.DurableTurnOptions.DispatchMode.get -> TemporalCommunity.Extensions.AI.DurableToolDispatchMode

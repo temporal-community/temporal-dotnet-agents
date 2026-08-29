@@ -220,6 +220,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 CreatedAt = resp.CreatedAt,
                 Messages = [],
                 Usage = resp.Usage,
+                FinishReason = resp.FinishReason,
+                CompletionReason = resp.CompletionReason,
                 AdditionalProperties = resp.AdditionalProperties,
             },
             DurableSessionRequest req => new DurableSessionRequest

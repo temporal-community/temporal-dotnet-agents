@@ -56,7 +56,7 @@ internal sealed class DurableChatActivities(
             $"{DurableChatTelemetry.ChatOperationName} {modelId ?? "unknown"}",
             System.Diagnostics.ActivityKind.Client);
 
-        SetupSpanTags(span, input.ConversationId, modelId);
+        SetupSpanTags(span, input.ConversationId, modelId, input.Options);
 
         EnsureNoCallerSuppliedTools(input.Options);
         var resolvedOptions = input.Options;
@@ -147,7 +147,7 @@ internal sealed class DurableChatActivities(
             $"{DurableChatTelemetry.ChatOperationName} {modelId ?? "unknown"}",
             System.Diagnostics.ActivityKind.Client);
 
-        SetupSpanTags(span, input.ConversationId, modelId);
+        SetupSpanTags(span, input.ConversationId, modelId, input.Options);
 
         // Caller-supplied tools cannot cross the durable boundary. The workflow owns the
         // model-facing schema and supplies its recorded declarations to this activity.
@@ -175,7 +175,32 @@ internal sealed class DurableChatActivities(
         // carrying every content item. Streaming responses may split content across
         // multiple chunks; the workflow loop just needs one assistant message to
         // append to its accumulated transcript.
-        var (assistantMessage, toolCalls, isFinal) = CollectAssistantContents(response);
+        var (assistantMessage, toolCalls) = CollectAssistantContents(response);
+        var classification = DurableChatCompletionPolicy.Classify(
+            response.FinishReason,
+            toolCalls.Count);
+        var isFinal = classification.Disposition != DurableChatStepDisposition.ContinueWithTools;
+        var completionReason = classification.Disposition ==
+            DurableChatStepDisposition.IncompleteResponse
+                ? DurableTurnCompletionReason.IncompleteResponse
+                : DurableTurnCompletionReason.FinalResponse;
+
+        if (classification.Disposition != DurableChatStepDisposition.ContinueWithTools)
+        {
+            span?.SetTag(
+                DurableChatTelemetry.TurnCompletionReasonAttribute,
+                completionReason.ToString());
+        }
+
+        if (classification.Disposition == DurableChatStepDisposition.IncompleteResponse)
+        {
+            _logger.LogChatStepProviderOutputRejected(
+                input.ConversationId,
+                input.TurnNumber,
+                response.FinishReason?.Value ?? "null",
+                toolCalls.Count,
+                classification.IsProviderOutputContradictory);
+        }
 
         _logger.LogChatStepCompleted(input.ConversationId, input.TurnNumber, isFinal, toolCalls.Count);
 
@@ -183,8 +208,12 @@ internal sealed class DurableChatActivities(
         {
             IsFinal = isFinal,
             AssistantMessage = assistantMessage,
-            ToolCalls = isFinal ? null : toolCalls,
+            ToolCalls = classification.Disposition == DurableChatStepDisposition.ContinueWithTools
+                ? toolCalls
+                : null,
             Usage = response.Usage,
+            FinishReason = response.FinishReason,
+            CompletionReason = completionReason,
         };
     }
 
@@ -250,7 +279,20 @@ internal sealed class DurableChatActivities(
 
             span?.SetTag(DurableChatTelemetry.InputTokensAttribute, response.Usage?.InputTokenCount);
             span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, response.Usage?.OutputTokenCount);
+            span?.SetTag(
+                DurableChatTelemetry.ReasoningOutputTokensAttribute,
+                response.Usage?.ReasoningTokenCount);
             span?.SetTag(DurableChatTelemetry.ResponseModelAttribute, response.ModelId);
+            if (response.FinishReason is { } finishReason)
+            {
+                span?.SetTag(
+                    DurableChatTelemetry.ResponseFinishReasonsAttribute,
+                    new[] { finishReason.Value });
+            }
+
+            span?.SetTag(
+                DurableChatTelemetry.EmptyVisibleTextAttribute,
+                !HasVisibleAssistantText(response));
 
             return response;
         }
@@ -283,7 +325,7 @@ internal sealed class DurableChatActivities(
     /// <see cref="ChatMessage"/> and extracts tool-call requests. Used by
     /// <see cref="GetChatStepAsync"/> to build a <see cref="DurableChatStepResult"/>.
     /// </summary>
-    private static (ChatMessage AssistantMessage, List<FunctionCallContent> ToolCalls, bool IsFinal)
+    private static (ChatMessage AssistantMessage, List<FunctionCallContent> ToolCalls)
         CollectAssistantContents(ChatResponse response)
     {
         List<AIContent> assistantContents = [];
@@ -300,10 +342,16 @@ internal sealed class DurableChatActivities(
 
         var assistantMessage = new ChatMessage(ChatRole.Assistant, assistantContents);
         var toolCalls = assistantContents.OfType<FunctionCallContent>().ToList();
-        var isFinal = toolCalls.Count == 0;
 
-        return (assistantMessage, toolCalls, isFinal);
+        return (assistantMessage, toolCalls);
     }
+
+    private static bool HasVisibleAssistantText(ChatResponse response) =>
+        response.Messages
+            .Where(message => message.Role == ChatRole.Assistant)
+            .SelectMany(message => message.Contents)
+            .OfType<TextContent>()
+            .Any(content => !string.IsNullOrWhiteSpace(content.Text));
 
     private static void EnsureNoCallerSuppliedTools(ChatOptions? options)
     {
@@ -325,11 +373,13 @@ internal sealed class DurableChatActivities(
     private static void SetupSpanTags(
         System.Diagnostics.Activity? span,
         string? conversationId,
-        string? modelId)
+        string? modelId,
+        ChatOptions? options)
     {
         span?.SetTag(DurableChatTelemetry.OperationNameAttribute, DurableChatTelemetry.ChatOperationName);
         span?.SetTag(DurableChatTelemetry.ConversationIdAttribute, conversationId);
         span?.SetTag(DurableChatTelemetry.RequestModelAttribute, modelId);
+        span?.SetTag(DurableChatTelemetry.RequestMaxTokensAttribute, options?.MaxOutputTokens);
     }
 
     /// <summary>

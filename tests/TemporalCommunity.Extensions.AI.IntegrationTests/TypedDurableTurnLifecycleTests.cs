@@ -275,8 +275,14 @@ public class TypedDurableTurnLifecycleTests
                     "discarded-call",
                     "state_tool",
                     new Dictionary<string, object?> { ["value"] = "discarded" }),
-            ])),
-            new ChatResponse(new ChatMessage(ChatRole.Assistant, "second turn complete")),
+            ]))
+            {
+                FinishReason = ChatFinishReason.ToolCalls,
+            },
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "second turn complete"))
+            {
+                FinishReason = ChatFinishReason.Stop,
+            },
         ]);
         var taskQueue = $"typed-turn-limit-history-{Guid.NewGuid():N}";
         using var host = BuildHost(
@@ -292,6 +298,7 @@ public class TypedDurableTurnLifecycleTests
             new WorkflowUpdateOptions { Id = "capped-turn" });
 
         Assert.Equal(DurableTurnCompletionReason.IterationLimitReached, capped.CompletionReason);
+        Assert.Null(capped.Response.FinishReason);
         Assert.Contains(
             capped.Response.Messages.SelectMany(message => message.Contents),
             content => content is FunctionCallContent);
@@ -305,6 +312,8 @@ public class TypedDurableTurnLifecycleTests
         var sentinel = Assert.Single(storedResponse.Messages);
         Assert.Equal(ChatRole.Assistant, sentinel.Role);
         Assert.Contains("Maximum tool-call iterations", sentinel.Text, StringComparison.Ordinal);
+        Assert.Equal(DurableTurnCompletionReason.IterationLimitReached, storedResponse.CompletionReason);
+        Assert.Null(storedResponse.FinishReason);
         Assert.DoesNotContain(
             storedResponse.Messages.SelectMany(message => message.Contents),
             content => content is FunctionCallContent or FunctionResultContent);
@@ -314,6 +323,7 @@ public class TypedDurableTurnLifecycleTests
             new WorkflowUpdateOptions { Id = "next-turn" });
 
         Assert.Equal(DurableTurnCompletionReason.FinalResponse, next.CompletionReason);
+        Assert.Equal(ChatFinishReason.Stop, next.Response.FinishReason);
         var nextModelInput = chatClient.Calls[1].Messages;
         Assert.Contains(nextModelInput, message =>
             message.Text.Contains("Maximum tool-call iterations", StringComparison.Ordinal));
@@ -324,6 +334,237 @@ public class TypedDurableTurnLifecycleTests
         await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
+
+    [Fact]
+    public async Task IncompleteResponse_WithToolCall_DoesNotDispatchAndPersistsOnlySentinel()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var diagnosticCall = new FunctionCallContent(
+            "unsafe-call",
+            "state_tool",
+            new Dictionary<string, object?> { ["value"] = "must-not-run" });
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, [diagnosticCall]))
+            {
+                FinishReason = ChatFinishReason.Length,
+            },
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "safe next turn"))
+            {
+                FinishReason = ChatFinishReason.Stop,
+            },
+        ]);
+        var taskQueue = $"typed-incomplete-history-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, chatClient);
+        await host.StartAsync();
+        var handle = await StartAsync(env.Client, host.Services, taskQueue);
+
+        var incomplete = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(CreateRequest("incomplete-turn")),
+            new WorkflowUpdateOptions { Id = "incomplete-turn" });
+
+        Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, incomplete.CompletionReason);
+        Assert.Equal(ChatFinishReason.Length, incomplete.Response.FinishReason);
+        Assert.Contains(
+            incomplete.Response.Messages.SelectMany(message => message.Contents),
+            content => content is FunctionCallContent call && call.CallId == "unsafe-call");
+        Assert.Equal(0, incomplete.FinalTurnState!.Revision);
+        Assert.Empty(incomplete.FinalTurnState.Receipts);
+        Assert.Equal(
+            0,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+
+        var history = await handle.QueryAsync(workflow => workflow.GetHistory());
+        var stored = Assert.IsType<DurableSessionResponse>(history[1]);
+        Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, stored.CompletionReason);
+        Assert.Equal(ChatFinishReason.Length, stored.FinishReason);
+        Assert.Equal(
+            DurableManagedLoopHistory.IncompleteResponseSentinelText,
+            Assert.Single(stored.Messages).Text);
+        Assert.DoesNotContain(
+            stored.Messages.SelectMany(message => message.Contents),
+            content => content is FunctionCallContent or FunctionResultContent);
+
+        var next = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(CreateRequest("after-incomplete")),
+            new WorkflowUpdateOptions { Id = "after-incomplete" });
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, next.CompletionReason);
+        Assert.Contains(chatClient.Calls[1].Messages, message =>
+            message.Text == DurableManagedLoopHistory.IncompleteResponseSentinelText);
+        Assert.DoesNotContain(
+            chatClient.Calls[1].Messages.SelectMany(message => message.Contents),
+            content => content is FunctionCallContent or FunctionResultContent);
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task IncompleteResponse_AfterSuccessfulTool_ReturnsProvisionalStateAndPersistsOnlySentinel()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+            [
+                new FunctionCallContent(
+                    "provisional-call",
+                    "state_tool",
+                    new Dictionary<string, object?> { ["value"] = "provisional" }),
+            ]))
+            {
+                FinishReason = ChatFinishReason.ToolCalls,
+            },
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "partial final answer"))
+            {
+                FinishReason = ChatFinishReason.Length,
+            },
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "safe next turn"))
+            {
+                FinishReason = ChatFinishReason.Stop,
+            },
+        ]);
+        var taskQueue = $"typed-incomplete-provisional-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, chatClient);
+        await host.StartAsync();
+        var handle = await StartAsync(env.Client, host.Services, taskQueue);
+
+        var incomplete = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(CreateRequest("provisional-turn")),
+            new WorkflowUpdateOptions { Id = "provisional-turn" });
+
+        Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, incomplete.CompletionReason);
+        Assert.Equal(ChatFinishReason.Length, incomplete.Response.FinishReason);
+        Assert.Contains(
+            incomplete.Response.Messages.SelectMany(message => message.Contents),
+            content => content is FunctionCallContent call && call.CallId == "provisional-call");
+        Assert.Contains(
+            incomplete.Response.Messages.SelectMany(message => message.Contents),
+            content => content is FunctionResultContent result && result.CallId == "provisional-call");
+        Assert.Equal(1, incomplete.FinalTurnState!.Revision);
+        Assert.Equal("state_tool", Assert.Single(incomplete.FinalTurnState.Receipts));
+        Assert.Equal(
+            1,
+            await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+
+        var history = await handle.QueryAsync(workflow => workflow.GetHistory());
+        Assert.Equal(2, history.Count);
+        var stored = Assert.IsType<DurableSessionResponse>(history[1]);
+        Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, stored.CompletionReason);
+        Assert.Equal(ChatFinishReason.Length, stored.FinishReason);
+        Assert.Equal(
+            DurableManagedLoopHistory.IncompleteResponseSentinelText,
+            Assert.Single(stored.Messages).Text);
+        Assert.DoesNotContain(
+            stored.Messages.SelectMany(message => message.Contents),
+            content => content is FunctionCallContent or FunctionResultContent);
+
+        var next = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(CreateRequest("after-provisional")),
+            new WorkflowUpdateOptions { Id = "after-provisional" });
+
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, next.CompletionReason);
+        Assert.Equal(0, next.FinalTurnState!.Revision);
+        Assert.Equal(3, chatClient.Calls.Count);
+        var nextModelInput = chatClient.Calls[2].Messages;
+        Assert.Contains(nextModelInput, message =>
+            message.Text == DurableManagedLoopHistory.IncompleteResponseSentinelText);
+        Assert.DoesNotContain(
+            nextModelInput.SelectMany(message => message.Contents),
+            content => content is FunctionCallContent or FunctionResultContent);
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+#pragma warning disable MEAI001 // Exercise every UsageDetails counter, including experimental modality fields.
+    [Fact]
+    public async Task ManagedLoop_AggregatesAllUsageFields()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+            [
+                new FunctionCallContent(
+                    "usage-call",
+                    "state_tool",
+                    new Dictionary<string, object?> { ["value"] = "usage" }),
+            ]))
+            {
+                FinishReason = ChatFinishReason.ToolCalls,
+                Usage = new UsageDetails
+                {
+                    InputTokenCount = 10,
+                    OutputTokenCount = 20,
+                    TotalTokenCount = 30,
+                    CachedInputTokenCount = 3,
+                    ReasoningTokenCount = 7,
+                    InputAudioTokenCount = 2,
+                    InputTextTokenCount = 8,
+                    OutputAudioTokenCount = 4,
+                    OutputTextTokenCount = 16,
+                    AdditionalCounts = new AdditionalPropertiesDictionary<long>
+                    {
+                        ["shared"] = 5,
+                        ["first"] = 11,
+                    },
+                },
+            },
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "usage complete"))
+            {
+                FinishReason = ChatFinishReason.Stop,
+                Usage = new UsageDetails
+                {
+                    InputTokenCount = 1,
+                    OutputTokenCount = 2,
+                    TotalTokenCount = 3,
+                    CachedInputTokenCount = 1,
+                    ReasoningTokenCount = 1,
+                    InputAudioTokenCount = 1,
+                    InputTextTokenCount = 1,
+                    OutputAudioTokenCount = 1,
+                    OutputTextTokenCount = 1,
+                    AdditionalCounts = new AdditionalPropertiesDictionary<long>
+                    {
+                        ["shared"] = 7,
+                        ["second"] = 13,
+                    },
+                },
+            },
+        ]);
+        var taskQueue = $"typed-usage-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, chatClient);
+        await host.StartAsync();
+        var handle = await StartAsync(env.Client, host.Services, taskQueue);
+
+        var result = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(CreateRequest("usage-turn")),
+            new WorkflowUpdateOptions { Id = "usage-turn" });
+
+        var usage = Assert.IsType<UsageDetails>(result.Response.Usage);
+        Assert.Equal(11, usage.InputTokenCount);
+        Assert.Equal(22, usage.OutputTokenCount);
+        Assert.Equal(33, usage.TotalTokenCount);
+        Assert.Equal(4, usage.CachedInputTokenCount);
+        Assert.Equal(8, usage.ReasoningTokenCount);
+        Assert.Equal(3, usage.InputAudioTokenCount);
+        Assert.Equal(9, usage.InputTextTokenCount);
+        Assert.Equal(5, usage.OutputAudioTokenCount);
+        Assert.Equal(17, usage.OutputTextTokenCount);
+        Assert.Equal(12, usage.AdditionalCounts!["shared"]);
+        Assert.Equal(11, usage.AdditionalCounts["first"]);
+        Assert.Equal(13, usage.AdditionalCounts["second"]);
+        Assert.Equal(ChatFinishReason.Stop, result.Response.FinishReason);
+        Assert.Equal(DurableTurnCompletionReason.FinalResponse, result.CompletionReason);
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+#pragma warning restore MEAI001
 
     private static IHost BuildHost(
         ITemporalClient client,

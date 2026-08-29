@@ -150,6 +150,18 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
 
         span?.SetTag(DurableChatTelemetry.InputTokensAttribute, responseEntry.Usage?.InputTokenCount);
         span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, responseEntry.Usage?.OutputTokenCount);
+        span?.SetTag(
+            DurableChatTelemetry.ReasoningOutputTokensAttribute,
+            responseEntry.Usage?.ReasoningTokenCount);
+        span?.SetTag(
+            DurableChatTelemetry.TurnCompletionReasonAttribute,
+            responseEntry.CompletionReason.ToString());
+        if (responseEntry.FinishReason is { } finishReason)
+        {
+            span?.SetTag(
+                DurableChatTelemetry.ResponseFinishReasonsAttribute,
+                new[] { finishReason.Value });
+        }
 
         return responseEntry;
     }

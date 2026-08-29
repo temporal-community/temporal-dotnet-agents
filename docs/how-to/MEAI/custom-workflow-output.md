@@ -107,19 +107,25 @@ Approval is not authorization. Request data, initial or derived turn state, and 
 are not trusted permission evidence. A write tool must reauthorize immediately before every high-
 risk external effect using an authoritative service, regardless of whether approval occurred.
 
-`DurableTurnCompletionReason` has exactly two outcomes: `FinalResponse` and
-`IterationLimitReached`. Approval denial/timeout and recoverable tool failures can become model-
-visible synthetic results before a later final response. Workflow cancellation and the configured
-consecutive-error limit throw instead of returning a completion reason. A failed model activity
-uses the consecutive-error allowance but does not consume a successful model/tool iteration;
-provider errors classified as permanent fail the turn immediately.
+`DurableTurnCompletionReason` has three outcomes:
 
-An iteration-limit result returns the complete model/tool protocol and the last successfully
-recorded turn state so the caller can inspect what happened and apply an explicit application
-policy. Treat that state as uncommitted unless the application deliberately accepts a capped turn.
-For newly executed capped turns, durable conversation history stores only the terminal assistant
-sentinel. Later model calls therefore do not inherit successful tool results whose application
-state the caller may have discarded. Histories created by 0.12.0 remain replayable through a
+- `FinalResponse` means the model produced a complete final response. This is the only outcome for
+  which an application commits `FinalTurnState`.
+- `IterationLimitReached` means the package stopped the managed loop at its configured bound.
+- `IncompleteResponse` means the provider stopped before a complete response or reported a finish
+  reason inconsistent with the response content.
+
+For either non-final outcome, `FinalTurnState` contains only the last successfully recorded state
+for diagnostics and is provisional. The application must not commit it. Approval denial/timeout
+and recoverable tool failures can become model-visible synthetic results before a later final
+response. Workflow cancellation and the configured consecutive-error limit throw instead of
+returning a completion reason. A failed model activity uses the consecutive-error allowance but
+does not consume a successful model/tool iteration; provider errors classified as permanent fail
+the turn immediately.
+
+For newly executed non-final turns, durable conversation history stores only the corresponding
+terminal assistant sentinel. Later model calls therefore do not inherit successful tool results
+whose application state was discarded. Histories created by 0.12.0 remain replayable through a
 Temporal patch marker.
 
 `RunDurableTurnAsync` must be called from a workflow Update and permits one managed turn per Update
