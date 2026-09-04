@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization.Metadata;
 using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.Agents.Workflows;
+using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;
 using Xunit;
 
@@ -40,14 +41,19 @@ public class AgentSessionJsonContextTests
         Assert.Same(AgentSessionJsonContext.Default, typeInfo.OriginatingResolver);
     }
 
-    [Theory]
-    [InlineData(typeof(AgentSessionRequest))]
-    [InlineData(typeof(DurableSessionEntry))]
-    public void CompatibilityProtectedTypes_UseGeneratedResolver_InDurableOptions(Type type)
+    [Fact]
+    public void AgentSessionRequest_UsesGeneratedResolver_InDurableOptions()
     {
-        var typeInfo = TemporalAgentJsonUtilities.DefaultOptions.GetTypeInfo(type);
-
+        var typeInfo = TemporalAgentJsonUtilities.DefaultOptions.GetTypeInfo(typeof(AgentSessionRequest));
         Assert.NotNull(typeInfo);
         Assert.Same(AgentSessionJsonContext.Default, typeInfo.OriginatingResolver);
+    }
+
+    [Fact]
+    public void DurableSessionEntry_UsesGeneratedResolver_InDurableOptions()
+    {
+        var typeInfo = TemporalAgentJsonUtilities.DefaultOptions.GetTypeInfo(typeof(DurableSessionEntry));
+        Assert.NotNull(typeInfo);
+        Assert.Same(DurableAIJsonContext.Default, typeInfo.OriginatingResolver);
     }
 }

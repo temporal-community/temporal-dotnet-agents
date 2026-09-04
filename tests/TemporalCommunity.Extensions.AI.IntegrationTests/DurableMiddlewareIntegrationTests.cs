@@ -45,7 +45,6 @@ public class DurableMiddlewareIntegrationTests
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
-        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var providerClient = new MetadataRecordingChatClient();
         var builder = Host.CreateApplicationBuilder();
@@ -369,7 +368,6 @@ public class DurableMiddlewareIntegrationTests
     private static async Task AssertDirectChatWorkflowAsync(bool streaming)
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
-        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var builder = Host.CreateApplicationBuilder();

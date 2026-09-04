@@ -1,4 +1,5 @@
-#pragma warning disable TA002 // CompactionMarkerEntry / compaction types are experimental
+#pragma warning disable TA002
+#pragma warning disable MEAI001 // CompactionMarkerEntry / compaction types are experimental
 
 using System.Text.Json;
 using Microsoft.Agents.AI;
@@ -235,6 +236,37 @@ public class PolymorphicSerializationAuditTests
     }
 
     // ─── AgentStepResult polymorphic members ────────────────────────────────────────────
+
+    [Fact]
+    public void Audit_AgentStepResult_Usage_ModalityTokenCounts_RoundTrip()
+    {
+        var result = new AgentStepResult
+        {
+            IsFinal = true,
+            AssistantMessage = new ChatMessage(ChatRole.Assistant, "test"),
+            Usage = new UsageDetails
+            {
+                InputTokenCount = 100,
+                OutputTokenCount = 200,
+                TotalTokenCount = 300,
+                InputAudioTokenCount = 10,
+                InputTextTokenCount = 90,
+                OutputAudioTokenCount = 50,
+                OutputTextTokenCount = 150,
+            },
+        };
+
+        var roundTripped = RoundTrip(result);
+
+        Assert.NotNull(roundTripped.Usage);
+        Assert.Equal(100, roundTripped.Usage!.InputTokenCount);
+        Assert.Equal(200, roundTripped.Usage.OutputTokenCount);
+        Assert.Equal(300, roundTripped.Usage.TotalTokenCount);
+        Assert.Equal(10, roundTripped.Usage.InputAudioTokenCount);
+        Assert.Equal(90, roundTripped.Usage.InputTextTokenCount);
+        Assert.Equal(50, roundTripped.Usage.OutputAudioTokenCount);
+        Assert.Equal(150, roundTripped.Usage.OutputTextTokenCount);
+    }
 
     [Fact]
     public void Audit_AgentStepResult_AssistantMessage_RoundTrip()
