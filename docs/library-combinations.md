@@ -11,7 +11,13 @@ through both asset selections.
 
 ---
 
-## The Two Combinations at a Glance
+## Choose Your Path
+
+Use this page as the canonical package-selection guide. After choosing a package, select a runnable
+project from the [Sample Catalog](../samples/catalog.md); do not copy registration, history, or tool
+assumptions from the other package's samples.
+
+### The Two Combinations at a Glance
 
 | | Combination 1 | Combination 2 |
 |---|---|---|
@@ -199,6 +205,11 @@ In short:
 
 - No `Microsoft.Agents.AI` in your project — use Combination 1.
 - `Microsoft.Agents.AI` in your project — use Combination 2.
+
+For MAF deployments, choose the registration role separately: use `AddDurableAgent` on the worker
+that hosts an agent implementation; use `AddTemporalAgentProxies` plus `AddAgentProxy` only in a
+client process that calls an already-hosted agent. See [MAF usage](how-to/MAF/usage.md#quick-start)
+for the two topologies.
 
 ---
 

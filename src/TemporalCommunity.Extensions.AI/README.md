@@ -59,6 +59,8 @@ put functions in `ChatOptions.Tools` when calling
 
 Every worker that serves the session task queue must register compatible tool names and schemas.
 For side-effecting functions, design for activity retries or use `NoRetry()`.
+When using the per-turn `WithMaxRetryAttempts(...)` override, pass a positive value; zero and
+negative values are rejected so a request cannot opt into Temporal's unbounded-retry semantics.
 
 ### Upgrade boundary for live 0.10.4 tool sessions
 
@@ -181,9 +183,9 @@ function. Its activity runs on the calling workflow's task queue; the shared
 `DurableExecutionOptions.TaskQueue` value does not reroute it. The worker polling that workflow
 queue must therefore register the function with `AddDurableTools`.
 
-The session client has no streaming API. `DurableChatClient.GetStreamingResponseAsync`, when used
-directly inside a workflow, is workflow-safe but still buffers one complete activity result and
-then emits synthetic updates. It is not token-by-token streaming across the workflow boundary.
+The session client has no streaming API. `DurableChatClient.GetStreamingResponseAsync` throws when
+its async enumerator is advanced inside a workflow; it cannot provide token-by-token streaming
+across the workflow/activity boundary. Use `GetResponseAsync` from workflows.
 
 ## Target framework support
 
@@ -201,9 +203,7 @@ for inline function invocation or caller-supplied session tools.
 - [Durable tool contract](../../docs/how-to/MEAI/tool-functions.md)
 - [Managed-session tool contract](../../docs/how-to/MEAI/managed-session-tool-contract.md)
 - [Pipeline architecture](../../docs/architecture/MEAI/durable-chat-pipeline.md)
-- [DurableChat sample](../../samples/MEAI/DurableChat)
-- [DurableTools sample](../../samples/MEAI/DurableTools)
-- [ExtensibleDurableTurns sample](../../samples/MEAI/ExtensibleDurableTurns)
+- [Sample Catalog](../../samples/catalog.md#temporalcommunityextensionsai-meai) — choose a sample by intent and see current canary coverage
 
 ## License
 

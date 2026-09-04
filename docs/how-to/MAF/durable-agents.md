@@ -1,6 +1,6 @@
 # Durable Agents
 
-Every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in a separately named `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — durable agents are the only registration path. This makes per-tool retry granularity explicit and prevents the foot-gun where write-style tools could re-fire on a transient activity retry.
+Every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in a separately named `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — it is the only worker-hosted agent-definition path. Client-only processes use `AddTemporalAgentProxies` and `AddAgentProxy` to call an agent hosted elsewhere. This makes per-tool retry granularity explicit and prevents the foot-gun where write-style tools could re-fire on a transient activity retry.
 
 ### Activities the workflow may dispatch per turn
 

@@ -164,7 +164,9 @@ For a direct-adapter integration test:
 1. Register a real `[Workflow]` type and the backing activities on a local worker.
 2. Construct `ChatClientBuilder` with a sentinel inner client that throws if invoked, then apply
    `UseDurableExecution()` inside the workflow.
-3. Invoke `GetResponseAsync` or fully enumerate `GetStreamingResponseAsync` from `[WorkflowRun]`.
+3. Invoke `GetResponseAsync` from `[WorkflowRun]`. `GetStreamingResponseAsync` is intentionally
+   unsupported in workflow context and must be tested by advancing its async enumerator and
+   asserting the resulting `NotSupportedException`.
 4. Issue another workflow command after the call, such as `Workflow.DelayAsync`. This proves the
    continuation can still use the workflow scheduler; observing only the activity result is not
    sufficient.
@@ -173,9 +175,9 @@ For a direct-adapter integration test:
 6. Inspect workflow history and assert the expected activity and post-call timer were scheduled.
 
 Register the real provider-side `IChatClient` on the worker. The workflow-local sentinel exists
-only to prove that provider I/O was dispatched through the activity. Buffered streaming uses the
-same single activity and emits synthetic updates after that activity returns; it does not provide
-token-by-token workflow streaming.
+only to prove that provider I/O was dispatched through the activity. Streaming is not implemented
+across the workflow/activity boundary, so it fails before an activity is scheduled rather than
+silently changing into a buffered response.
 
 ### NuGet packages
 

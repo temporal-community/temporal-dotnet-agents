@@ -1,19 +1,26 @@
-# Usage Guide
+# MAF Quick Start and Usage Guide
 
-Detailed usage patterns and configuration for TemporalCommunity.Extensions.Agents. For a quick overview, see the [README](../../../README.md).
+Start with the [Library Combinations Guide](../../library-combinations.md) to select the package,
+then choose a runnable project from the [Sample Catalog](../../../samples/catalog.md). This page
+starts with the worker-hosted path and links to the focused guides for advanced behavior.
 
 For externally reachable session or approval endpoints, apply the normative
 [security boundary](../../security.md) before calling a durable client.
 
 ---
 
-## Durable Agents (`AddDurableAgent`)
+## Quick Start
 
-`AddDurableAgent` is the only registration path. The design rationale for this consolidation is in [`docs/design-decisions.md`](../../design-decisions.md#why-the-v03-consolidation-removed-the-v02-surface).
+`AddDurableAgent` is the only **worker-hosted durable-agent definition** path. The client-only
+counterpart is `AddTemporalAgentProxies` plus `AddAgentProxy`; it declares proxies for an agent
+hosted by another process and does not register a worker or agent implementation.
 
-`AddDurableAgent(string name, Action<DurableAgentBuilder> configure)` is a single registration entry point that consolidates everything an agent needs — chat client, instructions, tools (with per-tool retry overrides), context providers, per-agent timeouts, and external-history opt-in — onto one fluent builder. DI access is provided via per-slot factories on the builder, so you do not need to call `BuildServiceProvider()` to wire dependencies.
+`AddDurableAgent(string name, Action<DurableAgentBuilder> configure)` consolidates the worker's chat
+client, instructions, durable tools, compatible context providers, and per-agent timeouts. It does
+not make provider-owned external history durable. DI access is provided via per-slot factories on
+the builder, so you do not need to call `BuildServiceProvider()` to wire dependencies.
 
-### Canonical example
+### Worker-hosted example
 
 ```csharp
 builder.Services.AddSingleton<OrderService>();
@@ -56,6 +63,17 @@ builder.Services
 ```
 
 > **`ITemporalClient` prerequisite:** `AddTemporalAgents` requires `ITemporalClient` to be registered in DI before it is called. Call `services.AddTemporalClient(address, namespace)` when using the one-argument `AddHostedTemporalWorker(queue)` overload. The three-argument `AddHostedTemporalWorker(address, namespace, queue)` overload registers the client for you.
+
+### Continue from here
+
+| Need | Canonical guide |
+| --- | --- |
+| Select a package or sample | [Library Combinations Guide](../../library-combinations.md) and [Sample Catalog](../../../samples/catalog.md) |
+| Use a client-only process | [Invoking Agents from External Code](#invoking-agents-from-external-code-proxy) |
+| Configure tools, retries, and writes | [Durable Agents](durable-agents.md) |
+| Add a compatible context provider | [Individual MAF Context Providers](individual-context-providers.md) |
+| Understand supported MAF inputs | [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md) |
+| Manage prompt/context size | [History & Token Optimization](prompt-caching.md) |
 
 ### `DurableAgentBuilder` reference
 
@@ -254,7 +272,7 @@ The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are 
 16. [Human-in-the-Loop (HITL) Approval Gates](#human-in-the-loop-hitl-approval-gates)
 17. [Scheduling](#scheduling)
 18. [MCP Tool Integration](#mcp-tool-integration)
-19. [External Memory with AIContextProvider](#external-memory-with-aicontextprovider)
+19. [Context Providers and External Memory](#context-providers-and-external-memory)
 20. [Per-Tool Activity Configuration](#per-tool-activity-configuration)
 21. [OpenTelemetry Integration](#opentelemetry-integration)
 
@@ -363,7 +381,9 @@ With this configuration:
 > **Note:** `MessageCountingChatReducer` is provided by the MEAI library
 > (`Microsoft.Extensions.AI`). Any `IChatReducer` implementation works —
 > token-counting reducers, summarization reducers, etc. — as long as it is
-> stateless or scoped per call.
+> stateless or scoped per call. This is prompt shaping only: an `IChatReducer`
+> is not a durable `DurableSessionEntry` compaction adapter. Use the keyed
+> `HistoryReducerKey` path for continue-as-new history reduction.
 
 See the equivalent guidance for `TemporalCommunity.Extensions.AI` in
 [the MEAI usage guide](../MEAI/usage.md#reducing-the-llm-context-window).
@@ -1106,40 +1126,22 @@ authenticate the server or prove the remote implementation is compatible. See th
 
 ---
 
-## External Memory with AIContextProvider
+## Context Providers and External Memory
 
-`AIContextProvider` instances run before each inference call inside `AgentActivities`. They allow external memory providers (such as [Mem0](https://mem0.ai/)) to inject relevant context from previous conversations automatically, with no additional Temporal code required.
+`AIContextProvider` instances run before each LLM call inside `AgentActivities`. Compatible providers
+contribute retry-safe instructions or messages and store compact per-session state in
+`AgentSessionStateBag`; see [Individual MAF Context Providers](individual-context-providers.md) and
+the [bounded compatibility contract](../../architecture/MAF/bounded-durable-agent-compatibility.md).
 
-`AgentSessionStateBag` state — including provider-managed state such as Mem0 thread IDs — is serialized and carried across continue-as-new boundaries automatically.
+Provider-owned history and external writes, including direct Mem0-style registrations, are not
+supported durable registrations. Their lifecycle hooks run in retryable LLM-step activities and
+the library has no atomic idempotent provider-history contract. Do not use `AddContextProvider` as
+a durable external-memory adapter.
 
-Register a provider on the builder via `AddContextProvider`:
-
-```csharp
-builder.Services.AddSingleton<Mem0ContextProvider>(sp =>
-    new Mem0ContextProvider(sp.GetRequiredService<Mem0Client>(), userId: "user-001"));
-
-builder.Services.AddChatClient(chatClient);
-
-builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
-    .AddTemporalAgents(opts =>
-    {
-        opts.AddDurableAgent("MemoryAgent", agent =>
-        {
-            agent.Instructions = "You are a helpful assistant with long-term memory.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-
-            // DI-resolved context provider — runs once per worker per agent (cached).
-            agent.AddContextProvider(sp => sp.GetRequiredService<Mem0ContextProvider>());
-        });
-    });
-```
-
-`AddContextProvider` has two overloads — `AddContextProvider(AIContextProvider)` for a concrete instance and `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` for a DI factory. A factory is called from the scoped provider for every LLM-step activity attempt; the instance overload intentionally reuses the supplied instance. Neither is session storage. Keep per-session state in MAF's `StateBag`, make external effects retry-safe, and declare any provider-owned tools statically with `IDurableToolSource` or the `durableTools` overload.
-
-In durable mode, `InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per `RunDurableAgentStep` activity), not once per turn — make these hooks idempotent and cheap, or cache results via `StateBag` to skip redundant work within a turn.
-
-For a deep dive into how StateBag persistence works, see [Session StateBag & Context Providers](../../architecture/MAF/session-statebag-and-context-providers.md).
+`AddContextProvider` accepts either a concrete instance or an activity-scoped DI factory. Neither
+form is session storage. The factory may run on every LLM-step activity attempt, including retries;
+the instance object is likewise not a durable session object. Declare provider tools statically
+with `IDurableToolSource` or the `durableTools` overload.
 
 ---
 

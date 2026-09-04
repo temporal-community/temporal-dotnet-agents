@@ -255,7 +255,9 @@ the CLI binary's own version.
 
 ## CI/CD — GitHub Actions
 
-`.github/workflows/build.yml`. Two jobs: `build` (ubuntu+macOS matrix on push to `main`, runs `just build` + `just test-unit`) and `package` (after `build`, `just pack`, uploads artifact). Integration tests are excluded from CI.
+`.github/workflows/build.yml`. Two jobs: `build` (ubuntu+macOS matrix on push to `main`, runs `just build` + `just test-unit`) and `package` (after `build`, `just pack`, uploads artifact).
+
+`.github/workflows/integration.yml`. Runs the discovered integration suites on pull requests to `main`, pushes to `main`, and manual dispatch. Each matrix entry restores, builds, and runs its selected suite with `Category!=HistoryCapture`; history-capture tests remain excluded from that workflow.
 
 `.github/workflows/publish.yml`. `workflow_dispatch`-only `publish` job (`nuget-publish` environment, `id-token: write`). Verifies MinVer resolved a real tag (fails on the `0.0.0-*` fallback), `just pack`, then publishes to NuGet.org via OIDC Trusted Publishing (`NuGet/login@v1` exchanges the GitHub OIDC token for a short-lived key — no long-lived secret stored).
 

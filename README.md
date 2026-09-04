@@ -77,46 +77,8 @@ down-level limitations.
 
 ## Samples
 
-### `TemporalCommunity.Extensions.AI`
-
-| Sample | Package | Description |
-|--------|---------|-------------|
-| [DurableChat](samples/MEAI/DurableChat) | `Extensions.AI` | Multi-turn durable chat with `DurableChatSessionClient` and tool functions |
-| [DurableTools](samples/MEAI/DurableTools) | `Extensions.AI` | Per-tool activity dispatch with `AsDurable()` and `AddDurableTools` |
-| [OpenTelemetry](samples/MEAI/OpenTelemetry) | `Extensions.AI` | OTel tracing and metrics — signal ownership, source/meter names, and token attributes |
-| [HumanInTheLoop](samples/MEAI/HumanInTheLoop) | `Extensions.AI` | Workflow-owned approval gates with `RequireApproval()` and retry-safe `ResolveApprovalAsync` |
-| [DurableEmbeddings](samples/MEAI/DurableEmbeddings) | `Extensions.AI` | `IEmbeddingGenerator` wrapped for durable per-chunk activity dispatch |
-| [ToolInterceptor](samples/MEAI/ToolInterceptor) | `Extensions.AI` | Intercept, pause, skip, or block tool calls |
-| [CustomWorkflow](samples/MEAI/CustomWorkflow) | `Extensions.AI` | Extend the durable chat workflow with a domain-typed result |
-| [ExtensibleDurableTurns](samples/MEAI/ExtensibleDurableTurns) | `Extensions.AI` | Typed request/state with package-managed model and per-tool activities |
-
-### MCP server composition
-
-| Sample | Package | Description |
-|--------|---------|-------------|
-| [WorkflowToolServer](samples/MCP/WorkflowToolServer) | Temporal .NET + MCP SDK | Authenticated ordinary MCP tools that start or join tenant-scoped Temporal workflows |
-
-### `TemporalCommunity.Extensions.Agents`
-
-| Sample | Package | Description |
-|--------|---------|-------------|
-| [BasicAgent](samples/MAF/BasicAgent) | `Extensions.Agents` | External caller pattern — send messages to an agent from a console app |
-| [SplitWorkerClient](samples/MAF/SplitWorkerClient) | `Extensions.Agents` | Worker and client in separate processes |
-| [WorkflowOrchestration](samples/MAF/WorkflowOrchestration) | `Extensions.Agents` | Sub-agent orchestration inside a Temporal workflow |
-| [EvaluatorOptimizer](samples/MAF/EvaluatorOptimizer) | `Extensions.Agents` | Generator + evaluator loop pattern |
-| [MultiAgentRouting](samples/MAF/MultiAgentRouting) | `Extensions.Agents` | LLM-powered routing, parallel execution, and OpenTelemetry |
-| [HumanInTheLoop](samples/MAF/HumanInTheLoop) | `Extensions.Agents` | HITL approval gates via `[WorkflowUpdate]` |
-| [WorkflowRouting](samples/MAF/WorkflowRouting) | `Extensions.Agents` | Static and dynamic durable routing patterns |
-| [AmbientAgent](samples/MAF/AmbientAgent) | `Extensions.Agents` | Signal-driven ambient monitoring agent |
-| [ConfigurableAgent](samples/MAF/ConfigurableAgent) | `Extensions.Agents` | Per-agent settings and read-only tools |
-| [PerToolActivities](samples/MAF/PerToolActivities) | `Extensions.Agents` | Per-tool activity options, per-turn tool selection, and no-retry write tools |
-| [ContextProviders](samples/MAF/ContextProviders) | `Extensions.Agents` | Custom `AIContextProvider` implementations |
-| [DurableContextProvider](samples/MAF/DurableContextProvider) | `Extensions.Agents` | Context-provided tools dispatched durably |
-| [MixedActivities](samples/MAF/MixedActivities) | `Extensions.Agents` | Regular and AI activities in one workflow |
-| [ApprovalScopes](samples/MAF/ApprovalScopes) | `Extensions.Agents` | Scope-aware approvals persisted across turns |
-| [ToolInterceptor](samples/MAF/ToolInterceptor) | `Extensions.Agents` | Pre-tool policy decisions and approval pauses |
-| [WorkingSet](samples/MAF/WorkingSet) | `Extensions.Agents` | Working-set file context for coding agents |
-| [Skills](samples/MAF/Skills) | `Extensions.Agents` | Progressive-disclosure skill catalog and durable loading |
+Use the [Sample Catalog](samples/catalog.md) as the authoritative intent-to-sample index. It records
+every tracked sample project, including whether it is currently covered by a local sample-canary recipe.
 
 ### Sample credentials
 

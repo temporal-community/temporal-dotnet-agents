@@ -179,27 +179,22 @@ the Temporal server. Pass them to `temporal server start-dev` as shown above, or
 CLI commands in the [Observability guide](../../docs/how-to/MAF/observability.md#search-attributes).
 Set the option to `false` to opt out.
 
+`AgentSessionStateBag` is carried across turns and continue-as-new boundaries, but it is not a
+general memory store. At continue-as-new time the workflow logs a warning when the serialized bag
+exceeds 64 KB; the warning does not trim or fail the session. Keep provider state compact and see
+the [context-provider boundary](../../docs/architecture/MAF/bounded-durable-agent-compatibility.md).
+Providers and tools can measure the same durable payload representation before a turn is submitted:
+
+```csharp
+int carriedBytes = session.StateBag.GetDurableSerializedUtf8ByteCount();
+```
+
+An empty bag reports zero because durable agent workflows omit it from the payload.
+
 ## Samples
 
-| Sample | Description |
-|--------|-------------|
-| [BasicAgent](../../samples/MAF/BasicAgent) | External caller pattern — send messages to an agent from a console app |
-| [SplitWorkerClient](../../samples/MAF/SplitWorkerClient) | Worker and client in separate processes |
-| [WorkflowOrchestration](../../samples/MAF/WorkflowOrchestration) | Sub-agent orchestration inside a Temporal workflow |
-| [EvaluatorOptimizer](../../samples/MAF/EvaluatorOptimizer) | Generator + evaluator loop pattern |
-| [MultiAgentRouting](../../samples/MAF/MultiAgentRouting) | Parallel agent execution and OpenTelemetry |
-| [HumanInTheLoop](../../samples/MAF/HumanInTheLoop) | HITL approval gates via `[WorkflowUpdate]` |
-| [WorkflowRouting](../../samples/MAF/WorkflowRouting) | Durable routing inside a Temporal workflow — static and dynamic patterns |
-| [AmbientAgent](../../samples/MAF/AmbientAgent) | Ambient agent pattern |
-| [ConfigurableAgent](../../samples/MAF/ConfigurableAgent) | Per-agent configuration and read-only tools |
-| [PerToolActivities](../../samples/MAF/PerToolActivities) | Per-tool Temporal activities with write-tool no-retry |
-| [ContextProviders](../../samples/MAF/ContextProviders) | `TodoProvider` and `AgentModeProvider` via `AddContextProvider` |
-| [DurableContextProvider](../../samples/MAF/DurableContextProvider) | Context-provided tools dispatched through durable activities |
-| [MixedActivities](../../samples/MAF/MixedActivities) | Regular and AI activities in one workflow |
-| [ApprovalScopes](../../samples/MAF/ApprovalScopes) | Scope-aware HITL approvals persisted across turns |
-| [ToolInterceptor](../../samples/MAF/ToolInterceptor) | Proceed, pause, skip, and block decisions before tools run |
-| [WorkingSet](../../samples/MAF/WorkingSet) | File-reference working-set context injected per turn |
-| [Skills](../../samples/MAF/Skills) | Progressive disclosure with durable `load_skill` tool calls |
+Use the [Sample Catalog](../../samples/catalog.md#temporalcommunityextensionsagents-maf) to choose a
+MAF sample by intent and deployment topology. It is validated against tracked sample projects.
 
 ## Core Components
 
@@ -219,7 +214,16 @@ This library depends on `TemporalCommunity.Extensions.AI`. Installing `TemporalC
 
 The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI.Approvals`. Use the package-specific typed client for one-call decisions. MAF reusable session grants are available only through the explicitly registered `ITemporalAgentApprovalScopeAdministration` service.
 
-`DurableAIDataConverter` is auto-wired by `AddTemporalAgents()` for the standard registration patterns (3-arg `AddHostedTemporalWorker` and `AddTemporalClient`). Manual setup is only required when creating the client via `TemporalClient.ConnectAsync` and registering it with `AddSingleton<ITemporalClient>`.
+`TemporalAgentDataConverter` is auto-wired by `AddTemporalAgents()` for the standard registration
+patterns (3-arg `AddHostedTemporalWorker` and `AddTemporalClient`). If an application creates a
+client via `TemporalClient.ConnectAsync` and registers it with `AddSingleton<ITemporalClient>`, it
+must configure a converter that preserves MAF session entries (normally
+`TemporalAgentDataConverter.Instance`). `AddTemporalAgents()` validates that requirement before
+the worker starts and fails with configuration guidance when it is not met.
+
+For a custom payload codec, use `TemporalAgentDataConverter.CreateDataConverter(codec)`. Deploy
+compatible decoding to every client, worker, replayer, and operational reader before enabling
+encoding.
 
 ## Documentation
 

@@ -54,6 +54,9 @@ jobs:
       - name: Run unit tests
         run: just test-unit-all
 
+      - name: Verify documentation and sample catalog
+        run: just verify-sample-catalog verify-doc-links
+
   package:
     name: Package
     runs-on: ubuntu-latest

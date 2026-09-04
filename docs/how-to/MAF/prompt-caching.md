@@ -12,7 +12,7 @@ How conversation history grows in TemporalAgents, how the framework manages it a
 4. [Continue-as-New: Automatic History Transfer](#continue-as-new-automatic-history-transfer)
 5. [Token Usage Monitoring](#token-usage-monitoring)
 6. [Strategies for Reducing Token Costs](#strategies-for-reducing-token-costs)
-7. [External Memory with AIContextProvider](#external-memory-with-aicontextprovider)
+7. [Context-Provider Boundary](#context-provider-boundary)
 8. [StateBag Persistence](#statebag-persistence)
 
 ---
@@ -237,22 +237,24 @@ public async Task<string> RunAsync(string question)
 
 The summarizer sees only the final output, not the full 5-turn research history.
 
-### 3. Use External Memory Instead of Full History
+### 3. Use a Supported Auxiliary Context Projection
 
-`AIContextProvider` implementations (like Mem0) store memories externally and inject only relevant context on each turn. This decouples "what the agent remembers" from "the full conversation transcript":
+The workflow remains the authoritative conversation-history owner. A compatible
+`AIContextProvider` may add retry-safe instructions or messages for a specific LLM step, such as
+the library-provided `WorkingSetContextProvider`; it does not replace durable history.
 
 ```csharp
-opts.AddDurableAgent("MemoryAgent", agent =>
+opts.AddDurableAgent("CodingAgent", agent =>
 {
-    agent.Instructions = "You are a helpful assistant with long-term memory.";
-    agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-    agent.AddContextProvider(sp => new Mem0ContextProvider(
-        sp.GetRequiredService<Mem0Client>(),
-        userId: "user-001"));
+    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+    agent.AddContextProvider(new WorkingSetContextProvider());
 });
 ```
 
-The provider injects a small set of relevant memories instead of the full history, keeping token counts low even across many turns.
+Provider-owned history and external writes are not supported direct durable registrations because
+the provider lifecycle runs in retryable activities without an atomic idempotent persistence
+contract. See [Individual MAF Context Providers](individual-context-providers.md) for supported
+patterns and [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md) for exclusions.
 
 ### 4. Use One-Shot Sessions for Independent Tasks
 
@@ -322,25 +324,29 @@ var options = new TemporalAgentRunOptions
 
 ---
 
-## External Memory with AIContextProvider
+## Context-Provider Boundary
 
-For a detailed explanation of how `AIContextProvider` and `AgentSessionStateBag` work, see [Session StateBag & Context Providers](../../architecture/MAF/session-statebag-and-context-providers.md).
+For a detailed explanation of `AIContextProvider` and `AgentSessionStateBag`, see [Session StateBag & Context Providers](../../architecture/MAF/session-statebag-and-context-providers.md).
 
-The key insight for token optimization: providers run inside `AgentActivities.RunDurableAgentStepAsync` (the activity, not the workflow), so they can make external I/O calls safely. The provider decides what context to inject — it could be a few relevant memories from a vector database rather than the entire conversation history.
+Providers run in `AgentActivities.RunDurableAgentStepAsync`, not in workflow code. This makes
+retry-safe activity work possible, but it does not make provider-owned external persistence atomic
+or durable. Use providers for compatible auxiliary projections; do not use them as an external
+conversation-history store.
 
 ---
 
 ## StateBag Persistence
 
-`AgentSessionStateBag` carries provider state (like Mem0 thread IDs) across turns without serializing the provider's full data store:
+`AgentSessionStateBag` carries compact provider state (for example, a working-set index) across
+turns without serializing an external data store:
 
 ```
 Turn 1: Activity starts → empty StateBag
-        Provider writes: bag["mem0_thread_id"] = "t-abc"
+        Provider writes: bag["temporal.working_set"] = "src/App.cs"
         Activity ends → bag serialized → workflow stores it
 
 Turn 2: Activity starts → bag restored from workflow state
-        Provider reads: bag["mem0_thread_id"] → "t-abc" (skips re-init)
+        Provider reads: bag["temporal.working_set"] → "src/App.cs"
         Activity ends → bag re-serialized
 
 Continue-as-New:

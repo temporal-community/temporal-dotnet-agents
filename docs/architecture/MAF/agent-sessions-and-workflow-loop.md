@@ -568,7 +568,7 @@ There is no `AgentWorkflowWrapper` interposed between the `ChatClientAgent` and 
 
 ## Durable Agent Workflow Loop
 
-In v0.3 every agent registered via `TemporalAgentsOptions.AddDurableAgent(...)` runs in **durable mode**: the agentic loop lives inside `[Workflow]` code, each LLM call is its own `RunDurableAgentStep` activity, and each tool call is its own `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — durable agents are the only registration path.
+In v0.3 every agent registered via `TemporalAgentsOptions.AddDurableAgent(...)` runs in **durable mode**: the agentic loop lives inside `[Workflow]` code, each LLM call is its own `RunDurableAgentStep` activity, and each tool call is its own `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — this is the only worker-hosted agent-definition path; client-only processes declare proxies separately.
 
 ### Why the loop must live in the workflow
 

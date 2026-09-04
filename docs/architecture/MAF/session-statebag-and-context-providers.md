@@ -102,7 +102,9 @@ The `StateBag` is **not a memory store** — it is a persistent address book tha
 
 `Mem0Provider`, `ChatHistoryMemoryProvider`, and similar providers perform external reads and writes from their lifecycle hooks. Those hooks run in retryable LLM-step activities, and this library does not provide an atomic idempotent provider-history contract. They are therefore **not supported as direct durable registrations**.
 
-The historical `Mem0Provider` walkthrough below explains StateBag mechanics only. Do not copy its registration snippet into a durable agent until a dedicated durable adapter defines its retry and idempotency behavior.
+The historical `Mem0Provider` material below explains StateBag mechanics only. It is not a durable
+recipe. No direct `AddContextProvider` registration is supported until a dedicated durable adapter
+defines retry, idempotency, and recovery behavior.
 
 ### Historical Mem0Provider StateBag Walkthrough
 
@@ -296,11 +298,12 @@ Workflow stores          Workflow stores
 
 ---
 
-## Configuration: Wiring It All Together
+## Durable Registration Boundary
 
-### Step 1 — Register the agent with an AIContextProvider
-
-In v0.3, `AIContextProvider` instances are registered on the `DurableAgentBuilder` via `AddContextProvider`. `AgentActivities.RunDurableAgentStepAsync` invokes them explicitly around each LLM call and serializes the resulting `StateBag`; the library does not hand provider lifecycle ownership to `ChatClientAgent`.
+`AIContextProvider` instances are registered on `DurableAgentBuilder` through `AddContextProvider`.
+`AgentActivities.RunDurableAgentStepAsync` invokes compatible providers around each LLM call and
+serializes the resulting `StateBag`; the library does not hand provider lifecycle ownership to
+`ChatClientAgent`.
 
 ### Scope limits
 
@@ -310,69 +313,12 @@ approval mixin. It cannot persist or consume StateBag-backed approval scopes; an
 nor workflow-parked approval, so it has the same `PauseForApproval` → `Block` behavior. Use a
 session-backed `TemporalAIAgentProxy` when an approval scope must survive a turn.
 
-```csharp
-builder.Services.AddSingleton<HttpClient>(_ =>
-{
-    var httpClient = new HttpClient { BaseAddress = new Uri("https://api.mem0.ai") };
-    httpClient.DefaultRequestHeaders.Authorization =
-        new AuthenticationHeaderValue("Token", "<your-api-key>");
-    return httpClient;
-});
-
-builder.Services.AddSingleton<Mem0Provider>(sp => new Mem0Provider(
-    sp.GetRequiredService<HttpClient>(),
-    stateInitializer: session =>
-    {
-        // Extract the session ID from the TemporalAgentSession.
-        // This runs once per session (first turn only).
-        var sessionId = session?.GetService<TemporalAgentSessionId>();
-        return new Mem0Provider.State(
-            new Mem0ProviderScope
-            {
-                AgentId = "weather-bot",
-                UserId  = sessionId?.Key ?? "anonymous"
-            });
-    }));
-
-builder.Services.AddChatClient(chatClient);
-```
-
-### Step 2 — Wire the agent through `AddDurableAgent`
-
-```csharp
-builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
-    .AddTemporalAgents(options =>
-    {
-        options.AddDurableAgent("WeatherAgent", agent =>
-        {
-            agent.Instructions = "You are a helpful weather assistant.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-            agent.TimeToLive   = TimeSpan.FromHours(4);
-
-            // The factory runs from the scoped provider for each LLM-step activity attempt.
-            // Per-session state always goes through AgentSessionStateBag, not provider fields.
-            agent.AddContextProvider(sp => sp.GetRequiredService<Mem0Provider>());
-        });
-    });
-```
-
-Because the provider is registered on the agent's builder, it is composed into the chat pipeline by the library when the agent is materialized. No extra TemporalAgents-specific configuration is needed — the StateBag persistence happens transparently.
-
-### Step 3 — Call the agent (no special handling needed)
-
-```csharp
-// External caller
-var proxy = services.GetTemporalAgentProxy("WeatherAgent");
-var session = await proxy.CreateSessionAsync();
-
-// Turn 1 — StateBag empty, stateInitializer runs, Mem0 has no memories yet
-var r1 = await proxy.RunAsync("I live in Seattle.", session);
-
-// Turn 2 — StateBag restored, Mem0 now has "User lives in Seattle"
-var r2 = await proxy.RunAsync("What should I wear tomorrow?", session);
-// LLM receives: "## Memories\nUser lives in Seattle" injected into the prompt
-```
+The following registration is intentionally absent: direct registration of `Mem0Provider`,
+`ChatHistoryMemoryProvider`, or another provider that persists history or writes to an external
+store. Calling those hooks from retryable activities can duplicate or lose external effects. The
+supported examples are [ContextProviders](../../../samples/MAF/ContextProviders/) and
+[WorkingSet](../../../samples/MAF/WorkingSet/), whose session state is carried in `StateBag` and
+whose providers do not become the conversation-history owner.
 
 ---
 
@@ -522,7 +468,7 @@ Each provider reads only its own key — they are fully independent.
 
 ## Key Invariants to Remember
 
-1. **The StateBag is not a memory store.** It stores configuration/identity state so providers can find external data. The actual data lives elsewhere (Mem0 API, vector DB, etc.).
+1. **The StateBag is not a memory store.** It holds compact per-session state for compatible providers. It does not make an external provider's reads, writes, or history durable.
 
 2. **`stateInitializer` runs exactly once per session.** After the first turn, `GetOrInitializeState` finds the key in the bag and skips initialization. If the bag is lost (e.g., a bug in TemporalAgents serialization), initialization runs again — which is why `stateInitializer` must be idempotent.
 
@@ -530,7 +476,7 @@ Each provider reads only its own key — they are fully independent.
 
 4. **The bag survives continue-as-new.** `AgentWorkflowInput.CarriedStateBag` carries it across workflow history resets — providers never need to reinitialize after a long-running session triggers continue-as-new.
 
-5. **Providers run in the activity, not in the workflow.** `IChatClient.GetStreamingResponseAsync` is called inside `AgentActivities.RunDurableAgentStepAsync`, and `AIContextProvider.InvokingAsync` runs immediately before it. All I/O (external Mem0 calls, LLM calls) is safe here. Never call `RunAsync` directly inside a `[Workflow]` class.
+5. **Providers run in the activity, not in the workflow.** `IChatClient.GetStreamingResponseAsync` is called inside `AgentActivities.RunDurableAgentStepAsync`, and `AIContextProvider.InvokingAsync` runs immediately before it. LLM calls and retry-safe provider work belong there; provider-owned external history or writes remain unsupported without a dedicated adapter. Never call `RunAsync` directly inside a `[Workflow]` class.
 
 ---
 

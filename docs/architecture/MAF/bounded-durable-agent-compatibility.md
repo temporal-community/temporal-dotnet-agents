@@ -4,6 +4,19 @@
 
 The extension builds a fresh `ChatClientAgent` inside each LLM-step activity from the registered `IChatClient`, with `UseProvidedChatClientAsIs = true`. Temporal owns the model-step, durable-tool, retry, and approval boundaries.
 
+## Quick guardrails
+
+| Boundary | Enforcement | Safe path |
+| --- | --- | --- |
+| Function-invocation middleware | Rejected | Register tools through `AddTool`; the workflow dispatches them as activities. |
+| Opaque or replacing agent middleware | Rejected | Use a transparent `DelegatingAIAgent` that preserves the supplied inner agent and session. |
+| Tools returned dynamically by a context provider | Dropped and logged | Declare static `IDurableToolSource` specs or use `AddContextProvider(provider, durableTools)`. |
+| Provider-owned history or external writes | Unsupported contract | Do not register it until a dedicated durable adapter defines idempotency and recovery. |
+| Provider state held in fields | Unsupported | Store compact per-session state in `AgentSessionStateBag`. |
+| `ChatHistoryProvider` as the durable history owner | Unsupported | Temporal owns `DurableSessionEntry` history; use a retry-safe context projection only. |
+| `IChatReducer` | Prompt shaping only | Use it in the `IChatClient` pipeline; use `HistoryReducerKey` for entry-level continue-as-new reduction. |
+| Large `StateBag` | Warning only at continue-as-new | Keep carried state compact; the 64 KB warning neither trims nor fails the session. |
+
 ## Supported inputs
 
 | Input | Support | Required contract |

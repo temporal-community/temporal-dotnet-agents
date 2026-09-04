@@ -287,11 +287,20 @@ compile: build
 # Alias: test-unit (Agents only, for backward compatibility)
 verify: test-unit
 
-# Build + all unit tests (no server required)
-validate: build test-unit-all
+# Build, unit tests, and repository-local documentation checks (no server required)
+validate: build test-unit-all verify-sample-catalog verify-doc-links
 
-# Full local CI pipeline: clean → build → test-unit-all → pack
-ci: clean build test-unit-all pack
+# Verify that the checked-in sample catalog represents every tracked sample project exactly once.
+# This is intentionally credential- and Temporal-service-free so it can run in local and CI checks.
+verify-sample-catalog:
+    bash scripts/verify-sample-catalog.sh
+
+# Verify repository-local Markdown links without requiring network access.
+verify-doc-links:
+    bash scripts/verify-markdown-links.sh
+
+# Full local CI pipeline: clean → build → test-unit-all → documentation checks → pack
+ci: clean build test-unit-all verify-sample-catalog verify-doc-links pack
 
 # ---------------------------------------------------------------------------
 # Process hygiene — orphan cleanup + safe logging
