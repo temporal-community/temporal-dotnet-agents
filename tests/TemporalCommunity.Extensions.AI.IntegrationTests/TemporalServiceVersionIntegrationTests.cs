@@ -10,6 +10,7 @@ public class TemporalServiceVersionIntegrationTests
     public async Task PinnedDevServer_MeetsMinimumTemporalServiceVersion()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var response = await environment.Client.WorkflowService.GetSystemInfoAsync(
             new GetSystemInfoRequest());

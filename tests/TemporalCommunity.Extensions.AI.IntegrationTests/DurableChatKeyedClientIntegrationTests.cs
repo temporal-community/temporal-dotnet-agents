@@ -22,6 +22,7 @@ public class DurableChatKeyedClientIntegrationTests
     public async Task KeyedClient_WorkerUsesDefaultKey_WhenRegisteredWithKeyedClientOnly()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var defaultClient = new LabeledChatClient("default");
         var otherClient = new LabeledChatClient("other");

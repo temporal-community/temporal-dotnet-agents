@@ -19,6 +19,7 @@ public sealed class DeferredToolResearchIntegrationTests
     public async Task PendingInput_SurvivesContinueAsNew_AndBothRunsReplay()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var taskQueue = $"deferred-tool-research-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(environment.Client);

@@ -45,6 +45,7 @@ public class DurableMiddlewareIntegrationTests
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var providerClient = new MetadataRecordingChatClient();
         var builder = Host.CreateApplicationBuilder();
@@ -115,6 +116,7 @@ public class DurableMiddlewareIntegrationTests
     public async Task DurableAIFunction_InvokesToolAsActivity_WhenCalledInsideWorkflow()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         // The real tool implementation — registered in DurableFunctionRegistry via
         // AddDurableTools so DurableFunctionActivities can resolve it by name.
@@ -166,6 +168,7 @@ public class DurableMiddlewareIntegrationTests
     public async Task DurableAIFunction_RetryDefaults_AreBoundedAndPreserveExplicitNoRetry()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var permanentAttempts = 0;
         var transientAttempts = 0;
@@ -258,6 +261,7 @@ public class DurableMiddlewareIntegrationTests
     public async Task DurableEmbeddingGenerator_DispatchesAsActivity_WhenCalledInsideWorkflow()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         const int stubDimensions = 4;
         var stubGenerator = new StubEmbeddingGenerator(stubDimensions);
@@ -323,6 +327,7 @@ public class DurableMiddlewareIntegrationTests
     public async Task DurableChatActivities_HeartbeatsKeepActivityAlive_UnderTightTimeout()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(env.Client);
@@ -364,6 +369,7 @@ public class DurableMiddlewareIntegrationTests
     private static async Task AssertDirectChatWorkflowAsync(bool streaming)
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var builder = Host.CreateApplicationBuilder();

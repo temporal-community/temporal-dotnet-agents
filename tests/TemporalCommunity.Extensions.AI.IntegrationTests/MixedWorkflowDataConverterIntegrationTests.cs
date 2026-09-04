@@ -16,6 +16,7 @@ public class MixedWorkflowDataConverterIntegrationTests
     public async Task SharedWorker_OrdinaryWorkflowNestedResult_RoundTripsWithConfiguredManualCaller()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var taskQueue = $"mixed-converter-{Guid.NewGuid():N}";
         var targetHost = environment.Client.Connection.Options.TargetHost
             ?? throw new InvalidOperationException("Test server target host is unavailable.");

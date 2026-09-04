@@ -35,6 +35,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task Interceptor_Proceed_ToolDispatches()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("ping", "Ping.", _ => "pong");
@@ -93,6 +94,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task Interceptor_Skip_NoToolDispatch_SyntheticResultInjected()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("cache_lookup", "Looks up from cache.", _ => "from-cache");
@@ -160,6 +162,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task Interceptor_Block_NoToolDispatch_ErrorResultInjected()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("dangerous_tool", "A dangerous tool.", _ => "executed!");
@@ -223,6 +226,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task RequireApproval_NoInterceptor_PausesForApproval_ApproveAllowsTool()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("send_email", "Sends email.", _ => "email-sent");
@@ -318,6 +322,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task InterceptorApproval_ExposesExplicitReviewData_NotRawFunctionArguments()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("transfer_funds", "Transfers funds.", _ => "transferred");
@@ -381,6 +386,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task ApprovalBatch_WaitsForEveryDecisionBeforeSchedulingAnyTool()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var approvedTool = harness.BuildAlwaysSucceeds("approved_action", "Approved action.", _ => "approved");
@@ -476,6 +482,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task WorkerRestart_WhileApprovalPending_PreservesRequestIdAndRunsToolOnce()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("write_record", "Writes a record.", _ => "written");
@@ -521,6 +528,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task Approval_ConcurrentEquivalentResolutions_RunToolOnce()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("write_record", "Writes a record.", _ => "written");
@@ -563,6 +571,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task ApprovalResolution_RetryAfterContinueAsNew_ReturnsAlreadyResolved()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
@@ -678,6 +687,7 @@ public class DurableToolInterceptorIntegrationTests
     public async Task SkipInterceptor_Flag_InterceptorNotCalledForSkippedTool()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("read_file", "Read-only; safe to skip interceptor.", _ => "file-contents");

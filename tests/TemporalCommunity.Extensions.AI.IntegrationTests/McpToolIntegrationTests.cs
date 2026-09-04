@@ -18,6 +18,7 @@ public sealed class McpToolIntegrationTests
     public async Task PinnedMcpTool_IsModelVisibleAndRunsAsSeparateActivity()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         await using var mcp = await InProcessMcpServer.CreateAsync();
         var pinned = InProcessMcpServer.CreatePinnedTools(mcp.Client);
 

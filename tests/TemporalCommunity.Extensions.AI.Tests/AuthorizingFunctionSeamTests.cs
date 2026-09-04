@@ -167,8 +167,8 @@ public class AuthorizingFunctionSeamTests
             async () => await authorizingFunction.InvokeAsync());
 
         Assert.Equal("The authoritative service denied this operation.", exception.Message);
-        Assert.Equal(0, executionCount, "Tool body should not execute for denied subject");
-        Assert.False(authorizingFunction.ToolBodyExecuted, "Tool body should not execute for denied subject");
+        Assert.Equal(0, executionCount);
+        Assert.False(authorizingFunction.ToolBodyExecuted);
     }
 
     /// <summary>
@@ -211,8 +211,8 @@ public class AuthorizingFunctionSeamTests
             async () => await authorizingFunction.InvokeAsync());
 
         Assert.Equal("The authoritative service denied this operation.", exception.Message);
-        Assert.Equal(0, executionCount, "Tool body should not execute when resource is blank");
-        Assert.False(authorizingFunction.ToolBodyExecuted, "Tool body should not execute when resource is blank");
+        Assert.Equal(0, executionCount);
+        Assert.False(authorizingFunction.ToolBodyExecuted);
     }
 
     /// <summary>
@@ -304,7 +304,7 @@ public class AuthorizingFunctionSeamTests
             async () => await authorizingFunction.InvokeAsync());
 
         Assert.Equal("The authoritative service denied this operation.", exception.Message);
-        Assert.Equal(0, executionCount, "Tool body should not execute for forged authorization");
-        Assert.False(authorizingFunction.ToolBodyExecuted, "Tool body should not execute despite forged state");
+        Assert.Equal(0, executionCount);
+        Assert.False(authorizingFunction.ToolBodyExecuted);
     }
 }

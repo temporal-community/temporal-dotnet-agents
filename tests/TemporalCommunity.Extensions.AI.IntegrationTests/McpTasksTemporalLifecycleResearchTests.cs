@@ -75,6 +75,7 @@ public sealed class McpTasksTemporalLifecycleResearchTests
     public async Task WorkflowOwnedPolling_PreservesTaskIdentityAcrossPollRetry_AndReplays()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var taskQueue = $"mcp-task-research-{Guid.NewGuid():N}";
         var gate = new McpTaskResearchGate();
         var tracker = new McpTaskResearchTracker { FailFirstPollAttempt = true };
@@ -163,6 +164,7 @@ public sealed class McpTasksTemporalLifecycleResearchTests
     public async Task WorkflowOwnedCancellation_RequestsRemoteCancellation_AndObservesTerminalState()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var taskQueue = $"mcp-task-cancel-research-{Guid.NewGuid():N}";
         var gate = new McpTaskResearchGate();
         var tracker = new McpTaskResearchTracker();

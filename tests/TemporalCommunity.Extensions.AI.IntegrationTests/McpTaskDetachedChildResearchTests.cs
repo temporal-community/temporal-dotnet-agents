@@ -26,6 +26,7 @@ public sealed class McpTaskDetachedChildResearchTests
     public async Task DetachedExecutor_SignalsParentAfterParentContinueAsNew_AndBothReplay()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var taskQueue = $"mcp-task-child-research-{Guid.NewGuid():N}";
         var gate = new McpTaskResearchGate();
         var tracker = new McpTaskResearchTracker();

@@ -37,7 +37,7 @@ public class TypedDurableTurnLifecycleTests
             new ChatResponse(new ChatMessage(ChatRole.Assistant, "after continue-as-new")),
         ]);
         var taskQueue = $"typed-lifecycle-can-{Guid.NewGuid():N}";
-        using var host = BuildHost(env.Client, taskQueue, chatClient, maxEntryCount: 2);
+        using var host = BuildHost(env.Client, taskQueue, chatClient, maxEntryCount: 4);
         await host.StartAsync();
 
         var input = host.Services.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();

@@ -28,6 +28,7 @@ public sealed class WorkflowToolServerIntegrationTests
     public async Task AuthenticatedMcpServer_RejectsUnauthorizedCallsBeforeWorkflowStart()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         using var worker = BuildWorker(environment.Client);
         await worker.StartAsync();
         await using var app = await StartServerAsync(environment.Client);
@@ -88,6 +89,7 @@ public sealed class WorkflowToolServerIntegrationTests
     public async Task StartUnique_DuplicateReturnsStructuredConflict()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         using var worker = BuildWorker(environment.Client);
         await worker.StartAsync();
         await using var app = await StartServerAsync(environment.Client);
@@ -122,6 +124,7 @@ public sealed class WorkflowToolServerIntegrationTests
     public async Task StartOrJoin_RunningAndCompletedRetriesReturnSameBusinessResult()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         using var worker = BuildWorker(environment.Client);
         await worker.StartAsync();
         var service = new WorkflowOperationService(
@@ -157,6 +160,7 @@ public sealed class WorkflowToolServerIntegrationTests
     public async Task TenantIdentityAndUniqueMode_AreFailClosed()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         using var worker = BuildWorker(environment.Client);
         await worker.StartAsync();
         var service = new WorkflowOperationService(
@@ -203,6 +207,7 @@ public sealed class WorkflowToolServerIntegrationTests
         string expectedErrorCode)
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         using var worker = BuildWorker(environment.Client);
         await worker.StartAsync();
         var operationId = $"closed-{closure}-{Guid.NewGuid():N}";
@@ -255,6 +260,7 @@ public sealed class WorkflowToolServerIntegrationTests
     public async Task CallerCancellationDoesNotCancelDurableWork()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         using var worker = BuildWorker(environment.Client);
         await worker.StartAsync();
         var operationId = $"caller-cancel-{Guid.NewGuid():N}";
@@ -282,6 +288,7 @@ public sealed class WorkflowToolServerIntegrationTests
     public async Task ApplicationLedgerRemainsAuthorityAfterTemporalRetentionBoundary()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var ledger = new InMemoryWorkflowOperationLedger();
         var operationId = $"retained-{Guid.NewGuid():N}";
         var retained = new WorkflowToolResult(operationId, "completed", "retained-result");

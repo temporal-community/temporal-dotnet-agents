@@ -39,6 +39,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task TransientModelFailure_DoesNotConsumeSuccessfulIterationBudget()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var chatClient = new FailingThenFinalChatClient(
             failuresBeforeSuccess: 1,
             () => new InvalidOperationException("transient provider failure"));
@@ -70,6 +71,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task ModelFailureAllowance_ThrowsInsteadOfReturningIterationSentinel()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var chatClient = new FailingThenFinalChatClient(
             failuresBeforeSuccess: int.MaxValue,
             () => new InvalidOperationException("persistent transient provider failure"));
@@ -100,6 +102,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task PermanentModelFailure_IsNotRetriedByWorkflowLoop()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var chatClient = new FailingThenFinalChatClient(
             failuresBeforeSuccess: 1,
             () => new HttpRequestException(
@@ -141,6 +144,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task SingleToolCall_SingleTurn()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var weatherTool = harness.BuildAlwaysSucceeds(
@@ -187,6 +191,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task ParallelToolCalls_BothDispatchedInParallel()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool1 = harness.BuildAlwaysSucceeds("tool_a", "Tool A.", _ => "result-a");
@@ -239,6 +244,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task PerToolRetry_NoRetryThrows_FailsWithoutRetry()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var alwaysFails = harness.BuildAlwaysThrows("write_record", "Non-idempotent write.", "boom");
@@ -280,6 +286,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task MaxToolCallsPerTurn_Cap_ReturnsSentinelResponse()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var endlessTool = harness.BuildAlwaysSucceeds("loop_tool", "Returns nothing useful.", _ => "ok");
@@ -320,6 +327,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task CallerSuppliedTools_AreRejectedBeforeWorkflowDispatch()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var weatherTool = harness.BuildAlwaysSucceeds("get_weather", "Weather.", _ => "sunny");
@@ -373,6 +381,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task CatchAndFeedBack_RoundTrip()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         // Fails once then succeeds — the workflow must call the LLM twice.
@@ -435,6 +444,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task MaximumConsecutiveErrorsPerRequest_Threshold_FailsAfterCap()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var alwaysFails = harness.BuildAlwaysThrows("broken_tool", "Always fails.", "scripted failure");
@@ -499,6 +509,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task MaximumConsecutiveErrorsPerRequest_SuccessResetsCounter()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         // Deterministic per-invocation behaviour: fail, success, fail, fail, fail.
         // Use a closure counter rather than the harness so the exact sequence is
@@ -566,6 +577,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task MixedSuccessFailure_ParallelFanout_AllCallIdsSynthesized()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var good = harness.BuildAlwaysSucceeds("good_tool", "Always succeeds.", _ => "good-result");
@@ -629,6 +641,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task ImmediatePropagation_MaximumConsecutiveErrorsPerRequest_Zero()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var bad = harness.BuildAlwaysThrows("fail_tool", "fails", "boom");
@@ -681,6 +694,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task WhenAllAsync_WorkflowCancelledDuringToolFanOut_DoesNotSurfaceApplicationFailureException()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         // A gate that the tool will block on until the test releases it.
         // The tool never returns on its own — the workflow will be cancelled first.
@@ -819,6 +833,7 @@ public class DurableToolDispatchIntegrationTests
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("ping", "Ping tool.", _ => "pong");
@@ -874,6 +889,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task RegisteredTools_AreProvidedToModel()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var weather = harness.BuildAlwaysSucceeds("weather", "Weather", _ => "sunny");
