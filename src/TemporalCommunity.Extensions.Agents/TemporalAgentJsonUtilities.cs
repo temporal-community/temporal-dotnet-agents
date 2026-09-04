@@ -31,7 +31,7 @@ public static class TemporalAgentJsonUtilities
         // DurableAIJsonUtilities already carries MEAI's generated resolver and a reflection fallback.
         // Insert the MAF context after MEAI's resolver but before reflection, ensuring source-gen
         // metadata resolves correctly. MEAI's UsageDetails modality counters prove this ordering matters.
-        options.TypeInfoResolverChain.Insert(options.TypeInfoResolverChain.Count - 1, AgentSessionJsonContext.Default);
+        options.TypeInfoResolverChain.Insert(1, AgentSessionJsonContext.Default);
 
         // Register MAF-specific derived types on DurableSessionEntry's polymorphism options
         // at runtime. The base class declares the AI-library discriminators

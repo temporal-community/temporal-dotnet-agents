@@ -54,6 +54,6 @@ public class AgentSessionJsonContextTests
     {
         var typeInfo = TemporalAgentJsonUtilities.DefaultOptions.GetTypeInfo(typeof(DurableSessionEntry));
         Assert.NotNull(typeInfo);
-        Assert.Same(DurableAIJsonContext.Default, typeInfo.OriginatingResolver);
+        Assert.Same(AgentSessionJsonContext.Default, typeInfo.OriginatingResolver);
     }
 }

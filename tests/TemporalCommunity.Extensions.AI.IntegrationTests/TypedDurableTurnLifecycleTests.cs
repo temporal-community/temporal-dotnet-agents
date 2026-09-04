@@ -26,7 +26,8 @@ public class TypedDurableTurnLifecycleTests
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var chatClient = new ScriptedChatClient(
         [
-            new ChatResponse(new ChatMessage(ChatRole.Assistant, "before continue-as-new")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "before continue-as-new-1")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "before continue-as-new-2")),
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
             [
                 new FunctionCallContent(
@@ -47,8 +48,11 @@ public class TypedDurableTurnLifecycleTests
             new WorkflowOptions(workflowId, taskQueue));
 
         await handle.ExecuteUpdateAsync(
-            workflow => workflow.TurnAsync(CreateRequest("before")),
-            new WorkflowUpdateOptions { Id = "turn-before-can" });
+            workflow => workflow.TurnAsync(CreateRequest("before-1")),
+            new WorkflowUpdateOptions { Id = "turn-before-can-1" });
+        await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(CreateRequest("before-2")),
+            new WorkflowUpdateOptions { Id = "turn-before-can-2" });
         var initialRunId = (await handle.DescribeAsync()).RunId;
         var postCanRunId = await WaitForNewRunAsync(handle, initialRunId);
         var postCanHandle = env.Client.GetWorkflowHandle<TypedDurableTurnWorkflow>(
