@@ -94,13 +94,23 @@ public sealed class TemporalAgentsOptions
 
     /// <summary>
     /// Gets or sets the worker-level default maximum number of <see cref="DurableSessionEntry"/>
-    /// instances retained before triggering continue-as-new. Agents inherit this value when
+    /// instances retained before triggering continue-as-new. Values below four are invalid because
+    /// the default half-window carry policy must retain a complete request/response turn. Agents inherit this value when
     /// <see cref="DurableAgentBuilder.MaxEntryCount"/> is unset. Defaults to 1000. Continue-as-new
     /// also fires on Temporal SDK's own
     /// <see cref="Temporalio.Workflows.Workflow.ContinueAsNewSuggested"/> threshold, whichever
     /// comes first.
     /// </summary>
     public int DefaultMaxEntryCount { get; set; } = 1000;
+
+    internal void Validate()
+    {
+        if (DefaultMaxEntryCount < 4)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(DefaultMaxEntryCount)} must be at least 4 in {nameof(TemporalAgentsOptions)} to retain a complete request/response turn.");
+        }
+    }
 
     /// <summary>
     /// Gets or sets the worker-level default keyed-service key used to resolve the history-reducer

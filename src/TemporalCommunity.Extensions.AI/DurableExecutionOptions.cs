@@ -239,10 +239,10 @@ public sealed class DurableExecutionOptions
             throw new InvalidOperationException("ApprovalTimeout must be a positive duration.");
         }
 
-        if (MaxEntryCount <= 0)
+        if (MaxEntryCount < 4)
         {
             throw new InvalidOperationException(
-                $"{nameof(MaxEntryCount)} must be greater than zero in {nameof(DurableExecutionOptions)}.");
+                $"{nameof(MaxEntryCount)} must be at least 4 in {nameof(DurableExecutionOptions)} to retain a complete request/response turn.");
         }
 
         if (MaxToolCallsPerTurn <= 0)

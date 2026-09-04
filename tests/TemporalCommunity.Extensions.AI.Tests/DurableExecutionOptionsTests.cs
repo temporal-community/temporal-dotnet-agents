@@ -141,19 +141,15 @@ public class DurableExecutionOptionsTests
         Assert.Equal(500, options.MaxEntryCount);
     }
 
-    [Fact]
-    public void Validate_ThrowsWhenMaxEntryCountIsZero()
+    [Theory]
+    [InlineData(-5)]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Validate_ThrowsWhenMaxEntryCountCannotRetainACompleteTurn(int maxEntryCount)
     {
-        var options = new DurableExecutionOptions { TaskQueue = "q", MaxEntryCount = 0 };
-
-        var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
-        Assert.Contains("MaxEntryCount", ex.Message);
-    }
-
-    [Fact]
-    public void Validate_ThrowsWhenMaxEntryCountIsNegative()
-    {
-        var options = new DurableExecutionOptions { TaskQueue = "q", MaxEntryCount = -5 };
+        var options = new DurableExecutionOptions { TaskQueue = "q", MaxEntryCount = maxEntryCount };
 
         var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
         Assert.Contains("MaxEntryCount", ex.Message);

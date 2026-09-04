@@ -14,7 +14,8 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 /// triggered by the count threshold (<c>history.Count &gt;= MaxEntryCount</c>) the new run
 /// immediately re-tripped the same threshold — a back-to-back CAN loop. The trim must guarantee the
 /// carried count is <strong>strictly below</strong> <c>MaxEntryCount</c> (target = <c>MaxEntryCount/2</c>,
-/// floored, min 1) so the new run has headroom and does not CAN again next turn.
+/// floored) so the new run has headroom and does not CAN again next turn. Values below four are
+/// invalid because that policy cannot retain a complete request/response turn.
 /// </para>
 ///
 /// <para>
@@ -131,16 +132,16 @@ public class DefaultBoundedTrimTests
         Assert.True(trimmed.Count < max);
     }
 
-    [Fact]
-    public void Trim_TinyMaxEntryCount_KeepsAtLeastOne()
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Trim_RejectsThresholdThatCannotRetainACompleteTurn(int maxEntryCount)
     {
-        // max=1 → target = Math.Max(1, 0) = 1: keep the most-recent entry, never empty.
-        var history = MakeHistory(3);
+        var exception = Assert.Throws<TargetInvocationException>(
+            () => InvokeTrim(MakeCompletedTurns(2), maxEntryCount));
 
-        var trimmed = InvokeTrim(history, 1);
-
-        Assert.Single(trimmed);
-        Assert.Equal("corr-2", trimmed[0].CorrelationId);
+        Assert.IsType<ArgumentOutOfRangeException>(exception.InnerException);
     }
 
     [Fact]
@@ -155,6 +156,17 @@ public class DefaultBoundedTrimTests
             trimmed,
             entry => Assert.Equal("turn-2", Assert.IsType<DurableSessionRequest>(entry).CorrelationId),
             entry => Assert.Equal("turn-2", Assert.IsType<DurableSessionResponse>(entry).CorrelationId));
+    }
+
+    [Fact]
+    public void Trim_MinimumValidThreshold_RetainsTheCompleteLatestTurn()
+    {
+        var trimmed = InvokeTrim(MakeCompletedTurns(2), maxEntryCount: 4);
+
+        Assert.Collection(
+            trimmed,
+            entry => Assert.Equal("turn-1", Assert.IsType<DurableSessionRequest>(entry).CorrelationId),
+            entry => Assert.Equal("turn-1", Assert.IsType<DurableSessionResponse>(entry).CorrelationId));
     }
 
     [Fact]

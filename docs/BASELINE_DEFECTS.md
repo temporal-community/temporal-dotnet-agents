@@ -19,6 +19,18 @@ cannot have omitted requests reconstructed by an upgrade. Before rollout, operat
 sessions that use the no-reducer fallback and depend on complete conversation context; configure a
 deterministic keyed reducer where the product needs a different retention policy.
 
+`MaxEntryCount` values below four are now rejected. They cannot satisfy both the documented
+half-window carry policy and the complete-turn invariant. Update affected worker or agent
+configuration before deploying the validation change.
+
+## Source-generated JSON metadata
+
+Durable JSON source-generation metadata must precede the general reflection resolver. Durable DTO
+wire names, including internal `JsonPropertyName` shadow properties that preserve defaults for
+older payloads, are a compatibility contract: do not rename or remove them without a history
+migration. `UsageDetails` is explicitly source-generated so its modality counters survive durable
+activity and continue-as-new boundaries.
+
 ## Converter validation
 
 The worker now validates the DI `ITemporalClient.Options.DataConverter` before processing durable

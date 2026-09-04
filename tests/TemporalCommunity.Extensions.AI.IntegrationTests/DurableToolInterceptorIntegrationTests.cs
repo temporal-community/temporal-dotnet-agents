@@ -563,12 +563,17 @@ public class DurableToolInterceptorIntegrationTests
     public async Task ApprovalResolution_RetryAfterContinueAsNew_ReturnsAlreadyResolved()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("send_email", "Sends email.", _ => "sent");
-        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
-            [new FunctionCallContent("call-1", "send_email")],
-            "Email sent.");
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+                [new FunctionCallContent("call-1", "send_email")])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Email sent.")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Second turn completes the continue-as-new threshold.")),
+        ]);
 
         var taskQueue = $"interceptor-approval-can-{Guid.NewGuid():N}";
         using var host = BuildHostNoInterceptor(
@@ -576,7 +581,7 @@ public class DurableToolInterceptorIntegrationTests
             taskQueue,
             scripted,
             builder => builder.AddDurableTool(tool, o => o.RequireApproval()),
-            options => options.MaxEntryCount = 2);
+            options => options.MaxEntryCount = 4);
         await host.StartAsync();
 
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
@@ -607,6 +612,12 @@ public class DurableToolInterceptorIntegrationTests
             DurableApprovalResolutionStatus.Accepted,
             (await sessionClient.ResolveApprovalAsync(conversationId, decision)).Status);
         await chatTask.WaitAsync(TimeSpan.FromSeconds(30));
+
+        // A minimum valid threshold retains two complete entries per turn, so a second completed
+        // turn is required to cross the four-entry continue-as-new boundary.
+        await sessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "trigger continue-as-new")]);
 
         string? continuedRunId = null;
         for (var i = 0; i < 30 && continuedRunId is null; i++)

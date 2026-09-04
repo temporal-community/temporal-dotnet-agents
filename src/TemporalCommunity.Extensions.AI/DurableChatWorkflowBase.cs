@@ -427,9 +427,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         List<DurableSessionEntry> history,
         int maxEntryCount)
     {
-        // Guard against non-positive MaxEntryCount (validated elsewhere, but stay total here):
-        // a target of at least 1 keeps the most-recent entry rather than emptying history.
-        var target = Math.Max(1, maxEntryCount / 2);
+        // The half-window policy must retain a complete request/response turn. Values below four
+        // cannot do both, so configuration validation rejects them; retain the guard here for
+        // callers that reach this private method through a future code path.
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxEntryCount, 4);
+        var target = maxEntryCount / 2;
 
         if (history.Count <= target)
         {

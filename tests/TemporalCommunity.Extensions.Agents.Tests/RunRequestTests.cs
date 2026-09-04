@@ -108,6 +108,16 @@ public class RunRequestTests
     }
 
     [Fact]
+    public void JsonDeserialization_AbsentMessages_UsesEmptyList()
+    {
+        var deserialized = JsonSerializer.Deserialize<RunRequest>("{}");
+
+        Assert.NotNull(deserialized);
+        Assert.NotNull(deserialized!.Messages);
+        Assert.Empty(deserialized.Messages);
+    }
+
+    [Fact]
     public void JsonRoundTrip_PreservesEnableToolCalls()
     {
         var original = new RunRequest("test", enableToolCalls: false);

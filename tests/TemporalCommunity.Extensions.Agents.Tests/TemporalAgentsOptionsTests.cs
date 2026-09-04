@@ -44,6 +44,20 @@ public class TemporalAgentsOptionsTests
         Assert.Equal(1000, options.DefaultMaxEntryCount);
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Validate_RejectsDefaultMaxEntryCountThatCannotRetainACompleteTurn(int maxEntryCount)
+    {
+        var options = new TemporalAgentsOptions { DefaultMaxEntryCount = maxEntryCount };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+        Assert.Contains("DefaultMaxEntryCount", exception.Message);
+    }
+
     [Fact]
     public void DefaultRetryPolicy_DefaultsToNull()
     {

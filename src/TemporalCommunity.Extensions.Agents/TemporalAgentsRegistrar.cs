@@ -29,6 +29,7 @@ internal static class TemporalAgentsRegistrar
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(agentsOptions);
+        agentsOptions.Validate();
 
         // Fail fast if no ITemporalClient is registered. The DefaultTemporalAgentClient
         // factory (below) calls GetRequiredService<ITemporalClient>() at resolution time;

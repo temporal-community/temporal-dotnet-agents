@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- Enforced minimum `MaxEntryCount` of 4 across `DurableExecutionOptions` and `TemporalAgentsOptions`.
+  Values below 4 cannot satisfy both the documented half-window carry policy and the complete-turn
+  invariant. The validation rejects undersized configurations at worker startup with actionable error
+  messages; migration notes are documented in baseline defects and configuration entry points.
+
 - Reduced approval authority to typed, one-call decisions. Removed the raw-workflow-ID session
   control interface and permanent cross-session approval store, and added an explicitly registered
   administrative service for constrained, expiring, revocable grants within one MAF session.

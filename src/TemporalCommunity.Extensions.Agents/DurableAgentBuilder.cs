@@ -747,10 +747,10 @@ public sealed class DurableAgentBuilder
                 $"DurableAgentBuilder.MaxToolCallsPerTurn for agent '{Name}' must be a positive integer.");
         }
 
-        if (MaxEntryCount is <= 0)
+        if (MaxEntryCount is < 4)
         {
             throw new InvalidOperationException(
-                $"DurableAgentBuilder.MaxEntryCount for agent '{Name}' must be a positive integer when set (null inherits the worker-level default).");
+                $"DurableAgentBuilder.MaxEntryCount for agent '{Name}' must be at least 4 when set (null inherits the worker-level default) to retain a complete request/response turn.");
         }
 
         return new DurableAgentRegistration(

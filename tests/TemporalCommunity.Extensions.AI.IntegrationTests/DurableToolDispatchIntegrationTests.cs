@@ -818,6 +818,7 @@ public class DurableToolDispatchIntegrationTests
     public async Task Pattern3_ContinueAsNew_CarriesToolActivityOptionsAndMaxToolCallsPerTurn()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var harness = new ScriptedToolHarness();
         var tool = harness.BuildAlwaysSucceeds("ping", "Ping tool.", _ => "pong");
@@ -843,9 +844,9 @@ public class DurableToolDispatchIntegrationTests
             opts =>
             {
                 opts.MaxToolCallsPerTurn = maxToolCallsPerTurn;
-                // Trigger continue-as-new after the first turn's entries are stored.
-                // Each turn produces a request + response → MaxEntryCount = 2 forces CAN at turn 1 finish.
-                opts.MaxEntryCount = 2;
+                // Each turn produces a request + response. The minimum valid threshold of four
+                // triggers continue-as-new after the second completed turn.
+                opts.MaxEntryCount = 4;
             });
         await host.StartAsync();
 

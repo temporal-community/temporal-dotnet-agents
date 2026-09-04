@@ -77,7 +77,9 @@ public static class DurableAIJsonUtilities
         // serialization and trimming contract. DurableToolsetResolutionRequest carries its
         // absent-version compatibility behavior in an explicit converter, so it remains on the
         // source-generated path too.
-        options.TypeInfoResolverChain.Insert(0, DurableAIJsonContext.Default);
+        // Preserve MEAI's source-generated metadata for its own contracts (notably
+        // UsageDetails), then place durable metadata ahead of the reflection fallback.
+        options.TypeInfoResolverChain.Insert(1, DurableAIJsonContext.Default);
 
         // MEAI registers a string-enum converter in its shared options. These two values are
         // Temporal wire contracts, so their numeric representation must win in both reflection

@@ -351,29 +351,23 @@ public class DurableAgentBuilderTests
         Assert.Contains("MaxToolCallsPerTurn", ex.Message);
     }
 
-    [Fact]
-    public void ToRegistration_ThrowsWhenMaxEntryCountIsZero()
+    [Theory]
+    [InlineData(-10)]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void ToRegistration_ThrowsWhenMaxEntryCountCannotRetainACompleteTurn(int maxEntryCount)
     {
         // MaxEntryCount is nullable: null = inherit the worker-level default. A non-null,
-        // non-positive value is invalid.
+        // below-four value cannot retain a complete request/response turn.
         var builder = NewBuilder("ZeroEntries");
         builder.ChatClient = _ => new TestChatClient();
-        builder.MaxEntryCount = 0;
+        builder.MaxEntryCount = maxEntryCount;
 
         var ex = Assert.Throws<InvalidOperationException>(() => builder.ToRegistration());
         Assert.Contains("MaxEntryCount", ex.Message);
         Assert.Contains("ZeroEntries", ex.Message);
-    }
-
-    [Fact]
-    public void ToRegistration_ThrowsWhenMaxEntryCountIsNegative()
-    {
-        var builder = NewBuilder("NegEntries");
-        builder.ChatClient = _ => new TestChatClient();
-        builder.MaxEntryCount = -10;
-
-        var ex = Assert.Throws<InvalidOperationException>(() => builder.ToRegistration());
-        Assert.Contains("MaxEntryCount", ex.Message);
     }
 
     [Fact]
@@ -390,14 +384,14 @@ public class DurableAgentBuilderTests
     }
 
     [Fact]
-    public void ToRegistration_AcceptsPositiveMaxEntryCount()
+    public void ToRegistration_AcceptsMinimumValidMaxEntryCount()
     {
         var builder = NewBuilder("PosEntries");
         builder.ChatClient = _ => new TestChatClient();
-        builder.MaxEntryCount = 1;
+        builder.MaxEntryCount = 4;
 
         var reg = builder.ToRegistration(); // Should not throw.
-        Assert.Equal(1, reg.MaxEntryCount);
+        Assert.Equal(4, reg.MaxEntryCount);
     }
 
     // ── Test helpers ────────────────────────────────────────────────────

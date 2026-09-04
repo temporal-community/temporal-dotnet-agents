@@ -99,6 +99,10 @@ builder.Services
     .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
 ```
 
+At worker startup, `AddDurableAI()` validates that the registered client can preserve durable AI
+payloads. A manually connected client with an incompatible converter fails before work begins;
+use `DurableAIDataConverter.Instance` or a converter that preserves the same payload contract.
+
 `AddDurableTool` and `AddDurableTools` contribute to one implicit worker-owned default toolset. The stock client request stays
 thin: it carries no implementation or schema. On a new session, the workflow schedules
 `ResolveDurableToolsets` once before `GetChatStep`; Temporal records the returned versioned manifest

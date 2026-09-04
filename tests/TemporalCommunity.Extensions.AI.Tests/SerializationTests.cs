@@ -166,6 +166,35 @@ public class SerializationTests
     }
 
     [Fact]
+    public void ChatResponse_UsageDetails_RoundTripsAllModalityCounters()
+    {
+        var response = new ChatResponse([new ChatMessage(ChatRole.Assistant, "Hello!")])
+        {
+            Usage = new UsageDetails
+            {
+                InputTokenCount = 10,
+                OutputTokenCount = 20,
+                TotalTokenCount = 30,
+                CachedInputTokenCount = 3,
+                ReasoningTokenCount = 7,
+                InputAudioTokenCount = 2,
+                InputTextTokenCount = 8,
+                OutputAudioTokenCount = 4,
+                OutputTextTokenCount = 16,
+            },
+        };
+
+        var json = JsonSerializer.Serialize(response, DurableAIJsonUtilities.DefaultOptions);
+        var usage = Assert.IsType<UsageDetails>(
+            JsonSerializer.Deserialize<ChatResponse>(json, DurableAIJsonUtilities.DefaultOptions)!.Usage);
+
+        Assert.Equal(2, usage.InputAudioTokenCount);
+        Assert.Equal(8, usage.InputTextTokenCount);
+        Assert.Equal(4, usage.OutputAudioTokenCount);
+        Assert.Equal(16, usage.OutputTextTokenCount);
+    }
+
+    [Fact]
     public void DurableChatStepResult_RoundTrip_PreservesFinishReasonAndCompletionReason()
     {
         var result = new DurableChatStepResult

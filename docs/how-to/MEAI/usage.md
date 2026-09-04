@@ -32,6 +32,10 @@ builder.Services
 });
 ```
 
+`AddDurableAI()` validates that the registered client can preserve durable AI payloads before the
+worker starts. A manual client with an incompatible converter fails at startup; configure
+`DurableAIDataConverter.Instance` (or a compatible converter with the same payload contract).
+
 `DurableAIDataConverter.Instance` remains uncompressed. For large histories, the optional bounded
 gzip codec requires an explicit shared converter and a decoder-first deployment; see
 [payload codecs](payload-codecs.md).
