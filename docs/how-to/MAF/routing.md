@@ -50,8 +50,9 @@ No special routing configuration needed — just register the agents:
 
 ```csharp
 services.AddChatClient(chatClient);
+services.AddTemporalClient("localhost:7233", "default");
 
-services.AddHostedTemporalWorker("localhost:7233", "default", "agents")
+services.AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("Classifier", agent =>
@@ -159,8 +160,9 @@ The workflow discovers available agents by calling an activity that queries `opt
 
 ```csharp
 services.AddChatClient(chatClient);
+services.AddTemporalClient("localhost:7233", "default");
 
-services.AddHostedTemporalWorker("localhost:7233", "default", "agents")
+services.AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         // Not a routable specialist — no Description set, so it is excluded from GetAgentDescriptors().

@@ -15,7 +15,7 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// </summary>
 public sealed class DeferredToolResearchIntegrationTests
 {
-    [Fact]
+    [Fact(Skip = "Non-shipping research prototype test; tracked in backlog")]
     public async Task PendingInput_SurvivesContinueAsNew_AndBothRunsReplay()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();

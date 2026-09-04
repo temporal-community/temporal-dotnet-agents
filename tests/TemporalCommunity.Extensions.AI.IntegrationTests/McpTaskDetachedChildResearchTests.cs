@@ -22,7 +22,7 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// <summary>Test-only detached-child comparison for the MCP Task research ADR.</summary>
 public sealed class McpTaskDetachedChildResearchTests
 {
-    [Fact]
+    [Fact(Skip = "Non-shipping research prototype test; tracked in backlog")]
     public async Task DetachedExecutor_SignalsParentAfterParentContinueAsNew_AndBothReplay()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();

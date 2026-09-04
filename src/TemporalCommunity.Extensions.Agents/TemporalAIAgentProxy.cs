@@ -3,6 +3,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
@@ -67,6 +68,13 @@ internal class TemporalAIAgentProxy(
         AgentRunOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        if (Workflow.InWorkflow)
+        {
+            throw new InvalidOperationException(
+                "TemporalAIAgentProxy cannot be invoked from inside a Temporal workflow. " +
+                $"Use Workflow.GetTemporalAgent(\"{Name}\") to execute a sub-agent deterministically.");
+        }
+
         session ??= await CreateSessionAsync(cancellationToken).ConfigureAwait(false);
 
         if (session is not TemporalAgentSession temporalSession)

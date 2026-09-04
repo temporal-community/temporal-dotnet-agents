@@ -18,8 +18,10 @@ builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(sp 
         })
         .Build());
 
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "my-task-queue")
+    .AddHostedTemporalWorker("my-task-queue")
     .AddDurableAI();
 ```
 

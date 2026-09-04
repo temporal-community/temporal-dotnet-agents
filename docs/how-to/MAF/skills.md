@@ -47,8 +47,10 @@ All three are registered through `UseSkills(Action<SkillsBuilder>)` on `DurableA
 The example below registers a `SupportAgent` that scans a `./skills` directory for `SKILL.md` files.
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("SupportAgent", agent =>

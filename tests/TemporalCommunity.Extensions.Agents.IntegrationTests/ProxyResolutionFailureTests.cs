@@ -1,8 +1,12 @@
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Extensions.Hosting;
+using Temporalio.Worker;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
+using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode;
 using TemporalCommunity.Extensions.AI;
@@ -133,5 +137,70 @@ public class ProxyResolutionFailureTests
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
+    }
+
+    [Fact]
+    public async Task Proxy_InsideWorkflow_ThrowsInvalidOperationException()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var dummyClient = new DummyTemporalAgentClient();
+        var proxy = new TemporalAIAgentProxy("TestAgent", dummyClient);
+
+        var taskQueue = $"proxy-in-workflow-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddWorkflow<TestProxyInWorkflow>();
+        using var host = builder.Build();
+        await host.StartAsync();
+
+        var ex = await Assert.ThrowsAsync<Temporalio.Exceptions.WorkflowFailedException>(async () =>
+        {
+            await env.Client.ExecuteWorkflowAsync(
+                (TestProxyInWorkflow wf) => wf.ExecuteAsync(proxy),
+                new WorkflowOptions($"wf-{Guid.NewGuid():N}", taskQueue));
+        });
+        var innerEx = Assert.IsType<InvalidOperationException>(ex.InnerException);
+        Assert.Contains("TemporalAIAgentProxy cannot be invoked from inside a Temporal workflow", innerEx.Message);
+    }
+
+    private sealed class DummyTemporalAgentClient : ITemporalAgentClient
+    {
+        public Task<AgentResponse> SendAsync(TemporalAgentSessionId session, RunRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task RunAgentFireAndForgetAsync(TemporalAgentSessionId session, RunRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest?> GetPendingApprovalAsync(TemporalAgentSessionId session, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalResolutionResult> ResolveApprovalAsync(TemporalAgentSessionId session, TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision decision, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task RunAgentDelayedAsync(TemporalAgentSessionId session, RunRequest request, TimeSpan delay, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<Temporalio.Client.Schedules.ScheduleHandle> ScheduleAgentAsync(string agentName, string scheduleId, RunRequest request, Temporalio.Client.Schedules.ScheduleSpec spec, Temporalio.Client.Schedules.SchedulePolicy? policy = null, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Temporalio.Client.Schedules.ScheduleHandle GetAgentScheduleHandle(string scheduleId)
+            => throw new NotImplementedException();
+
+        public Task ShutdownAsync(TemporalAgentSessionId session, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+    }
+
+    [Temporalio.Workflows.Workflow]
+    internal sealed class TestProxyInWorkflow
+    {
+        [Temporalio.Workflows.WorkflowRun]
+        public async Task ExecuteAsync(TemporalAIAgentProxy proxy)
+        {
+            await ((AIAgent)proxy).RunAsync([new ChatMessage(ChatRole.User, "Hello")]);
+        }
     }
 }

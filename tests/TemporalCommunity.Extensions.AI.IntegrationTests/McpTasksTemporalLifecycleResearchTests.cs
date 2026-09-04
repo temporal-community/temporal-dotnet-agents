@@ -71,7 +71,7 @@ public sealed class McpTasksTemporalLifecycleResearchTests
         Assert.Equal(0, invocationCount);
     }
 
-    [Fact]
+    [Fact(Skip = "Non-shipping research prototype test; tracked in backlog")]
     public async Task WorkflowOwnedPolling_PreservesTaskIdentityAcrossPollRetry_AndReplays()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();

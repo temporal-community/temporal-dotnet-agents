@@ -3,7 +3,6 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
-using TemporalCommunity.Extensions.Agents.Workflows;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.Tests;

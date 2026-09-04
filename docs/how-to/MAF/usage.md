@@ -62,7 +62,7 @@ builder.Services
     .AddWorkflow<RefundWorkflow>();
 ```
 
-> **`ITemporalClient` prerequisite:** `AddTemporalAgents` requires `ITemporalClient` to be registered in DI before it is called. Call `services.AddTemporalClient(address, namespace)` when using the one-argument `AddHostedTemporalWorker(queue)` overload. The three-argument `AddHostedTemporalWorker(address, namespace, queue)` overload registers the client for you.
+> **`ITemporalClient` prerequisite:** `AddTemporalAgents` requires `ITemporalClient` to be registered in DI. While the three-argument `AddHostedTemporalWorker(address, namespace, queue)` overload configures a worker-internal client, it does not register `ITemporalClient` in DI. Always call `builder.Services.AddTemporalClient(address, namespace)` before `AddHostedTemporalWorker`.
 
 ### Continue from here
 
@@ -82,7 +82,7 @@ builder.Services
 | `Name` (read-only) | Case-insensitive agent name passed in to `AddDurableAgent`. |
 | `Description` | Used in `GetAgentDescriptors()` for routing prompts. Optional. |
 | `Instructions` | Agent system prompt. Library stamps onto every LLM call's `ChatOptions.Instructions`. Optional. |
-| `ChatClient` | **Required.** `Func<IServiceProvider, IChatClient>` invoked once at first dispatch. |
+| `ChatClient` | **Required.** `Func<IServiceProvider, IChatClient>` factory invoked at activity execution time to resolve the model's `IChatClient`. Throws `InvalidOperationException` if omitted. |
 | `ChatOptions` | LLM-call template (Temperature, ResponseFormat, MaxOutputTokens, etc.). `Tools` and `Instructions` set on this property are ignored. |
 | `AddTool(AIFunction tool, Action<DurableToolOptions>? configure = null)` | Registers a concrete `AIFunction`. Per-tool retry / timeout via `configure`. |
 | `AddTool(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure = null)` | DI-resolving tool factory. |
@@ -353,9 +353,10 @@ var chatClient = openAiClient.GetChatClient("gpt-4o-mini")
 //  the chat pipeline internally and tools are dispatched as separate Temporal activities.
 
 builder.Services.AddChatClient(chatClient);
+builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("MyAgent", agent =>
@@ -570,8 +571,10 @@ call `GetTemporalAgentProxy` directly against the host's service provider:
 
 ```csharp
 // Worker and caller in the same process
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("SupportAgent", agent =>
@@ -705,8 +708,10 @@ Both are non-nullable `TimeSpan` properties on `TemporalAgentsOptions` with the 
 to tune for slow models or long tool-call chains.
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         // Increase for slow models or long tool-call chains
@@ -957,8 +962,10 @@ automatically when the worker starts. If the schedule already exists (e.g., on s
 a warning is logged and the existing schedule is left untouched.
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("SummaryAgent", agent =>
@@ -1161,8 +1168,10 @@ Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activ
 `agent.MaxToolCallsPerTurn` (default `20` when not set) caps step-loop iterations per single agent turn. The value propagates from the agent's registration into session-based workflows, scheduled jobs, and sub-agent calls via `GetTemporalAgent()` — you configure it once on the builder and it takes effect everywhere. When exceeded, the workflow returns a structured "iteration cap exceeded" assistant message rather than letting workflow history grow unbounded.
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("SupportAgent", agent =>
