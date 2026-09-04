@@ -18,15 +18,11 @@ namespace TemporalCommunity.Extensions.AI;
 /// </list>
 /// </para>
 /// <para>
-/// <b>Streaming inside a Temporal workflow is buffered.</b> When
-/// <see cref="GetStreamingResponseAsync"/> is called from workflow context, the implementation
-/// executes the non-streaming activity and replays the complete response as a sequence of
-/// synthetic <see cref="ChatResponseUpdate"/> chunks. True token-by-token streaming is not
-/// possible across the workflow/activity boundary because Temporal activities return a single
-/// serialized result. If per-token latency is not a requirement, prefer
-/// <see cref="GetResponseAsync"/> in workflow context — it is semantically equivalent and
-/// avoids the overhead of converting a <see cref="ChatResponse"/> to updates. Outside a
-/// workflow the real streaming path is preserved.
+/// <b>Streaming is not supported inside a Temporal workflow.</b> Temporal activities return a
+/// single serialized result, so token-by-token updates cannot cross the workflow/activity
+/// boundary. <see cref="GetStreamingResponseAsync"/> therefore fails when its async enumerator is
+/// advanced in workflow context. Use <see cref="GetResponseAsync"/> there; outside a workflow the
+/// real streaming path is preserved.
 /// </para>
 /// <para>
 /// <b>Limitation:</b> <see cref="ChatOptions.RawRepresentationFactory"/> is not serializable and
@@ -75,51 +71,29 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
 
     /// <inheritdoc/>
     /// <remarks>
-    /// <b>Inside a Temporal workflow, streaming is buffered.</b> The activity is executed as a
-    /// non-streaming call and the complete <see cref="ChatResponse"/> is then converted to a
-    /// sequence of <see cref="ChatResponseUpdate"/> objects. Callers will observe a deferred
-    /// batch — all updates arrive together after the activity completes — rather than
-    /// token-by-token updates. This is an inherent constraint of the Temporal activity model,
-    /// which serializes a single result value across the workflow/activity boundary.
-    /// <para>
-    /// Outside a workflow the real streaming path is preserved and updates are forwarded
-    /// directly from the inner <see cref="IChatClient"/>.
-    /// </para>
+    /// Inside a Temporal workflow, advancing the returned async enumerator throws
+    /// <see cref="NotSupportedException"/>. Use <see cref="GetResponseAsync"/> instead. Outside a
+    /// workflow, updates are forwarded directly from the inner <see cref="IChatClient"/>.
     /// </remarks>
     public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        if (!Workflow.InWorkflow)
+        if (Workflow.InWorkflow)
         {
-            // Outside a workflow — real streaming is preserved. Pass through directly,
-            // stripping Temporal-internal keys that the inner client does not understand.
-            await foreach (var update in base.GetStreamingResponseAsync(
-                messages,
-                Internal.ChatOptionsSanitizer.PrepareForProvider(options),
-                cancellationToken)
-                .ConfigureAwait(false))
-            {
-                yield return update;
-            }
-            yield break;
+            throw new NotSupportedException(
+                "Streaming responses are not supported inside a Temporal workflow because " +
+                "Temporal activities return a single result. Use GetResponseAsync instead.");
         }
 
-        // Inside a workflow — buffered strategy: execute as a non-streaming activity, then
-        // replay the full response as a synthetic ChatResponseUpdate sequence.
-        // Temporal activities return a single serialized result; true token-by-token streaming
-        // across the workflow/activity boundary is not supported.
-        var input = CreateInput(messages, options);
-
-        // Keep this continuation on Temporal's workflow task scheduler so subsequent
-        // workflow commands are issued through the active workflow context.
-        var response = await Workflow.ExecuteActivityAsync(
-            (DurableChatActivities a) => a.GetResponseAsync(input),
-            CreateActivityOptions(options));
-
-        // Convert the buffered response to streaming updates.
-        foreach (var update in response.ToChatResponseUpdates())
+        // Outside a workflow — real streaming is preserved. Pass through directly, stripping
+        // Temporal-internal keys that the inner client does not understand.
+        await foreach (var update in base.GetStreamingResponseAsync(
+            messages,
+            Internal.ChatOptionsSanitizer.PrepareForProvider(options),
+            cancellationToken)
+            .ConfigureAwait(false))
         {
             yield return update;
         }
@@ -176,7 +150,9 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
         var maxRetry = chatOptions.GetMaxRetryAttempts();
         if (maxRetry.HasValue)
         {
-            activityOptions.RetryPolicy = new Temporalio.Common.RetryPolicy
+            // Keep every resolved policy setting (notably the bounded maximum interval) while
+            // changing only the per-request attempt limit.
+            activityOptions.RetryPolicy = activityOptions.RetryPolicy with
             {
                 MaximumAttempts = maxRetry.Value,
             };

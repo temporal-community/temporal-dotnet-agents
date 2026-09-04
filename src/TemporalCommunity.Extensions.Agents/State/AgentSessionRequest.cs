@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Workflows;
@@ -22,7 +23,22 @@ namespace TemporalCommunity.Extensions.Agents.State;
 public sealed class AgentSessionRequest : DurableSessionRequest
 {
     /// <summary>Gets whether durable tool calls are enabled for this turn.</summary>
+    [JsonIgnore]
     public bool EnableToolCalls { get; init; } = true;
+
+    [JsonInclude]
+    [JsonPropertyName("enableToolCalls")]
+    internal bool? SerializedEnableToolCalls
+    {
+        get => this.EnableToolCalls;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.EnableToolCalls = value.Value;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the registered tool names exposed for this turn. A null value exposes all registered

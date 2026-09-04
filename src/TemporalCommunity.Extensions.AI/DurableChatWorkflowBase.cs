@@ -334,11 +334,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             //    is stored in Temporal history and survives replay deterministically. The key is
             //    serialized and travels on the wire; the delegate never does.
             //
-            // 2. DefaultBoundedTrim (C-2 fallback) — no reducer configured. Keeps the most-recent
-            //    Max(1, MaxEntryCount/2) entries so the fresh run has headroom before the next CAN.
-            //    Pure and order-preserving (TakeLast) — replay-safe. External-store mode (MAF only)
-            //    nulls CarriedHistory in its CreateContinueAsNewException override, making this a
-            //    harmless no-op there.
+            // 2. DefaultBoundedTrim (C-2 fallback) — no reducer configured. Keeps a recent suffix
+            //    with headroom before the next CAN, but never splits a known adjacent request/response
+            //    pair at its leading boundary. Pure and order-preserving — replay-safe. External-store
+            //    mode (MAF only) nulls CarriedHistory in its CreateContinueAsNewException override,
+            //    making this a harmless no-op there.
             List<DurableSessionEntry> carriedHistory;
             if (input.HistoryReducerKey is not null)
             {
@@ -412,12 +412,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// new run has headroom before the next CAN.
     /// </para>
     /// <para>
-    /// Target = half of <paramref name="maxEntryCount"/> (floored, minimum 1) — a conservative
-    /// default that leaves room for several turns and avoids trimming on every turn near the cap.
-    /// When the history is already at or below the target it is returned unchanged (so an
-    /// SDK-suggested CAN with a small history is not perturbed). Pure and order-preserving
-    /// (<see cref="System.Linq.Enumerable.TakeLast{TSource}"/> over the existing entry order) — no
-    /// wall-clock, no <see cref="Workflow.NewGuid"/> — hence replay-safe.
+    /// The target is half of <paramref name="maxEntryCount"/> (floored, minimum 1) — a
+    /// conservative default that leaves room for several turns and avoids trimming on every turn
+    /// near the cap. When that entry boundary would begin with a response whose immediately
+    /// preceding entry is its matching request, the response is also omitted. This retains only
+    /// complete request/response turns in the carried suffix rather than presenting an orphaned
+    /// response as the first context entry. When the history is already at or below the target it
+    /// is returned unchanged (so an SDK-suggested CAN with a small history is not perturbed).
+    /// Pure and order-preserving — no wall-clock, no <see cref="Workflow.NewGuid"/> — hence
+    /// replay-safe.
     /// </para>
     /// </remarks>
     private static List<DurableSessionEntry> DefaultBoundedTrim(
@@ -435,7 +438,23 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             return history;
         }
 
-        return history.TakeLast(target).ToList();
+        var firstRetainedIndex = history.Count - target;
+        var trimmed = history.TakeLast(target).ToList();
+
+        // RunTurnAsync appends a completed turn as an adjacent request/response pair sharing a
+        // CorrelationId. When an odd target lands between that pair, retaining the response alone
+        // gives the next run context that it cannot attribute to a request. Do not infer pairing
+        // for unrelated or legacy entries: only remove the response when the omitted immediate
+        // predecessor proves the boundary split a known pair.
+        if (firstRetainedIndex > 0 &&
+            history[firstRetainedIndex - 1] is DurableSessionRequest request &&
+            trimmed[0] is DurableSessionResponse response &&
+            string.Equals(request.CorrelationId, response.CorrelationId, StringComparison.Ordinal))
+        {
+            trimmed.RemoveAt(0);
+        }
+
+        return trimmed;
     }
 
     /// <summary>

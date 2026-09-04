@@ -63,9 +63,13 @@ public static class TemporalChatOptionsExtensions
     /// Mutates <see cref="ChatOptions.AdditionalProperties"/> on <paramref name="options"/> in-place
     /// and returns the same instance. Clone first if the original must be preserved.
     /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown when <paramref name="maxAttempts"/> is zero or negative.
+    /// </exception>
     public static ChatOptions WithMaxRetryAttempts(this ChatOptions options, int maxAttempts)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ValidateMaxRetryAttempts(maxAttempts, nameof(maxAttempts));
         options.AdditionalProperties ??= [];
         options.AdditionalProperties[MaxRetryAttemptsKey] = maxAttempts.ToString();
         return options;
@@ -152,12 +156,12 @@ public static class TemporalChatOptionsExtensions
             return null;
 
         if (TryGetString(value) is { } s && int.TryParse(s, out var v))
-            return v;
+            return ValidateMaxRetryAttempts(v, MaxRetryAttemptsKey);
         if (value is int direct) // backward compat
-            return direct;
+            return ValidateMaxRetryAttempts(direct, MaxRetryAttemptsKey);
         if (value is JsonElement { ValueKind: JsonValueKind.Number } element &&
             element.TryGetInt32(out var jsonValue))
-            return jsonValue;
+            return ValidateMaxRetryAttempts(jsonValue, MaxRetryAttemptsKey);
 
         return null;
     }
@@ -215,4 +219,17 @@ public static class TemporalChatOptionsExtensions
         JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
         _ => null,
     };
+
+    private static int ValidateMaxRetryAttempts(int maxAttempts, string parameterName)
+    {
+        if (maxAttempts <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                maxAttempts,
+                "Temporal retry maximum attempts must be greater than zero.");
+        }
+
+        return maxAttempts;
+    }
 }

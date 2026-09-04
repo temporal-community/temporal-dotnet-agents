@@ -37,7 +37,7 @@ public static class ServiceCollectionExtensions
     public static AIAgent GetTemporalAgentProxy(this IServiceProvider services, string name)
     {
         return services.GetKeyedService<AIAgent>(name)
-            ?? throw new KeyNotFoundException($"A Temporal agent with name '{name}' has not been registered.");
+            ?? throw new AgentNotRegisteredException(name);
     }
 
     /// <summary>

@@ -19,8 +19,10 @@ namespace TemporalCommunity.Extensions.Agents;
 /// Worker-level default properties on this class use the <c>Default*</c> prefix
 /// (e.g. <c>DefaultActivityTimeout</c>) to distinguish them from per-agent overrides on
 /// <see cref="DurableAgentBuilder"/>, which use unprefixed names. The MEAI counterpart
-/// <see cref="DurableExecutionOptions"/> uses unprefixed names throughout.
-/// This asymmetry is intentional — do not rename properties on either class.
+/// <see cref="DurableExecutionOptions"/> configures one managed-session model rather than
+/// worker defaults inherited by named agents; it uses ordinary properties for execution values and
+/// <c>Default*</c> only where a configured selector is itself a default. Do not infer an API
+/// equivalence between the two option types from property names alone.
 /// </remarks>
 /// <seealso cref="DurableExecutionOptions"/>
 public sealed class TemporalAgentsOptions

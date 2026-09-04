@@ -20,8 +20,8 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 ///
 /// <list type="bullet">
 /// <item><b>No-reducer fallback:</b> with a low <c>MaxEntryCount</c> and no reducer, a count-driven
-/// CAN must carry a BOUNDED history (DefaultBoundedTrim ~= MaxEntryCount/2, strictly below the
-/// trigger) so the next turn does NOT immediately re-trigger CAN — no back-to-back CAN loop.</item>
+/// CAN must carry a BOUNDED history (a recent, complete-turn suffix strictly below the trigger)
+/// so the next turn does NOT immediately re-trigger CAN — no back-to-back CAN loop.</item>
 /// <item><b>Reducer-configured path unchanged:</b> a sentinel reducer (keep-last-1) across CAN carries
 /// the reduced shape — the original C-2 intent.</item>
 /// </list>
@@ -44,7 +44,7 @@ public class HistoryReducerAtCanTests
         await using var env = await TestEnvironmentHelper.StartLocalAsync();
         env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
 
-        const int maxEntryCount = 6; // trim target = 3; each turn adds 2 entries (req + resp).
+        const int maxEntryCount = 6; // raw trim target = 3; paired fallback retains the final 2 entries.
         var scripted = new ScriptedChatClient(
             Enumerable.Range(1, 40).Select(i => new ChatResponse(new ChatMessage(ChatRole.Assistant, $"r{i}"))));
 
@@ -73,7 +73,7 @@ public class HistoryReducerAtCanTests
             _output.WriteLine($"CAN fired: {initialRunId} -> {runAfterCan}");
 
             // After CAN, the carried history must be bounded strictly below MaxEntryCount
-            // (DefaultBoundedTrim target = MaxEntryCount/2 = 3).
+            // (DefaultBoundedTrim begins from MaxEntryCount/2 = 3 but preserves complete turns).
             await Task.Delay(TimeSpan.FromSeconds(1));
             var carried = await handle.QueryAsync<AgentWorkflow, IReadOnlyList<DurableSessionEntry>>(
                 wf => wf.GetHistory());
@@ -81,7 +81,7 @@ public class HistoryReducerAtCanTests
             Assert.True(carried.Count < maxEntryCount,
                 $"Carried history ({carried.Count}) must be strictly below MaxEntryCount ({maxEntryCount}).");
             Assert.True(carried.Count <= maxEntryCount / 2 + 1,
-                $"Carried history ({carried.Count}) should be ~MaxEntryCount/2 (DefaultBoundedTrim).");
+                $"Carried history ({carried.Count}) should remain a small complete-turn suffix.");
 
             // NO back-to-back CAN: run one more turn and confirm the run id does NOT immediately
             // change again (the fresh run had headroom; one turn must not re-trigger CAN).
@@ -104,7 +104,7 @@ public class HistoryReducerAtCanTests
     /// Reproduces the [JsonIgnore] silent-failure bug: a keep-last-1 reducer configured via
     /// <c>HistoryReducerKey</c> must produce exactly 1 carried entry after CAN.
     /// Before the fix the reducer was silently stripped on the wire and DefaultBoundedTrim
-    /// produced 3 entries (<c>maxEntryCount/2</c>) instead.
+    /// produced the final completed turn instead.
     /// </summary>
     [Fact]
     public async Task ConfiguredReducer_ViaKey_AcrossCan_CarriesExactlyOneEntry()
@@ -171,7 +171,8 @@ public class HistoryReducerAtCanTests
             //
             // The deterministic discriminator is the FIRST carried entry — the reduced base:
             //   keep-last-1 reducer → carried[0] is the single last pre-CAN response ("r3")
-            //   DefaultBoundedTrim  → carried[0] would be "r2" (TakeLast(maxEntryCount/2)=3 of
+            //   DefaultBoundedTrim  → carried[0] would be the final retained completed turn (the raw
+            //                         TakeLast(maxEntryCount/2)=3 suffix is narrowed at its pair boundary)
             //                         [req1,r1,req2,r2,req3,r3] starts at r2)
             // CAN fires deterministically at history count == maxEntryCount (6), i.e. after turn 3,
             // so the reduced entry is reliably "r3".

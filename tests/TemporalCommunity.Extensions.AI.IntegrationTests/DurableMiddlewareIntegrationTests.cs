@@ -29,11 +29,11 @@ public class DurableMiddlewareIntegrationTests
         AssertDirectChatWorkflowAsync(streaming: false);
 
     /// <summary>
-    /// Verifies the public direct-chat middleware resumes on Temporal's workflow scheduler
-    /// after buffered streaming enumeration and can schedule a subsequent workflow timer.
+    /// Verifies workflow streaming fails when the async iterator advances, before it schedules a
+    /// model activity. This avoids silently changing a streaming request into a buffered one.
     /// </summary>
     [Fact]
-    public Task DurableChatClientWorkflow_BufferedStreaming_CompletesAfterActivity() =>
+    public Task DurableChatClientWorkflow_Streaming_FailsAtEnumeratorAdvance() =>
         AssertDirectChatWorkflowAsync(streaming: true);
 
     /// <summary>
@@ -394,10 +394,17 @@ public class DurableMiddlewareIntegrationTests
                     DurableChatClientWorkflow.TaskQueue));
 
             var result = await handle.GetResultAsync().WaitAsync(TimeSpan.FromSeconds(15));
-            Assert.Equal(SchedulerProbeChatClient.ResponseText, result);
+            if (streaming)
+            {
+                Assert.StartsWith("Streaming responses are not supported inside a Temporal workflow", result);
+            }
+            else
+            {
+                Assert.Equal(SchedulerProbeChatClient.ResponseText, result);
+            }
 
             Assert.Equal(
-                1,
+                streaming ? 0 : 1,
                 await WorkflowHistoryAssertions.CountActivityScheduledAsync(
                     handle,
                     "TemporalCommunity.Extensions.AI.GetResponse"));

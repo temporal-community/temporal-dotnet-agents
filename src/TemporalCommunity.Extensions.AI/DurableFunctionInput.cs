@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace TemporalCommunity.Extensions.AI;
 
@@ -7,6 +8,7 @@ namespace TemporalCommunity.Extensions.AI;
 /// </summary>
 internal sealed record class DurableFunctionInput
 {
+
     /// <summary>
     /// The name of the <see cref="Microsoft.Extensions.AI.AIFunction"/> to invoke.
     /// </summary>
@@ -33,7 +35,22 @@ internal sealed record class DurableFunctionInput
 
     public JsonElement? TurnState { get; set; }
 
+    [JsonIgnore]
     public DurableToolDispatchMode DispatchMode { get; init; } = DurableToolDispatchMode.Parallel;
+
+    [JsonInclude]
+    [JsonPropertyName("dispatchMode")]
+    internal DurableToolDispatchMode? SerializedDispatchMode
+    {
+        get => this.DispatchMode;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.DispatchMode = value.Value;
+            }
+        }
+    }
 
     public string? ToolCallId { get; init; }
 

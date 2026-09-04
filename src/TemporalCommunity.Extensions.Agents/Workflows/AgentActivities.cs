@@ -641,7 +641,7 @@ internal sealed class AgentActivities(
             ChatOptions = null,
             // Q1 (β): keep our explicit AIContextProvider loop inside RunDurableAgentStepAsync
             // rather than delegating to MAF's ChatClientAgent. Setting null here suppresses MAF's
-            // own provider lifecycle so providers fire exactly once per turn from our loop.
+            // own provider lifecycle so providers fire once per LLM step from our loop.
             AIContextProviders = null,
             UseProvidedChatClientAsIs = true,
         };

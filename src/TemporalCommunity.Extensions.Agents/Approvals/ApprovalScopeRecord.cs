@@ -6,8 +6,14 @@ namespace TemporalCommunity.Extensions.Agents.Approvals;
 /// </summary>
 public sealed class ApprovalScopeRecord
 {
+    private string grantId = string.Empty;
+
     /// <summary>Stable identifier used for explicit revocation.</summary>
-    public string GrantId { get; init; } = string.Empty;
+    public string GrantId
+    {
+        get => this.grantId;
+        init => this.grantId = value ?? string.Empty;
+    }
 
     /// <summary>The tool name this scope covers.</summary>
     public required string ToolName { get; init; }

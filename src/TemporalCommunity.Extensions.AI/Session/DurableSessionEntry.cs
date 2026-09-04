@@ -20,6 +20,8 @@ namespace TemporalCommunity.Extensions.AI.Session;
 [JsonDerivedType(typeof(CompactionMarkerEntry), "compaction-marker")]
 public abstract class DurableSessionEntry
 {
+    private IReadOnlyList<ChatMessage> messages = [];
+
     /// <summary>
     /// Per-turn correlation identifier used for log/trace threading and for matching
     /// request entries to response entries within a session.
@@ -38,7 +40,11 @@ public abstract class DurableSessionEntry
     /// typically the user-supplied prompt(s); for response entries it is the model's
     /// reply (which may include tool-call / tool-result content turns).
     /// </summary>
-    public IReadOnlyList<ChatMessage> Messages { get; init; } = [];
+    public IReadOnlyList<ChatMessage> Messages
+    {
+        get => this.messages;
+        init => this.messages = value ?? [];
+    }
 
     /// <summary>
     /// Captures additional JSON properties that round-trip through serialization but

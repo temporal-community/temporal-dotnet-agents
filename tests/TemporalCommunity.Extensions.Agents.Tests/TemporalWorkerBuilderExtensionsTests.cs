@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
 using TemporalCommunity.Extensions.Agents.Workflows;
+using TemporalCommunity.Extensions.Agents.Internal;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.Tests;
@@ -27,6 +28,22 @@ public class TemporalWorkerBuilderExtensionsTests
         var provider = services.BuildServiceProvider();
         var options = provider.GetRequiredService<TemporalAgentsOptions>();
         Assert.NotNull(options);
+    }
+
+    [Fact]
+    public void AddTemporalAgents_RegistersDataConverterValidator()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var builder = services.AddHostedTemporalWorker("test-task-queue");
+
+        builder.AddTemporalAgents(opts => opts.AddDurableAgent("test-agent", ConfigureWithChatClient));
+
+        var provider = services.BuildServiceProvider();
+        var postConfigurators = provider.GetServices<IPostConfigureOptions<TemporalWorkerServiceOptions>>();
+
+        Assert.Contains(postConfigurators, configurator => configurator is TemporalAgentDataConverterValidator);
     }
 
     [Fact]

@@ -26,7 +26,19 @@ public static class TemporalAgentDataConverter
     /// A <see cref="DataConverter"/> whose JSON serializer uses
     /// <see cref="TemporalAgentJsonUtilities.DefaultOptions"/>.
     /// </summary>
-    public static DataConverter Instance { get; } = new(
+    public static DataConverter Instance { get; } = CreateDataConverter();
+
+    /// <summary>
+    /// Creates a data converter that preserves both MEAI and MAF session contracts and optionally
+    /// applies a caller-supplied Temporal payload codec.
+    /// </summary>
+    /// <param name="payloadCodec">
+    /// Optional payload codec. The caller must configure compatible decoding on every client,
+    /// worker, replayer, and operational reader that accesses the encoded histories.
+    /// </param>
+    /// <returns>A newly-created compatible converter.</returns>
+    public static DataConverter CreateDataConverter(IPayloadCodec? payloadCodec = null) => new(
         new DefaultPayloadConverter(TemporalAgentJsonUtilities.DefaultOptions),
-        new DefaultFailureConverter());
+        new DefaultFailureConverter(),
+        payloadCodec);
 }

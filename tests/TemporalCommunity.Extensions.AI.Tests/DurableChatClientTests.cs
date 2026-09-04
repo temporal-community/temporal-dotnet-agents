@@ -104,6 +104,48 @@ public class DurableChatClientTests
     }
 
     [Fact]
+    public void CreateActivityOptions_RetryOverride_PreservesResolvedPolicySettings()
+    {
+        var innerClient = A.Fake<IChatClient>();
+        var retryPolicy = new Temporalio.Common.RetryPolicy
+        {
+            InitialInterval = TimeSpan.FromSeconds(3),
+            BackoffCoefficient = 1.5f,
+            MaximumInterval = TimeSpan.FromSeconds(9),
+            MaximumAttempts = 8,
+            NonRetryableErrorTypes = ["fatal"],
+        };
+        var client = new DurableChatClient(
+            innerClient,
+            new DurableExecutionOptions { TaskQueue = "test", RetryPolicy = retryPolicy });
+
+        var activityOptions = client.CreateActivityOptions(new ChatOptions().WithMaxRetryAttempts(2));
+
+        Assert.NotNull(activityOptions.RetryPolicy);
+        Assert.NotSame(retryPolicy, activityOptions.RetryPolicy);
+        Assert.Equal(2, activityOptions.RetryPolicy.MaximumAttempts);
+        Assert.Equal(retryPolicy.InitialInterval, activityOptions.RetryPolicy.InitialInterval);
+        Assert.Equal(retryPolicy.BackoffCoefficient, activityOptions.RetryPolicy.BackoffCoefficient);
+        Assert.Equal(retryPolicy.MaximumInterval, activityOptions.RetryPolicy.MaximumInterval);
+        Assert.Equal(retryPolicy.NonRetryableErrorTypes, activityOptions.RetryPolicy.NonRetryableErrorTypes);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void CreateActivityOptions_RejectsNonPositiveRawRetryOverride(int maxAttempts)
+    {
+        var innerClient = A.Fake<IChatClient>();
+        var client = new DurableChatClient(innerClient, new DurableExecutionOptions { TaskQueue = "test" });
+        var options = new ChatOptions { AdditionalProperties = [] };
+        options.AdditionalProperties[TemporalChatOptionsExtensions.MaxRetryAttemptsKey] = maxAttempts;
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => client.CreateActivityOptions(options));
+
+        Assert.Equal(TemporalChatOptionsExtensions.MaxRetryAttemptsKey, exception.ParamName);
+    }
+
+    [Fact]
     public async Task GetResponseAsync_StripsTemporalKeysBeforeForwardingToInner()
     {
         ChatOptions? capturedOptions = null;

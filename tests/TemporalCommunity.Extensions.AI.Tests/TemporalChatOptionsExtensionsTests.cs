@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using System.Text.Json;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -50,6 +51,44 @@ public class TemporalChatOptionsExtensionsTests
 
         Assert.NotNull(options.AdditionalProperties);
         Assert.Equal(5, options.GetMaxRetryAttempts());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void WithMaxRetryAttempts_RejectsNonPositiveValues(int maxAttempts)
+    {
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(
+            () => new ChatOptions().WithMaxRetryAttempts(maxAttempts));
+
+        Assert.Equal("maxAttempts", exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    public void GetMaxRetryAttempts_RejectsNonPositiveRawStringValues(string rawValue)
+    {
+        var options = new ChatOptions();
+        options.AdditionalProperties ??= [];
+        options.AdditionalProperties[TemporalChatOptionsExtensions.MaxRetryAttemptsKey] = rawValue;
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => options.GetMaxRetryAttempts());
+        Assert.Equal(TemporalChatOptionsExtensions.MaxRetryAttemptsKey, exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    public void GetMaxRetryAttempts_RejectsNonPositiveRawJsonValues(string rawValue)
+    {
+        using var document = JsonDocument.Parse(rawValue);
+        var options = new ChatOptions();
+        options.AdditionalProperties ??= [];
+        options.AdditionalProperties[TemporalChatOptionsExtensions.MaxRetryAttemptsKey] = document.RootElement.Clone();
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() => options.GetMaxRetryAttempts());
+        Assert.Equal(TemporalChatOptionsExtensions.MaxRetryAttemptsKey, exception.ParamName);
     }
 
     [Fact]

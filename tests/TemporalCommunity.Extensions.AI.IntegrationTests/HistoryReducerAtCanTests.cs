@@ -22,8 +22,8 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// <para>
 /// This test uses a keep-last-1 sentinel reducer: if the reducer fires, the carried
 /// history after CAN must have exactly 1 entry (ignoring any turns added after the CAN
-/// but before the query). With <c>maxEntryCount = 6</c>, <c>DefaultBoundedTrim</c> would
-/// produce 3 entries — so the assertion <c>carried.Count == 1</c> cleanly distinguishes
+/// but before the query). With <c>maxEntryCount = 6</c>, <c>DefaultBoundedTrim</c> retains the
+/// final complete request/response pair — so the assertion <c>carried.Count == 1</c> cleanly distinguishes
 /// reducer-fired from reducer-dropped.
 /// </para>
 /// </summary>
@@ -37,12 +37,12 @@ public class HistoryReducerAtCanTests
     /// <summary>
     /// A keep-last-1 reducer fires at CAN and the carried history has exactly 1 entry.
     /// Before the fix this fails because the reducer was silently stripped on the wire
-    /// and DefaultBoundedTrim produced 3 entries instead.
+    /// and DefaultBoundedTrim produced the final completed turn instead.
     /// </summary>
     [Fact]
     public async Task ConfiguredReducer_ViaKey_AcrossCan_CarriesExactlyOneEntry()
     {
-        const int maxEntryCount = 6; // DefaultBoundedTrim would produce 3; reducer should produce 1.
+        const int maxEntryCount = 6; // DefaultBoundedTrim retains the final pair; reducer produces 1.
         const string reducerKey = "keep-last-1-test";
 
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
@@ -118,8 +118,8 @@ public class HistoryReducerAtCanTests
             //
             // The deterministic discriminator is the FIRST carried entry — the reduced base:
             //   keep-last-1 reducer  → carried[0] is the single last pre-CAN response ("response 3")
-            //   DefaultBoundedTrim   → carried[0] would be "response 2" (TakeLast(maxEntryCount/2)=3
-            //                          of [req1,resp1,req2,resp2,req3,resp3] starts at resp2)
+            //   DefaultBoundedTrim   → carried[0] would be "request 3" (the raw three-entry suffix
+            //                          would split req2/resp2, so the fallback drops response 2)
             // CAN fires deterministically at history count == maxEntryCount (6) i.e. after turn 3,
             // so the reduced entry is reliably "response 3".
             Assert.NotEmpty(carried);

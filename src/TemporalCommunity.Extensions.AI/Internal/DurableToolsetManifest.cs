@@ -1,10 +1,12 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Exceptions;
 using Temporalio.Workflows;
 
 namespace TemporalCommunity.Extensions.AI.Internal;
 
+[JsonConverter(typeof(DurableToolsetResolutionRequestJsonConverter))]
 internal sealed record DurableToolsetResolutionRequest
 {
     internal const int CurrentVersion = 1;

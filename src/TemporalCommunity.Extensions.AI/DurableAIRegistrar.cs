@@ -83,6 +83,12 @@ internal static class DurableAIRegistrar
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             DurableAIWorkerClientConfigurator>());
 
+        // A manually registered ITemporalClient bypasses the AddTemporalClient configurator.
+        // Verify its converter at worker startup rather than allowing silent history data loss.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<TemporalWorkerServiceOptions>,
+            Internal.DurableAIDataConverterValidator>());
+
         // Startup check for the MEAI mixed-pattern misconfiguration.
         // Detects DurableFunctionRegistry.Count > 0 (durable tools registered) +
         // FunctionInvokingChatClient in the IChatClient chain (.UseFunctionInvocation()

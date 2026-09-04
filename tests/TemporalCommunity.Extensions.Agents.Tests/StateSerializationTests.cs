@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.Agents.Scheduling;
@@ -77,6 +78,46 @@ public class StateSerializationTests
 
         Assert.False(stateRequest.EnableToolCalls);
         Assert.Equal(["alpha"], stateRequest.EnableToolNames);
+    }
+
+    [Fact]
+    public void AgentSessionRequest_AbsentEnableToolCalls_PreservesTrueDefault()
+    {
+        var restored = JsonSerializer.Deserialize<AgentSessionRequest>(
+            "{\"correlationId\":\"correlation\",\"createdAt\":\"2026-01-01T00:00:00+00:00\"}",
+            s_opts);
+
+        Assert.NotNull(restored);
+        Assert.True(restored.EnableToolCalls);
+
+        var disabled = JsonSerializer.Deserialize<AgentSessionRequest>(
+            "{\"correlationId\":\"correlation\",\"createdAt\":\"2026-01-01T00:00:00+00:00\",\"enableToolCalls\":false}",
+            s_opts);
+
+        Assert.NotNull(disabled);
+        Assert.False(disabled.EnableToolCalls);
+    }
+
+    [Fact]
+    public void DurableSessionEntry_AbsentMessages_PreservesEmptyList()
+    {
+        var restored = JsonSerializer.Deserialize<DurableSessionEntry>(
+            "{\"$type\":\"ai_request\",\"correlationId\":\"correlation\",\"createdAt\":\"2026-01-01T00:00:00+00:00\"}",
+            s_opts);
+
+        Assert.NotNull(restored);
+        Assert.Empty(restored.Messages);
+    }
+
+    [Fact]
+    public void ApprovalScopeRecord_AbsentGrantId_PreservesEmptyDefault()
+    {
+        var restored = JsonSerializer.Deserialize<ApprovalScopeRecord>(
+            "{\"toolName\":\"write\",\"grantedAt\":\"2026-01-01T00:00:00+00:00\",\"expiresAt\":\"2026-01-02T00:00:00+00:00\",\"originatingRequestId\":\"request\"}",
+            s_opts);
+
+        Assert.NotNull(restored);
+        Assert.Equal(string.Empty, restored.GrantId);
     }
 
     // ─── Polymorphic type discriminators ────────────────────────────────────

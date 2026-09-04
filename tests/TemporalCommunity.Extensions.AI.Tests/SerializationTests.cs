@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Session;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -116,6 +117,24 @@ public class SerializationTests
     }
 
     [Fact]
+    public void DurableFunctionInput_AbsentDispatchMode_PreservesParallelDefault()
+    {
+        var restored = JsonSerializer.Deserialize<DurableFunctionInput>(
+            "{\"functionName\":\"get_weather\"}",
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(restored);
+        Assert.Equal(DurableToolDispatchMode.Parallel, restored.DispatchMode);
+
+        var sequential = JsonSerializer.Deserialize<DurableFunctionInput>(
+            "{\"functionName\":\"get_weather\",\"dispatchMode\":0}",
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(sequential);
+        Assert.Equal(DurableToolDispatchMode.Sequential, sequential.DispatchMode);
+    }
+
+    [Fact]
     public void DurableFunctionOutput_RoundTrips()
     {
         var output = new DurableFunctionOutput { Result = "72°F and sunny" };
@@ -202,6 +221,10 @@ public class SerializationTests
             TimeToLive = TimeSpan.FromHours(1),
             ActivityTimeout = TimeSpan.FromMinutes(10),
             HeartbeatTimeout = TimeSpan.FromMinutes(3),
+            ApprovalTimeout = TimeSpan.FromDays(2),
+            MaxEntryCount = 99,
+            MaxToolCallsPerTurn = 7,
+            MaximumConsecutiveErrorsPerRequest = 1,
         };
 
         var json = JsonSerializer.Serialize(input, Options);
@@ -210,6 +233,28 @@ public class SerializationTests
         Assert.NotNull(deserialized);
         Assert.Equal(TimeSpan.FromHours(1), deserialized!.TimeToLive);
         Assert.Equal(TimeSpan.FromMinutes(10), deserialized.ActivityTimeout);
+        Assert.Equal(TimeSpan.FromMinutes(3), deserialized.HeartbeatTimeout);
+        Assert.Equal(TimeSpan.FromDays(2), deserialized.ApprovalTimeout);
+        Assert.Equal(99, deserialized.MaxEntryCount);
+        Assert.Equal(7, deserialized.MaxToolCallsPerTurn);
+        Assert.Equal(1, deserialized.MaximumConsecutiveErrorsPerRequest);
+    }
+
+    [Fact]
+    public void DurableChatWorkflowInput_AbsentTimeToLive_PreservesDefault()
+    {
+        var restored = JsonSerializer.Deserialize<DurableChatWorkflowInput>(
+            "{}",
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(restored);
+        Assert.Equal(TimeSpan.FromDays(14), restored.TimeToLive);
+        Assert.Equal(TimeSpan.FromMinutes(5), restored.ActivityTimeout);
+        Assert.Equal(TimeSpan.FromMinutes(2), restored.HeartbeatTimeout);
+        Assert.Equal(TimeSpan.FromDays(7), restored.ApprovalTimeout);
+        Assert.Equal(1000, restored.MaxEntryCount);
+        Assert.Equal(20, restored.MaxToolCallsPerTurn);
+        Assert.Equal(3, restored.MaximumConsecutiveErrorsPerRequest);
     }
 
     [Fact]
@@ -238,11 +283,23 @@ public class SerializationTests
     [Fact]
     public void DurableAIDataConverter_UsesSourceGenContext_ForDurableChatInput()
     {
-        // DurableAIJsonUtilities.DefaultOptions chains DurableAIJsonContext.Default,
-        // so GetTypeInfo for library types must be source-gen backed (not a reflection fallback).
+        // Round trips do not distinguish source-generated metadata from a reflection fallback.
+        // OriginatingResolver is the API that proves resolver selection.
         var options = DurableAIJsonUtilities.DefaultOptions;
         var typeInfo = options.GetTypeInfo(typeof(DurableChatInput));
         Assert.NotNull(typeInfo);
-        Assert.NotEqual(JsonTypeInfoKind.None, typeInfo.Kind);
+        Assert.Same(DurableAIJsonContext.Default, typeInfo.OriginatingResolver);
+    }
+
+    [Theory]
+    [InlineData(typeof(DurableFunctionInput))]
+    [InlineData(typeof(DurableChatWorkflowInput))]
+    [InlineData(typeof(DurableSessionEntry))]
+    public void DurableAIDataConverter_UsesSourceGenContext_ForCompatibilityProtectedTypes(Type type)
+    {
+        var typeInfo = DurableAIJsonUtilities.DefaultOptions.GetTypeInfo(type);
+
+        Assert.NotNull(typeInfo);
+        Assert.Same(DurableAIJsonContext.Default, typeInfo.OriginatingResolver);
     }
 }

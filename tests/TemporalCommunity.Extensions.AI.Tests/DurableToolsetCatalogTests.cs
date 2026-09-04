@@ -384,6 +384,11 @@ public sealed class DurableToolsetCatalogTests
         Assert.Equal(["catalog", "orders"], restored.ToolsetIds);
         Assert.Equal(DurableToolsetResolutionRequest.CurrentVersion, absentVersion.ResolutionVersion);
         Assert.Equal(["catalog"], absentVersion.ToolsetIds);
+        Assert.Same(
+            DurableAIJsonContext.Default,
+            DurableAIJsonUtilities.DefaultOptions
+                .GetTypeInfo(typeof(DurableToolsetResolutionRequest))
+                .OriginatingResolver);
     }
 
     private static ServiceCollection CreateServices()

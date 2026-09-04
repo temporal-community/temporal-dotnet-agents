@@ -145,15 +145,16 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
     // ── Agent not registered ────────────────────────────────────────────────
 
     [Fact]
-    public void GetTemporalAgentProxy_UnregisteredAgent_ThrowsKeyNotFoundException()
+    public void GetTemporalAgentProxy_UnregisteredAgent_ThrowsAgentNotRegisteredException()
     {
         // Resolve the IServiceProvider from the fixture's host.
         // The fixture registers "EchoAgent" — any other name should fail.
         using var host = _fixture.BuildHost();
 
-        var ex = Assert.Throws<KeyNotFoundException>(
+        var ex = Assert.Throws<AgentNotRegisteredException>(
             () => host.Services.GetTemporalAgentProxy("NonExistentAgent"));
 
+        Assert.Equal("NonExistentAgent", ex.AgentName);
         Assert.Contains("NonExistentAgent", ex.Message);
     }
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Converters;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -87,6 +88,39 @@ public class DurableAIDataConverterTests
         var fc = (FunctionCallContent)content;
         Assert.Equal("call-1", fc.CallId);
         Assert.Equal("get_weather", fc.Name);
+    }
+
+    [Fact]
+    public void DefaultPayloadConverter_PreservesFunctionCallAndResultContent()
+    {
+        // This is the exact manual-client boundary alleged to lose these MEAI content types.
+        // Keep it separate from DurableAIDataConverter: it decides whether an AI-side startup
+        // guard has a reproducible payload-contract basis.
+        var message = new ChatMessage(
+            ChatRole.Assistant,
+            [
+                new FunctionCallContent(
+                    "call-1",
+                    "get_weather",
+                    new Dictionary<string, object?> { ["city"] = "Seattle" }),
+                new FunctionResultContent("call-1", new { temperature = 72 }),
+            ]);
+
+        var payload = DataConverter.Default.PayloadConverter.ToPayload(message);
+        var restored = (ChatMessage)DataConverter.Default.PayloadConverter.ToValue(
+            payload,
+            typeof(ChatMessage))!;
+
+        var call = Assert.IsType<FunctionCallContent>(restored.Contents[0]);
+        Assert.Equal("call-1", call.CallId);
+        Assert.Equal("get_weather", call.Name);
+        var city = Assert.IsType<System.Text.Json.JsonElement>(call.Arguments!["city"]);
+        Assert.Equal("Seattle", city.GetString());
+
+        var result = Assert.IsType<FunctionResultContent>(restored.Contents[1]);
+        Assert.Equal("call-1", result.CallId);
+        var resultElement = Assert.IsType<System.Text.Json.JsonElement>(result.Result);
+        Assert.Equal(72, resultElement.GetProperty("temperature").GetInt32());
     }
 
     [Fact]

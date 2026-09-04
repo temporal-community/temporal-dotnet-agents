@@ -72,7 +72,12 @@ public static class DurableAIJsonUtilities
         // Start from AIJsonUtilities.DefaultOptions which already handles
         // AIContent polymorphism (TextContent, FunctionCallContent, etc.)
         var options = new JsonSerializerOptions(AIJsonUtilities.DefaultOptions);
-        options.TypeInfoResolverChain.Add(DurableAIJsonContext.Default);
+        // AIJsonUtilities includes a reflection resolver. Resolver selection is first-match-wins,
+        // so durable DTO metadata must precede that fallback to preserve the source-generated
+        // serialization and trimming contract. DurableToolsetResolutionRequest carries its
+        // absent-version compatibility behavior in an explicit converter, so it remains on the
+        // source-generated path too.
+        options.TypeInfoResolverChain.Insert(0, DurableAIJsonContext.Default);
 
         // MEAI registers a string-enum converter in its shared options. These two values are
         // Temporal wire contracts, so their numeric representation must win in both reflection

@@ -23,11 +23,13 @@ internal static class TestEnvironmentHelper
     /// <summary>
     /// Starts a local Temporal test environment with the required search attributes registered.
     /// </summary>
-    internal static Task<WorkflowEnvironment> StartLocalAsync(params string[] extraArgs)
+    internal static async Task<WorkflowEnvironment> StartLocalAsync(params string[] extraArgs)
     {
         var allArgs = new List<string>(SearchAttributeArgs);
         allArgs.AddRange(extraArgs);
 
-        return TemporalServiceTestEnvironment.StartLocalAsync([.. allArgs]);
+        var environment = await TemporalServiceTestEnvironment.StartLocalAsync([.. allArgs]);
+        environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+        return environment;
     }
 }

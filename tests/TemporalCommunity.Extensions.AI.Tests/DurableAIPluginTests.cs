@@ -39,6 +39,16 @@ public class DurableAIPluginTests
     private static TemporalWorkerOptions FreshWorkerOptions() =>
         new() { TaskQueue = "test-queue" };
 
+    private static ITemporalClient CreateDurableClient()
+    {
+        var client = A.Fake<ITemporalClient>();
+        A.CallTo(() => client.Options).Returns(new TemporalClientOptions
+        {
+            DataConverter = DurableAIDataConverter.Instance,
+        });
+        return client;
+    }
+
     // ── Name ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -235,7 +245,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton(A.Fake<ITemporalClient>());
+        services.AddSingleton(CreateDurableClient());
         services.AddHostedTemporalWorker("my-queue")
             .AddWorkerPlugin(new DurableAIPlugin());
 
@@ -247,7 +257,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton(A.Fake<ITemporalClient>());
+        services.AddSingleton(CreateDurableClient());
         services.AddHostedTemporalWorker("my-queue")
             .AddWorkerPlugin(new DurableAIPlugin());
 
@@ -290,7 +300,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton(A.Fake<ITemporalClient>());
+        services.AddSingleton(CreateDurableClient());
         var plugin = new DurableAIPlugin();
         services.AddHostedTemporalWorker("my-queue").AddWorkerPlugin(plugin);
 
@@ -353,7 +363,7 @@ public class DurableAIPluginTests
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddSingleton(A.Fake<ITemporalClient>());
+        services.AddSingleton(CreateDurableClient());
         services.AddHostedTemporalWorker("localhost:7233", "default", "my-queue")
             .AddDurableAI();
 

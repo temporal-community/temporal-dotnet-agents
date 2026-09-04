@@ -115,6 +115,12 @@ internal static class TemporalAgentsRegistrar
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             TemporalAgentWorkerClientConfigurator>());
 
+        // The plugin configures clients created through AddTemporalClient. A manually registered
+        // client needs the same fail-fast guard before MAF session entries reach workflow history.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<TemporalWorkerServiceOptions>,
+            TemporalAgentDataConverterValidator>());
+
         // Startup C-check: validates user-supplied ConfigureAgentPipeline callbacks against the
         // function-invocation conflict before any workflow can dispatch an activity. Skipped when
         // TemporalAgentsOptions.SkipDryRunCCheck = true.

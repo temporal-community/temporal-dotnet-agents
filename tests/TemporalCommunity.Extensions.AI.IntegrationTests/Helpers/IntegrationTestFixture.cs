@@ -32,6 +32,7 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         Environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        Environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         _host = BuildHost();
         await _host.StartAsync();

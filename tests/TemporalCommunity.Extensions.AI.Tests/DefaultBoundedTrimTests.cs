@@ -54,6 +54,29 @@ public class DefaultBoundedTrimTests
         return list;
     }
 
+    private static List<DurableSessionEntry> MakeCompletedTurns(int count)
+    {
+        var list = new List<DurableSessionEntry>(count * 2);
+        for (var i = 0; i < count; i++)
+        {
+            var correlationId = $"turn-{i}";
+            list.Add(new DurableSessionRequest
+            {
+                CorrelationId = correlationId,
+                CreatedAt = DateTimeOffset.UnixEpoch.AddSeconds(i * 2),
+                Messages = [new ChatMessage(ChatRole.User, $"request-{i}")],
+            });
+            list.Add(new DurableSessionResponse
+            {
+                CorrelationId = correlationId,
+                CreatedAt = DateTimeOffset.UnixEpoch.AddSeconds((i * 2) + 1),
+                Messages = [new ChatMessage(ChatRole.Assistant, $"response-{i}")],
+            });
+        }
+
+        return list;
+    }
+
     [Fact]
     public void Trim_AtThreshold_CarriesStrictlyBelowMaxEntryCount()
     {
@@ -118,5 +141,32 @@ public class DefaultBoundedTrimTests
 
         Assert.Single(trimmed);
         Assert.Equal("corr-2", trimmed[0].CorrelationId);
+    }
+
+    [Fact]
+    public void Trim_CompletedTurns_DoesNotCarryAnOrphanedResponse()
+    {
+        // max=6 targets the last three entries. A naive suffix would start at response-1:
+        // [request-0, response-0, request-1, response-1, request-2, response-2]. The fallback
+        // must instead retain only the complete final turn.
+        var trimmed = InvokeTrim(MakeCompletedTurns(3), maxEntryCount: 6);
+
+        Assert.Collection(
+            trimmed,
+            entry => Assert.Equal("turn-2", Assert.IsType<DurableSessionRequest>(entry).CorrelationId),
+            entry => Assert.Equal("turn-2", Assert.IsType<DurableSessionResponse>(entry).CorrelationId));
+    }
+
+    [Fact]
+    public void Trim_CompletedTurns_PreservesPairedSuffix_WhenTargetIsEven()
+    {
+        var trimmed = InvokeTrim(MakeCompletedTurns(4), maxEntryCount: 9);
+
+        Assert.Collection(
+            trimmed,
+            entry => Assert.Equal("turn-2", Assert.IsType<DurableSessionRequest>(entry).CorrelationId),
+            entry => Assert.Equal("turn-2", Assert.IsType<DurableSessionResponse>(entry).CorrelationId),
+            entry => Assert.Equal("turn-3", Assert.IsType<DurableSessionRequest>(entry).CorrelationId),
+            entry => Assert.Equal("turn-3", Assert.IsType<DurableSessionResponse>(entry).CorrelationId));
     }
 }

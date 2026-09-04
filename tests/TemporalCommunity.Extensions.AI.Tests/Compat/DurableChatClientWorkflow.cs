@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using System.Text;
 using Microsoft.Extensions.AI;
 using Temporalio.Workflows;
 
@@ -47,13 +46,20 @@ public sealed class DurableChatClientWorkflow
 
         if (input.Streaming)
         {
-            var builder = new StringBuilder();
-            await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options))
+            // Async iterators run their body when MoveNextAsync is called, not when they are
+            // created. Keep the probe at that boundary so it pins the observable API contract.
+            await using var enumerator = chatClient
+                .GetStreamingResponseAsync(messages, options)
+                .GetAsyncEnumerator();
+            try
             {
-                builder.Append(update.Text);
+                _ = await enumerator.MoveNextAsync();
+                responseText = "streaming unexpectedly succeeded";
             }
-
-            responseText = builder.ToString();
+            catch (NotSupportedException exception)
+            {
+                responseText = exception.Message;
+            }
         }
         else
         {
@@ -102,7 +108,7 @@ public sealed class DurableChatClientWorkflow
 /// <summary>Input for <see cref="DurableChatClientWorkflow"/>.</summary>
 public sealed record DurableChatClientWorkflowInput
 {
-    /// <summary>Whether to exercise the buffered streaming API.</summary>
+    /// <summary>Whether to verify workflow streaming fails when its enumerator advances.</summary>
     public bool Streaming { get; init; }
 
     /// <summary>Whether to include the pre-metadata-fix compatibility values.</summary>

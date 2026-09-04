@@ -18,6 +18,7 @@ public sealed class McpToolIntegrationTests
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
         await using var mcp = await InProcessMcpServer.CreateAsync();
         var pinned = InProcessMcpServer.CreatePinnedTools(mcp.Client);
 

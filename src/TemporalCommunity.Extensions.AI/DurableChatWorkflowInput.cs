@@ -19,7 +19,22 @@ public record class DurableChatWorkflowInput
     /// <summary>
     /// The session time-to-live. The workflow completes when idle for this duration.
     /// </summary>
+    [JsonIgnore]
     public TimeSpan TimeToLive { get; init; } = TimeSpan.FromDays(14);
+
+    [JsonInclude]
+    [JsonPropertyName("timeToLive")]
+    internal TimeSpan? SerializedTimeToLive
+    {
+        get => this.TimeToLive;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.TimeToLive = value.Value;
+            }
+        }
+    }
 
     /// <summary>
     /// Conversation history carried forward from a previous run (continue-as-new).
@@ -29,12 +44,42 @@ public record class DurableChatWorkflowInput
     /// <summary>
     /// Activity timeout for LLM calls.
     /// </summary>
+    [JsonIgnore]
     public TimeSpan ActivityTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
+    [JsonInclude]
+    [JsonPropertyName("activityTimeout")]
+    internal TimeSpan? SerializedActivityTimeout
+    {
+        get => this.ActivityTimeout;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.ActivityTimeout = value.Value;
+            }
+        }
+    }
 
     /// <summary>
     /// Heartbeat timeout for LLM call activities.
     /// </summary>
+    [JsonIgnore]
     public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromMinutes(2);
+
+    [JsonInclude]
+    [JsonPropertyName("heartbeatTimeout")]
+    internal TimeSpan? SerializedHeartbeatTimeout
+    {
+        get => this.HeartbeatTimeout;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.HeartbeatTimeout = value.Value;
+            }
+        }
+    }
 
     /// <summary>
     /// Explicit retry policy applied to dispatched activities. When unset, each dispatch path
@@ -54,7 +99,22 @@ public record class DurableChatWorkflowInput
     /// Maximum time to wait for a human to respond to a tool approval request.
     /// Defaults to 7 days.
     /// </summary>
+    [JsonIgnore]
     public TimeSpan ApprovalTimeout { get; init; } = TimeSpan.FromDays(7);
+
+    [JsonInclude]
+    [JsonPropertyName("approvalTimeout")]
+    internal TimeSpan? SerializedApprovalTimeout
+    {
+        get => this.ApprovalTimeout;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.ApprovalTimeout = value.Value;
+            }
+        }
+    }
 
     /// <summary>
     /// Bounded approval decisions retained for idempotent reviewer retries across continue-as-new.
@@ -74,7 +134,22 @@ public record class DurableChatWorkflowInput
     /// Maximum number of <see cref="DurableSessionEntry"/> instances retained in the
     /// conversation history before a continue-as-new transition is triggered. Defaults to 1000.
     /// </summary>
+    [JsonIgnore]
     public int MaxEntryCount { get; init; } = 1000;
+
+    [JsonInclude]
+    [JsonPropertyName("maxEntryCount")]
+    internal int? SerializedMaxEntryCount
+    {
+        get => this.MaxEntryCount;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.MaxEntryCount = value.Value;
+            }
+        }
+    }
 
     /// <summary>
     /// Keyed-service key under which
@@ -174,7 +249,22 @@ public record class DurableChatWorkflowInput
     /// synthesizing an "iterations exceeded" sentinel response and aborting the turn.
     /// Defaults to 20. Mirrors MAF's <c>DurableAgentBuilder.MaxToolCallsPerTurn</c>.
     /// </summary>
+    [JsonIgnore]
     public int MaxToolCallsPerTurn { get; init; } = 20;
+
+    [JsonInclude]
+    [JsonPropertyName("maxToolCallsPerTurn")]
+    internal int? SerializedMaxToolCallsPerTurn
+    {
+        get => this.MaxToolCallsPerTurn;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.MaxToolCallsPerTurn = value.Value;
+            }
+        }
+    }
 
     /// <summary>
     /// Maximum number of consecutive iterations in which one or more tools may fail
@@ -187,7 +277,22 @@ public record class DurableChatWorkflowInput
     /// and resets to zero on the next all-success iteration. When the threshold is
     /// exceeded, the workflow throws a non-retryable failure so the caller is informed.
     /// </remarks>
+    [JsonIgnore]
     public int MaximumConsecutiveErrorsPerRequest { get; init; } = 3;
+
+    [JsonInclude]
+    [JsonPropertyName("maximumConsecutiveErrorsPerRequest")]
+    internal int? SerializedMaximumConsecutiveErrorsPerRequest
+    {
+        get => this.MaximumConsecutiveErrorsPerRequest;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.MaximumConsecutiveErrorsPerRequest = value.Value;
+            }
+        }
+    }
 
     /// <summary>
     /// When <see langword="true"/>, synthesized tool-error
