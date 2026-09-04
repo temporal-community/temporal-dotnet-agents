@@ -145,9 +145,6 @@ public class ProxyResolutionFailureTests
         await using var env = await TestEnvironmentHelper.StartLocalAsync();
         env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
 
-        var dummyClient = new DummyTemporalAgentClient();
-        var proxy = new TemporalAIAgentProxy("TestAgent", dummyClient);
-
         var taskQueue = $"proxy-in-workflow-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(env.Client);
@@ -160,11 +157,11 @@ public class ProxyResolutionFailureTests
         var ex = await Assert.ThrowsAsync<Temporalio.Exceptions.WorkflowFailedException>(async () =>
         {
             await env.Client.ExecuteWorkflowAsync(
-                (TestProxyInWorkflow wf) => wf.ExecuteAsync(proxy),
+                (TestProxyInWorkflow wf) => wf.ExecuteAsync(),
                 new WorkflowOptions($"wf-{Guid.NewGuid():N}", taskQueue));
         });
-        var innerEx = Assert.IsType<InvalidOperationException>(ex.InnerException);
-        Assert.Contains("TemporalAIAgentProxy cannot be invoked from inside a Temporal workflow", innerEx.Message);
+        var appEx = Assert.IsType<Temporalio.Exceptions.ApplicationFailureException>(ex.InnerException);
+        Assert.Contains("TemporalAIAgentProxy cannot be invoked from inside a Temporal workflow", appEx.Message);
     }
 
     private sealed class DummyTemporalAgentClient : ITemporalAgentClient
@@ -198,9 +195,19 @@ public class ProxyResolutionFailureTests
     internal sealed class TestProxyInWorkflow
     {
         [Temporalio.Workflows.WorkflowRun]
-        public async Task ExecuteAsync(TemporalAIAgentProxy proxy)
+        public async Task ExecuteAsync()
         {
-            await ((AIAgent)proxy).RunAsync([new ChatMessage(ChatRole.User, "Hello")]);
+            var proxy = new TemporalAIAgentProxy("TestAgent", new DummyTemporalAgentClient());
+            try
+            {
+                await ((AIAgent)proxy).RunAsync([new ChatMessage(ChatRole.User, "Hello")]);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new Temporalio.Exceptions.ApplicationFailureException(
+                    ex.Message,
+                    errorType: "InvalidOperationException");
+            }
         }
     }
 }
