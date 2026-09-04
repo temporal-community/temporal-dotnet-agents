@@ -347,12 +347,12 @@ internal class AgentWorkflow :
         };
 
         // StateBag size guard (Feature D): emit a warning when the serialized StateBag
-        // exceeds the configurable threshold (default 64 KB). The warning only — no hard
+        // exceeds the internal warning threshold (64 KB). The warning only — no hard
         // failure — so sessions keep running even when StateBag grows large.
         if (_currentStateBag.HasValue)
         {
-            var stateBagJson = _currentStateBag.Value.GetRawText();
-            var byteCount = System.Text.Encoding.UTF8.GetByteCount(stateBagJson);
+            var byteCount = AgentSessionStateBagExtensions.GetDurableSerializedUtf8ByteCount(
+                _currentStateBag.Value);
             if (byteCount > StateBagSizeWarnThresholdBytes)
             {
                 Workflow.Logger.LogWarning(
