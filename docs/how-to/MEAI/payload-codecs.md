@@ -1,4 +1,4 @@
-# Compressing durable AI payloads
+# Durable AI payload codecs
 
 Durable model loops can store repeated tool declarations, growing message history, tool arguments,
 and Continue-as-New state. `DurableAIGzipPayloadCodec` is an opt-in Temporal `IPayloadCodec` that
@@ -23,9 +23,11 @@ Decode rejects unsupported versions, corrupt data, and payloads that cross eithe
 
 `CompressionLevel` defaults to `CompressionLevel.Fastest`. Faster compression generally spends less
 CPU but may produce larger payloads; denser levels may reduce stored bytes at higher CPU cost. Measure
-representative application payloads before changing it. The
-[payload-codec benchmark](../../benchmarks/ai-payload-codecs.md) is evidence for this repository's
-fixtures, not a universal recommendation.
+representative application payloads before changing it. Internal BenchmarkDotNet measurements on a
+representative 50-tool/4-KiB declaration snapshot compressed to about 1.24% of its original size at a
+locally acceptable per-payload CPU/allocation cost, which is why the codec ships opt-in and
+threshold-gated rather than on by default; that evidence is repository-fixture-specific, not a
+universal recommendation.
 
 ## Decoder-first rollout
 
@@ -54,5 +56,7 @@ Compression is neither encryption nor authentication. Encrypt secrets with an ap
 authenticated encryption codec and apply normal Temporal namespace, transport, and application
 authorization controls.
 
-See the [measured benchmark](../../benchmarks/ai-payload-codecs.md) and the
+The codec is opt-in, threshold-gated (it only stores the compressed form when it is smaller than
+the original payload, so incompressible data isn't stored compressed), and requires a decoder-first
+rollout across every reader before any writer enables compression. See the
 [runnable sample](../../../samples/MEAI/PayloadCodec/README.md).

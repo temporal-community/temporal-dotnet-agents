@@ -88,18 +88,6 @@ The workflow executes this sequence until the model returns a final response:
   `tool.NoRetry()` when a retry would repeat an unsafe operation.
 - `MaxToolCallsPerTurn` caps a runaway model/tool loop. Set it for your cost and risk budget.
 
-## Upgrading live 0.10.4 tool sessions
-
-Do not carry a live managed tool session started by version 0.10.4 across this upgrade. Those
-histories contain neither the caller-owned declaration snapshot introduced in 0.12.0 nor the
-worker-owned manifest-resolution command introduced by the toolset design. Drain or terminate
-those sessions before deploying workers with this workflow implementation, then start fresh
-sessions against the corrected worker-owned authority path.
-
-Before deploying the upgraded worker, stop new turns on those sessions and let them expire or call
-`DurableChatSessionClient.ShutdownAsync(conversationId)`. Start replacement sessions after the
-upgrade. Replay compatibility for recorded commands does not imply forward-operation compatibility
-for new turns on an older live session.
 
 ## Invocation-scoped tools for typed turns
 
@@ -217,6 +205,26 @@ zero-based model iteration and call index, conversation/correlation metadata, an
 scoped idempotency key. It deliberately contains neither the SDK Update ID nor approval-wait
 duration.
 
+```csharp
+worker.AddDurableToolFactory<ApplicationRequest, ApplicationTurnState>(
+    declaration,
+    (services, context) =>
+    {
+        var meta = context.Metadata;
+        var logger = services.GetRequiredService<ILogger<ApplicationTools>>();
+        logger.LogInformation(
+            "tool={Tool} attempt={Attempt} iteration={Iteration} callIndex={CallIndex} mode={Mode}",
+            meta.ToolName, meta.Attempt, meta.ModelIteration, meta.CallIndex, context.DispatchMode);
+
+        return new DurableToolActivation<ApplicationTurnState>
+        {
+            Function = AIFunctionFactory.Create(
+                (string itemId) => processor.ProcessItem(context.RequestData, context.TurnState, itemId),
+                name: "process_item"),
+        };
+    });
+```
+
 Request data and turn state are application-supplied lookup inputs, not authenticated claims,
 approval evidence, or authorization grants. A high-risk tool must obtain the current authorization
 decision from an authoritative service inside the activity immediately before every external
@@ -230,10 +238,66 @@ would prevent Temporal from applying the configured activity retry policy. The d
 dependencies are created from a fresh activity DI scope on every attempt. Ordinary functions need
 no special signature and remain the default registration path.
 
+```csharp
+sealed class TelemetryToolFunction(AIFunction inner, ILogger logger) : DelegatingAIFunction(inner)
+{
+    protected override async ValueTask<object?> InvokeCoreAsync(
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Invoking {Tool}", Name);
+        try
+        {
+            // Runs the wrapped function (the ordinary method, or another decorator).
+            return await base.InvokeCoreAsync(arguments, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "{Tool} failed", Name);
+            throw; // Rethrow so the activity retry policy still applies.
+        }
+        finally
+        {
+            logger.LogInformation("{Tool} attempt complete", Name);
+        }
+    }
+}
+```
+
+Wrap the factory's function with the decorator before returning it: `Function = new
+TelemetryToolFunction(AIFunctionFactory.Create(...), logger)`.
+
 ### Activity idempotency key
 
-`Metadata.IdempotencyKey` identifies one scheduled tool activity across its activity retries. The
-v1 algorithm is fixed:
+`Metadata.IdempotencyKey` identifies one scheduled tool activity across its activity retries. Read
+it from the same `DurableToolInvocationContext` supplied to a declaration-plus-activation factory:
+
+```csharp
+(services, context) =>
+{
+    var idempotencyKey = context.Metadata.IdempotencyKey;
+    var store = services.GetRequiredService<IIdempotencyStore>();
+
+    return new DurableToolActivation<ApplicationTurnState>
+    {
+        Function = AIFunctionFactory.Create(
+            async (string orderId) =>
+            {
+                if (await store.TryGetResultAsync(idempotencyKey) is { } cached)
+                {
+                    return cached; // A prior attempt for this activity already applied the effect.
+                }
+
+                var result = await billing.ChargeAsync(orderId);
+                await store.RecordAsync(idempotencyKey, result);
+                return result;
+            },
+            name: "charge_order"),
+    };
+}
+```
+
+The v1 algorithm is fixed:
 
 1. Write the strict UTF-8 bytes of
    `TemporalCommunity.Extensions.AI/IdempotencyKey/v1\0`.
@@ -278,8 +342,36 @@ delay behavior in the activity or configure an explicit policy. Use `MaximumAtte
 effect that is not safe to repeat. An activity already scheduled before a deployment retains the
 policy recorded in its `ActivityTaskScheduled` event.
 
+```csharp
+[Workflow]
+internal sealed class ChargeCardWorkflow
+{
+    [WorkflowRun]
+    public async Task<string> RunAsync(ChargeCardInput input)
+    {
+        var chargeCard = AIFunctionFactory.Create(
+            (string cardToken, decimal amount) => "[stub — not invoked in workflow context]",
+            name: "charge_card",
+            description: "Charges a payment card. Not safe to retry.")
+            .AsDurable(new DurableExecutionOptions
+            {
+                RetryPolicy = new RetryPolicy { MaximumAttempts = 1 }, // non-idempotent effect
+            });
+
+        var result = await chargeCard.InvokeAsync(
+            new AIFunctionArguments(new Dictionary<string, object?>
+            {
+                ["cardToken"] = input.CardToken,
+                ["amount"] = input.Amount,
+            }));
+
+        return result?.ToString() ?? "No result.";
+    }
+}
+```
+
 For the complete managed-session boundary, see the
-[managed-session tool contract](managed-session-tool-contract.md).
+[managed-session tool rules](managed-session-tool-rules.md).
 
 For the worker-owned authority and manifest design, see
 [Durable toolsets](../../architecture/MEAI/durable-toolsets.md).

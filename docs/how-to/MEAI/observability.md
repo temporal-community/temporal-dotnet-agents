@@ -58,7 +58,9 @@ These are attempt-scoped operational signals, not durable audit or billing count
 retry can emit another attempt, and process failure around measurement export can omit or duplicate
 a signal. Temporal history remains the execution record. Workflow-side turn-narrowing rejection
 uses the replay-safe workflow logger and a non-retryable failure; it does not create a span, metric,
-or telemetry-only activity.
+or telemetry-only activity. `GetHistoryAsync` returns request and response entries — response
+entries include usage, and both entries in a turn share a correlation ID — so history can support
+per-turn audit and test assertions without requiring an OpenTelemetry backend.
 
 | Owner | Signal | Responsibility |
 |---|---|---|
@@ -81,13 +83,6 @@ SendAsync
 
 The direct `DurableChatClient` adapter uses the separate `GetResponse` activity and does not
 implement the managed-session tool loop.
-
-## Durable history metadata
-
-`GetHistoryAsync` returns request and response entries. Response entries include usage and both
-entries share a correlation ID, so history can support per-turn audit and test assertions without
-requiring an OpenTelemetry backend. Use traces for cross-process operational analysis; use history
-for durable session state.
 
 See the [OpenTelemetry sample](../../../samples/MEAI/OpenTelemetry/README.md) for a runnable
 configuration.

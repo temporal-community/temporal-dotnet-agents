@@ -68,7 +68,7 @@ execution remains retained. Production idempotency that must outlive Temporal re
 atomic, durable application ledger keyed by authenticated tenant and operation ID. That ledger must
 store completed results or conflicts before retention expires.
 
-MCP Tasks are a separate experimental lifecycle; see the
-[research ADR](../../../docs/architecture/MCP/durable-mcp-task-research.md).
+MCP Tasks use a separate lifecycle. Temporal-backed MCP Task integration remains deferred
+research; see the [research ADR](../../../docs/architecture/MCP/durable-mcp-task-research.md).
 The full security and lifecycle contract is in the
 [workflow-backed MCP server guide](../../../docs/how-to/MCP/workflow-tool-server.md).

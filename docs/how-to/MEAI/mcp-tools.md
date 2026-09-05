@@ -20,8 +20,11 @@ IList<McpClientTool> tools = await mcp.ListToolsAsync();
 worker.AddDurableTools(tools); // all discovered tools share the default durable policy
 ```
 
-For production or side-effecting tools, keep reviewed `Protocol.Tool` definitions in source
-control and construct the client tools without live discovery:
+The example above calls `mcp.ListToolsAsync()` against the live server every time the worker
+starts — live discovery. For production or side-effecting tools, do the opposite: check reviewed
+`Tool` definitions (`ModelContextProtocol.Protocol.Tool`) into source control ahead of time, and
+build the `McpClientTool` wrapper objects directly from those saved definitions instead of asking
+the server what tools currently exist:
 
 ```csharp
 IReadOnlyList<Tool> pinned = LoadCheckedInDefinitions();

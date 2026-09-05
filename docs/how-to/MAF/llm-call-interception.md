@@ -2,7 +2,7 @@
 
 How to wrap the inner `IChatClient` so every LLM call made by an agent is observable — log inputs and outputs, time the request, capture token usage, attach custom telemetry — without changing how Temporal dispatches the activity.
 
-This is the answer to "I want per-LLM-call observability today." See also the [`docs/design-decisions.md`](../../design-decisions.md) entry on durable-agent dispatch granularity for the underlying architectural rationale.
+This is the answer to "I want per-LLM-call observability today." See also [`durable-agents.md`](./durable-agents.md) for the underlying per-tool dispatch model this pattern composes with.
 
 > **Applies to `ChatClientAgent`-backed durable agents.** In v0.3, `AddDurableAgent` constructs a `ChatClientAgent` internally from the user's `agent.ChatClient` factory, with `UseProvidedChatClientAsIs = true` (so MAF does not auto-inject `FunctionInvokingChatClient` — the workflow owns the tool-dispatch loop). The interception point is the `IChatClient` your factory returns; decorate it before returning it from the factory. **`A2AAgent`, graph-workflow agents, and other non-`ChatClientAgent` `AIAgent` subtypes do not have an inner `IChatClient` to wrap** — they dispatch via different protocols and are not produced by `AddDurableAgent`. If you need observability for those agent types, instrument at the agent's own dispatch layer instead (e.g., HTTP-client middleware for A2A; OpenTelemetry source for graph workflows).
 
@@ -19,7 +19,7 @@ Use `ChatClientFactory` interception when you want to:
 
 Do **not** use this pattern for:
 
-- **Per-tool durability** (each tool retried independently in workflow event history). That is a different problem with a different solution — see [Comparison with granular tool dispatch](#comparison-with-granular-tool-dispatch) and `docs/design-decisions.md` § "Function Invocation: Loop Ownership and Durability Granularity".
+- **Per-tool durability** (each tool retried independently in workflow event history). That is a different problem with a different solution — see [Comparison with the v0.3 dispatch model](#comparison-with-the-v03-dispatch-model) and [`durable-agents.md`](./durable-agents.md).
 - **Cross-agent or cross-session aggregation.** Decorate at the registered `IChatClient` level, but treat the data as scoped to a single activity invocation — the wrapped client is rebuilt per call.
 
 ---
@@ -198,8 +198,7 @@ Both work together. The decorator sees every LLM round — including the rounds 
 
 ## References
 
-- [`docs/design-decisions.md`](../../design-decisions.md) — the underlying design rationale for the v0.3 durable-agent dispatch model.
-- [`docs/how-to/MAF/durable-agents.md`](./durable-agents.md) — per-tool retry/timeout configuration via `DurableToolOptions`.
+- [`docs/how-to/MAF/durable-agents.md`](./durable-agents.md) — per-tool retry/timeout configuration via `DurableToolOptions` and the per-tool dispatch model.
 - [`docs/how-to/MAF/observability.md`](./observability.md) — the full OTel span hierarchy. Spans emitted by your decorator nest inside `agent.turn`.
 - `src/TemporalCommunity.Extensions.Agents/Workflows/AgentActivities.cs` — `ComposeDurableAgent` and `RunDurableAgentStepAsync`, where the per-step `ChatOptions` is built and the decorated `IChatClient` is invoked.
 - `samples/MAF/BasicAgent/Program.cs` — canonical `agent.ChatClient = sp => ...` registration shape.

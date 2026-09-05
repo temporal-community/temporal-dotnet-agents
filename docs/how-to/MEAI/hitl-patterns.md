@@ -8,6 +8,7 @@ at worker registration; the workflow owns the wait and does not dispatch the too
 reviewer approves it.
 
 ```csharp
+// Worker registration
 builder.Services
     .AddHostedTemporalWorker("durable-chat")
     .AddDurableAI(options =>
@@ -41,6 +42,7 @@ needed while a human reviews the request. `SessionTimeToLive` must be longer tha
 ## Read and resolve an approval
 
 ```csharp
+// External client process (e.g. a reviewer service or API endpoint) — not worker or workflow code
 var pending = await sessionClient.GetPendingApprovalAsync(conversationId);
 if (pending is not null)
 {
@@ -68,6 +70,7 @@ Every pending request includes `ExpiresAt`, the workflow-time deadline used for 
 Set a tool-specific deadline when approval urgency differs by operation:
 
 ```csharp
+// Worker registration
 worker.AddDurableTool(deleteRecords, tool =>
     tool.NoRetry().RequireApproval().WithApprovalTimeout(TimeSpan.FromHours(2)));
 ```
@@ -82,6 +85,7 @@ interceptor. The workflow never copies raw model-produced function arguments int
 request. This avoids exposing secrets or unreviewed payloads to an approval UI.
 
 ```csharp
+// Inside a durable tool interceptor's BeforeToolCallAsync — runs as a Temporal activity
 return DurableToolDecision.PauseForApproval(
     "Delete the requested tenant records.",
     metadata: new Dictionary<string, string>

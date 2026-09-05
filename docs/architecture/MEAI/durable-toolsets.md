@@ -35,6 +35,21 @@ against current authoritative application data inside their activity.
 - Explicit defaults and the implicit `AddDurableTools` toolset cannot be mixed. Register every
   selected default as a named toolset when more than one group is required.
 
+Registering two named toolsets and selecting one as the stock workflow's baseline:
+
+```csharp
+builder.Services
+    .AddHostedTemporalWorker("durable-chat")
+    .AddDurableAI(options => options.DefaultToolsetIds = ["billing"])
+    .AddDurableToolset("billing", toolset => toolset.Add(chargeCardTool, opts => opts.NoRetry()))
+    .AddDurableToolset("support", toolset => toolset.AddTools([lookupOrderTool, refundStatusTool]));
+```
+
+`DefaultToolsetIds` selects only `"billing"` for this worker's stock sessions; `"support"` remains
+registered (a custom typed workflow could still narrow to it) but is not part of the resolved
+baseline. Mixing this call with `AddDurableTools` — the implicit default toolset — on the same
+worker fails validation, per the rule above.
+
 ## Manifest compatibility
 
 The first manifest wire format is version `1`. Missing version `0` and unsupported versions fail

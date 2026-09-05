@@ -667,6 +667,7 @@ test-samples-meai: build _sample-preflight
         "DurableTools:samples/MEAI/DurableTools:90" \
         "DurableEmbeddings:samples/MEAI/DurableEmbeddings:180" \
         "CustomWorkflow:samples/MEAI/CustomWorkflow:90" \
+        "DirectAdapters:samples/MEAI/DirectAdapters:90" \
         "OpenTelemetry:samples/MEAI/OpenTelemetry:90" \
         "ToolInterceptor:samples/MEAI/ToolInterceptor:120" \
         "HumanInTheLoop:samples/MEAI/HumanInTheLoop:120" \

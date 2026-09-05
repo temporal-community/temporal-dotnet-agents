@@ -25,6 +25,7 @@
     <Project Path="samples/MEAI/ToolInterceptor/ToolInterceptor.csproj" />
     <Project Path="samples/MEAI/McpTools/McpTools.csproj" />
     <Project Path="samples/MEAI/PayloadCodec/PayloadCodec.csproj" />
+    <Project Path="samples/MEAI/DirectAdapters/DirectAdapters.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/MCP/WorkflowToolServer/WorkflowToolServer.csproj" />

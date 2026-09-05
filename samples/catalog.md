@@ -33,6 +33,7 @@ Intermediate samples covering tool interceptors, context providers, approvals, a
 | [ApprovalScopes](MAF/ApprovalScopes/) | MAF | Scope-aware approvals persisted across turns | Interactive Console | Manual |
 | [ContextProviders](MAF/ContextProviders/) | MAF | Retry-safe custom `AIContextProvider` implementations | Unattended Script | Automated: `just test-samples-maf` |
 | [CustomWorkflow](MEAI/CustomWorkflow/) | MEAI | Extend the managed durable workflow with domain output | Unattended Script | Automated: `just test-samples-meai` |
+| [DirectAdapters](MEAI/DirectAdapters/) | MEAI | Hand-written Activity + `AsDurable()` for low-level custom workflows | Unattended Script | Manual |
 | [DurableContextProvider](MAF/DurableContextProvider/) | MAF | Context-provided tools declared as durable activities | Unattended Script | Automated: `just test-samples-maf` |
 | [EvaluatorOptimizer](MAF/EvaluatorOptimizer/) | MAF | Generator and evaluator loop | Unattended Script | Automated: `just test-samples-maf` |
 | [ExtensibleDurableTurns](MEAI/ExtensibleDurableTurns/) | MEAI | Typed turn input/state with package-managed activities | Unattended Script | Automated: `just test-samples-meai` |

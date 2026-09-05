@@ -28,9 +28,12 @@ There is one managed-session tool model:
 client must not use `UseFunctionInvocation()`. This prevents caller-local delegates or middleware
 from bypassing the workflow-owned activity boundary.
 
-The direct `DurableChatClient` and `AIFunction.AsDurable()` adapters are separate APIs. They are
-useful when application workflow code explicitly invokes a model or known function; they do not
-provide caller-selected tools for a managed chat session.
+`AIFunction.AsDurable()` is a separate, lower-level API: it lets application workflow code
+explicitly invoke a known function without going through a managed chat session, and does not
+provide caller-selected tools for a managed chat session. Constructing `DurableChatClient` (or any
+`ChatClientBuilder` composition around it) directly inside workflow code is a retired anti-pattern —
+see [Direct-adapter-in-workflow anti-pattern](./architecture/MEAI/direct-adapter-anti-pattern.md)
+for the full rationale and the supported alternatives.
 
 ## Approval and tool safety
 

@@ -187,6 +187,7 @@ For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how
 - **Never** call `ActivitySource.StartActivity()` inside `[Workflow]` — non-deterministic on replay
 - Don't use wall-clock time in workflows (`DateTime.UtcNow`, `DateTimeOffset.Now`)
 - Don't use `Random` or `Guid.NewGuid()` in workflows
+- Don't construct `DurableChatClient`/`DurableEmbeddingGenerator`/`ChatClientBuilder` composition inside `[WorkflowRun]`/`[WorkflowUpdate]` methods — see `docs/architecture/MEAI/direct-adapter-anti-pattern.md`
 
 ---
 
@@ -346,4 +347,5 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **HITL Patterns**: `docs/how-to/MEAI/hitl-patterns.md`
 - **Custom Workflow Output**: `docs/how-to/MEAI/custom-workflow-output.md`
 - **Durable Chat Pipeline**: `docs/architecture/MEAI/durable-chat-pipeline.md`
+- **Direct-Adapter Anti-Pattern**: `docs/architecture/MEAI/direct-adapter-anti-pattern.md`
 - **Cross-Library Integration**: `docs/architecture/MEAI/cross-library-integration.md`

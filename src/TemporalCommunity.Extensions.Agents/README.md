@@ -4,69 +4,11 @@ A [Temporal](https://temporal.io/) integration for
 the [Microsoft Agent Framework](https://github.com/microsoft/agents) (`Microsoft.Agents.AI`). This library provides
 durable, stateful AI agent sessions backed by Temporal workflows.
 
-## Overview
-
-Temporal gives AI agents **durability by default** — every agent session maps to a long-lived workflow whose state
-survives process crashes and restarts. Conversation history, tool calls, and even human-in-the-loop approval gates are
-all persisted in Temporal's event history and replayed deterministically.
-
-Key benefits over in-memory agent frameworks:
-
-- **Request/Response via `[WorkflowUpdate]`** — direct response, no polling
-- **Long sessions** — continue-as-new transfers history to fresh runs automatically
-- **Observability** — full Temporal Web UI, event history, and distributed tracing
-- **Multi-agent orchestration** — first-class workflow fan-out and routing
-
-## Feature Highlights
-
-- Durable multi-turn conversations with automatic history management
-- Workflow-based routing — durable, observable, and fully under your control
-- Parallel agent execution inside workflows (`ExecuteAgentsInParallelAsync`)
-- Human-in-the-loop approval gates via `[WorkflowUpdate]`
-- Typed structured output with `RunAsync<T>` (markdown fence stripping + retry)
-- Recurring and one-time scheduled agent runs
-- MCP tool integration through ordinary `AddTool`/`AddTools` registration; see the
-  [MCP guide](../../docs/how-to/MAF/mcp-tools.md)
-- External memory with `AIContextProvider` and `AgentSessionStateBag` persistence
-- Completed request/response only; `RunStreamingAsync` is not supported
-- Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`)
-- `WorkingSetContextProvider` — `AIContextProvider` subclass that extracts recently-referenced file paths and injects a working-set note before each LLM call
-- OpenTelemetry distributed tracing with a stable Temporal `agent.turn` parent and optional
-  canonical MAF/MEAI child spans; search attributes enabled by default via `EnableSearchAttributes`
-- Plugin composition — `.AddWorkerPlugin()` / `.AddClientPlugin()` available via the `TemporalCommunity.Extensions.AI` dependency (same worker builder, chains after `.AddTemporalAgents()`)
-
-## How It Works
-
-```
-External Caller
-    │
-    │  ExecuteUpdateAsync (RunRequest)
-    ▼
-AgentWorkflow (long-lived workflow)
-    │
-    │  ExecuteActivityAsync
-    ▼
-AgentActivities.RunDurableAgentStepAsync
-    │
-    ├─► agent.turn (Temporal correlation and fallback usage)
-    │     └─► invoke_agent / chat (optional MAF/MEAI telemetry; canonical usage owner)
-    └─► Model step and durable tool activities (e.g., ChatClientAgent backed by Azure OpenAI)
-```
-
-`agent.turn` is retained when upstream MAF/MEAI telemetry is enabled. A sampled MAF
-`invoke_agent` descendant receives the same `temporal.agent.correlation_id`; a standalone MEAI
-chat span shares the trace but is created below the library boundary, so correlation is trace-based.
-Usage attributes appear on the upstream canonical GenAI span when present and otherwise fall back
-to `agent.turn`.
-
-Each agent session maps to a long-lived Temporal **workflow** (`AgentWorkflow`). When an external caller sends a
-message, it uses a Temporal **Update** — a durable, acknowledged request/response primitive — to deliver the message and
-receive the agent's response in a single call. All AI inference runs inside Temporal **activities**, preserving
-determinism.
-
 ## Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) or later to run the samples below
+- [.NET 10 SDK](https://dotnet.microsoft.com/download) or later to run the samples below. The
+  published package also targets `netstandard2.1` (.NET Core 3.1+ and modern .NET); .NET Framework
+  is not supported.
 - Temporal Service 1.31.0 or newer ([local development](https://docs.temporal.io/cli#start-dev):
   `temporal server start-dev`)
 - An LLM provider (e.g., Azure OpenAI, OpenAI)
@@ -76,12 +18,6 @@ Install the NuGet package:
 ```bash
 dotnet add package TemporalCommunity.Extensions.Agents
 ```
-
-## Target framework support
-
-The package ships `net10.0` and `netstandard2.1` assets. The latter supports .NET Core 3.1+
-and modern .NET; .NET Framework is not supported. The repository samples and test projects
-remain `net10.0`.
 
 ## Getting Started
 
@@ -161,69 +97,10 @@ temporal server start-dev --namespace default \
 dotnet run --project samples/MAF/BasicAgent/BasicAgent.csproj
 ```
 
-## Configuration
-
-Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts => ...)` delegate):
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `EnableSearchAttributes` | `bool` | `true` | Upsert `AgentName`, `SessionCreatedAt`, `TurnCount` on each workflow run |
-| `DefaultMaxEntryCount` | `int` | `1000` | Cap on `DurableSessionEntry` records (request + response pairs) before triggering continue-as-new |
-| `DefaultHistoryReducerKey` | `string?` | `null` | Key of a history reducer registered in DI and executed as an activity at continue-as-new boundaries |
-| `DefaultRetryPolicy` | `RetryPolicy?` | `null` | Override the default retry policy for agent activities |
-| `DefaultActivityTimeout` | `TimeSpan` | `5 min` | Default start-to-close timeout for agent activities |
-| `DefaultApprovalTimeout` | `TimeSpan` | `7 days` | How long a HITL gate waits before auto-rejecting |
-
-`EnableSearchAttributes` defaults to `true`. The three search attributes must be pre-registered on
-the Temporal server. Pass them to `temporal server start-dev` as shown above, or run the production
-CLI commands in the [Observability guide](../../docs/how-to/MAF/observability.md#search-attributes).
-Set the option to `false` to opt out.
-
-`AgentSessionStateBag` is carried across turns and continue-as-new boundaries, but it is not a
-general memory store. At continue-as-new time the workflow logs a warning when the serialized bag
-exceeds 64 KB; the warning does not trim or fail the session. Keep provider state compact and see
-the [context-provider boundary](../../docs/architecture/MAF/bounded-durable-agent-compatibility.md).
-Providers and tools can measure the same durable payload representation before a turn is submitted:
-
-```csharp
-int carriedBytes = session.StateBag.GetDurableSerializedUtf8ByteCount();
-```
-
-An empty bag reports zero because durable agent workflows omit it from the payload.
-
 ## Samples
 
 Use the [Sample Catalog](../../samples/catalog.md#temporalcommunityextensionsagents-maf) to choose a
 MAF sample by intent and deployment topology. It is validated against tracked sample projects.
-
-## Core Components
-
-- **`AgentWorkflow`** — Long-lived workflow with `[WorkflowUpdate]` for request/response
-- **`AgentJobWorkflow`** — Fire-and-forget workflow for scheduled and deferred runs
-- **`TemporalAIAgent`** — For use inside Temporal workflows (via `GetTemporalAgent`)
-- **`TemporalAIAgentProxy`** — For external callers (via `GetTemporalAgentProxy`)
-- **`ITemporalAgentClient`** — Update-based client with routing, scheduling, and HITL support
-- **`TemporalAgentContext`** — Async-local context for agent tools running inside activities
-- **`StructuredOutputExtensions`** — `RunAsync<T>` with markdown fence stripping and retry
-- **`IAgentToolInterceptor`** (`TemporalCommunity.Extensions.Agents.Tools`) — pre-tool lifecycle hook; extends `IDurableToolInterceptor<AgentToolContext>` from `TemporalCommunity.Extensions.AI.Tools`; return `DurableToolDecision.Proceed/PauseForApproval/Skip/Block`
-- **`WorkingSetContextProvider`** — `AIContextProvider` that injects a compact file-reference note before each LLM call
-
-### Dependency on TemporalCommunity.Extensions.AI
-
-This library depends on `TemporalCommunity.Extensions.AI`. Installing `TemporalCommunity.Extensions.Agents` pulls in `TemporalCommunity.Extensions.AI` automatically — no separate package reference is needed.
-
-The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI.Approvals`. Use the package-specific typed client for one-call decisions. MAF reusable session grants are available only through the explicitly registered `ITemporalAgentApprovalScopeAdministration` service.
-
-`TemporalAgentDataConverter` is auto-wired by `AddTemporalAgents()` for the standard registration
-patterns (3-arg `AddHostedTemporalWorker` and `AddTemporalClient`). If an application creates a
-client via `TemporalClient.ConnectAsync` and registers it with `AddSingleton<ITemporalClient>`, it
-must configure a converter that preserves MAF session entries (normally
-`TemporalAgentDataConverter.Instance`). `AddTemporalAgents()` validates that requirement before
-the worker starts and fails with configuration guidance when it is not met.
-
-For a custom payload codec, use `TemporalAgentDataConverter.CreateDataConverter(codec)`. Deploy
-compatible decoding to every client, worker, replayer, and operational reader before enabling
-encoding.
 
 ## Documentation
 
@@ -257,6 +134,125 @@ encoding.
 - [Temporal Documentation](https://docs.temporal.io/)
 - [Temporal .NET SDK](https://github.com/temporalio/sdk-dotnet)
 - [Microsoft Agent Framework](https://github.com/microsoft/agents)
+
+## Overview
+
+Temporal gives AI agents **durability by default** — every agent session maps to a long-lived workflow whose state
+survives process crashes and restarts. Conversation history, tool calls, and even human-in-the-loop approval gates are
+all persisted in Temporal's event history and replayed deterministically.
+
+Key benefits over in-memory agent frameworks:
+
+- **Request/Response via `[WorkflowUpdate]`** — direct response, no polling
+- **Long sessions** — continue-as-new transfers history to fresh runs automatically
+- **Observability** — full Temporal Web UI, event history, and distributed tracing
+- **Multi-agent orchestration** — first-class workflow fan-out and routing
+
+## Feature Highlights
+
+- Durable multi-turn conversations with automatic history management
+- Workflow-based routing — durable, observable, and fully under your control
+- Parallel agent execution inside workflows (`ExecuteAgentsInParallelAsync`)
+- Human-in-the-loop approval gates via `[WorkflowUpdate]`
+- Typed structured output with `RunAsync<T>` (markdown fence stripping + retry)
+- Recurring and one-time scheduled agent runs
+- MCP tool integration through ordinary `AddTool`/`AddTools` registration; see the
+  [MCP guide](../../docs/how-to/MAF/mcp-tools.md)
+- External memory with `AIContextProvider` and `AgentSessionStateBag` persistence
+- Completed request/response only; `RunStreamingAsync` is not supported
+- Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`)
+- `WorkingSetContextProvider` — `AIContextProvider` subclass that extracts recently-referenced file paths and injects a working-set note before each LLM call
+- OpenTelemetry distributed tracing with a stable Temporal `agent.turn` parent and optional
+  canonical MAF/MEAI child spans; search attributes enabled by default via `EnableSearchAttributes`
+- Plugin composition — `.AddWorkerPlugin()` / `.AddClientPlugin()` available via the `TemporalCommunity.Extensions.AI` dependency (same worker builder, chains after `.AddTemporalAgents()`)
+
+## How It Works
+
+```
+External Caller
+    │
+    │  ExecuteUpdateAsync (RunRequest)
+    ▼
+AgentWorkflow (long-lived workflow)
+    │
+    │  ExecuteActivityAsync
+    ▼
+AgentActivities.RunDurableAgentStepAsync
+    │
+    ├─► agent.turn (Temporal correlation and fallback usage)
+    │     └─► invoke_agent / chat (optional MAF/MEAI telemetry; canonical usage owner)
+    └─► Model step and durable tool activities (e.g., ChatClientAgent backed by Azure OpenAI)
+```
+
+`agent.turn` is retained when upstream MAF/MEAI telemetry is enabled. A sampled MAF
+`invoke_agent` descendant receives the same `temporal.agent.correlation_id`; a standalone MEAI
+chat span shares the trace but is created below the library boundary, so correlation is trace-based.
+Usage attributes appear on the upstream canonical GenAI span when present and otherwise fall back
+to `agent.turn`.
+
+Each agent session maps to a long-lived Temporal **workflow** (`AgentWorkflow`). When an external caller sends a
+message, it uses a Temporal **Update** — a durable, acknowledged request/response primitive — to deliver the message and
+receive the agent's response in a single call. All AI inference runs inside Temporal **activities**, preserving
+determinism.
+
+## Configuration
+
+Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts => ...)` delegate):
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `EnableSearchAttributes` | `bool` | `true` | Upsert `AgentName`, `SessionCreatedAt`, `TurnCount` on each workflow run |
+| `DefaultMaxEntryCount` | `int` | `1000` | Cap on `DurableSessionEntry` records (request + response pairs) before triggering continue-as-new |
+| `DefaultHistoryReducerKey` | `string?` | `null` | Key of a history reducer registered in DI and executed as an activity at continue-as-new boundaries |
+| `DefaultRetryPolicy` | `RetryPolicy?` | `null` | Override the default retry policy for agent activities |
+| `DefaultActivityTimeout` | `TimeSpan` | `5 min` | Default start-to-close timeout for agent activities |
+| `DefaultApprovalTimeout` | `TimeSpan` | `7 days` | How long a HITL gate waits before auto-rejecting |
+
+`EnableSearchAttributes` defaults to `true`. The three search attributes must be pre-registered on
+the Temporal server. Pass them to `temporal server start-dev` as shown above, or run the production
+CLI commands in the [Observability guide](../../docs/how-to/MAF/observability.md#search-attributes).
+Set the option to `false` to opt out.
+
+`AgentSessionStateBag` is carried across turns and continue-as-new boundaries, but it is not a
+general memory store. At continue-as-new time the workflow logs a warning when the serialized bag
+exceeds 64 KB; the warning does not trim or fail the session. Keep provider state compact and see
+the [context-provider boundary](../../docs/architecture/MAF/bounded-durable-agent-compatibility.md).
+Providers and tools can measure the same durable payload representation before a turn is submitted:
+
+```csharp
+int carriedBytes = session.StateBag.GetDurableSerializedUtf8ByteCount();
+```
+
+An empty bag reports zero because durable agent workflows omit it from the payload.
+
+## Core Components
+
+- **`AgentWorkflow`** — Long-lived workflow with `[WorkflowUpdate]` for request/response
+- **`AgentJobWorkflow`** — Fire-and-forget workflow for scheduled and deferred runs
+- **`TemporalAIAgent`** — For use inside Temporal workflows (via `GetTemporalAgent`)
+- **`TemporalAIAgentProxy`** — For external callers (via `GetTemporalAgentProxy`)
+- **`ITemporalAgentClient`** — Update-based client with routing, scheduling, and HITL support
+- **`TemporalAgentContext`** — Async-local context for agent tools running inside activities
+- **`StructuredOutputExtensions`** — `RunAsync<T>` with markdown fence stripping and retry
+- **`IAgentToolInterceptor`** (`TemporalCommunity.Extensions.Agents.Tools`) — pre-tool lifecycle hook; extends `IDurableToolInterceptor<AgentToolContext>` from `TemporalCommunity.Extensions.AI.Tools`; return `DurableToolDecision.Proceed/PauseForApproval/Skip/Block`
+- **`WorkingSetContextProvider`** — `AIContextProvider` that injects a compact file-reference note before each LLM call
+
+### Dependency on TemporalCommunity.Extensions.AI
+
+This library depends on `TemporalCommunity.Extensions.AI`. Installing `TemporalCommunity.Extensions.Agents` pulls in `TemporalCommunity.Extensions.AI` automatically — no separate package reference is needed.
+
+The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI.Approvals`. Use the package-specific typed client for one-call decisions. MAF reusable session grants are available only through the explicitly registered `ITemporalAgentApprovalScopeAdministration` service.
+
+`TemporalAgentDataConverter` is auto-wired by `AddTemporalAgents()` for the standard registration
+patterns (3-arg `AddHostedTemporalWorker` and `AddTemporalClient`). If an application creates a
+client via `TemporalClient.ConnectAsync` and registers it with `AddSingleton<ITemporalClient>`, it
+must configure a converter that preserves MAF session entries (normally
+`TemporalAgentDataConverter.Instance`). `AddTemporalAgents()` validates that requirement before
+the worker starts and fails with configuration guidance when it is not met.
+
+For a custom payload codec, use `TemporalAgentDataConverter.CreateDataConverter(codec)`. Deploy
+compatible decoding to every client, worker, replayer, and operational reader before enabling
+encoding.
 
 ## License
 

@@ -223,4 +223,5 @@ for the two topologies.
 - [Pre-release MAF Worker Cutover](how-to/MAF/pre-release-cutover.md)
 - [Cross-Library Integration Architecture](architecture/MEAI/cross-library-integration.md)
 - [Durable Chat Pipeline Architecture](architecture/MEAI/durable-chat-pipeline.md)
+- [Direct-Adapter-in-Workflow Anti-Pattern](architecture/MEAI/direct-adapter-anti-pattern.md) — why constructing a durable chat/embedding adapter directly inside workflow code is retired, and what to use instead
 - [Durability and Determinism](architecture/MAF/durability-and-determinism.md)

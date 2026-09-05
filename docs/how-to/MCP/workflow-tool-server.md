@@ -2,8 +2,8 @@
 
 An ordinary MCP server tool can call `ITemporalClient` directly. This composition is sufficient
 when an MCP request starts durable application work and waits for its business result. It does not
-need a `TemporalCommunity.Extensions.*` adapter and it is distinct from the experimental MCP Tasks
-protocol.
+need a `TemporalCommunity.Extensions.*` adapter. It is distinct from the MCP Tasks extension and
+from the deferred Temporal-backed MCP Task integration.
 
 The runnable [WorkflowToolServer sample](../../../samples/MCP/WorkflowToolServer) demonstrates this
 topology:
