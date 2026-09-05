@@ -45,7 +45,7 @@ Every agent call runs as a durable Temporal activity. If the worker crashes afte
 
 3. **`.ConfigureAwait(true)` on all workflow awaits.** All `await` calls inside `[Workflow]`-attributed classes use `.ConfigureAwait(true)`. This is required to keep the Temporal workflow task scheduler active — omitting it can cause the workflow context to be lost during replay.
 
-4. **Live agent list, locally-mapped descriptions.** The dynamic routing workflow asks an activity for the live registered agent names via `TemporalAgentsOptions.GetRegisteredAgentNames()`, then combines those names with a description map declared inside the activity. The result drives a context-aware prompt for the Classifier. Routing metadata is a routing-activity concern, not state on the agent registry.
+4. **Live agent list, descriptor-driven.** The dynamic routing workflow asks an activity for the live agent descriptors via `TemporalAgentsOptions.GetAgentDescriptors()`, which surfaces each registered agent's `Description`. The result drives a context-aware prompt for the Classifier. Routing metadata lives on the agent registration itself, not in a separate map.
 
 5. **Independent sessions per agent.** Each agent call gets its own session (`CreateSessionAsync`), keeping conversation histories isolated between the classifier and specialist.
 
@@ -149,7 +149,7 @@ The sample also includes `DynamicRoutingWorkflow`, which demonstrates **truly dy
 
 `DynamicRoutingWorkflow` discovers agents at runtime without hardcoding any names in the routing workflow:
 
-1. **An activity** calls `options.GetRegisteredAgentNames()` to get the registered agent list, then combines the names with a local descriptions dictionary declared in the activity — the result is cached in workflow event history
+1. **An activity** calls `options.GetAgentDescriptors()` to get the registered agent names and their `Description` values — the result is cached in workflow event history
 2. **The Classifier agent** receives the descriptor list as context and picks the best match from whatever agents are currently registered
 3. **A validation activity** confirms the LLM's choice is actually registered, with a fallback
 
@@ -157,8 +157,7 @@ The sample also includes `DynamicRoutingWorkflow`, which demonstrates **truly dy
 DynamicRoutingWorkflow
     │
     ├─ Activity: GetAvailableAgents()
-    │    └─ calls options.GetRegisteredAgentNames() for the registered agent list
-    │    └─ combines with a local descriptions map in the activity
+    │    └─ calls options.GetAgentDescriptors() for the registered agent list + descriptions
     │    └─ returns: [("OrdersAgent", "Handles orders..."), ("TechSupportAgent", "..."), ...]
     │    └─ result cached in event history (replay-safe)
     │

@@ -143,7 +143,7 @@ When a worker crashes:
 - `DurableToolContext` — `TemporalCommunity.Extensions.AI.Tools` — cross-library base context. Properties: `ToolName`, `Arguments`, `CallId`, `SessionId?`. Non-sealed — `AgentToolContext` extends it.
 - `IAgentToolInterceptor` — `TemporalCommunity.Extensions.Agents.Tools` — convenience alias for `IDurableToolInterceptor<AgentToolContext>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`. Returns `DurableToolDecision` from the AI library.
 - `AgentToolContext` — `TemporalCommunity.Extensions.Agents.Tools` — extends `DurableToolContext`. Adds `AgentName` (required) and `StateBag?` (read-only snapshot). The inherited `SessionId` is populated from `ActivityExecutionContext.Current.Info.WorkflowId` in the interceptor activity.
-- `WorkingSetContextProvider` — `TemporalCommunity.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Stores result in `AgentSessionStateBag["temporal.working_set"]`; effectively a no-op for external-store sessions (sparse current-turn messages only).
+- `WorkingSetContextProvider` — `TemporalCommunity.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Stores result in `AgentSessionStateBag["temporal.working_set"]`.
 
 ### DI Patterns
 - `TemporalAgentsOptions` has an **internal constructor** — always access via the `AddTemporalAgents(opts => ...)` delegate.
@@ -238,6 +238,7 @@ just clean-test-artifacts  # remove artifacts/{test-individual,sample-runs}/
 
 **Skipped from sample-canary** (must run manually):
 - `samples/{MEAI,MAF}/HumanInTheLoop` — interactive (Console.ReadLine)
+- `samples/MAF/ApprovalScopes` — interactive (Console.ReadLine)
 - `samples/MAF/SplitWorkerClient` — two processes (Worker + Client)
 
 **Pre-requisites for sample-canary:** GNU coreutils `timeout` (macOS: `brew install coreutils`),

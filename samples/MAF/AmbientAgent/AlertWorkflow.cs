@@ -23,14 +23,14 @@ public class AlertWorkflow
         while (!_shutdownRequested)
         {
             // Wait until we have alerts to process, or shutdown is requested.
-            // m6: Pass Workflow.CancellationToken so the wait is cancelled cleanly on shutdown.
+            // Pass Workflow.CancellationToken so the wait is cancelled cleanly on shutdown.
             var conditionMet = await Workflow.WaitConditionAsync(
                 () => _shutdownRequested
                       || _pendingAlerts.Count > 0
                       || Workflow.ContinueAsNewSuggested,
                 timeout: TimeSpan.FromHours(1),
                 cancellationToken: Workflow.CancellationToken)
-                .ConfigureAwait(true);  // C1
+                .ConfigureAwait(true);
 
             if (_shutdownRequested)
                 break;
@@ -62,9 +62,9 @@ public class AlertWorkflow
 
                 // Fresh session per cycle: each LLM call is a stateless analysis of the current window.
                 // To accumulate cross-cycle conversation history, store the session in a field and reuse it.
-                var session = await alertAgent.CreateSessionAsync().ConfigureAwait(true);  // C1, M4
+                var session = await alertAgent.CreateSessionAsync().ConfigureAwait(true);
 
-                var response = await alertAgent.RunAsync(  // C1
+                var response = await alertAgent.RunAsync(
                     [new ChatMessage(ChatRole.User, prompt)],
                     session).ConfigureAwait(true);
 

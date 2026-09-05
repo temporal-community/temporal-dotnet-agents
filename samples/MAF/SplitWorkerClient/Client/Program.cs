@@ -67,13 +67,10 @@ Console.WriteLine($"User : What's the current weather condition?");
 Console.WriteLine($"Agent: {r3.Text}\n");
 
 // ── Step 5: Reuse the session from a new client instance ─────────────────────
-// Sessions are durable: you can reconnect to an existing session from its workflow ID.
-// session.ToString() returns the Temporal workflow ID (e.g. "ta-assistant-abc123").
-// This simulates a second client process picking up where the first left off.
-// TemporalAgentSession.ToString() returns SessionId.WorkflowId — never null at runtime.
-// The ! suppresses the compiler's string? inference on object.ToString(). The string
-// round-trip is intentional: it simulates a second process that has only the workflow
-// ID (e.g. stored in a database) and needs to reconstruct the session handle from it.
+// Sessions are durable: session.ToString() returns the workflow ID (e.g. "ta-assistant-abc123"),
+// never null at runtime — the ! suppresses the compiler's string? inference on object.ToString().
+// Parsing it back simulates a second process that only has the workflow ID (e.g. stored in a
+// database) reconstructing the session handle to continue an existing conversation.
 var sessionId = TemporalAgentSessionId.Parse(session.ToString()!);
 var resumedSession = new TemporalAgentSession(sessionId);
 

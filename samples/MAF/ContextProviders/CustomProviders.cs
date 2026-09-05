@@ -1,7 +1,9 @@
 // CustomProviders.cs — two AIContextProvider subclasses for the ContextProviders sample.
 //
-// Demonstrates the AIContextProvider pattern without relying on MAF types that are not
-// yet available in the 1.3.0 NuGet release.
+// Demonstrates the AIContextProvider pattern with hand-rolled providers rather than MAF's
+// built-in TodoProvider/AgentModeProvider, which expose tools dynamically via AIContext.Tools
+// and are not direct drop-ins for this library's durable tool dispatch (see
+// docs/how-to/MAF/individual-context-providers.md).
 //
 // TurnCounterProvider — stateful: increments a per-session LLM-call counter in StateBag
 //                       and injects it as a system message on every step.

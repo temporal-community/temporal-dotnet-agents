@@ -76,8 +76,9 @@ public sealed class OrderService
 
 /// <summary>
 /// Write-style refund tool. Non-idempotent: a retry would issue a second refund.
-/// The agent registration sets <c>MaximumAttempts = 1</c> in <c>PerToolActivityOptions</c>
-/// for this tool's name so Temporal will surface the failure rather than re-charge.
+/// The agent registration binds <c>opts.NoRetry()</c> (<c>MaximumAttempts = 1</c>) to
+/// this tool's <c>AIFunction</c> reference so Temporal will surface the failure rather
+/// than re-charge.
 /// </summary>
 public sealed class RefundService
 {

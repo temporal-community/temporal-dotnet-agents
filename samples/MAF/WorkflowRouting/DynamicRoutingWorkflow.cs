@@ -39,7 +39,8 @@ public class DynamicRoutingWorkflow
     public async Task<string> RunAsync(string userQuestion)
     {
         // ── Step 1: Discover available agents via activity (cached on replay) ──
-        // The activity reads AddAgentDescriptor() registrations from the registry.
+        // The activity reads Description values set on AddDurableAgent registrations,
+        // exposed via TemporalAgentsOptions.GetAgentDescriptors().
         // This is the only place the workflow learns what specialists exist.
         var availableAgents = await Workflow.ExecuteActivityAsync(
             (RoutingActivities a) => a.GetAvailableAgents(),

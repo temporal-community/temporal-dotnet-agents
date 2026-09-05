@@ -99,8 +99,8 @@ dotnet run --project samples/MAF/BasicAgent/BasicAgent.csproj
 
 ## Samples
 
-Use the [Sample Catalog](../../samples/catalog.md#temporalcommunityextensionsagents-maf) to choose a
-MAF sample by intent and deployment topology. It is validated against tracked sample projects.
+Use the [Sample Catalog](../../samples/catalog.md) to choose a MAF sample by intent and deployment
+topology. It is validated against tracked sample projects.
 
 ## Documentation
 
