@@ -1,6 +1,6 @@
 # Testing Agents
 
-How to test TemporalAgents integrations — from fast unit tests with no server to full integration tests running against a real Temporal environment. The codebase ships with 214 unit tests and 51 integration tests; this guide walks through the patterns they use.
+How to test TemporalAgents integrations — from fast unit tests with no server to full integration tests running against a real Temporal environment. The codebase ships with 623 unit tests and 109 integration tests; this guide walks through the patterns they use.
 
 ---
 
@@ -19,8 +19,8 @@ The test suite is split into two projects:
 
 | Project | Count | Server Required | Purpose |
 |---------|-------|-----------------|---------|
-| `TemporalCommunity.Extensions.Agents.Tests` | 214 | No | Configuration, routing, DI registration, serialization |
-| `TemporalCommunity.Extensions.Agents.IntegrationTests` | 51 | Yes | Full agent execution, HITL, continue-as-new, history preservation |
+| `TemporalCommunity.Extensions.Agents.Tests` | 623 | No | Configuration, routing, DI registration, serialization |
+| `TemporalCommunity.Extensions.Agents.IntegrationTests` | 109 | Yes | Full agent execution, HITL, continue-as-new, history preservation |
 
 **General principles:**
 
@@ -563,11 +563,11 @@ just capture-agent-histories
 
 ## References
 
-- `tests/TemporalCommunity.Extensions.Agents.Tests/` — 214 unit tests
-- `tests/TemporalCommunity.Extensions.Agents.IntegrationTests/` — 51 integration tests
+- `tests/TemporalCommunity.Extensions.Agents.Tests/` — 623 unit tests
+- `tests/TemporalCommunity.Extensions.Agents.IntegrationTests/` — 109 integration tests
 - [Durability & Determinism](../../architecture/MAF/durability-and-determinism.md) — why activity results are cached on replay
 - [Agent Sessions & Workflow Loop](../../architecture/MAF/agent-sessions-and-workflow-loop.md) — session lifecycle under test
 
 ---
 
-_Last updated: 2026-03-13_
+_Last updated: 2026-09-05_

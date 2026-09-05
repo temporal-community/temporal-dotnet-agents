@@ -10,8 +10,8 @@ This document explains how `TemporalAgentSession` bridges the Microsoft Agent Fr
 2. [The Agent Loop Inside AgentWorkflow](#the-agent-loop-inside-agentworkflow)
 3. [Sending Messages via WorkflowUpdate](#sending-messages-via-workflowupdate)
 4. [Durable Agent Composition](#durable-agent-composition)
-6. [Durable Agent Workflow Loop](#durable-agent-workflow-loop)
-7. [Crashes, Heartbeats, and Timeouts](#crashes-heartbeats-and-timeouts)
+5. [Durable Agent Workflow Loop](#durable-agent-workflow-loop)
+6. [Crashes, Heartbeats, and Timeouts](#crashes-heartbeats-and-timeouts)
 
 ---
 

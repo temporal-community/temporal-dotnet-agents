@@ -73,6 +73,8 @@ opts => opts.SkipInterceptor()                      // bypass IAgentToolIntercep
 opts => opts.WithInterceptorTimeout(TimeSpan.FromSeconds(10))  // per-tool interceptor activity timeout
 opts => opts.RequireApproval()                      // absolute floor: always pause for human approval
                                                     // even if the interceptor returns Proceed
+opts => opts.ScopeAware()                           // opt in to expiring-grant auto-approval —
+                                                    // requires agent.UseApprovalScopes(); see hitl-patterns.md
 ```
 
 `RequireApproval()` and `PauseForApproval` are the two workflow-parked HITL triggers — the turn loop parks (no activity pinned) and retry-safe `ResolveApprovalAsync` unblocks it. This differs from the in-tool path (`TemporalAgentContext.Current.RequestApprovalAsync`), which keeps the activity running and heartbeating while waiting. See [HITL Patterns](./hitl-patterns.md) for a full comparison and the `IAgentToolInterceptor` registration pattern.

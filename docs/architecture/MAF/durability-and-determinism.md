@@ -225,27 +225,42 @@ If either crashes:
 
 ### 3. Continue-as-New and History Carryover
 
-The `AgentWorkflow` uses `Workflow.CreateContinueAsNewException()` to continue as a new run when the session TTL is reached:
+`AgentWorkflow` extends the shared `DurableChatWorkflowBase<AgentResponse>` (from
+`TemporalCommunity.Extensions.AI`), which owns the wait/trigger loop for continue-as-new — it is
+not inline in `AgentWorkflow`. The base class waits on SDK-suggested CAN, `MaxEntryCount`, or an
+explicit shutdown, then invokes the `CreateContinueAsNewException` hook that `AgentWorkflow`
+overrides to build the MAF-specific carried input:
 
 ```csharp
-// In AgentWorkflow.RunAsync()
-else if (Workflow.ContinueAsNewSuggested && !_shutdownRequested)
+// In DurableChatWorkflowBase.RunAsync() (TemporalCommunity.Extensions.AI)
+if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount) && !_shutdownRequested)
 {
-    // Carry forward conversation history and StateBag to the new run.
-    var carriedHistory = _history.ToList();
-    var carriedStateBag = _currentStateBag;
-    throw Workflow.CreateContinueAsNewException(
-        (AgentWorkflow wf) => wf.RunAsync(new AgentWorkflowInput
-        {
-            AgentName = input.AgentName,
-            TaskQueue = input.TaskQueue,
-            TimeToLive = input.TimeToLive,
-            CarriedHistory = carriedHistory,
-            CarriedStateBag = carriedStateBag,
-            ActivityTimeout = input.ActivityTimeout,
-            HeartbeatTimeout = input.HeartbeatTimeout,
-            ApprovalTimeout = input.ApprovalTimeout
-        }));
+    // ... history reducer selection, then:
+    throw CreateContinueAsNewException(reducedInput);   // virtual hook
+}
+
+// In AgentWorkflow.CreateContinueAsNewException() override
+protected override ContinueAsNewException CreateContinueAsNewException(DurableChatWorkflowInput input)
+{
+    // `with` copies every property from _input and overrides only the fields that differ for
+    // the new run: the base-class CAN fields (sourced from the `input` argument) plus the
+    // StateBag snapshot and the MAF-specific approval ledger.
+    var carriedInput = _input! with
+    {
+        CarriedStateBag = _currentStateBag,
+        TimeToLive = input.TimeToLive,
+        CarriedHistory = input.CarriedHistory,
+        ApprovalTimeout = input.ApprovalTimeout,
+        EnableSearchAttributes = input.EnableSearchAttributes,
+        MaxEntryCount = input.MaxEntryCount,
+        HistoryReducerKey = input.HistoryReducerKey,
+        OriginalCreatedAt = input.OriginalCreatedAt,
+        ActivityTimeout = input.ActivityTimeout,
+        HeartbeatTimeout = input.HeartbeatTimeout,
+        AgentApprovalResolutionHistory = _resolvedAgentApprovals.ToList(),
+    };
+
+    return Workflow.CreateContinueAsNewException((AgentWorkflow wf) => wf.RunAsync(carriedInput));
 }
 ```
 

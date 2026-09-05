@@ -510,11 +510,11 @@ There is no per-schedule timeout override — the effective per-agent timeout (o
 ## References
 
 - `src/TemporalCommunity.Extensions.Agents/Workflows/AgentJobWorkflow.cs` — fire-and-forget workflow for scheduled runs
-- `src/TemporalCommunity.Extensions.Agents/Workflows/ScheduleActivities.cs` — one-time scheduling from inside workflows
-- `src/TemporalCommunity.Extensions.Agents/Workflows/ScheduleRegistrationService.cs` — config-time schedule creation
+- `src/TemporalCommunity.Extensions.Agents/Scheduling/ScheduleActivities.cs` — one-time scheduling from inside workflows
+- `src/TemporalCommunity.Extensions.Agents/Scheduling/ScheduleRegistrationService.cs` — config-time schedule creation
 - `src/TemporalCommunity.Extensions.Agents/Workflows/DefaultTemporalAgentClient.cs` — `ScheduleAgentAsync` and `RunAgentDelayedAsync`
 - `src/TemporalCommunity.Extensions.Agents/ITemporalAgentClient.cs` — `ShutdownAsync` and full interface surface
-- `src/TemporalCommunity.Extensions.Agents/Workflows/ScheduleAgentRegistration.cs` — internal registration record
+- `src/TemporalCommunity.Extensions.Agents/Scheduling/ScheduleAgentRegistration.cs` — internal registration record
 - [Usage Guide](./usage.md) — `AddDurableAgent` registration patterns
 - [Observability](./observability.md) — scheduling OTel spans
 - [Temporal Schedules Documentation](https://docs.temporal.io/workflows#schedule)

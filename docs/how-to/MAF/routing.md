@@ -194,7 +194,7 @@ services.AddHostedTemporalWorker("agents")
     .AddSingletonActivities<RoutingActivities>();
 ```
 
-> The `Description` you set on the builder is stored in the agent registry. `AddAgentProxy` accepts an optional `description` parameter for proxy-only declarations. Agents registered without a description (e.g. a classifier) are excluded from `GetAgentDescriptors()` automatically. The `AgentDescriptor` record in `TemporalCommunity.Extensions.Agents.State` is the `(Name, Description)` shape the method returns.
+> The `Description` you set on the builder is stored in the agent registry. `GetAgentDescriptors()` only reads from `AddDurableAgent` registrations — `AddAgentProxy(name, timeToLive)` has no `description` parameter, so proxy-only declarations never appear in the descriptor list. Agents registered without a description (e.g. a classifier) are excluded from `GetAgentDescriptors()` automatically. The `AgentDescriptor` record in `TemporalCommunity.Extensions.Agents.State` is the `(Name, Description)` shape the method returns.
 
 #### Step 2: Define routing activities
 

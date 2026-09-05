@@ -122,7 +122,7 @@ The `description` string is shown to the reviewer via `DurableApprovalRequest.De
 
 If approved, the tool proceeds. If rejected, the tool is skipped and the agent receives a synthetic rejection result.
 
-For the full approval dashboard API and testing patterns, see [HITL Patterns — Workflow-Parked Approval](./hitl-patterns.md#workflow-parked-approval-feature-a).
+For the full approval dashboard API and testing patterns, see [HITL Patterns — Workflow-parked approval](./hitl-patterns.md#workflow-parked-approval).
 
 ### `Skip`
 
@@ -207,12 +207,16 @@ public class PolicyInterceptor : IAgentToolInterceptor
         AgentToolContext ctx, CancellationToken ct)
     {
         // Check whether a session-scope record already covers this call.
+        // Use the wall clock here — BeforeToolCallAsync runs inside the RunToolInterceptor
+        // *activity*, not workflow code, so non-determinism is fine. The built-in
+        // ScopedApprovalInterceptor instead threads a workflow-time snapshot through an
+        // internal AgentToolContext member not visible outside this assembly.
         if (ApprovalScopeHelpers.TryMatchScope(
                 ctx.ToolName,
                 ctx.Arguments,
                 ctx.StateBag,
                 "temporal.approval_scopes.session",
-                ctx.ApprovalEvaluationTime,
+                DateTimeOffset.UtcNow,
                 out var match))
         {
             return Task.FromResult(DurableToolDecision.Proceed(

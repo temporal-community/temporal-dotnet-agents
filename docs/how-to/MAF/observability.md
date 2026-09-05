@@ -124,6 +124,20 @@ The three usage attributes are set only when the provider reports usage and no l
 `OpenTelemetryAgent`/`OpenTelemetryChatClient` is present. With upstream telemetry, its canonical
 GenAI span owns usage so token/cost queries do not double-count.
 
+### `agent.tool.invoke` (Internal kind)
+
+**Emitted by:** `AgentActivities.InvokeAgentToolAsync`
+
+Wraps one per-tool activity dispatch. Every `InvokeAgentTool` activity emits its own span, so a
+turn with three tool calls in one round produces three `agent.tool.invoke` spans alongside the
+`agent.turn` span for that round.
+
+| Attribute | Value |
+|-----------|-------|
+| `gen_ai.agent.name` | The registered agent name |
+| `agent.tool.name` | The tool being invoked |
+| `agent.tool.call_id` | The originating `FunctionCallContent.CallId`, when the model supplied one |
+
 ### Optional MAF/MEAI child spans
 
 With MAF `OpenTelemetryAgent`, its sampled `invoke_agent` descendant receives the same
@@ -184,6 +198,8 @@ All attributes are defined as constants on `TemporalAgentTelemetry`:
 | `InputTokensAttribute` | `gen_ai.usage.input_tokens` | int? | Fallback `agent.turn` only |
 | `OutputTokensAttribute` | `gen_ai.usage.output_tokens` | int? | Fallback `agent.turn` only |
 | `TotalTokensAttribute` | `gen_ai.usage.total_tokens` | int? | Fallback `agent.turn` only |
+| `AgentToolNameAttribute` | `agent.tool.name` | string | `agent.tool.invoke` |
+| `AgentToolCallIdAttribute` | `agent.tool.call_id` | string | `agent.tool.invoke` (when the model supplied a call ID) |
 | `ScheduleIdAttribute` | `schedule.id` | string | `schedule.create` |
 | `ScheduleDelayAttribute` | `schedule.delay` | string | `schedule.delayed`, `schedule.one_time` |
 | `ScheduleJobIdAttribute` | `schedule.job_id` | string | `schedule.one_time` |
@@ -210,9 +226,16 @@ agent.client.send                           ← TemporalAgentTelemetry (Client k
                           └── invoke_agent  ← optional MAF canonical GenAI span
                                 │
                                 └── (LLM HTTP call, if instrumented)
+
+  ... (if the turn produced tool calls, one InvokeAgentTool activity per call, each with its
+       own agent.tool.invoke span) ...
+
+  RunActivity:InvokeAgentTool                 ← TracingInterceptor.ActivitiesSource
+        │
+        └── agent.tool.invoke                ← one per tool call, fanned out via Workflow.WhenAllAsync
 ```
 
-The two `TemporalAgentTelemetry` spans bookend the trace — `agent.client.send` at the top (caller-side) and `agent.turn` at the bottom (inference-side). The Temporal SDK spans fill in the middle, showing the workflow and activity execution.
+The two `TemporalAgentTelemetry` spans bookend the trace — `agent.client.send` at the top (caller-side) and `agent.turn` at the bottom (inference-side). The Temporal SDK spans fill in the middle, showing the workflow and activity execution. `agent.tool.invoke` spans are siblings of `agent.turn` — each `InvokeAgentTool` activity dispatched for that turn's tool calls gets its own span, separate from the LLM-step span.
 
 ---
 
@@ -354,4 +377,4 @@ This is a doc-only pattern with no library opt-in flag. See [Per-LLM-Call Interc
 
 ---
 
-_Last updated: 2026-08-09_
+_Last updated: 2026-09-05_
