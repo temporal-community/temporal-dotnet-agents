@@ -136,7 +136,7 @@ public class ResearchWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
-        var researcher = TemporalWorkflowExtensions.GetTemporalAgent("ResearchAgent");
+        var researcher = WorkflowAgents.GetTemporalAgent("ResearchAgent");
         var session    = await researcher.CreateSessionAsync();
         var result     = await researcher.RunAsync($"Research: {topic}", session);
         return result.Messages[0].Text;

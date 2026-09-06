@@ -26,7 +26,7 @@ using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);

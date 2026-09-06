@@ -1,7 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace TemporalCommunity.Extensions.Agents.Tests.Compat;
 

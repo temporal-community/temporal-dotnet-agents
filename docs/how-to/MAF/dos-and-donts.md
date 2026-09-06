@@ -86,7 +86,7 @@ var results = await Task.WhenAll(toolTasks);
 var results = await Workflow.WhenAllAsync(toolTasks);
 ```
 
-**Why:** `Workflow.WhenAllAsync` is the SDK-provided workflow-safe combinator and the project convention. The XML doc on `TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync` (`src/TemporalCommunity.Extensions.Agents/TemporalWorkflowExtensions.cs:112`) describes it as "the workflow-safe equivalent of `Task.WhenAll`." `Task.WhenAll` is technically safe when every task comes from `Workflow.ExecuteActivityAsync` (those schedule on `TaskScheduler.Current`), but using the SDK method makes intent clear and stays consistent with the rest of the codebase.
+**Why:** `Workflow.WhenAllAsync` is the SDK-provided workflow-safe combinator and the project convention. The XML doc on `WorkflowAgents.ExecuteAgentsInParallelAsync` (`src/TemporalCommunity.Extensions.Agents/WorkflowAgents.cs:112`) describes it as "the workflow-safe equivalent of `Task.WhenAll`." `Task.WhenAll` is technically safe when every task comes from `Workflow.ExecuteActivityAsync` (those schedule on `TaskScheduler.Current`), but using the SDK method makes intent clear and stays consistent with the rest of the codebase.
 
 ### Don't use `ConfigureAwait(false)` in workflow code
 
@@ -105,13 +105,13 @@ await Workflow.ExecuteActivityAsync(...).ConfigureAwait(true);
 
 ```csharp
 // GOOD — string literal, deterministic
-var agent = TemporalWorkflowExtensions.GetTemporalAgent("WeatherAgent");
+var agent = WorkflowAgents.GetTemporalAgent("WeatherAgent");
 
 // GOOD — agent name from a cached activity result
 var agentName = await Workflow.ExecuteActivityAsync(
     (RoutingActivities a) => a.ValidateAgent(chosenName, "FallbackAgent"),
     new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(10) });
-var agent = TemporalWorkflowExtensions.GetTemporalAgent(agentName);
+var agent = WorkflowAgents.GetTemporalAgent(agentName);
 ```
 
 ---
@@ -167,15 +167,15 @@ The `ChatClient`, `AddTool(name, factory)`, and `AddContextProvider(factory)` bu
 
 ```csharp
 // WRONG — session2 sees session1's history because they share the instance
-var agent = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
+var agent = WorkflowAgents.GetTemporalAgent("Analyst");
 var s1 = await agent.CreateSessionAsync();
 await agent.RunAsync("Question A", s1);
 var s2 = await agent.CreateSessionAsync();
 await agent.RunAsync("Question B", s2); // sees "Question A" in context!
 
 // CORRECT — separate instances have independent histories
-var agent1 = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
-var agent2 = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
+var agent1 = WorkflowAgents.GetTemporalAgent("Analyst");
+var agent2 = WorkflowAgents.GetTemporalAgent("Analyst");
 var s1 = await agent1.CreateSessionAsync();
 var s2 = await agent2.CreateSessionAsync();
 ```
@@ -234,7 +234,7 @@ opts.DefaultHeartbeatTimeout   = TimeSpan.FromMinutes(30);
 ### Do pass ActivityOptions when using GetTemporalAgent() for workflow sub-agents
 
 ```csharp
-var agent = TemporalWorkflowExtensions.GetTemporalAgent(
+var agent = WorkflowAgents.GetTemporalAgent(
     "ResearcherAgent",
     activityOptions: new ActivityOptions
     {

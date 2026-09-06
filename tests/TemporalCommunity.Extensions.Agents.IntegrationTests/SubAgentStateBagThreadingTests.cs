@@ -10,13 +10,13 @@ using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
 using Xunit;
 using Xunit.Abstractions;
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 
 /// <summary>
 /// X-3 — <see cref="TemporalAIAgent"/> (orchestration sub-agent via
-/// <see cref="TemporalWorkflowExtensions.GetTemporalAgent"/>) threads its StateBag across steps. A context
+/// <see cref="WorkflowAgents.GetTemporalAgent"/>) threads its StateBag across steps. A context
 /// provider's StateBag write in step N must be visible to the provider in step N+1.
 ///
 /// <para>

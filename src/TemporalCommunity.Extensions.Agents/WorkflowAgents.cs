@@ -15,7 +15,7 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <see cref="InvalidOperationException"/>; resolve <see cref="TemporalAIAgentProxy"/> from the
 /// service provider via <c>GetTemporalAgentProxy(name)</c> for external invocation.
 /// </remarks>
-public static class TemporalWorkflowExtensions
+public static class WorkflowAgents
 {
     /// <summary>
     /// Gets a <see cref="TemporalAIAgent"/> for use in an orchestrating workflow.

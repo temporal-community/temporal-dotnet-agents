@@ -8,7 +8,7 @@ registered agent:
 
 - **From outside a workflow** — external callers (ASP.NET, console, background service) resolve a
   `TemporalAIAgentProxy` via `GetTemporalAgentProxy`.
-- **From inside an orchestrating workflow** — use `TemporalWorkflowExtensions.GetTemporalAgent` for
+- **From inside an orchestrating workflow** — use `WorkflowAgents.GetTemporalAgent` for
   sub-agent orchestration.
 
 This page is the how-to reference once you've chosen this package. To choose between it and
@@ -252,7 +252,7 @@ var report = await agentProxy.RunAsync<WeatherReport>(
 
 ```csharp
 // Inside a workflow
-var agent = TemporalWorkflowExtensions.GetTemporalAgent("AnalystAgent");
+var agent = WorkflowAgents.GetTemporalAgent("AnalystAgent");
 var session = await agent.CreateSessionAsync();
 var analysis = await agent.RunAsync<AnalysisResult>(messages, session);
 
@@ -316,7 +316,7 @@ in operator workflow logs, without arguments or registry contents.
 
 ## Agent Orchestration (Inside Workflows)
 
-Use `TemporalWorkflowExtensions.GetTemporalAgent` to interact with agents from within an orchestrating Temporal workflow. The
+Use `WorkflowAgents.GetTemporalAgent` to interact with agents from within an orchestrating Temporal workflow. The
 agent's conversation history is stored in the workflow's event history and replayed automatically.
 
 ```csharp
@@ -330,12 +330,12 @@ public class ResearchWorkflow
     public async Task<string> RunAsync(string topic)
     {
         // Get a TemporalAIAgent — runs inference via activity, history tracked in workflow state
-        var researcher = TemporalWorkflowExtensions.GetTemporalAgent("ResearcherAgent");
+        var researcher = WorkflowAgents.GetTemporalAgent("ResearcherAgent");
         var session = await researcher.CreateSessionAsync();
 
         var outline = await researcher.RunAsync($"Create an outline about: {topic}", session);
 
-        var writer = TemporalWorkflowExtensions.GetTemporalAgent("WriterAgent");
+        var writer = WorkflowAgents.GetTemporalAgent("WriterAgent");
         var writerSession = await writer.CreateSessionAsync();
 
         var draft = await writer.RunAsync(
@@ -356,7 +356,7 @@ worker restarts, supports retries, and is durable by design — all without any 
 
 Use `TemporalAIAgentProxy` to interact with a registered agent from outside a Temporal workflow — for example, from an
 ASP.NET handler, a background service, or a console application. The proxy communicates with the running `AgentWorkflow`
-via Temporal workflow updates and is the correct counterpart to `TemporalWorkflowExtensions.GetTemporalAgent`, which is
+via Temporal workflow updates and is the correct counterpart to `WorkflowAgents.GetTemporalAgent`, which is
 workflow-context only.
 
 `TemporalAIAgentProxy` is `internal`; callers always reference it as `AIAgent` (MAF's base class). Resolution is always
@@ -364,12 +364,12 @@ via `services.GetTemporalAgentProxy("Name")`.
 
 | | `TemporalAIAgent` | `TemporalAIAgentProxy` |
 |---|---|---|
-| Returned by | `TemporalWorkflowExtensions.GetTemporalAgent("Name")` | `services.GetTemporalAgentProxy("Name")` |
+| Returned by | `WorkflowAgents.GetTemporalAgent("Name")` | `services.GetTemporalAgentProxy("Name")` |
 | Context | Inside a `[Workflow]` method | Outside a workflow (ASP.NET, console, background service) |
 | History | Stored in the calling workflow's event history | Stored in the target `AgentWorkflow`'s event history |
 | Session | New or existing `TemporalAgentSession` | Same |
 
-> **Misuse guard:** `TemporalWorkflowExtensions.GetTemporalAgent` throws `InvalidOperationException` when called outside a
+> **Misuse guard:** `WorkflowAgents.GetTemporalAgent` throws `InvalidOperationException` when called outside a
 > workflow context with the message: _"If you need to invoke an agent from external code, resolve a
 > TemporalAIAgentProxy from your service provider via GetTemporalAgentProxy(name) instead."_
 > Additionally, `TemporalAIAgent.RunAsync` (via `RunCoreAsync`) throws `InvalidOperationException` if invoked
@@ -544,11 +544,11 @@ builder.Services
 
 ### Activity Timeouts for In-Workflow Agents
 
-When using `TemporalWorkflowExtensions.GetTemporalAgent` inside an orchestrating workflow, pass `ActivityOptions` directly at
+When using `WorkflowAgents.GetTemporalAgent` inside an orchestrating workflow, pass `ActivityOptions` directly at
 the call site:
 
 ```csharp
-var researcher = TemporalWorkflowExtensions.GetTemporalAgent(
+var researcher = WorkflowAgents.GetTemporalAgent(
     "ResearcherAgent",
     activityOptions: new ActivityOptions
     {
@@ -613,7 +613,7 @@ Both patterns are covered in detail in [Routing Patterns](./routing.md), with co
 
 ## Parallel Agent Execution
 
-`TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync` dispatches multiple agent calls concurrently inside a workflow
+`WorkflowAgents.ExecuteAgentsInParallelAsync` dispatches multiple agent calls concurrently inside a workflow
 using `Workflow.WhenAllAsync` — the workflow-safe equivalent of `Task.WhenAll`.
 
 ```csharp
@@ -626,11 +626,11 @@ public class ResearchAndSummarizeWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
-        var researchAgent  = TemporalWorkflowExtensions.GetTemporalAgent("ResearchAgent");
-        var summaryAgent   = TemporalWorkflowExtensions.GetTemporalAgent("SummaryAgent");
+        var researchAgent  = WorkflowAgents.GetTemporalAgent("ResearchAgent");
+        var summaryAgent   = WorkflowAgents.GetTemporalAgent("SummaryAgent");
 
-        var researchSession = TemporalWorkflowExtensions.NewAgentSessionId("ResearchAgent");
-        var summarySession  = TemporalWorkflowExtensions.NewAgentSessionId("SummaryAgent");
+        var researchSession = WorkflowAgents.NewAgentSessionId("ResearchAgent");
+        var summarySession  = WorkflowAgents.NewAgentSessionId("SummaryAgent");
 
         var researchMessages = new List<ChatMessage>
             { new(ChatRole.User, $"Research the topic: {topic}") };
@@ -638,7 +638,7 @@ public class ResearchAndSummarizeWorkflow
             { new(ChatRole.User, $"Summarize the latest findings on: {topic}") };
 
         IReadOnlyList<AgentResponse> results =
-            await TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync(new[]
+            await WorkflowAgents.ExecuteAgentsInParallelAsync(new[]
             {
                 (researchAgent, (IList<ChatMessage>)researchMessages, (AgentSession)new TemporalAgentSession(researchSession)),
                 (summaryAgent,  (IList<ChatMessage>)summaryMessages,  (AgentSession)new TemporalAgentSession(summarySession)),
@@ -857,7 +857,7 @@ public class ResearchWorkflow
     public async Task RunAsync(string topic)
     {
         // Run the main analysis immediately
-        var analyst = TemporalWorkflowExtensions.GetTemporalAgent("AnalystAgent");
+        var analyst = WorkflowAgents.GetTemporalAgent("AnalystAgent");
         var session = await analyst.CreateSessionAsync();
         await analyst.RunAsync($"Analyze: {topic}", session);
 

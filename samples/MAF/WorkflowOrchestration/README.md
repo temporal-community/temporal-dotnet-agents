@@ -2,7 +2,7 @@
 
 ## Overview
 
-Shows how to call an AI agent from inside a custom Temporal workflow using `TemporalWorkflowExtensions.GetTemporalAgent()`. The workflow itself is the orchestrator — it starts the agent, passes a question, and returns the result as its final output.
+Shows how to call an AI agent from inside a custom Temporal workflow using `WorkflowAgents.GetTemporalAgent()`. The workflow itself is the orchestrator — it starts the agent, passes a question, and returns the result as its final output.
 
 This sample demonstrates:
 - A custom `[Workflow]` (`WeatherOrchestrationWorkflow`) driving an agent call

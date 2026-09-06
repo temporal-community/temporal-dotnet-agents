@@ -59,7 +59,7 @@ builder.Services
 
 The library composes the chat pipeline internally — the registration above is the whole story, with no extra bootstrap or wiring on your side.
 
-To use the agent, call `TemporalWorkflowExtensions.GetTemporalAgent("RefundAgent")` inside a workflow (see [`usage.md`](./usage.md)), or `services.GetTemporalAgentProxy("RefundAgent")` from external code.
+To use the agent, call `WorkflowAgents.GetTemporalAgent("RefundAgent")` inside a workflow (see [`usage.md`](./usage.md)), or `services.GetTemporalAgentProxy("RefundAgent")` from external code.
 
 ## Fluent sugar on `DurableToolOptions`
 

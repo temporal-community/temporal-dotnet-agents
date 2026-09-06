@@ -11,7 +11,7 @@
 using Microsoft.Extensions.AI;
 using Temporalio.Activities;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace MixedActivities;
 

@@ -32,11 +32,11 @@ This gives you:
 
 ## Code Example — Fan-Out / Fan-In with `ExecuteAgentsInParallelAsync`
 
-The helper `ExecuteAgentsInParallelAsync` (from `TemporalWorkflowExtensions`) dispatches
+The helper `ExecuteAgentsInParallelAsync` (from `WorkflowAgents`) dispatches
 multiple agents in parallel and returns all responses in input order.
 
 ```csharp
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 [Workflow("EventDrivenFanOut")]
 public class EventDrivenFanOutWorkflow

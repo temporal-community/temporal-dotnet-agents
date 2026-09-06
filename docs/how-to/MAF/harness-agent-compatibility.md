@@ -22,7 +22,7 @@ Wrapping `HarnessAgent` would collapse all tool calls into a single activity bou
 
 `AgentWorkflow` triggers continue-as-new when history grows past `MaxEntryCount`. On continue-as-new, the workflow state (including `CarriedStateBag`) is restarted in a new execution. Any `Task<T>` reference stored in the provider's state has no meaning in the new execution context.
 
-The correct pattern for parallel agent fan-out is `TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync`, which uses `Workflow.WhenAllAsync` — fully durable and replay-safe across worker restarts and continue-as-new boundaries.
+The correct pattern for parallel agent fan-out is `WorkflowAgents.ExecuteAgentsInParallelAsync`, which uses `Workflow.WhenAllAsync` — fully durable and replay-safe across worker restarts and continue-as-new boundaries.
 
 ### 3. `ToolApprovalAgent` loses approval session state
 

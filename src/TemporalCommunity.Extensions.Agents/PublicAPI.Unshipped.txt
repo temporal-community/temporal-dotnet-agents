@@ -54,9 +54,9 @@ static TemporalCommunity.Extensions.Agents.TemporalAgentDataConverter.CreateData
 static TemporalCommunity.Extensions.Agents.TemporalAgentJsonUtilities.DefaultOptions.get -> System.Text.Json.JsonSerializerOptions!
 static TemporalCommunity.Extensions.Agents.TemporalWorkerBuilderExtensions.AddTemporalAgents(this Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder! builder, System.Action<TemporalCommunity.Extensions.Agents.TemporalAgentsOptions!>! configure) -> Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder!
 static TemporalCommunity.Extensions.Agents.TemporalWorkerBuilderExtensions.AddWorkerPlugin(this Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder! builder, TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin! plugin) -> Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder!
-static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync(System.Collections.Generic.IEnumerable<(TemporalCommunity.Extensions.Agents.TemporalAIAgent! Agent, System.Collections.Generic.IList<Microsoft.Extensions.AI.ChatMessage!>! Messages, Microsoft.Agents.AI.AgentSession! Session)>! requests, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Microsoft.Agents.AI.AgentResponse!>!>!
-static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions.GetTemporalAgent(string! agentName, Temporalio.Workflows.ActivityOptions? activityOptions = null) -> TemporalCommunity.Extensions.Agents.TemporalAIAgent!
-static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions.NewAgentSessionId(string! agentName) -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
+static TemporalCommunity.Extensions.Agents.WorkflowAgents.ExecuteAgentsInParallelAsync(System.Collections.Generic.IEnumerable<(TemporalCommunity.Extensions.Agents.TemporalAIAgent! Agent, System.Collections.Generic.IList<Microsoft.Extensions.AI.ChatMessage!>! Messages, Microsoft.Agents.AI.AgentSession! Session)>! requests, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<Microsoft.Agents.AI.AgentResponse!>!>!
+static TemporalCommunity.Extensions.Agents.WorkflowAgents.GetTemporalAgent(string! agentName, Temporalio.Workflows.ActivityOptions? activityOptions = null) -> TemporalCommunity.Extensions.Agents.TemporalAIAgent!
+static TemporalCommunity.Extensions.Agents.WorkflowAgents.NewAgentSessionId(string! agentName) -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
 static TemporalCommunity.Extensions.Agents.Testing.NoOpAgent.Instance.get -> TemporalCommunity.Extensions.Agents.Testing.NoOpAgent!
 TemporalCommunity.Extensions.Agents.AgentNotRegisteredException
 TemporalCommunity.Extensions.Agents.AgentNotRegisteredException.AgentName.get -> string!
@@ -320,7 +320,7 @@ TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin.TemporalAgentsPlugin(Te
 TemporalCommunity.Extensions.Agents.TemporalAgentTelemetry
 TemporalCommunity.Extensions.Agents.TemporalAIAgent
 TemporalCommunity.Extensions.Agents.TemporalWorkerBuilderExtensions
-TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions
+TemporalCommunity.Extensions.Agents.WorkflowAgents
 TemporalCommunity.Extensions.Agents.Testing.NoOpAgent
 TemporalCommunity.Extensions.Agents.Testing.NoOpAgent.NoOpAgent() -> void
 TemporalCommunity.Extensions.Agents.Tools.AgentToolContext

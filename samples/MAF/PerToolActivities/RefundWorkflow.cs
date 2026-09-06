@@ -8,7 +8,7 @@
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.Agents;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace PerToolActivities;
 

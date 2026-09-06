@@ -59,7 +59,7 @@ agent.AddContextProvider(new WorkingSetContextProvider { SilentMode = true });
 
 `BackgroundAgentsProvider` stores live `Task<AgentResponse>` references in its runtime state. Those `Task` objects are in-process handles — they cannot be serialized, cannot survive continue-as-new, and cannot be replayed from workflow history. **Do not register `BackgroundAgentsProvider` with `AddContextProvider`.**
 
-If you need parallel agent fan-out, use `TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync` instead — it achieves the same result through `Workflow.WhenAllAsync`, which is fully durable and replay-safe. See [`docs/how-to/MAF/usage.md`](./usage.md) and the [`MultiAgentRouting`](../../../samples/MAF/MultiAgentRouting/) sample.
+If you need parallel agent fan-out, use `WorkflowAgents.ExecuteAgentsInParallelAsync` instead — it achieves the same result through `Workflow.WhenAllAsync`, which is fully durable and replay-safe. See [`docs/how-to/MAF/usage.md`](./usage.md) and the [`MultiAgentRouting`](../../../samples/MAF/MultiAgentRouting/) sample.
 
 For a detailed explanation of why the full `HarnessAgent` bundle (which includes `BackgroundAgentsProvider`) is incompatible, see [`harness-agent-compatibility.md`](./harness-agent-compatibility.md).
 

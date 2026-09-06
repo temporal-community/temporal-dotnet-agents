@@ -7,7 +7,7 @@ using TemporalCommunity.Extensions.Agents.Tests.StepMode;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
 using Xunit;
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 

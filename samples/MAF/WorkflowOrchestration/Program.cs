@@ -1,5 +1,5 @@
 // WorkflowOrchestration — a Temporal workflow that calls a durable AI agent as a
-// sub-agent via TemporalWorkflowExtensions.GetTemporalAgent().
+// sub-agent via WorkflowAgents.GetTemporalAgent().
 //
 // Run:  dotnet run --project samples/MAF/WorkflowOrchestration/WorkflowOrchestration.csproj
 
@@ -14,7 +14,7 @@ using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -114,7 +114,7 @@ public class WeatherOrchestrationWorkflow
     /// Runs the orchestration: receives a question, calls the agent, returns the answer.
     /// </summary>
     /// <remarks>
-    /// Inside a workflow, use <c>TemporalWorkflowExtensions.GetTemporalAgent</c> to obtain a
+    /// Inside a workflow, use <c>WorkflowAgents.GetTemporalAgent</c> to obtain a
     /// <c>TemporalAIAgent</c>. Each call to <c>RunAsync</c> dispatches activities
     /// (RunDurableAgentStep + InvokeAgentTool per tool call) so results are durable and
     /// replay-cached.

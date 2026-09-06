@@ -217,7 +217,7 @@ using Temporalio.Activities;
 using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 [Workflow]
 public class ResearchWorkflow

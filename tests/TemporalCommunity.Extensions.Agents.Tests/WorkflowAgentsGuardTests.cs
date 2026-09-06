@@ -6,18 +6,18 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
-/// Pins the contract that every public method on <see cref="TemporalWorkflowExtensions"/>
+/// Pins the contract that every public method on <see cref="WorkflowAgents"/>
 /// fails fast with a clear <see cref="InvalidOperationException"/> when called outside a
 /// Temporal workflow. The guards replace the previous <c>[EditorBrowsable(Never)]</c>
 /// IntelliSense-hide trick with an actual runtime defense.
 /// </summary>
-public class TemporalWorkflowExtensionsGuardTests
+public class WorkflowAgentsGuardTests
 {
     [Fact]
     public void GetTemporalAgent_OutsideWorkflow_Throws()
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            TemporalWorkflowExtensions.GetTemporalAgent("WeatherAgent"));
+            WorkflowAgents.GetTemporalAgent("WeatherAgent"));
         Assert.Contains("GetTemporalAgent", ex.Message, StringComparison.Ordinal);
         Assert.Contains("workflow", ex.Message, StringComparison.OrdinalIgnoreCase);
         // Surface the recommended alternative for external code so users know what to do.
@@ -28,7 +28,7 @@ public class TemporalWorkflowExtensionsGuardTests
     public void NewAgentSessionId_OutsideWorkflow_Throws()
     {
         var ex = Assert.Throws<InvalidOperationException>(() =>
-            TemporalWorkflowExtensions.NewAgentSessionId("WeatherAgent"));
+            WorkflowAgents.NewAgentSessionId("WeatherAgent"));
         Assert.Contains("NewAgentSessionId", ex.Message, StringComparison.Ordinal);
         // Surface the recommended alternative (TemporalAgentSessionId.WithRandomKey).
         Assert.Contains("WithRandomKey", ex.Message, StringComparison.Ordinal);
@@ -43,14 +43,14 @@ public class TemporalWorkflowExtensionsGuardTests
         // workflow guard now via GetTemporalAgent), so verify ExecuteAgentsInParallelAsync's guard
         // by passing an empty sequence — the guard fires before any iteration.
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await TemporalWorkflowExtensions.ExecuteAgentsInParallelAsync(
+            await WorkflowAgents.ExecuteAgentsInParallelAsync(
                 Array.Empty<(TemporalAIAgent, IList<ChatMessage>, AgentSession)>()));
         Assert.Contains("ExecuteAgentsInParallelAsync", ex.Message, StringComparison.Ordinal);
         Assert.Contains("workflow", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
-    /// Helper that simply documents the fact that <see cref="TemporalWorkflowExtensions.GetTemporalAgent"/>
+    /// Helper that simply documents the fact that <see cref="WorkflowAgents.GetTemporalAgent"/>
     /// itself throws outside workflow context — used to express intent in the test above.
     /// </summary>
     private static TemporalAIAgent? TryGetAgentInsideGuard() => null;

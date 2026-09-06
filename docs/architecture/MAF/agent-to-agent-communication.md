@@ -35,7 +35,7 @@ The most common pattern: an orchestrating workflow calls one or more agents sequ
 
 ### How It Works
 
-`TemporalWorkflowExtensions.GetTemporalAgent()` returns a `TemporalAIAgent` — a workflow-safe `AIAgent` that executes inference via `Workflow.ExecuteActivityAsync`. The agent's conversation history is stored as workflow state and replayed from event history:
+`WorkflowAgents.GetTemporalAgent()` returns a `TemporalAIAgent` — a workflow-safe `AIAgent` that executes inference via `Workflow.ExecuteActivityAsync`. The agent's conversation history is stored as workflow state and replayed from event history:
 
 ```csharp
 public static TemporalAIAgent GetTemporalAgent(
@@ -55,13 +55,13 @@ public class ResearchWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
-        var researcher = TemporalWorkflowExtensions.GetTemporalAgent("ResearcherAgent");
+        var researcher = WorkflowAgents.GetTemporalAgent("ResearcherAgent");
         var session = await researcher.CreateSessionAsync();
 
         var outline = await researcher.RunAsync(
             $"Create an outline about: {topic}", session);
 
-        var writer = TemporalWorkflowExtensions.GetTemporalAgent("WriterAgent");
+        var writer = WorkflowAgents.GetTemporalAgent("WriterAgent");
         var writerSession = await writer.CreateSessionAsync();
 
         var draft = await writer.RunAsync(
@@ -94,7 +94,7 @@ protected override ValueTask<AgentSession> CreateSessionCoreAsync(
 You can also create session IDs explicitly:
 
 ```csharp
-var sessionId = TemporalWorkflowExtensions.NewAgentSessionId("MyAgent");
+var sessionId = WorkflowAgents.NewAgentSessionId("MyAgent");
 ```
 
 ### Important: One Instance Per Conversation
@@ -103,11 +103,11 @@ Two sessions on the same `TemporalAIAgent` instance share history because histor
 
 ```csharp
 // CORRECT: two independent agents with independent histories
-var agent1 = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
-var agent2 = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
+var agent1 = WorkflowAgents.GetTemporalAgent("Analyst");
+var agent2 = WorkflowAgents.GetTemporalAgent("Analyst");
 
 // WRONG: session2 will see session1's history
-var agent = TemporalWorkflowExtensions.GetTemporalAgent("Analyst");
+var agent = WorkflowAgents.GetTemporalAgent("Analyst");
 var session1 = await agent.CreateSessionAsync();
 await agent.RunAsync("Question 1", session1);
 var session2 = await agent.CreateSessionAsync();
@@ -323,7 +323,7 @@ public class AlertActivities(ITemporalClient client)
 **AlertWorkflow** — receives signals, uses an LLM agent to compose notifications:
 
 ```csharp
-using static TemporalCommunity.Extensions.Agents.TemporalWorkflowExtensions;
+using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 [Workflow("AmbientAgent.AlertWorkflow")]
 public class AlertWorkflow
@@ -418,7 +418,7 @@ public async Task<string> RunAsync(string question)
 
 ## References
 
-- `src/TemporalCommunity.Extensions.Agents/TemporalWorkflowExtensions.cs` — `GetTemporalAgent`, `ExecuteAgentsInParallelAsync`
+- `src/TemporalCommunity.Extensions.Agents/WorkflowAgents.cs` — `GetTemporalAgent`, `ExecuteAgentsInParallelAsync`
 - `src/TemporalCommunity.Extensions.Agents/TemporalAIAgent.cs` — workflow-safe agent with activity-based execution
 - `src/TemporalCommunity.Extensions.Agents/Session/TemporalAgentContext.cs` — async-local Temporal capabilities for tools
 - `samples/MAF/WorkflowOrchestration/` — Pattern 1 example
