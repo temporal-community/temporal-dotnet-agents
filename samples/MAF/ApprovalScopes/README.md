@@ -12,7 +12,7 @@ This sample shows two deliberately separate human-in-the-loop capabilities:
 Prerequisites:
 
 - .NET 10 SDK
-- Temporal Service 1.31 or newer
+- Temporal Service 1.31 or newer (local: `temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`)
 - an OpenAI-compatible endpoint and key
 
 ```bash

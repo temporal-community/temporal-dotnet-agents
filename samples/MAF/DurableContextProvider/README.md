@@ -60,7 +60,7 @@ and retries only the failed one.
 Temporal Service 1.31.0 or newer is required. For local development:
 
 ```bash
-temporal server start-dev
+temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int
 dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MAF/DurableContextProvider
 ```
 

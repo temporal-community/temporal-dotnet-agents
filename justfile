@@ -631,6 +631,38 @@ _sample-preflight:
     fi; \
     echo "Temporal Service $server_version detected (minimum 1.31.0)."
 
+# MAF-only addition to _sample-preflight: AddDurableAgent's EnableSearchAttributes defaults to
+# true, so every MAF sample upserts AgentName/SessionCreatedAt/TurnCount search attributes on
+# every run. A fresh `temporal server start-dev` does NOT auto-register these (confirmed via a
+# live test against CLI 1.8.3 / Server 1.31.2 — see
+# .clans/knowledge/maf-sample-search-attribute-doc-gap.md); an unregistered attribute fails the
+# workflow outright rather than just being absent from the UI. MEAI's DurableExecutionOptions
+# defaults EnableSearchAttributes to false, so test-samples-meai does not need this check.
+_sample-preflight-maf:
+    @if ! command -v temporal >/dev/null 2>&1; then \
+        echo "ERROR: Temporal CLI is required to verify registered search attributes."; \
+        exit 127; \
+    fi
+    @sa_json="$(temporal operator search-attribute list --address localhost:7233 --namespace default --output json 2>/dev/null)" || { \
+        echo "ERROR: Temporal CLI could not query registered search attributes at localhost:7233."; \
+        exit 2; \
+    }; \
+    missing=""; \
+    for name in AgentName SessionCreatedAt TurnCount; do \
+        if ! printf '%s\n' "$sa_json" | grep -q "\"$name\""; then \
+            missing="$missing $name"; \
+        fi; \
+    done; \
+    if [ -n "$missing" ]; then \
+        echo "ERROR: Namespace 'default' is missing required search attribute(s):$missing"; \
+        echo "  MAF samples default to EnableSearchAttributes = true and will fail to start otherwise."; \
+        echo "  Restart your dev server with:"; \
+        echo "    temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int"; \
+        echo "  (or run: just doctor)"; \
+        exit 2; \
+    fi; \
+    echo "Required search attributes (AgentName, SessionCreatedAt, TurnCount) are registered."
+
 # Run all non-interactive MEAI samples end-to-end. Per-sample timeouts:
 # default 90s, with overrides for samples that legitimately take longer
 # (DurableEmbeddings parallel-indexes a corpus). Reports PASS / FAIL / HANG.
@@ -694,7 +726,7 @@ test-samples-meai: build _sample-preflight
 # the 90s default where needed (ConfigurableAgent has multi-agent handoff).
 # Skips HumanInTheLoop (interactive)
 # and SplitWorkerClient (two processes — run manually).
-test-samples-maf: build _sample-preflight
+test-samples-maf: build _sample-preflight _sample-preflight-maf
     #!/usr/bin/env bash
     set -uo pipefail
     # Child sample projects have isolated user-secret stores. Reuse the repository's configured

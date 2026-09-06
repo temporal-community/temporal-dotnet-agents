@@ -36,7 +36,7 @@ The sample registers an `OrderInterceptor` that fires before every `apply_refund
 ## Prerequisites
 
 - .NET 10 SDK
-- Temporal Service 1.31.0 or newer on `localhost:7233` (local: `temporal server start-dev`)
+- Temporal Service 1.31.0 or newer on `localhost:7233` (local: `temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`)
 - OpenAI API key configured via user-secrets:
   ```bash
   dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MAF/ToolInterceptor

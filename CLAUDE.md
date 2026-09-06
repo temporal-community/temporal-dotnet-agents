@@ -301,7 +301,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 | `GetTypeInfo metadata not provided` for `TemporalAgentSession` | Don't serialize via `DefaultOptions`; use `StateBag.Serialize()` |
 | Activity timeout (HITL) | Increase `DefaultActivityTimeout` (or per-agent `ActivityTimeout`) to accommodate human review time |
 | Worker won't start | `temporal server start-dev` running on `localhost:7233`? |
-| Search attributes missing in UI | `opts.EnableSearchAttributes` defaults to `true`; pre-register `AgentName`/`SessionCreatedAt`/`TurnCount` on production clusters — automatic with `temporal server start-dev` |
+| Search attributes missing in UI, or workflow start fails with "no mapping defined for search attribute" | `opts.EnableSearchAttributes` defaults to `true`; `AgentName`/`SessionCreatedAt`/`TurnCount` must be pre-registered before the worker starts — this is **not** automatic, even for a local `temporal server start-dev`. Start it with `--search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`; production clusters need the equivalent one-time CLI commands. |
 | Integration test "Unexpected workflow task failure" | `EnableSearchAttributes` defaults to `true` — use `TestEnvironmentHelper.StartLocalAsync()`, or set `opts.EnableSearchAttributes = false` to disable search attribute upserts |
 | Integration test suite hangs; can't tell which test | `just test-individual <project>` — per-test loop, reports PASS/FAIL/HANG. Default 180s cap, parameterizable. |
 | Test command hangs and pipe-buffering hides output | `just test-logged <project>` — writes to `/tmp/temporalagents-test-*.log`; `tail -f` separately. 600s default cap. |

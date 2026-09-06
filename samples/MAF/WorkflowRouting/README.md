@@ -60,7 +60,7 @@ Every agent call runs as a durable Temporal activity. If the worker crashes afte
 ### 1. Start Temporal
 
 ```bash
-temporal server start-dev
+temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int
 ```
 
 ### 2. Configure API credentials

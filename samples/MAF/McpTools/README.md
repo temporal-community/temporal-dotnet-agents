@@ -18,7 +18,7 @@ the server's unexpected `server_admin` tool is excluded.
 ## Prerequisites
 
 - .NET 10 SDK;
-- a local Temporal service at `localhost:7233` (for example, `temporal server start-dev`);
+- a local Temporal service at `localhost:7233` (for example, `temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`);
 - no model API key—the sample uses a deterministic in-process chat client;
 - no external MCP service—the sample MCP transport and server run in-process.
 

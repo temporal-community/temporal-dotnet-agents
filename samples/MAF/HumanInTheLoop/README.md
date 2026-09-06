@@ -70,7 +70,7 @@ proxy.RunAsync(messages, session)            ← [WorkflowUpdate] to AgentWorkfl
 ### Prerequisites
 
 - [.NET 10 SDK](https://dot.net) or later
-- Temporal Service 1.31.0 or newer (local: `temporal server start-dev`)
+- Temporal Service 1.31.0 or newer (local: `temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`)
 - An OpenAI-compatible API key
 - This sample waits for you to type `approve` or `reject` at the console — do not run it with piped stdin
 
