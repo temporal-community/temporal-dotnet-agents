@@ -229,101 +229,23 @@ If either crashes:
 `TemporalCommunity.Extensions.AI`), which owns the wait/trigger loop for continue-as-new — it is
 not inline in `AgentWorkflow`. The base class waits on SDK-suggested CAN, `MaxEntryCount`, or an
 explicit shutdown, then invokes the `CreateContinueAsNewException` hook that `AgentWorkflow`
-overrides to build the MAF-specific carried input:
-
-```csharp
-// In DurableChatWorkflowBase.RunAsync() (TemporalCommunity.Extensions.AI)
-if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount) && !_shutdownRequested)
-{
-    // ... history reducer selection, then:
-    throw CreateContinueAsNewException(reducedInput);   // virtual hook
-}
-
-// In AgentWorkflow.CreateContinueAsNewException() override
-protected override ContinueAsNewException CreateContinueAsNewException(DurableChatWorkflowInput input)
-{
-    // `with` copies every property from _input and overrides only the fields that differ for
-    // the new run: the base-class CAN fields (sourced from the `input` argument) plus the
-    // StateBag snapshot and the MAF-specific approval ledger.
-    var carriedInput = _input! with
-    {
-        CarriedStateBag = _currentStateBag,
-        TimeToLive = input.TimeToLive,
-        CarriedHistory = input.CarriedHistory,
-        ApprovalTimeout = input.ApprovalTimeout,
-        EnableSearchAttributes = input.EnableSearchAttributes,
-        MaxEntryCount = input.MaxEntryCount,
-        HistoryReducerKey = input.HistoryReducerKey,
-        OriginalCreatedAt = input.OriginalCreatedAt,
-        ActivityTimeout = input.ActivityTimeout,
-        HeartbeatTimeout = input.HeartbeatTimeout,
-        AgentApprovalResolutionHistory = _resolvedAgentApprovals.ToList(),
-    };
-
-    return Workflow.CreateContinueAsNewException((AgentWorkflow wf) => wf.RunAsync(carriedInput));
-}
-```
-
-When this happens:
-- The old run completes
-- A new run starts with the carried history
-- The orchestrating workflow's unpinned handle automatically follows the continue-as-new chain
-- No data loss occurs
+overrides to build the MAF-specific carried input (StateBag snapshot, approval ledger, and the
+base-class CAN fields). No data is lost: the old run completes, a new run starts with the carried
+history, and the orchestrating workflow's unpinned handle automatically follows the chain. For the
+exact override code and the full field list carried forward, see
+[Agent Sessions and the Workflow Loop — Continue-as-New: History Carryover](./agent-sessions-and-workflow-loop.md#continue-as-new-history-carryover).
 
 ---
 
 ## Failure Scenarios and Outcomes
 
-### Scenario 1: Worker Crashes During Activity Execution
-
-```
-Workflow calls: agent.RunAsync() → ExecuteActivityAsync(Activity)
-                                    ↓
-                                 [Activity executing]
-                                 [Worker crashes]
-```
-
-**Outcome:**
-- Temporal detects the activity timeout (or worker disconnect)
-- Activity is marked as failed in history
-- Workflow is blocked waiting for activity result
-- New worker picks up workflow, sees activity is still pending
-- Activity is retried (according to `ActivityOptions.ScheduleToCloseTimeout`)
-- Once activity succeeds, result is recorded and workflow continues
-
-### Scenario 2: Workflow Crashes After Activity Completes
-
-```
-Workflow calls: agent.RunAsync()
-                    ↓
-                    Activity completes ✓
-                    Result recorded in history ✓
-                    [Workflow code throws exception]
-                    [Worker crashes]
-```
-
-**Outcome:**
-- New worker replays workflow
-- Gets cached activity result from history
-- Executes business logic again
-- If same exception occurs, workflow will fail
-- If fixed, workflow completes
-
-### Scenario 3: Multiple Agent Calls with Partial Completion
-
-```
-Workflow:
-  agent.RunAsync("Q1") → Complete ✓
-  agent.RunAsync("Q2") → Complete ✓
-  agent.RunAsync("Q3") → In progress...
-  [Worker crashes]
-```
-
-**Outcome:**
-- Q1, Q2 results are in history (cached)
-- Q3 activity is retried or fails based on timeout
-- New worker replays Q1, Q2 (returns cached), handles Q3 retry
-- Conversation history is fully preserved in workflow state
+The general pattern — activities completed before a crash return cached results on replay, and
+in-flight activities retry on the new worker — is illustrated above. For the concrete crash
+scenarios specific to this library (worker dies mid-activity, mid-workflow-code, or mid-Update;
+what happens to the StateBag and turn count in each case; exact heartbeat and timeout mechanics),
+see [Agent Sessions and the Workflow Loop — Crashes, Heartbeats, and Timeouts](./agent-sessions-and-workflow-loop.md#crashes-heartbeats-and-timeouts),
+which covers these scenarios against the actual `AgentWorkflow` implementation rather than a
+generic `Activity1`/`Activity2`/`Activity3` example.
 
 ---
 
@@ -392,7 +314,12 @@ temporal workflow show --workflow-id <workflow-id> --output json | jq '.history.
 
 ## References
 
+- [Agent Sessions, the Workflow Loop, and Resilience](./agent-sessions-and-workflow-loop.md) — how this library's session loop, crash scenarios, heartbeats, and timeouts work against the real `AgentWorkflow` implementation
 - [Temporal Concepts: Determinism](https://docs.temporal.io/workflows#determinism)
 - [Temporal SDK: Activity Execution](https://docs.temporal.io/activities)
 - [Workflow History](https://docs.temporal.io/workflows#history)
 - [Continue-as-New Pattern](https://docs.temporal.io/workflows#continue-as-new)
+
+---
+
+_Last updated: 2026-09-05_

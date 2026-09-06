@@ -290,15 +290,20 @@ production worker, or set `EnableSearchAttributes = false` to opt out:
 opts.EnableSearchAttributes = false; // opt out when the attributes are unavailable
 ```
 
-When enabled, register the three attributes on production clusters before starting the worker:
+When enabled, register the three attributes before starting the worker — this is required even
+for a local `temporal server start-dev`; it is **not** automatic:
 
 ```bash
+# Local dev server: pass the flags at startup
+temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int
+
+# Production clusters: register once via the operator CLI
 temporal operator search-attribute create --name AgentName --type Keyword
 temporal operator search-attribute create --name SessionCreatedAt --type Datetime
 temporal operator search-attribute create --name TurnCount --type Int
 ```
 
-With `temporal server start-dev` these are auto-created when present, but production clusters require explicit registration. If you leave the default enabled without pre-registering the attributes, the workflow fails with an opaque "unexpected workflow task failure".
+If you leave the default enabled without pre-registering the attributes, the workflow fails with an opaque "unexpected workflow task failure".
 
 ---
 

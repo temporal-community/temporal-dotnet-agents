@@ -491,3 +491,7 @@ Each provider reads only its own key — they are fully independent.
 - `agent-framework/dotnet/src/Microsoft.Agents.AI.Abstractions/AIContextProvider.cs`
 - `agent-framework/dotnet/src/Microsoft.Agents.AI.Abstractions/ProviderSessionState{TState}.cs`
 - `agent-framework/dotnet/src/Microsoft.Agents.AI.Mem0/Mem0Provider.cs`
+
+---
+
+_Last updated: 2026-09-04_

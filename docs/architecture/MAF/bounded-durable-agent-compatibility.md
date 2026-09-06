@@ -83,3 +83,7 @@ contract requires. The original durable StateBag is serialized after the chain c
 ## Consequence
 
 For a third-party provider, support is determined by behavior—not by its package name. It is directly compatible only when it contributes retry-safe instructions/messages and stores session state in the supplied `StateBag`. If it produces tools, declare static `DurableToolRegistrationSpec` entries. If it owns history, invokes tools itself, or depends on live process state, do not register it until a dedicated durable adapter exists.
+
+---
+
+_Last updated: 2026-09-04_

@@ -1,11 +1,21 @@
 # MAF Quick Start and Usage Guide
 
-Start with the [Library Combinations Guide](../../library-combinations.md) to select the package,
-then choose a runnable project from the [Sample Catalog](../../../samples/catalog.md). This page
-starts with the worker-hosted path and links to the focused guides for advanced behavior.
+`TemporalCommunity.Extensions.Agents` makes a Microsoft Agent Framework (`Microsoft.Agents.AI`)
+`AIAgent` durable with Temporal. It builds on `TemporalCommunity.Extensions.AI`, adding named
+agents, `AgentSessionStateBag`, `AIContextProvider` support, and Temporal Web UI search attributes.
+There is one worker-hosted definition path (`AddDurableAgent`) and two ways to interact with a
+registered agent:
 
-For externally reachable session or approval endpoints, apply the normative
-[security boundary](../../security.md) before calling a durable client.
+- **From outside a workflow** — external callers (ASP.NET, console, background service) resolve a
+  `TemporalAIAgentProxy` via `GetTemporalAgentProxy`.
+- **From inside an orchestrating workflow** — use `TemporalWorkflowExtensions.GetTemporalAgent` for
+  sub-agent orchestration.
+
+This page is the how-to reference once you've chosen this package. To choose between it and
+`TemporalCommunity.Extensions.AI`, see the [Library Combinations Guide](../../library-combinations.md);
+for a runnable starting point, see the [Sample Catalog](../../../samples/catalog.md). For externally
+reachable session or approval endpoints, apply the normative [security boundary](../../security.md)
+before calling a durable client.
 
 ---
 
@@ -62,7 +72,11 @@ builder.Services
     .AddWorkflow<RefundWorkflow>();
 ```
 
-> **`ITemporalClient` prerequisite:** `AddTemporalAgents` requires `ITemporalClient` to be registered in DI. While the three-argument `AddHostedTemporalWorker(address, namespace, queue)` overload configures a worker-internal client, it does not register `ITemporalClient` in DI. Always call `builder.Services.AddTemporalClient(address, namespace)` before `AddHostedTemporalWorker`.
+> **Note:** the alternate three-argument `AddHostedTemporalWorker(address, namespace, queue)`
+> overload configures a worker-internal client but does not register `ITemporalClient` in DI. If
+> you use that overload instead of the separate `AddTemporalClient` call shown above,
+> `AddTemporalAgents` (and anything else that needs `ITemporalClient`) will not find one — call
+> `AddTemporalClient` explicitly first.
 
 ### Continue from here
 
@@ -74,207 +88,7 @@ builder.Services
 | Add a compatible context provider | [Individual MAF Context Providers](individual-context-providers.md) |
 | Understand supported MAF inputs | [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md) |
 | Manage prompt/context size | [History & Token Optimization](prompt-caching.md) |
-
-### `DurableAgentBuilder` reference
-
-| Property / Method | Purpose |
-|-------------------|---------|
-| `Name` (read-only) | Case-insensitive agent name passed in to `AddDurableAgent`. |
-| `Description` | Used in `GetAgentDescriptors()` for routing prompts. Optional. |
-| `Instructions` | Agent system prompt. Library stamps onto every LLM call's `ChatOptions.Instructions`. Optional. |
-| `ChatClient` | **Required.** `Func<IServiceProvider, IChatClient>` factory invoked at activity execution time to resolve the model's `IChatClient`. Throws `InvalidOperationException` if omitted. |
-| `ChatOptions` | LLM-call template (Temperature, ResponseFormat, MaxOutputTokens, etc.). `Tools` and `Instructions` set on this property are ignored. |
-| `AddTool(AIFunction tool, Action<DurableToolOptions>? configure = null)` | Registers a concrete `AIFunction`. Per-tool retry / timeout via `configure`. |
-| `AddTool(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure = null)` | DI-resolving tool factory. |
-| `AddTools(params AIFunction[] tools)` | Bulk registration of concrete tools. |
-| `AddContextProvider(AIContextProvider provider, IEnumerable<DurableToolRegistrationSpec>? durableTools = null)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the chat pipeline. `Invoking/InvokedAsync` fire once per LLM call. Concrete providers can also contribute durable tools through specs or `IDurableToolSource`. |
-| `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
-| `RetryPolicy` | Retry policy for the agent's `RunAgentStep` activity (the LLM call). Per-tool retry is configured separately via `DurableToolOptions`. |
-| `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
-| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
-| `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
-
-### `DurableToolOptions` reference
-
-| Property / Method | Purpose |
-|-------------------|---------|
-| `StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` | Standard Temporal activity overrides. `null` inherits worker default. |
-| `NoRetry()` | Sets `RetryPolicy = new() { MaximumAttempts = 1 }`. Use on write tools. |
-| `WithMaxAttempts(int n)` | Sets a fixed-retry policy. |
-| `WithTimeout(TimeSpan t)` | Sets `StartToCloseTimeout`. |
-| `SkipInterceptor()` | Bypasses `IAgentToolInterceptor` for this specific tool. |
-| `WithInterceptorTimeout(TimeSpan t)` | Per-tool timeout for the interceptor activity. |
-| `RequireApproval()` | Absolute floor: always pause for human approval even if the interceptor returns `Proceed`. |
-
-### Inheritance — per-agent vs worker-level
-
-For every scalar setting the rule is: **if you set it on the agent, it overrides the worker default; if you leave it `null`, the worker-level default applies.**
-
-| Per-agent setting (`DurableAgentBuilder`) | Worker default (`TemporalAgentsOptions`) |
-|-------------------------------------------|------------------------------------------|
-| `agent.TimeToLive` | `opts.DefaultTimeToLive` |
-| `agent.ApprovalTimeout` | `opts.DefaultApprovalTimeout` |
-| `agent.ActivityTimeout` | `opts.DefaultActivityTimeout` |
-| `agent.HeartbeatTimeout` | `opts.DefaultHeartbeatTimeout` |
-| `agent.RetryPolicy` | `opts.DefaultRetryPolicy` |
-| `agent.MaxEntryCount` | `opts.DefaultMaxEntryCount` |
-| `agent.HistoryReducerKey` | `opts.DefaultHistoryReducerKey` |
-| `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
-| `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
-
-The retry-policy hierarchy adds one more layer specifically for tools. From most to least specific:
-
-1. `agent.AddTool(t, opts => opts.DefaultRetryPolicy = ...)` — the per-tool override (use `opts.NoRetry()` on write tools).
-2. `agent.RetryPolicy` — the agent-level default for any tool that doesn't override.
-3. `opts.DefaultRetryPolicy` — the worker-level default used by agents that don't override.
-
-There is **no per-agent "default for all my tools" cascade beyond `agent.RetryPolicy`** — set policies per tool when the per-tool default is genuinely different.
-
-### Lifecycle and composition
-
-Tool factories run once when the worker first builds its immutable agent blueprint and their `AIFunction` values are cached for that worker. The chat-client, context-provider, and interceptor factories run from a fresh DI scope for every activity attempt. Do not use provider fields as session storage: an attempt can retry, run on another worker, or overlap another session; use `AgentSession.StateBag` instead.
-
-The library composes the chat pipeline internally and passes `UseProvidedChatClientAsIs = true` to MAF so that `FunctionInvokingChatClient` is **not** auto-injected — the workflow owns the tool-dispatch loop. Register a bare `IChatClient` in DI (do not call `.UseFunctionInvocation()`).
-
-Custom agent middleware belongs in `ConfigureAgentPipeline`. Its wrapper must derive from
-`DelegatingAIAgent`, preserve the exact supplied `inner` agent through `base(inner)`, and delegate
-both run shapes it customizes:
-
-```csharp
-sealed class TimingAgent(AIAgent inner, ILogger<TimingAgent> logger)
-    : DelegatingAIAgent(inner)
-{
-    protected override async Task<AgentResponse> RunCoreAsync(
-        IEnumerable<ChatMessage> messages,
-        AgentSession? session = null,
-        AgentRunOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        var started = Stopwatch.GetTimestamp();
-        try
-        {
-            return await base.RunCoreAsync(messages, session, options, cancellationToken);
-        }
-        finally
-        {
-            logger.LogInformation("Agent run completed in {Elapsed}",
-                Stopwatch.GetElapsedTime(started));
-        }
-    }
-
-    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
-        IEnumerable<ChatMessage> messages,
-        AgentSession? session = null,
-        AgentRunOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var started = Stopwatch.GetTimestamp();
-        try
-        {
-            await foreach (var update in base.RunCoreStreamingAsync(
-                messages, session, options, cancellationToken))
-            {
-                yield return update;
-            }
-        }
-        finally
-        {
-            logger.LogInformation("Agent stream completed in {Elapsed}",
-                Stopwatch.GetElapsedTime(started));
-        }
-    }
-}
-
-agent.ConfigureAgentPipeline = pipeline =>
-    pipeline.Use((inner, services) =>
-        new TimingAgent(inner, services.GetRequiredService<ILogger<TimingAgent>>()));
-```
-
-Do not return a separate agent from the factory, and do not hide `inner` inside a custom
-`AIAgent` subclass. Both shapes are rejected because the library cannot prove that its
-`ChatClientAgent` remains the durable model-call leaf. Request-level short-circuiting inside a
-valid `DelegatingAIAgent` remains supported.
-
-The pipeline callback runs once during worker-startup validation and once for each
-`RunDurableAgentStep` activity attempt, including retries. Both validation and live construction
-use a DI scope, so middleware factories may resolve scoped dependencies. Treat wrapper fields as
-attempt-local, never session-local.
-
-Custom middleware wrappers must not implement `IDisposable` or `IAsyncDisposable`: MAF 1.17.0 does
-not expose whether a factory-created wrapper or DI owns that instance, so the library rejects that
-ambiguous shape. Put resource-owning dependencies in the activity DI scope instead. The one
-supported exception is MAF's built-in `OpenTelemetryAgent`; the library knows that wrapper owns
-its internal telemetry client and disposes it at the end of each validation or activity build.
-If `AIAgentBuilder.Build` throws before returning a root, MAF does not expose any partially built
-wrappers, so this library cannot dispose inaccessible instances.
-
-Live middleware receives the restored `TemporalAgentSession`. It may persist retry-safe state in
-the supplied session's `StateBag`, but it must pass the exact session object to `next`:
-
-```csharp
-sealed class AttemptCountingAgent(AIAgent inner) : DelegatingAIAgent(inner)
-{
-    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
-        IEnumerable<ChatMessage> messages,
-        AgentSession? session = null,
-        AgentRunOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var durable = (TemporalAgentSession)session!;
-        // Read/write a JSON-serializable StateBag value here. The activity persists the bag.
-
-        await foreach (var update in base.RunCoreStreamingAsync(
-            messages, durable, options, cancellationToken))
-        {
-            yield return update;
-        }
-    }
-}
-```
-
-Do not pass `null` or substitute another session. The library rejects either shape because only the
-original restored StateBag is durably serialized. The final `ChatClientAgent` uses a separate,
-transient `ChatClientAgentSession` behind the library's innermost boundary; middleware that
-requires that leaf-specific type is not supported.
-
-`AIContextProvider.InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per `RunDurableAgentStep` activity). A turn that takes 3 LLM-step iterations to converge will see 3 invocation pairs. Make these hooks idempotent and cheap, or cache results via `StateBag` to skip redundant work within a turn.
-
-For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).
-For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md).
-
----
-
-## Library Dependencies
-
-`TemporalCommunity.Extensions.Agents` depends on `TemporalCommunity.Extensions.AI`. Installing the Agents NuGet package pulls in the AI package automatically — no separate `<PackageReference>` for `TemporalCommunity.Extensions.AI` is needed.
-
-The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI`. Ordinary decisions apply to one call. MAF reusable session grants use the separately registered `ITemporalAgentApprovalScopeAdministration` capability.
-
----
-
-## Table of Contents
-
-1. [Sending Messages](#sending-messages)
-2. [Multi-Turn Conversations](#multi-turn-conversations)
-3. [Reducing the LLM Context Window](#reducing-the-llm-context-window)
-4. [Fire-and-Forget](#fire-and-forget)
-5. [Structured Output](#structured-output)
-6. [Tool Filtering](#tool-filtering)
-7. [Agent Orchestration (Inside Workflows)](#agent-orchestration-inside-workflows)
-8. [Invoking Agents from External Code (Proxy)](#invoking-agents-from-external-code-proxy)
-9. [Session Identity](#session-identity)
-10. [Session TTL](#session-ttl)
-11. [Activity Timeouts](#activity-timeouts)
-12. [Accessing Temporal from Agent Tools](#accessing-temporal-from-agent-tools)
-13. [Streaming Limitation](#streaming-limitation)
-14. [Routing](#routing)
-15. [Parallel Agent Execution](#parallel-agent-execution)
-16. [Human-in-the-Loop (HITL) Approval Gates](#human-in-the-loop-hitl-approval-gates)
-17. [Scheduling](#scheduling)
-18. [MCP Tool Integration](#mcp-tool-integration)
-19. [Context Providers and External Memory](#context-providers-and-external-memory)
-20. [Per-Tool Activity Configuration](#per-tool-activity-configuration)
-21. [OpenTelemetry Integration](#opentelemetry-integration)
+| Full builder/options reference | [Reference](#reference) below |
 
 ---
 
@@ -700,7 +514,7 @@ workflow run.
 Every agent turn — one call to `RunAsync` — executes inside a Temporal activity. Two timeouts govern that activity:
 
 | Option              | Default   | What it limits                                                                                           |
-|---------------------|-----------|----------------------------------------------------------------------------------------------------------|
+|---------------------|-----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `ActivityTimeout`   | 5 minutes | Total wall-clock time for one turn, including tool calls and retries                                     |
 | `HeartbeatTimeout`  | 2 minutes | Maximum gap between heartbeats emitted while the model-step activity consumes provider updates |
 
@@ -1154,16 +968,7 @@ with `IDurableToolSource` or the `durableTools` overload.
 
 ## Per-Tool Activity Configuration
 
-Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity (`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). An explicit worker-level `opts.DefaultRetryPolicy` is inherited exactly. When it is null, tools use the library's bounded five-attempt default with exponential backoff capped at 30 seconds. Override per tool via the `configure` callback on `AddTool`.
-
-| Property / Method on `DurableToolOptions` | Purpose |
-|---|---|
-| `StartToCloseTimeout` | Per-tool activity timeout. `null` inherits worker default. |
-| `HeartbeatTimeout` | Per-tool heartbeat timeout. `null` inherits worker default. |
-| `RetryPolicy` | Per-tool retry policy. `null` inherits worker default. |
-| `NoRetry()` | Sugar for `RetryPolicy = new() { MaximumAttempts = 1 }`. Use on write tools. |
-| `WithMaxAttempts(int n)` | Sugar for fixed-attempt retry. |
-| `WithTimeout(TimeSpan t)` | Sugar for `StartToCloseTimeout`. |
+Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity (`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). An explicit worker-level `opts.DefaultRetryPolicy` is inherited exactly. When it is null, tools use the library's bounded five-attempt default with exponential backoff capped at 30 seconds. Override per tool via the `configure` callback on `AddTool` — see the [`DurableToolOptions` reference](#durabletooloptions-reference) below for the full property list.
 
 `agent.MaxToolCallsPerTurn` (default `20` when not set) caps step-loop iterations per single agent turn. The value propagates from the agent's registration into session-based workflows, scheduled jobs, and sub-agent calls via `GetTemporalAgent()` — you configure it once on the builder and it takes effect everywhere. When exceeded, the workflow returns a structured "iteration cap exceeded" assistant message rather than letting workflow history grow unbounded.
 
@@ -1280,7 +1085,7 @@ Search attribute upserts are **on by default**. `AgentWorkflow` upserts three [c
 on each workflow, enabling operational queries in the Temporal Web UI and via `ListWorkflowsAsync`:
 
 | Attribute          | Type           | Description                                            |
-|--------------------|----------------|--------------------------------------------------------|
+|--------------------|----------------|----------------------------------------------------------|
 | `AgentName`        | Keyword        | The registered agent name                              |
 | `SessionCreatedAt` | DateTimeOffset | When the workflow first started                        |
 | `TurnCount`        | Long           | Number of completed agent responses in this session    |
@@ -1293,14 +1098,217 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 ```
 
 > **Production clusters:** search attributes (`AgentName`, `SessionCreatedAt`, `TurnCount`) must be
-> pre-registered on your Temporal cluster before workers start. On `temporal server start-dev` they
-> are registered automatically. On production clusters, register them once using the Temporal CLI:
+> pre-registered on your Temporal cluster before workers start — this is **not** automatic, even
+> for a local `temporal server start-dev`. Register them once using the Temporal CLI:
 >
 > ```bash
-> temporal operator search-attribute create --name AgentName --type Keyword
-> temporal operator search-attribute create --name SessionCreatedAt --type Datetime
-> temporal operator search-attribute create --name TurnCount --type Int
+> temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int
 > ```
 >
-> Set `opts.EnableSearchAttributes = false` to disable search attribute writes if your cluster does
-> not have these attributes registered.
+> Production clusters need the equivalent one-time `temporal operator search-attribute create`
+> commands. Set `opts.EnableSearchAttributes = false` to disable search attribute writes if your
+> cluster does not have these attributes registered.
+
+---
+
+## Reference
+
+### `DurableAgentBuilder` reference
+
+| Property / Method | Purpose |
+|-------------------|---------|
+| `Name` (read-only) | Case-insensitive agent name passed in to `AddDurableAgent`. |
+| `Description` | Used in `GetAgentDescriptors()` for routing prompts. Optional. |
+| `Instructions` | Agent system prompt. Library stamps onto every LLM call's `ChatOptions.Instructions`. Optional. |
+| `ChatClient` | **Required.** `Func<IServiceProvider, IChatClient>` factory invoked at activity execution time to resolve the model's `IChatClient`. Throws `InvalidOperationException` if omitted. |
+| `ChatOptions` | LLM-call template (Temperature, ResponseFormat, MaxOutputTokens, etc.). `Tools` and `Instructions` set on this property are ignored. |
+| `AddTool(AIFunction tool, Action<DurableToolOptions>? configure = null)` | Registers a concrete `AIFunction`. Per-tool retry / timeout via `configure`. |
+| `AddTool(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure = null)` | DI-resolving tool factory. |
+| `AddTools(params AIFunction[] tools)` | Bulk registration of concrete tools. |
+| `AddContextProvider(AIContextProvider provider, IEnumerable<DurableToolRegistrationSpec>? durableTools = null)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the chat pipeline. `Invoking/InvokedAsync` fire once per LLM call. Concrete providers can also contribute durable tools through specs or `IDurableToolSource`. |
+| `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
+| `RetryPolicy` | Retry policy for the agent's `RunAgentStep` activity (the LLM call). Per-tool retry is configured separately via `DurableToolOptions`. |
+| `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
+| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
+| `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
+
+### `DurableToolOptions` reference
+
+| Property / Method | Purpose |
+|-------------------|---------|
+| `StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` | Standard Temporal activity overrides. `null` inherits worker default. |
+| `NoRetry()` | Sets `RetryPolicy = new() { MaximumAttempts = 1 }`. Use on write tools. |
+| `WithMaxAttempts(int n)` | Sets a fixed-retry policy. |
+| `WithTimeout(TimeSpan t)` | Sets `StartToCloseTimeout`. |
+| `SkipInterceptor()` | Bypasses `IAgentToolInterceptor` for this specific tool. |
+| `WithInterceptorTimeout(TimeSpan t)` | Per-tool timeout for the interceptor activity. |
+| `RequireApproval()` | Absolute floor: always pause for human approval even if the interceptor returns `Proceed`. |
+
+### Inheritance — per-agent vs worker-level
+
+For every scalar setting the rule is: **if you set it on the agent, it overrides the worker default; if you leave it `null`, the worker-level default applies.**
+
+| Per-agent setting (`DurableAgentBuilder`) | Worker default (`TemporalAgentsOptions`) |
+|-------------------------------------------|------------------------------------------|
+| `agent.TimeToLive` | `opts.DefaultTimeToLive` |
+| `agent.ApprovalTimeout` | `opts.DefaultApprovalTimeout` |
+| `agent.ActivityTimeout` | `opts.DefaultActivityTimeout` |
+| `agent.HeartbeatTimeout` | `opts.DefaultHeartbeatTimeout` |
+| `agent.RetryPolicy` | `opts.DefaultRetryPolicy` |
+| `agent.MaxEntryCount` | `opts.DefaultMaxEntryCount` |
+| `agent.HistoryReducerKey` | `opts.DefaultHistoryReducerKey` |
+| `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
+| `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
+
+The retry-policy hierarchy adds one more layer specifically for tools. From most to least specific:
+
+1. `agent.AddTool(t, opts => opts.DefaultRetryPolicy = ...)` — the per-tool override (use `opts.NoRetry()` on write tools).
+2. `agent.RetryPolicy` — the agent-level default for any tool that doesn't override.
+3. `opts.DefaultRetryPolicy` — the worker-level default used by agents that don't override.
+
+There is **no per-agent "default for all my tools" cascade beyond `agent.RetryPolicy`** — set policies per tool when the per-tool default is genuinely different.
+
+### Custom agent middleware
+
+Custom agent middleware belongs in `ConfigureAgentPipeline`. Its wrapper must derive from
+`DelegatingAIAgent`, preserve the exact supplied `inner` agent through `base(inner)`, and delegate
+both run shapes it customizes:
+
+```csharp
+sealed class TimingAgent(AIAgent inner, ILogger<TimingAgent> logger)
+    : DelegatingAIAgent(inner)
+{
+    protected override async Task<AgentResponse> RunCoreAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            return await base.RunCoreAsync(messages, session, options, cancellationToken);
+        }
+        finally
+        {
+            logger.LogInformation("Agent run completed in {Elapsed}",
+                Stopwatch.GetElapsedTime(started));
+        }
+    }
+
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            await foreach (var update in base.RunCoreStreamingAsync(
+                messages, session, options, cancellationToken))
+            {
+                yield return update;
+            }
+        }
+        finally
+        {
+            logger.LogInformation("Agent stream completed in {Elapsed}",
+                Stopwatch.GetElapsedTime(started));
+        }
+    }
+}
+
+agent.ConfigureAgentPipeline = pipeline =>
+    pipeline.Use((inner, services) =>
+        new TimingAgent(inner, services.GetRequiredService<ILogger<TimingAgent>>()));
+```
+
+Do not return a separate agent from the factory, and do not hide `inner` inside a custom
+`AIAgent` subclass. Both shapes are rejected because the library cannot prove that its
+`ChatClientAgent` remains the durable model-call leaf. Request-level short-circuiting inside a
+valid `DelegatingAIAgent` remains supported.
+
+Tool factories run once when the worker first builds its immutable agent blueprint and their
+`AIFunction` values are cached for that worker. The chat-client, context-provider, and interceptor
+factories run from a fresh DI scope for every activity attempt. Do not use provider fields as
+session storage: an attempt can retry, run on another worker, or overlap another session; use
+`AgentSession.StateBag` instead.
+
+The library composes the chat pipeline internally and passes `UseProvidedChatClientAsIs = true` to
+MAF so that `FunctionInvokingChatClient` is **not** auto-injected — the workflow owns the
+tool-dispatch loop. Register a bare `IChatClient` in DI (do not call `.UseFunctionInvocation()`).
+
+The pipeline callback runs once during worker-startup validation and once for each
+`RunDurableAgentStep` activity attempt, including retries. Both validation and live construction
+use a DI scope, so middleware factories may resolve scoped dependencies. Treat wrapper fields as
+attempt-local, never session-local.
+
+Custom middleware wrappers must not implement `IDisposable` or `IAsyncDisposable`: MAF 1.17.0 does
+not expose whether a factory-created wrapper or DI owns that instance, so the library rejects that
+ambiguous shape. Put resource-owning dependencies in the activity DI scope instead. The one
+supported exception is MAF's built-in `OpenTelemetryAgent`; the library knows that wrapper owns
+its internal telemetry client and disposes it at the end of each validation or activity build.
+If `AIAgentBuilder.Build` throws before returning a root, MAF does not expose any partially built
+wrappers, so this library cannot dispose inaccessible instances.
+
+Live middleware receives the restored `TemporalAgentSession`. It may persist retry-safe state in
+the supplied session's `StateBag`, but it must pass the exact session object to `next`:
+
+```csharp
+sealed class AttemptCountingAgent(AIAgent inner) : DelegatingAIAgent(inner)
+{
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var durable = (TemporalAgentSession)session!;
+        // Read/write a JSON-serializable StateBag value here. The activity persists the bag.
+
+        await foreach (var update in base.RunCoreStreamingAsync(
+            messages, durable, options, cancellationToken))
+        {
+            yield return update;
+        }
+    }
+}
+```
+
+Do not pass `null` or substitute another session. The library rejects either shape because only the
+original restored StateBag is durably serialized. The final `ChatClientAgent` uses a separate,
+transient `ChatClientAgentSession` behind the library's innermost boundary; middleware that
+requires that leaf-specific type is not supported.
+
+`AIContextProvider.InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per `RunDurableAgentStep` activity). A turn that takes 3 LLM-step iterations to converge will see 3 invocation pairs. Make these hooks idempotent and cheap, or cache results via `StateBag` to skip redundant work within a turn.
+
+For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).
+For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md).
+
+---
+
+## Where to go next
+
+**How-to guides**
+
+- [Durable Agents](durable-agents.md) — the canonical write-vs-read tool example and per-tool retry hierarchy
+- [Individual MAF Context Providers](individual-context-providers.md) — building compatible `AIContextProvider` implementations
+- [HITL Patterns](hitl-patterns.md) — the two approval flavors, full guide and testing patterns
+- [Routing Patterns](routing.md) — static and dynamic agent routing
+- [Tool Interceptor](tool-interceptor.md) — pre-dispatch lifecycle hooks
+- [Scheduling](scheduling.md) — recurring and deferred agent runs
+- [MCP Tools](mcp-tools.md) — remote MCP client tool registration
+- [Testing Agents](testing-agents.md) — unit vs. integration testing durable agents
+- [Observability](observability.md) — the full OTel span hierarchy
+- [History & Token Optimization](prompt-caching.md) — managing prompt/context size
+- [Do's and Don'ts](dos-and-donts.md) — terse workflow-determinism quick reference
+
+**Architecture & concepts**
+
+- [Agent Sessions and Workflow Loop](../../architecture/MAF/agent-sessions-and-workflow-loop.md) — crash safety, continue-as-new, per-tool fan-out
+- [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md) — the supported MAF agent/provider boundary
+- [Durability and Determinism](../../architecture/MAF/durability-and-determinism.md) — Temporal's replay guarantees in the context of agent orchestration
+- [Library Combinations Guide](../../library-combinations.md) — choosing between this package and `TemporalCommunity.Extensions.AI`
+- [Security Boundary](../../security.md) — normative authentication/authorization rules for externally reachable session and approval endpoints
+- [Sample Catalog](../../../samples/catalog.md) — choose a runnable MAF sample by intent
