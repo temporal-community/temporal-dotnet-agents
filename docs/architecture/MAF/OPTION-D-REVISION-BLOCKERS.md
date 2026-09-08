@@ -11,16 +11,18 @@
 ### 1. Wire Contract Safety — **BLOCKER**
 
 **Current Problem:**  
-Phase 1 serializes `TemporalAgentSession` directly in workflow input carry-forward, but [CLAUDE.md line 153](../../CLAUDE.md#key-type-locations-gotchas) explicitly states `TemporalAgentSession` is NOT a serialization root.
+Phase 1 serializes `TemporalAgentSession` directly in workflow input carry-forward, but [CLAUDE.md's JSON serialization guidance](../../../CLAUDE.md#json-serialization-gotchas) explicitly states `TemporalAgentSession` is NOT a serialization root.
 
 **Required Fix:**
-- Define an internal source-gen snapshot DTO: `TemporalAgentSessionSnapshot` containing:
-  - SessionId (string)
-  - StateBag (JsonElement)
+- Define an internal, source-generated snapshot DTO: `TemporalAgentSessionSnapshot` containing:
+  - SessionId (`string`)
+  - StateBag (`JsonElement?`)
   - History (IReadOnlyList<DurableSessionEntry>)
 - Add to `AgentSessionJsonContext` source-gen context
 - Customer workflows use `SerializeSessionAsync()` → `JsonElement` → `DeserializeSessionAsync()` for carry-forward (not direct `TemporalAgentSession`)
-- Add polymorphic round-trip test: serialize/deserialize request/response/tool-content through snapshot
+- The snapshot remains an implementation detail; customer workflow inputs carry only the returned `JsonElement`.
+- Add a wire-contract test that asserts both `JsonTypeInfo.OriginatingResolver == AgentSessionJsonContext.Default` and a real `TemporalAgentDataConverter` payload round-trip preserves StateBag, derived request/response entries, and tool content.
+- Treat a missing `history` field as the documented legacy payload shape. Add a version field only when a future migration has a defined versioned behavior.
 
 **Impact:** Phase 2 cannot proceed without this contract.
 
@@ -29,14 +31,15 @@ Phase 1 serializes `TemporalAgentSession` directly in workflow input carry-forwa
 ### 2. StateBag Ownership Incomplete — **BLOCKER**
 
 **Current Problem:**  
-History moved to session, but `_currentStateBag` remains on `TemporalAIAgent` (line 37). Multi-session scenario:
+History moved to session, but [`_currentStateBag`](../../../src/TemporalCommunity.Extensions.Agents/TemporalAIAgent.cs#L44) remains on `TemporalAIAgent`. Multi-session scenario:
 - Session A runs, populates `_currentStateBag`
 - Session B runs, overwrites `_currentStateBag`
 - Session A has lost provider/tool state, context providers are out of sync
 - Continued workflow after continue-as-new loses all StateBag mutations
 
 **Required Fix:**
-- Move `_currentStateBag` ownership to `TemporalAgentSession`
+- Move the serialized StateBag transport to `TemporalAgentSession`, whose inherited MAF `StateBag` remains the single authoritative StateBag model. Do not introduce a second StateBag model.
+- Add an internal session operation that replaces/applies activity-produced serialized StateBag values before the next activity dispatch.
 - Include `StateBag` in session wire contract (snapshot DTO)
 - Preserve existing deterministic `StateBagMerge` behavior across LLM steps and tool write-backs
 - Test: StateBag mutations visible across concurrent distinct sessions, mutations not lost on continue-as-new
@@ -73,7 +76,7 @@ Phase 1 adds `SessionHistoryMetadata` and `SetHistory()` but:
 
 **Required Fix:**
 - Remove `SessionHistoryMetadata` from Phase 1
-- Remove public `SetHistory()` (keep as internal-only if needed)
+- Remove `SetHistory()` from this scope. It is already internal, but it is unnecessary until separately authorized history reduction work exists.
 - Defer history compaction/reduction to separate Phase N work with full pair-boundary invariants
 
 **Impact:** Simplifies Phase 1 scope; clarifies separation of concerns.
@@ -84,16 +87,15 @@ Phase 1 adds `SessionHistoryMetadata` and `SetHistory()` but:
 
 **Current Problem:**  
 No contract defined for concurrent access. What happens if:
-- Two threads call `RunAsync()` on the same `TemporalAgentSession` simultaneously?
+- Two overlapping workflow tasks call `RunAsync()` on the same live `TemporalAgentSession`?
 - First call appends request, second call appends request → who owns the ordering?
 - Workflow has overlapping sub-agent calls via `GetTemporalAgent()`?
 
 **Required Fix:**
 - Define explicit concurrency rule:
-  - **Option A:** `RunAsync()` calls on same session must be serial (reject overlapping calls)
+  - **Recommended:** `RunAsync()` calls on the same live session reject overlap with a clear `InvalidOperationException`; callers use distinct session objects for parallel conversations.
   - **Option B:** `RunAsync()` calls are serialized internally; history appends are ordered by causality
-  - **Option C:** Sessions are single-use; new session per concurrent call
-- Add gate test: overlapping same-session behavior (verify rejection or serialization)
+- Add a gate test that asserts the documented rejection behavior for overlapping same-session runs.
 
 **Impact:** Prevents subtle race conditions in production workflows.
 
@@ -120,7 +122,7 @@ Plan claims O(1) append: "Lazy-load history only when needed." Actual implementa
 ### 7. Validation Inconsistency — **BLOCKER**
 
 **Current Problem:**  
-Plan defines new validation exception for agent-name mismatch. But [TemporalAIAgentProxy line 169](../../src/TemporalCommunity.Extensions.Agents/TemporalAIAgentProxy.cs#L169) uses `ArgumentException` with `paramName: "session"`.
+Plan defines new validation exception for agent-name mismatch. But [`TemporalAIAgentProxy.ValidateSessionOwnership`](../../../src/TemporalCommunity.Extensions.Agents/TemporalAIAgentProxy.cs#L169) uses `ArgumentException` with `paramName: "session"`.
 
 **Required Fix:**
 - Match proxy validation: throw `ArgumentException` when session agent name doesn't match
@@ -135,9 +137,9 @@ Plan defines new validation exception for agent-name mismatch. But [TemporalAIAg
 
 **Current Problem:**  
 Plan specifies "50+ unit/integration tests" without concrete test gates. No explicit coverage for:
-- Source-gen snapshot round-trip
-- Polymorphic request/response/tool-content serialization
-- Legacy payloads (v0.2 without history)
+- Source-gen snapshot resolver-origin and round-trip
+- `TemporalAgentDataConverter` payload round-trip for polymorphic request/response/tool-content serialization
+- Legacy payloads without a `history` field
 - Concurrent distinct sessions (isolation)
 - Overlapping same-session calls (concurrency rule)
 - StateBag mutation through LLM + tool write-backs
@@ -147,7 +149,7 @@ Plan specifies "50+ unit/integration tests" without concrete test gates. No expl
 **Required Fix:**
 - Define named test gates (listed above)
 - Each gate is a specific test class/method with clear pass criteria
-- Add to Phase 3 (testing) specification before implementation
+- Define these named gates before implementation, then add each focused unit test with its corresponding wire-contract or behavior change. Do not defer the complete test suite until after the migration.
 
 **Impact:** Ensures test coverage is complete and intentional, not generic.
 
@@ -156,10 +158,10 @@ Plan specifies "50+ unit/integration tests" without concrete test gates. No expl
 ### 9. Architecture Docs Incomplete — **BLOCKER**
 
 **Current Problem:**  
-Plan only mentions migration guide. But existing docs conflict with new design:
-- [session-statebag-and-context-providers.md line 384](../../src/TemporalCommunity.Extensions.Agents/Session/TemporalAgentSession.cs#L384) — explains current session/StateBag model
-- [agent-to-agent-communication.md line 76](../../src/TemporalCommunity.Extensions.Agents/TemporalAIAgentProxy.cs#L76) — assumes agent-wide state
-- [durability-and-determinism.md line 163](../MAF/durability-and-determinism.md#L163) — session semantics
+Plan only mentions migration guide. But existing docs conflict with the new design:
+- [session-statebag-and-context-providers.md](./session-statebag-and-context-providers.md#temporalaiaagent--history-is-on-the-instance-not-the-session) — explains the current instance-owned history and StateBag model
+- [agent-to-agent-communication.md](./agent-to-agent-communication.md#history-accumulation) — assumes agent-wide history
+- [durability-and-determinism.md](./durability-and-determinism.md#path-b--orchestrating-workflow--sub-agent-via-temporalaiaagent) — defines the internal-agent workflow path
 
 **Required Fix:**
 - Update all three architecture docs with new session ownership model
@@ -187,17 +189,17 @@ Plan includes "Phase 5: Release" with version bump and NuGet publish. That requi
 
 ## Recommended Revision Order
 
-1. **Wire-contract prototype** (1-2 days)
+1. **Wire-contract prototype and focused tests** (1-2 days)
    - Design snapshot DTO
    - Add to source-gen context
-   - Round-trip test (serialize/deserialize session)
+   - Add resolver-origin, data-converter payload, polymorphic-content, and legacy-payload tests
 
-2. **Session-owned history + StateBag transfer** (2-3 days)
+2. **Session-owned history + StateBag transfer and focused tests** (2-3 days)
    - Move both to session
    - Define concurrency rule and enforcement
-   - Add validation gate tests
+   - Add isolation, StateBag write-back, validation, and same-session-overlap tests
 
-3. **Agent migration** (2-3 days)
+3. **Agent migration and performance evidence** (2-3 days)
    - Remove `_history` from TemporalAIAgent
    - Use session-owned storage
    - Add performance benchmarks
