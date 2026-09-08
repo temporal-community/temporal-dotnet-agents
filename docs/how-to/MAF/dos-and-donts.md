@@ -163,24 +163,51 @@ The `ChatClient`, `AddTool(name, factory)`, and `AddContextProvider(factory)` bu
 
 ## Session and History Management
 
-### Don't reuse a TemporalAIAgent instance for independent conversations
+### Do give each independent conversation its own session
 
 ```csharp
-// WRONG — session2 sees session1's history because they share the instance
+// CORRECT — one agent, two sessions, two independent conversations
 var agent = WorkflowAgents.GetTemporalAgent("Analyst");
 var s1 = await agent.CreateSessionAsync();
-await agent.RunAsync("Question A", s1);
 var s2 = await agent.CreateSessionAsync();
-await agent.RunAsync("Question B", s2); // sees "Question A" in context!
-
-// CORRECT — separate instances have independent histories
-var agent1 = WorkflowAgents.GetTemporalAgent("Analyst");
-var agent2 = WorkflowAgents.GetTemporalAgent("Analyst");
-var s1 = await agent1.CreateSessionAsync();
-var s2 = await agent2.CreateSessionAsync();
+await agent.RunAsync("Question A", s1);
+await agent.RunAsync("Question B", s2); // does not see Question A
 ```
 
-**Why:** `TemporalAIAgent` stores conversation history on the instance. Two sessions on the same instance accumulate into a single history list.
+**Why:** as of v0.4 the *session* owns the conversation history and StateBag, so one agent instance
+drives any number of independent conversations. Before v0.4 both lived on the agent instance and
+the second conversation replayed the first one's turns; the old workaround of resolving a second
+agent instance is no longer needed.
+
+Reuse the same session object for the turns that belong to one conversation — a fresh session per
+call accumulates nothing.
+
+### Don't run two turns over the same session at once
+
+```csharp
+// WRONG — throws InvalidOperationException
+var session = await agent.CreateSessionAsync();
+await Workflow.WhenAllAsync([
+    agent.RunAsync("Question A", session),
+    agent.RunAsync("Question B", session)]);
+
+// CORRECT — parallel conversations get a session each
+var a = await agent.CreateSessionAsync();
+var b = await agent.CreateSessionAsync();
+await Workflow.WhenAllAsync([
+    agent.RunAsync("Question A", a),
+    agent.RunAsync("Question B", b)]);
+```
+
+**Why:** two interleaved runs would append to one history and merge into one StateBag with no
+defined ordering, which is not replay-safe. The guard rejects the second run before it schedules
+any activity. Sequential turns on one session are unaffected.
+
+### Do pass a TemporalAgentSession, not any AgentSession
+
+`TemporalAIAgent.RunAsync` rejects a foreign `AgentSession` with `InvalidOperationException`: the
+session is where history and StateBag live, so a foreign one has nowhere to keep them. Obtain
+sessions from `CreateSessionAsync()` or construct a `TemporalAgentSession` directly.
 
 ### Do use explicit session keys for deterministic routing
 
@@ -193,16 +220,45 @@ var session = new TemporalAgentSession(sessionId);
 ### Don't serialize TemporalAgentSession directly
 
 ```csharp
-// WRONG — TemporalAgentSession is not in the source-gen JSON context
+// WRONG — TemporalAgentSession is not in the source-gen JSON context, so this
+// silently resolves through the reflection resolver and loses the MAF history
+// discriminators.
 JsonSerializer.Serialize(session, DefaultOptions);
 
-// CORRECT — use StateBag.Serialize() directly for state persistence
-var serializedBag = session.StateBag.Serialize();
+// CORRECT — the agent's own boundary writes the supported wire shape,
+// including conversation history.
+JsonElement serialized = await agent.SerializeSessionAsync(session);
+TemporalAgentSession restored =
+    (TemporalAgentSession)await agent.DeserializeSessionAsync(serialized);
+
+// If you only need the StateBag, not the conversation:
+JsonElement serializedBag = session.StateBag.Serialize();
 ```
+
+**Why:** the persisted shape is `TemporalAgentSessionSnapshot`, which *is* registered in the
+source-gen context. Going around it drops history and gives up the generated-metadata guarantees
+the rest of the workflow wire format depends on.
+
+If you pass your own `JsonSerializerOptions`, derive them from
+`TemporalAgentJsonUtilities.DefaultOptions`. The `agent_request` / `agent_response` discriminators
+are registered by a runtime resolver modifier rather than by attributes, so unrelated options
+cannot round-trip history.
 
 > **Note:** `SerializeStateBag()` is an `internal` method on `TemporalAgentSession` used by the
 > framework itself (in `AgentActivities`). It is not part of the public API. User code should call
-> `session.StateBag.Serialize()` directly when state persistence is required.
+> `session.StateBag.Serialize()` directly when only StateBag persistence is required.
+
+### Do carry the session across continue-as-new yourself
+
+```csharp
+var serialized = await agent.SerializeSessionAsync(session);
+throw Workflow.CreateContinueAsNewException((MyWorkflow wf) => wf.RunAsync(
+    new MyInput { CarriedSession = serialized }));
+```
+
+**Why:** the orchestrating workflow owns its own continue-as-new policy, so the library does not
+guess when a sub-agent conversation should survive the boundary. A session that is not carried
+forward starts empty on the next run.
 
 ---
 

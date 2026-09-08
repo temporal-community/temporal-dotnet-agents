@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -261,6 +262,116 @@ public class SessionOwnedStateTests
                 FirstRunCompleted = first.IsCompletedSuccessfully,
                 ThirdRunAfterCompletionSucceeded = thirdSucceeded,
                 FinalEntryCount = session.History.Count,
+            };
+        }
+    }
+
+    /// <summary>
+    /// A session carried across a continue-as-new boundary keeps its history and its StateBag.
+    /// On the pre-Option-D model neither was part of the serialized session, so the conversation
+    /// silently restarted empty on the next generation.
+    /// </summary>
+    [Fact]
+    public async Task SessionCarriedAcrossContinueAsNew_KeepsHistoryAndStateBag()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var taskQueue = $"session-can-{Guid.NewGuid():N}";
+        // One response per generation.
+        using var host = await StartWorkerAsync<CarryForwardWorkflow>(
+            env.Client, FinalResponses(2), taskQueue);
+        try
+        {
+            var result = await env.Client.ExecuteWorkflowAsync(
+                (CarryForwardWorkflow wf) => wf.RunAsync(new CarryForwardInput { Generation = 0 }),
+                new WorkflowOptions($"session-can-{Guid.NewGuid():N}", taskQueue));
+
+            _output.WriteLine(
+                $"gen={result.Generation} entries={result.HistoryEntryCount} " +
+                $"tag={result.CarriedTag} texts={string.Join("|", result.UserTexts)}");
+
+            Assert.Equal(1, result.Generation);
+
+            // Two turns' worth of entries: the pre-continue-as-new turn survived.
+            Assert.Equal(4, result.HistoryEntryCount);
+            Assert.Equal(["turn in generation 0", "turn in generation 1"], result.UserTexts);
+
+            // StateBag written before the boundary is still there.
+            Assert.Equal("written-in-gen-0", result.CarriedTag);
+
+            // Same conversation, not a fresh one.
+            Assert.Equal(result.OriginalSessionId, result.SessionId);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    public record CarryForwardInput
+    {
+        public JsonElement? CarriedSession { get; init; }
+        public string? OriginalSessionId { get; init; }
+        public int Generation { get; init; }
+    }
+
+    public record CarryForwardResult
+    {
+        public required int Generation { get; init; }
+        public required int HistoryEntryCount { get; init; }
+        public required IReadOnlyList<string> UserTexts { get; init; }
+        public required string? CarriedTag { get; init; }
+        public required string SessionId { get; init; }
+        public required string OriginalSessionId { get; init; }
+    }
+
+    [Workflow("SessionOwnedState.CarryForward")]
+    internal class CarryForwardWorkflow
+    {
+        [WorkflowRun]
+        public async Task<CarryForwardResult> RunAsync(CarryForwardInput input)
+        {
+            var agent = GetTemporalAgent("SubAgent");
+
+            var session = input.CarriedSession is { } carried
+                ? (TemporalAgentSession)await agent.DeserializeSessionAsync(carried).ConfigureAwait(true)
+                : (TemporalAgentSession)await agent.CreateSessionAsync().ConfigureAwait(true);
+
+            if (input.Generation == 0)
+            {
+                session.StateBag.SetValue("carried.tag", "written-in-gen-0");
+            }
+
+            await agent.RunAsync(
+                [new ChatMessage(ChatRole.User, $"turn in generation {input.Generation}")],
+                session).ConfigureAwait(true);
+
+            if (input.Generation == 0)
+            {
+                var next = new CarryForwardInput
+                {
+                    CarriedSession = await agent.SerializeSessionAsync(session).ConfigureAwait(true),
+                    OriginalSessionId = session.SessionId.WorkflowId,
+                    Generation = 1,
+                };
+                throw Workflow.CreateContinueAsNewException((CarryForwardWorkflow wf) => wf.RunAsync(next));
+            }
+
+            return new CarryForwardResult
+            {
+                Generation = input.Generation,
+                HistoryEntryCount = session.History.Count,
+                UserTexts =
+                [
+                    .. session.History
+                        .SelectMany(e => e.Messages)
+                        .Where(m => m.Role == ChatRole.User)
+                        .Select(m => m.Text ?? string.Empty)
+                ],
+                CarriedTag = session.StateBag.TryGetValue<string>("carried.tag", out var tag) ? tag : null,
+                SessionId = session.SessionId.WorkflowId,
+                OriginalSessionId = input.OriginalSessionId ?? string.Empty,
             };
         }
     }

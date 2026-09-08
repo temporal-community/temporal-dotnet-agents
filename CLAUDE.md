@@ -98,6 +98,21 @@ its required transient `ChatClientAgentSession`.
 - `TemporalAIAgent` — workflow-context sub-agent. Access via `WorkflowAgents.GetTemporalAgent("Name")`.
 - `TemporalAIAgentProxy` — external-context proxy. Access via `services.GetTemporalAgentProxy("Name")`.
 
+**Session ownership (v0.4)**: `TemporalAgentSession` — not the agent instance — owns the
+conversation history and the StateBag. One agent may drive many sessions; nothing conversational
+lives on the agent. Consequences:
+- `TemporalAIAgent.RunAsync` **requires** a `TemporalAgentSession`; a foreign `AgentSession` is rejected.
+- Two overlapping `RunAsync()` calls on the **same** session throw `InvalidOperationException`
+  (`EnterRun`/`ExitRun` guard). Parallel conversations on one agent are fine — give each its own session.
+- State survives continue-as-new only if the orchestrating workflow explicitly carries the
+  serialized session forward. The library does not guess.
+- Worker config (`MaxToolCallsPerTurn`, per-tool activity options, interceptor caches) stays
+  agent-scoped — it describes the agent, not the conversation.
+- StateBag updates: LLM-step output is **overlaid** (trusted, unfiltered, preserves untouched keys);
+  tool/interceptor write-backs are **merged in tool-call index order** (later index wins) with the
+  reserved approval-scope deny-list applied. Never let activity completion order drive the merge.
+See `docs/how-to/MAF/migrating-to-session-owned-state.md`.
+
 **HITL**: see `docs/how-to/MAF/hitl-patterns.md`. Activity timeout must accommodate human review time.
 
 **StateBag persistence**: **64 KB size guard** — `CreateContinueAsNewException` emits `LogWarning` when the serialized `CarriedStateBag` exceeds 64 KB. Prune or externalize StateBag contents when this fires.
@@ -143,6 +158,7 @@ When a worker crashes:
 - `DurableToolContext` — `TemporalCommunity.Extensions.AI.Tools` — cross-library base context. Properties: `ToolName`, `Arguments`, `CallId`, `SessionId?`. Non-sealed — `AgentToolContext` extends it.
 - `IAgentToolInterceptor` — `TemporalCommunity.Extensions.Agents.Tools` — convenience alias for `IDurableToolInterceptor<AgentToolContext>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`. Returns `DurableToolDecision` from the AI library.
 - `AgentToolContext` — `TemporalCommunity.Extensions.Agents.Tools` — extends `DurableToolContext`. Adds `AgentName` (required) and `StateBag?` (read-only snapshot). The inherited `SessionId` is populated from `ActivityExecutionContext.Current.Info.WorkflowId` in the interceptor activity.
+- `TemporalAgentSessionSnapshot` — `TemporalCommunity.Extensions.Agents.Session` (internal sealed) — the wire contract for a serialized `TemporalAgentSession`. Registered in `AgentSessionJsonContext`. Members: `sessionId` (lossless `ta-{agent}-{key}` string), `stateBag`, `history` — the last two omitted when null via member-level `JsonIgnore`. A snapshot without `history` is the supported legacy shape and restores as empty history.
 - `WorkingSetContextProvider` — `TemporalCommunity.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Stores result in `AgentSessionStateBag["temporal.working_set"]`.
 
 ### DI Patterns
@@ -152,8 +168,10 @@ When a worker crashes:
 
 ### JSON Serialization (gotchas)
 - `AgentSessionJsonContext` (Agents) and `DurableAIJsonContext` (AI) — source-gen contexts for conversation history types.
-- `TemporalAgentSession` is **NOT** in any source-gen context. Don't try `DefaultOptions.GetTypeInfo(typeof(TemporalAgentSession))`.
+- `TemporalAgentSession` is **NOT** in any source-gen context. Don't try `DefaultOptions.GetTypeInfo(typeof(TemporalAgentSession))` — it resolves through `DefaultJsonTypeInfoResolver` (reflection). Serialize the session via `TemporalAgentSessionSnapshot` instead; that DTO *is* registered.
 - `TemporalAgentSession.SerializeStateBag()` delegates to `StateBag.Serialize()`, not session serialization.
+- The `agent_request` / `agent_response` discriminators on `DurableSessionEntry` come from a **runtime resolver modifier** in `TemporalAgentJsonUtilities`, not from `[JsonDerivedType]` attributes. Options lacking that modifier throw `NotSupportedException` on any session holding history — `TemporalAgentSession.ResolveSnapshotOptions` detects this and falls back to `TemporalAgentJsonUtilities.DefaultOptions`. Derive custom options from `DefaultOptions`.
+- `AgentSessionStateBag` is backed by a `ConcurrentDictionary`, so a bag serialized straight from `SetValue` calls emits keys in hash order. Don't byte-compare multi-key snapshots. (`StateBagMerge` output *is* ordinal-sorted and stable.)
 - Agents library reuses `DurableAIDataConverter` from the AI library (re-exposed via `TemporalAgentDataConverter`) for chat-content polymorphism.
 
 ---
@@ -332,6 +350,7 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **Durable Agents (per-tool activities)**: `docs/how-to/MAF/durable-agents.md`
 - **Tool Interceptor**: `docs/how-to/MAF/tool-interceptor.md`
 - **Do's and Don'ts**: `docs/how-to/MAF/dos-and-donts.md`
+- **Migrating to Session-Owned State (v0.3 → v0.4)**: `docs/how-to/MAF/migrating-to-session-owned-state.md`
 - **Durability Guarantees**: `docs/architecture/MAF/durability-and-determinism.md`
 - **Sessions and Workflow Loop**: `docs/architecture/MAF/agent-sessions-and-workflow-loop.md`
 - **Pub/Sub Equivalents**: `docs/architecture/MAF/pub-sub-and-event-driven.md`
