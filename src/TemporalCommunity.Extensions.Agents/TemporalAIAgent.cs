@@ -35,7 +35,6 @@ public sealed class TemporalAIAgent : AIAgent
 {
     private readonly string _agentName;
     private readonly ActivityOptions _activityOptions;
-    private int _requestCount;
     // Cached after the first successful worker-settings resolution step so subsequent turns
     // skip the resolution handshake and use the resolved value rather than the hard-coded default.
     private bool _settingsResolved;
@@ -116,6 +115,20 @@ public sealed class TemporalAIAgent : AIAgent
                 $"Create the session with {nameof(CreateSessionAsync)} on this agent.");
         }
 
+        // SECURITY: a session now carries its conversation history, so running one agent's session
+        // on another agent would flatten that whole transcript into this agent's prompt and into
+        // this agent's Temporal event history — a cross-agent (and, in a multi-tenant host,
+        // cross-tenant) disclosure. TemporalAIAgentProxy has always checked this; before session
+        // ownership a mismatched session carried only an ID and a StateBag, so the check mattered
+        // less here. It matters now. Matching is by agent name, so two agent instances resolved
+        // from the same registration remain interchangeable.
+        if (!string.Equals(temporalSession.SessionId.AgentName, _agentName, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"The provided session belongs to agent '{temporalSession.SessionId.AgentName}', not agent '{_agentName}'. " +
+                "Create the session from the same agent that will run it.");
+        }
+
         // Reject a second run over the same live session before any activity is scheduled — two
         // interleaved runs would append to one history and merge into one StateBag with no
         // defined ordering. Distinct sessions on this same agent remain free to run in parallel.
@@ -130,6 +143,14 @@ public sealed class TemporalAIAgent : AIAgent
         }
     }
 
+    /// <remarks>
+    /// Takes no <see cref="CancellationToken"/> deliberately. The turn body never used the caller's
+    /// token: every activity dispatched here relies on <c>Workflow.CancellationToken</c>, which is
+    /// the documented pattern for workflow code. A caller-supplied child token would therefore be
+    /// ignored — that is pre-existing behaviour, not something this extraction introduced. Honouring
+    /// one would mean threading it into each <c>ExecuteActivityAsync</c> call, not adding a
+    /// parameter here.
+    /// </remarks>
     private async Task<AgentResponse> RunTurnAsync(
         IEnumerable<ChatMessage> messages,
         TemporalAgentSession temporalSession,
@@ -165,11 +186,10 @@ public sealed class TemporalAIAgent : AIAgent
         };
 
         temporalSession.AppendHistoryEntry(AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow));
-        _requestCount++;
 
         var sessionId = temporalSession.SessionId;
 
-        Workflow.Logger.LogInWorkflowAgentDispatching(_agentName, _requestCount);
+        Workflow.Logger.LogInWorkflowAgentDispatching(_agentName, temporalSession.RunCount);
 
         // Drive the durable-agent dispatch loop for sub-agents inside an orchestrating workflow.
         // Mirrors the AgentWorkflow main loop but without continue-as-new / search attributes /
@@ -236,9 +256,9 @@ public sealed class TemporalAIAgent : AIAgent
                 // decision degrades to Block below. Emitting a LogWarning here after the first
                 // step's ResolvedWorkerConfig arrives makes this degradation visible before
                 // the tool call rather than silently at block time.
-                // Note: SerializedStateBag is always null in TemporalAIAgent's interceptor
-                // input (constructed below) — scope records from StateBag are never consulted
-                // on this path.
+                // Note: TemporalAIAgent's interceptor input still passes a null SerializedStateBag
+                // (constructed below), so scope records in StateBag are not consulted on this path
+                // even though the session now has a StateBag to consult.
                 if (resolvedConfig.ScopeAwareApprovalTools is { Count: > 0 } scopeApprovalTools)
                 {
                     var names = string.Join(", ", scopeApprovalTools);
@@ -328,8 +348,14 @@ public sealed class TemporalAIAgent : AIAgent
                             ToolName = tc.Name,
                             Arguments = tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments),
                             CallId = tc.CallId,
-                            // SerializedStateBag is always null on this path — TemporalAIAgent
-                            // has no StateBag and scope records from StateBag are never consulted.
+                            // Still null here, but NOT because there is no StateBag to send — as of
+                            // session ownership there is one (see toolDispatchStateBag below, and
+                            // AgentWorkflow, which does pass its bag to interceptors). Passing it
+                            // would let a scope-aware interceptor find a matching approval-scope
+                            // record and return Proceed where it currently returns
+                            // PauseForApproval, which degrades to Block on this path. That is a
+                            // change to approval semantics and needs its own design and tests, so
+                            // it is deliberately left alone here rather than altered in passing.
                             SerializedStateBag = null,
                             // Feature B (Task 4.7): populate scope-aware fields.
                             ScopeAware = _scopeAwareTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
@@ -380,7 +406,22 @@ public sealed class TemporalAIAgent : AIAgent
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
                             // X-1: seed the tool with accumulated session state so context
-                            // providers / scope-aware tools see it (was implicitly null before).
+                            // providers / scope-aware tools see it.
+                            //
+                            // KNOWN LIMITATION (pre-existing, not introduced by session ownership):
+                            // this bag is currently ignored on the sub-agent path. InvokeAgentToolInput
+                            // carries no SessionId, so InvokeAgentToolAsync derives the session from
+                            // ActivityExecutionContext.Info.WorkflowId — which here is the ORCHESTRATING
+                            // workflow's ID, not a "ta-{agent}-{key}" session ID. The parse fails, no
+                            // TemporalAgentContext is established, and the tool's StateBag write-back
+                            // comes back null. So toolStateBagWriteBacks below is always all-null on
+                            // this path and the merge is a no-op. RunDurableAgentStepAsync does not
+                            // have this problem because AgentStepInput does carry SessionId and it is
+                            // preferred over the workflow ID; that is why context-provider StateBag
+                            // threading works for sub-agents while tool write-backs do not.
+                            // Closing this means adding SessionId to InvokeAgentToolInput and
+                            // preferring it — a wire addition with approval-routing implications, so
+                            // it needs its own design rather than a change in passing.
                             SerializedStateBag = toolDispatchStateBag,
                         };
                         // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)

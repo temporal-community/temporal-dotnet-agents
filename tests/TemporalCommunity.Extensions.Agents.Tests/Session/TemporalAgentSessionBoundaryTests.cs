@@ -233,4 +233,57 @@ public class TemporalAgentSessionBoundaryTests
 
         Assert.IsType<AgentSessionRequest>(Assert.Single(restored.History));
     }
+
+    [Fact]
+    public async Task ForeignOptions_KeepTheirEncoderAndDepthLimit()
+    {
+        // The fallback must not silently downgrade a caller's security-relevant settings. The
+        // library default uses UnsafeRelaxedJsonEscaping, which leaves '<' unescaped — a caller
+        // who chose a stricter encoder because they embed the payload somewhere must keep it, and
+        // the payload now carries model- and tool-authored conversation text.
+        var strict = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default,
+            MaxDepth = 16,
+        };
+        strict.MakeReadOnly();
+
+        var session = new TemporalAgentSession(new TemporalAgentSessionId("Assistant", "abc123"));
+        session.AppendHistoryEntry(Request("c1", "</script><img src=x onerror=alert(1)>"));
+
+        var agent = CreateAgent();
+        var serialized = await agent.SerializeSessionAsync(session, strict);
+        var raw = serialized.GetRawText();
+
+        // Angle brackets escaped by the caller's encoder, not emitted raw by the library default.
+        Assert.DoesNotContain("</script>", raw, StringComparison.Ordinal);
+        Assert.Contains("\\u003C", raw, StringComparison.OrdinalIgnoreCase);
+
+        // ...and the fallback still round-trips history, which is why it exists at all.
+        var restored = Assert.IsType<TemporalAgentSession>(
+            await agent.DeserializeSessionAsync(serialized, strict));
+        Assert.IsType<AgentSessionRequest>(Assert.Single(restored.History));
+    }
+
+    [Fact]
+    public async Task ForeignOptions_FallbackIsCachedPerCallerInstance()
+    {
+        // Building fresh options per call would discard System.Text.Json's per-instance metadata
+        // cache and make every serialize pay full resolution cost.
+        var foreign = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
+        };
+        foreign.MakeReadOnly();
+
+        var session = new TemporalAgentSession(new TemporalAgentSessionId("Assistant", "abc123"));
+        session.AppendHistoryEntry(Request("c1", "hello"));
+
+        var agent = CreateAgent();
+        var first = await agent.SerializeSessionAsync(session, foreign);
+        var second = await agent.SerializeSessionAsync(session, foreign);
+
+        Assert.Equal(first.GetRawText(), second.GetRawText());
+    }
 }

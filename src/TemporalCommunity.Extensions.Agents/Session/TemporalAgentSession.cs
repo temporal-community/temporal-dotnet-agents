@@ -27,6 +27,11 @@ namespace TemporalCommunity.Extensions.Agents.Session;
 /// </remarks>
 public sealed class TemporalAgentSession : AgentSession
 {
+    // Derived options per caller-supplied instance, for the ResolveSnapshotOptions fallback.
+    // Holds no strong reference to the caller's options.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<JsonSerializerOptions, JsonSerializerOptions>
+        FallbackOptionsCache = new();
+
     // Mutable backing store so AppendHistoryEntry stays O(1). _historyView is created once (field
     // initializers run in declaration order, so _history is already assigned) and handed out
     // instead of _history itself, so callers cannot cast the facade back to a mutable list.
@@ -91,7 +96,19 @@ public sealed class TemporalAgentSession : AgentSession
         }
 
         _runInProgress = true;
+        this.RunCount++;
     }
+
+    /// <summary>
+    /// How many runs this session has started. Used for log correlation only.
+    /// </summary>
+    /// <remarks>
+    /// Per session rather than per agent: one agent drives many conversations, so an agent-level
+    /// counter would report session B's first turn as turn 3. Not part of the snapshot — a session
+    /// restored after continue-as-new counts from zero again, matching the pre-existing behaviour
+    /// of the agent-level counter it replaced.
+    /// </remarks>
+    internal int RunCount { get; private set; }
 
     /// <summary>
     /// Clears the in-flight marker. Must run on every completion, cancellation, and failure path.
@@ -187,9 +204,22 @@ public sealed class TemporalAgentSession : AgentSession
     /// <para>
     /// This mattered nothing while history never crossed the wire — an empty history serializes
     /// fine under any options. It is load-bearing now, so the snapshot is written with options
-    /// that are known to carry the registration. Caller options
-    /// are still honoured whenever they can (they usually derive from
+    /// that are known to carry the registration. Caller options are used as given whenever they
+    /// can round-trip history (they usually derive from
     /// <see cref="TemporalAgentJsonUtilities.DefaultOptions"/> and so pass this check).
+    /// </para>
+    /// <para>
+    /// <strong>When a fallback is needed, the caller's security-relevant settings are carried
+    /// over.</strong> Silently swapping in the default options would also swap in their
+    /// <see cref="System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping"/> encoder
+    /// and default <see cref="JsonSerializerOptions.MaxDepth"/>. A caller who set a stricter
+    /// encoder to make output safe to embed, or a depth limit to bound parsing of untrusted
+    /// persisted state, would lose that protection without being told — and the payload now
+    /// carries model- and tool-authored conversation text. <see cref="JsonSerializerOptions.Encoder"/>
+    /// and <see cref="JsonSerializerOptions.MaxDepth"/> are therefore copied onto the derived
+    /// options. Settings that would change the wire shape itself (naming policy, reference
+    /// handling, the resolver chain) are deliberately not copied — the snapshot format is this
+    /// library's contract, not the caller's.
     /// </para>
     /// </remarks>
     private static JsonSerializerOptions ResolveSnapshotOptions(JsonSerializerOptions? jsonSerializerOptions)
@@ -199,9 +229,24 @@ public sealed class TemporalAgentSession : AgentSession
             return TemporalAgentJsonUtilities.DefaultOptions;
         }
 
-        return CarriesAgentEntryPolymorphism(jsonSerializerOptions)
-            ? jsonSerializerOptions
-            : TemporalAgentJsonUtilities.DefaultOptions;
+        if (CarriesAgentEntryPolymorphism(jsonSerializerOptions))
+        {
+            return jsonSerializerOptions;
+        }
+
+        // Cached per caller-options instance: System.Text.Json caches resolved JsonTypeInfo on the
+        // options object, so building a fresh instance per call would re-resolve all metadata every
+        // time. The table holds no strong reference to the caller's options.
+        return FallbackOptionsCache.GetValue(jsonSerializerOptions, static callerOptions =>
+        {
+            var derived = new JsonSerializerOptions(TemporalAgentJsonUtilities.DefaultOptions)
+            {
+                Encoder = callerOptions.Encoder,
+                MaxDepth = callerOptions.MaxDepth,
+            };
+            derived.MakeReadOnly();
+            return derived;
+        });
     }
 
     private static bool CarriesAgentEntryPolymorphism(JsonSerializerOptions options)
@@ -345,6 +390,24 @@ public sealed class TemporalAgentSession : AgentSession
     /// Replaces this session's <see cref="AgentSession.StateBag"/> with the merge result. A null,
     /// <see cref="JsonValueKind.Undefined"/>, or JSON-null value clears the bag.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>The ordinal-sorted key order produced by <see cref="StateBagMerge"/> ends here.</strong>
+    /// <c>StateBagMerge.SerializeSorted</c> emits keys ordinal-sorted so that <c>AgentWorkflow</c>'s
+    /// FNV-1a content hash in <c>GetStateBagForDispatch</c> sees byte-stable input. Deserializing
+    /// into an <see cref="AgentSessionStateBag"/> discards that order: the bag is backed by a
+    /// <c>ConcurrentDictionary</c>, so the next <see cref="SerializeStateBag"/> emits bucket order
+    /// instead.
+    /// </para>
+    /// <para>
+    /// That is harmless today — <see cref="TemporalAIAgent"/> has no hash gate, and bucket order is
+    /// itself stable across processes and replays because the dictionary uses the non-randomized
+    /// ordinal comparer (measured, not assumed). Replay determinism needs stability, which holds;
+    /// it does not need sortedness. But the two agent loops are documented as mirrors, so if a hash
+    /// gate is ever added to this path, re-sort on the way out rather than assuming the order
+    /// survived the round trip.
+    /// </para>
+    /// </remarks>
     private void ReplaceStateBag(JsonElement? merged)
     {
         this.StateBag = merged is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } el

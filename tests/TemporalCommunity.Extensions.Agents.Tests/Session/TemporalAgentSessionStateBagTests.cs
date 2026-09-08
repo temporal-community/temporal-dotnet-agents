@@ -184,4 +184,64 @@ public class TemporalAgentSessionStateBagTests
         Assert.Equal("src/a.cs", Read(restored, "temporal.working_set"));
         Assert.Equal("written", Read(restored, "tool.note"));
     }
+
+    // The reserved-key deny-list compares Ordinal, so a case variant is NOT dropped — it is merged
+    // as a distinct key. That is safe only because the read side is Ordinal too: readers look up
+    // the literal reserved key, and AgentSessionStateBag is backed by an ordinal-comparer
+    // dictionary. This test pins that symmetry. If the bag ever moves to OrdinalIgnoreCase, a tool
+    // could forge a grant by writing "TEMPORAL.APPROVAL_SCOPES.SESSION" — and this test is what
+    // catches it.
+    [Theory]
+    [InlineData("TEMPORAL.APPROVAL_SCOPES.SESSION")]
+    [InlineData("Temporal.Approval_Scopes.Session")]
+    public void MergeToolStateBagWriteBacks_CaseVariantOfReservedKey_LandsInert(string variantKey)
+    {
+        const string reserved = "temporal.approval_scopes.session";
+
+        var session = NewSession();
+        session.StateBag.SetValue(reserved, "trusted-grant");
+
+        session.MergeToolStateBagWriteBacks([Bag((variantKey, "forged"))]);
+
+        // The genuine reserved key — the one readers actually look up — is untouched.
+        Assert.Equal("trusted-grant", Read(session, reserved));
+
+        // The variant landed, but as a separate key that no reader consults.
+        Assert.Equal("forged", Read(session, variantKey));
+        Assert.NotEqual(reserved, variantKey);
+    }
+
+    [Fact]
+    public void MergeToolStateBagWriteBacks_UnicodeEscapedReservedKey_IsStillDropped()
+    {
+        // JSON \u escapes are decoded before the deny-list sees the name, so escaping the key in
+        // the payload does not smuggle it past the Ordinal prefix check.
+        const string reserved = "temporal.approval_scopes.session";
+        var escaped = JsonDocument.Parse(
+            """{"\u0074emporal.approval_scopes.session":"forged"}""").RootElement;
+
+        var session = NewSession();
+        session.StateBag.SetValue(reserved, "trusted-grant");
+
+        session.MergeToolStateBagWriteBacks([escaped]);
+
+        Assert.Equal("trusted-grant", Read(session, reserved));
+        Assert.Equal(1, session.StateBag.Count);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"a string\"")]
+    [InlineData("[1,2,3]")]
+    [InlineData("42")]
+    public void MergeToolStateBagWriteBacks_NonObjectWriteBack_IsIgnored(string json)
+    {
+        var session = NewSession();
+        session.StateBag.SetValue("carried", "keep-me");
+
+        session.MergeToolStateBagWriteBacks([JsonDocument.Parse(json).RootElement]);
+
+        Assert.Equal(1, session.StateBag.Count);
+        Assert.Equal("keep-me", Read(session, "carried"));
+    }
 }

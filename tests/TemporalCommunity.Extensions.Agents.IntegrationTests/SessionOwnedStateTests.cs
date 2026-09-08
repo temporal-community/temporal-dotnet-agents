@@ -375,4 +375,209 @@ public class SessionOwnedStateTests
             };
         }
     }
+
+    /// <summary>
+    /// SECURITY: a session now carries its conversation history, so running one agent's session on
+    /// another agent would flatten that transcript into the second agent's prompt and event
+    /// history. Before session ownership a mismatched session carried only an ID and a StateBag.
+    /// </summary>
+    [Fact]
+    public async Task SessionBelongingToAnotherAgent_IsRejectedBeforeAnyLlmCall()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var taskQueue = $"session-binding-{Guid.NewGuid():N}";
+        var scripted = FinalResponses(1);
+        using var host = await StartWorkerAsync<ForeignSessionWorkflow>(env.Client, scripted, taskQueue);
+        try
+        {
+            var result = await env.Client.ExecuteWorkflowAsync(
+                (ForeignSessionWorkflow wf) => wf.RunAsync(),
+                new WorkflowOptions($"session-binding-{Guid.NewGuid():N}", taskQueue));
+
+            _output.WriteLine($"rejection: {result.RejectionMessage}");
+
+            Assert.Equal(nameof(InvalidOperationException), result.RejectionExceptionType);
+            Assert.Contains("Researcher", result.RejectionMessage, StringComparison.Ordinal);
+            Assert.Contains("SubAgent", result.RejectionMessage, StringComparison.OrdinalIgnoreCase);
+
+            // The rejection must not echo the transcript it refused to read.
+            Assert.DoesNotContain("confidential", result.RejectionMessage, StringComparison.OrdinalIgnoreCase);
+
+            // A session belonging to this agent still runs — matching is by name, so two agent
+            // instances resolved from one registration stay interchangeable. That legitimate run
+            // is the one and only call the model should have seen.
+            Assert.True(result.OwnSessionRanSuccessfully);
+            Assert.Equal(1, scripted.CallCount);
+
+            // The load-bearing assertion: the foreign transcript never reached the model.
+            var everySentMessage = scripted.Calls
+                .SelectMany(c => c.Messages)
+                .Select(m => m.Text ?? string.Empty)
+                .ToArray();
+            Assert.DoesNotContain(everySentMessage, t => t.Contains("confidential", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    public record ForeignSessionResult
+    {
+        public required string RejectionExceptionType { get; init; }
+        public required string RejectionMessage { get; init; }
+        public required bool OwnSessionRanSuccessfully { get; init; }
+    }
+
+    [Workflow("SessionOwnedState.ForeignSession")]
+    internal class ForeignSessionWorkflow
+    {
+        [WorkflowRun]
+        public async Task<ForeignSessionResult> RunAsync()
+        {
+            var agent = GetTemporalAgent("SubAgent");
+
+            var foreign = new TemporalAgentSession(new TemporalAgentSessionId("Researcher", "abc123"));
+            foreign.AppendHistoryEntry(TemporalCommunity.Extensions.Agents.State.AgentSessionRequest
+                .FromRunRequest(
+                    new TemporalCommunity.Extensions.Agents.Scheduling.RunRequest(
+                        [new ChatMessage(ChatRole.User, "confidential research notes")])
+                    {
+                        CorrelationId = "c-foreign",
+                    },
+                    Workflow.UtcNow));
+
+            string exceptionType;
+            string message;
+            try
+            {
+                await agent.RunAsync([new ChatMessage(ChatRole.User, "summarise")], foreign)
+                    .ConfigureAwait(true);
+                exceptionType = "<none>";
+                message = "<no exception thrown>";
+            }
+            catch (InvalidOperationException ex)
+            {
+                exceptionType = nameof(InvalidOperationException);
+                message = ex.Message;
+            }
+
+            // Same-name session from a second agent instance must still be accepted.
+            var otherInstance = GetTemporalAgent("SubAgent");
+            var own = await otherInstance.CreateSessionAsync().ConfigureAwait(true);
+            var ranOk = true;
+            try
+            {
+                await agent.RunAsync([new ChatMessage(ChatRole.User, "own session")], own)
+                    .ConfigureAwait(true);
+            }
+            catch (InvalidOperationException)
+            {
+                ranOk = false;
+            }
+
+            return new ForeignSessionResult
+            {
+                RejectionExceptionType = exceptionType,
+                RejectionMessage = message,
+                OwnSessionRanSuccessfully = ranOk,
+            };
+        }
+    }
+
+    /// <summary>
+    /// The determinism-critical sparse-cursor mapping. When some tool calls in a turn are blocked
+    /// and produce synthetic results, the loop walks a sparse array with a separate
+    /// <c>pendingIdx</c> cursor to pair completed activities back to their ORIGINAL tool-call
+    /// index. An off-by-one there would attach tool 2's result to tool 0's call id.
+    /// </summary>
+    /// <remarks>
+    /// This asserts on tool-result pairing rather than on StateBag write-backs. Write-backs are not
+    /// observable on the sub-agent path at all: <c>InvokeAgentToolInput</c> carries no SessionId, so
+    /// the activity cannot establish a <c>TemporalAgentContext</c> for a sub-agent and always
+    /// returns a null bag. See the KNOWN LIMITATION note in <c>TemporalAIAgent.RunTurnAsync</c>.
+    /// The cursor being exercised is the same one either way.
+    /// </remarks>
+    [Fact]
+    public async Task BlockedToolCall_DoesNotShiftSurvivingToolResultsOntoWrongCallIds()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        // c1 names an unregistered tool, so it is blocked before dispatch and leaves a hole
+        // between two calls that do run.
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant,
+            [
+                new FunctionCallContent("c0", "echo",
+                    new Dictionary<string, object?> { ["value"] = "zero" }),
+                new FunctionCallContent("c1", "not_registered", new Dictionary<string, object?>()),
+                new FunctionCallContent("c2", "echo",
+                    new Dictionary<string, object?> { ["value"] = "two" }),
+            ])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Done.")),
+        ]);
+
+        var echo = AIFunctionFactory.Create(
+            ([System.ComponentModel.Description("value")] string value) => $"echoed:{value}",
+            new AIFunctionFactoryOptions { Name = "echo" });
+
+        var taskQueue = $"session-sparse-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddWorkflow<SparseToolResultWorkflow>()
+            .AddTemporalAgents(opts => opts.AddDurableAgent("SubAgent", agent =>
+            {
+                agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+                agent.AddTool(echo);
+            }));
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var pairs = await env.Client.ExecuteWorkflowAsync(
+                (SparseToolResultWorkflow wf) => wf.RunAsync(),
+                new WorkflowOptions($"session-sparse-{Guid.NewGuid():N}", taskQueue));
+
+            _output.WriteLine(string.Join(" | ", pairs));
+
+            Assert.Equal(3, pairs.Count);
+            Assert.StartsWith("c0=echoed:zero", pairs[0], StringComparison.Ordinal);
+            Assert.StartsWith("c1=", pairs[1], StringComparison.Ordinal);
+            Assert.Contains("Blocked", pairs[1], StringComparison.OrdinalIgnoreCase);
+            Assert.StartsWith("c2=echoed:two", pairs[2], StringComparison.Ordinal);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Workflow("SessionOwnedState.SparseToolResult")]
+    internal class SparseToolResultWorkflow
+    {
+        [WorkflowRun]
+        public async Task<List<string>> RunAsync()
+        {
+            var agent = GetTemporalAgent("SubAgent");
+            var session = (TemporalAgentSession)await agent.CreateSessionAsync().ConfigureAwait(true);
+            var response = await agent.RunAsync(
+                [new ChatMessage(ChatRole.User, "call the tools")], session).ConfigureAwait(true);
+
+            return
+            [
+                .. response.Messages
+                    .SelectMany(m => m.Contents)
+                    .OfType<FunctionResultContent>()
+                    .Select(r => $"{r.CallId}={r.Result}")
+            ];
+        }
+    }
 }

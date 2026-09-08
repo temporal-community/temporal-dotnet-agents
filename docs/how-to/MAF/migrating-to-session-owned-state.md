@@ -116,6 +116,52 @@ old one — rather than a mixed-version rolling replace.
 
 ---
 
+## A serialized session now contains the conversation
+
+This is the change most likely to matter outside the code.
+
+In v0.3, `SerializeSessionAsync` produced an identifier and a StateBag. In v0.4 it produces those
+plus **the full conversation transcript** — user messages, model replies, tool arguments, and tool
+results.
+
+If you persist sessions anywhere — Redis, Postgres, blob storage, a cache, a log — that store now
+holds conversation content, which for most applications means user data and quite possibly PII.
+Re-check:
+
+- **Encryption at rest** on the session store.
+- **Retention and deletion**, including whatever right-to-erasure obligations apply.
+- **Access controls** on anything that can read a serialized session.
+- **Log hygiene** — a serialized session is no longer safe to dump into a debug log.
+
+There is no redaction hook. If you need one, serialize the StateBag alone
+(`session.StateBag.Serialize()`) and accept that history will not survive.
+
+Payload growth is linear at roughly 750 bytes per turn for short messages. A carried session
+reaches Temporal's default 256 KB payload *warning* threshold near 350 turns and the 2 MB *error*
+threshold near 2,800 turns. History is uncompacted in v0.4, so long-running conversations that
+continue-as-new should bound turns per generation. This is separate from the existing 64 KB
+`CarriedStateBag` size guard, which is unchanged and does **not** cover session history.
+
+---
+
+## Sessions are bound to their agent
+
+`TemporalAIAgent.RunAsync` now rejects a session created by a differently-named agent:
+
+```
+The provided session belongs to agent 'Researcher', not agent 'Summarizer'.
+Create the session from the same agent that will run it.
+```
+
+`TemporalAIAgentProxy` has always enforced this. `TemporalAIAgent` did not, which was tolerable when
+a mismatched session carried only an ID — and is not, now that it carries a transcript that would
+otherwise be replayed into the wrong agent's prompt and event history.
+
+Matching is by agent **name**, case-insensitively, so two agent instances resolved from the same
+registration (`GetTemporalAgent("X")` called twice) still share sessions freely.
+
+---
+
 ## Serialization options
 
 `SerializeSessionAsync` / `DeserializeSessionAsync` accept a `JsonSerializerOptions`. The
@@ -126,6 +172,13 @@ round-trip history — serializing would throw `NotSupportedException`.
 The session detects this and falls back to `TemporalAgentJsonUtilities.DefaultOptions`. Options
 derived from `TemporalAgentJsonUtilities.DefaultOptions` carry the registration and are used as
 given. If you pass custom options, derive them from `TemporalAgentJsonUtilities.DefaultOptions`.
+
+When the fallback does engage, your `Encoder` and `MaxDepth` are carried across onto the derived
+options. The library default uses `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`, which leaves `<`,
+`>`, and `&` unescaped; silently substituting it would strip a stricter encoder you had chosen —
+and the payload now carries model- and tool-authored text. Settings that would change the wire
+shape itself (naming policy, reference handling, the resolver chain) are not carried across: the
+snapshot format is the library's contract.
 
 ---
 
@@ -156,3 +209,11 @@ the merge. Reserved approval-scope keys are still dropped from tool and intercep
 - `TemporalAIAgentProxy` behaviour is unchanged; it shares the same session wire shape.
 - Worker-level configuration (`MaxToolCallsPerTurn`, per-tool activity options, interceptor
   configuration) stays agent-scoped, because it describes the agent rather than the conversation.
+- **Tools invoked by a `TemporalAIAgent` sub-agent still cannot read or write the session StateBag.**
+  `InvokeAgentToolInput` carries no session ID, so the tool activity derives its session from the
+  activity's workflow ID — which for a sub-agent is the *orchestrating* workflow, not a
+  `ta-{agent}-{key}` session. No `TemporalAgentContext` is established and the tool's write-back
+  comes back empty. This predates v0.4 and is unchanged by it; giving the session a StateBag did not
+  make it reachable from tools on this path. Context providers are unaffected — the LLM-step
+  activity does receive an explicit session ID, which is why provider state threads correctly.
+  Tools running under the long-lived `AgentWorkflow` path are also unaffected.
