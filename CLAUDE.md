@@ -247,8 +247,8 @@ just cleanup-stale-worktrees                                               # SAF
 ### Sample-canary (verify samples still run end-to-end)
 
 ```bash
-just test-samples-meai     # 5 MEAI samples, per-sample timeout budget, preflight checks OPENAI_API_KEY + Temporal server
-just test-samples-maf      # 11 MAF samples, same
+just test-samples-meai     # 9 MEAI samples, per-sample timeout budget, preflight checks OPENAI_API_KEY + Temporal server
+just test-samples-maf      # 15 MAF samples, same
 just test-samples          # both
 just verify-sample-coverage # drift detector — fails if a new sample dir isn't in the recipe lists
 just clean-test-artifacts  # remove artifacts/{test-individual,sample-runs}/
