@@ -1,20 +1,118 @@
-# Do's and Don'ts — TemporalAgents (MAF)
+# Do's and Don'ts
 
-A consolidated reference of common mistakes and best practices when building durable agents with `TemporalCommunity.Extensions.Agents`. Each entry explains the rule, why it matters, and what to do instead.
-
-> **Note:** Temporal workflow determinism rules (wall-clock time, `Random`, `ActivitySource`, `ConfigureAwait(false)`) apply to all Temporal .NET projects, not just MAF. Those fundamentals are documented in [CLAUDE.md](../../CLAUDE.md#workflow-best-practices) and the [Temporal SDK docs](https://docs.temporal.io/). This guide focuses on **MAF integration specifics**.
+A consolidated reference of common mistakes and best practices when building with TemporalAgents. Each entry explains the rule, why it matters, and what to do instead.
 
 ---
 
 ## Table of Contents
 
-1. [Agent Registration and DI](#agent-registration-and-di)
-2. [Session and History Management](#session-and-history-management)
-3. [Workflow Sub-Agents](#workflow-sub-agents)
-4. [Observability & Search Attributes](#observability--search-attributes)
-5. [Testing](#testing)
-6. [Per-Tool Activity Configuration](#per-tool-activity-configuration)
-7. [Scheduling](#scheduling)
+1. [Workflow Determinism](#workflow-determinism)
+2. [Agent Registration and DI](#agent-registration-and-di)
+3. [Session and History Management](#session-and-history-management)
+4. [Activity Timeouts](#activity-timeouts)
+5. [Observability](#observability)
+6. [Testing](#testing)
+7. [Security and Configuration](#security-and-configuration)
+8. [Per-Tool Activity Configuration](#per-tool-activity-configuration)
+9. [Scheduling](#scheduling)
+
+---
+
+## Workflow Determinism
+
+These rules apply to any code inside a `[Workflow]` class — including `[WorkflowRun]`, `[WorkflowUpdate]`, `[WorkflowSignal]`, and `[WorkflowQuery]` methods.
+
+### Don't use wall-clock time in workflows
+
+```csharp
+// WRONG — non-deterministic on replay
+var now = DateTime.UtcNow;
+var now = DateTimeOffset.Now;
+
+// CORRECT
+var now = Workflow.UtcNow;
+```
+
+**Why:** Temporal replays workflow code deterministically from event history. `DateTime.UtcNow` returns a different value on each replay, causing the workflow to diverge from its recorded history and fail with a non-determinism error.
+
+### Don't use Random or Guid.NewGuid() in workflows
+
+```csharp
+// WRONG — different value on each replay
+var id = Guid.NewGuid();
+var n = new Random().Next();
+
+// CORRECT
+var id = Workflow.NewGuid();
+var n = Workflow.Random.Next();
+```
+
+**Why:** Same reason as wall-clock time — these produce different values on replay.
+
+### Don't call ActivitySource.StartActivity() in workflow code
+
+```csharp
+// WRONG — OTel spans are non-deterministic side effects
+using var span = mySource.StartActivity("my-span");
+
+// CORRECT — agent spans are emitted in AgentActivities and DefaultTemporalAgentClient,
+// both of which run outside the workflow execution context.
+```
+
+**Why:** `System.Diagnostics.Activity` creates spans with timestamps and IDs that differ on replay. All agent OTel spans (`agent.turn`, `agent.client.send`) are already emitted in the correct context — activities and client code.
+
+### Don't query the agent registry in workflow code
+
+```csharp
+// WRONG — registry may change between original execution and replay
+var names = options.GetRegisteredAgentNames();
+var exists = options.IsAgentRegistered("MyAgent");
+
+// CORRECT — wrap in an activity
+var names = await Workflow.ExecuteActivityAsync(
+    (RoutingActivities a) => a.GetAvailableAgents(),
+    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(10) });
+```
+
+**Why:** If agents are added or removed between the original execution and a replay, the registry returns different results, causing a non-determinism error. Activity results are cached in history and replayed deterministically. See [Routing Patterns — Dynamic Routing via Activity](./routing.md#pattern-2-dynamic-routing-via-activity) for the full pattern.
+
+### Don't use `Task.WhenAll` in workflow code — use `Workflow.WhenAllAsync`
+
+```csharp
+// WRONG — not the project convention
+var results = await Task.WhenAll(toolTasks);
+
+// CORRECT — workflow-safe SDK combinator
+var results = await Workflow.WhenAllAsync(toolTasks);
+```
+
+**Why:** `Workflow.WhenAllAsync` is the SDK-provided workflow-safe combinator and the project convention. The XML doc on `WorkflowAgents.ExecuteAgentsInParallelAsync` (`src/TemporalCommunity.Extensions.Agents/WorkflowAgents.cs:112`) describes it as "the workflow-safe equivalent of `Task.WhenAll`." `Task.WhenAll` is technically safe when every task comes from `Workflow.ExecuteActivityAsync` (those schedule on `TaskScheduler.Current`), but using the SDK method makes intent clear and stays consistent with the rest of the codebase.
+
+### Don't use `ConfigureAwait(false)` in workflow code
+
+```csharp
+// WRONG — opts out of TaskScheduler.Current
+await Workflow.ExecuteActivityAsync(...).ConfigureAwait(false);
+
+// CORRECT — stay on the workflow scheduler (omit, or use ConfigureAwait(true))
+await Workflow.ExecuteActivityAsync(...);
+await Workflow.ExecuteActivityAsync(...).ConfigureAwait(true);
+```
+
+**Why:** `ConfigureAwait(false)` opts the continuation out of the current Temporal workflow `TaskScheduler`. Subsequent workflow commands no longer execute through the active workflow context and the workflow may stop making progress. This is a `[Workflow]`-only rule — `AgentActivities.cs` and `DefaultTemporalAgentClient.cs` correctly use `ConfigureAwait(false)` because they are not workflow code. The same rule applies to the workflow paths in `DurableChatClient`, `DurableAIFunction`, and `DurableEmbeddingGenerator`.
+
+### Do use GetTemporalAgent() with string constants or activity results
+
+```csharp
+// GOOD — string literal, deterministic
+var agent = WorkflowAgents.GetTemporalAgent("WeatherAgent");
+
+// GOOD — agent name from a cached activity result
+var agentName = await Workflow.ExecuteActivityAsync(
+    (RoutingActivities a) => a.ValidateAgent(chosenName, "FallbackAgent"),
+    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(10) });
+var agent = WorkflowAgents.GetTemporalAgent(agentName);
+```
 
 ---
 
@@ -33,6 +131,18 @@ builder.Services
 ```
 
 `AddTemporalAgents` registers the workflow, activities, keyed proxies, and `ITemporalAgentClient` in a single call.
+
+### Don't call builder.Build() twice
+
+```csharp
+// WRONG — building twice creates separate DI containers
+var host1 = builder.Build();
+var host2 = builder.Build(); // throws or creates a broken second container
+
+// CORRECT
+var host = builder.Build();
+await host.StartAsync();
+```
 
 ### Do use DI factories on `AddDurableAgent` for agents that need scoped services
 
@@ -90,11 +200,36 @@ JsonSerializer.Serialize(session, DefaultOptions);
 var serializedBag = session.StateBag.Serialize();
 ```
 
-> **Note:** `SerializeStateBag()` is an `internal` method on `TemporalAgentSession` used by the framework itself. User code should call `session.StateBag.Serialize()` directly when state persistence is required.
+> **Note:** `SerializeStateBag()` is an `internal` method on `TemporalAgentSession` used by the
+> framework itself (in `AgentActivities`). It is not part of the public API. User code should call
+> `session.StateBag.Serialize()` directly when state persistence is required.
 
 ---
 
-## Workflow Sub-Agents
+## Activity Timeouts
+
+### Do set appropriate timeouts for your use case
+
+```csharp
+opts.DefaultActivityTimeout = TimeSpan.FromMinutes(10); // for fast models
+opts.DefaultActivityTimeout = TimeSpan.FromHours(24);   // for HITL approval
+```
+
+The default (5 minutes) is reasonable for most LLM calls, but HITL approval flows need much longer timeouts to accommodate human review time.
+
+### Do set HeartbeatTimeout shorter than ActivityTimeout
+
+```csharp
+// GOOD — heartbeats every 5 min, total timeout 30 min
+opts.DefaultActivityTimeout    = TimeSpan.FromMinutes(30);
+opts.DefaultHeartbeatTimeout   = TimeSpan.FromMinutes(5);
+
+// BAD — heartbeat timeout longer than activity timeout defeats the purpose
+opts.DefaultActivityTimeout    = TimeSpan.FromMinutes(5);
+opts.DefaultHeartbeatTimeout   = TimeSpan.FromMinutes(30);
+```
+
+**Why:** `HeartbeatTimeout` detects stuck activities by checking for periodic progress signals. If it exceeds `ActivityTimeout`, the activity times out before a heartbeat check can trigger.
 
 ### Do pass ActivityOptions when using GetTemporalAgent() for workflow sub-agents
 
@@ -110,63 +245,25 @@ var agent = WorkflowAgents.GetTemporalAgent(
 
 The global `TemporalAgentsOptions` timeouts only apply to `AgentWorkflow`-based sessions. Workflow sub-agents use their own `ActivityOptions`.
 
-For general timeout guidance, see [CLAUDE.md Activity Timeouts](../../CLAUDE.md#critical-durability-and-determinism).
-
-### Do use GetTemporalAgent() with string constants or activity results
-
-```csharp
-// GOOD — string literal, deterministic
-var agent = WorkflowAgents.GetTemporalAgent("WeatherAgent");
-
-// GOOD — agent name from a cached activity result
-var agentName = await Workflow.ExecuteActivityAsync(
-    (RoutingActivities a) => a.ValidateAgent(chosenName, "FallbackAgent"),
-    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(10) });
-var agent = WorkflowAgents.GetTemporalAgent(agentName);
-```
-
-### Do query the agent registry only inside activities, not workflow code
-
-```csharp
-// WRONG — registry may change between original execution and replay
-var names = options.GetRegisteredAgentNames();
-
-// CORRECT — wrap in an activity (result is cached in history)
-var names = await Workflow.ExecuteActivityAsync(
-    (RoutingActivities a) => a.GetAvailableAgents(),
-    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(10) });
-```
-
-**Why:** If agents are added or removed between the original execution and a replay, the registry returns different results, causing a non-determinism error. Activity results are cached in history and replayed deterministically. See [Routing Patterns — Dynamic Routing via Activity](./routing.md#pattern-2-dynamic-routing-via-activity) for the full pattern.
-
 ---
 
-## Observability & Search Attributes
+## Observability
 
-### Do pre-register search attributes, or explicitly opt out
-
-Search attribute upserts are enabled by default. Register the three attributes before starting a production worker, or set `EnableSearchAttributes = false` to opt out:
+### Do register all four ActivitySource names
 
 ```csharp
-opts.EnableSearchAttributes = false; // opt out when the attributes are unavailable
+// WRONG — missing agent spans
+builder.AddSource(TracingInterceptor.ClientSource.Name);
+
+// CORRECT — all four sources
+builder.AddSource(
+    TracingInterceptor.ClientSource.Name,
+    TracingInterceptor.WorkflowsSource.Name,
+    TracingInterceptor.ActivitiesSource.Name,
+    TemporalAgentTelemetry.ActivitySourceName);
 ```
 
-When enabled, register the three attributes before starting the worker — this is required even for a local `temporal server start-dev`; it is **not** automatic:
-
-```bash
-# Local dev server: pass the flags at startup
-temporal server start-dev --namespace default \
-  --search-attribute AgentName=Keyword \
-  --search-attribute SessionCreatedAt=Datetime \
-  --search-attribute TurnCount=Int
-
-# Production clusters: register once via the operator CLI
-temporal operator search-attribute create --name AgentName --type Keyword
-temporal operator search-attribute create --name SessionCreatedAt --type Datetime
-temporal operator search-attribute create --name TurnCount --type Int
-```
-
-If you leave the default enabled without pre-registering the attributes, the workflow fails with an opaque "unexpected workflow task failure".
+**Why:** Each source emits a different layer of the trace hierarchy. Missing one creates gaps in your distributed traces. See [Observability](./observability.md) for the full setup.
 
 ### Do decorate the registered `IChatClient` when you need per-LLM-call visibility
 
@@ -184,9 +281,46 @@ opts.AddDurableAgent("Assistant", agent =>
 
 **Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. Do not add `UseFunctionInvocation()`; the workflow owns durable tool dispatch. See [LLM-Call Interception](./llm-call-interception.md) for the full guide.
 
+### Do pre-register search attributes, or explicitly opt out
+
+Search attribute upserts are enabled by default. Register the three attributes before starting a
+production worker, or set `EnableSearchAttributes = false` to opt out:
+
+```csharp
+opts.EnableSearchAttributes = false; // opt out when the attributes are unavailable
+```
+
+When enabled, register the three attributes before starting the worker — this is required even
+for a local `temporal server start-dev`; it is **not** automatic:
+
+```bash
+# Local dev server: pass the flags at startup
+temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int
+
+# Production clusters: register once via the operator CLI
+temporal operator search-attribute create --name AgentName --type Keyword
+temporal operator search-attribute create --name SessionCreatedAt --type Datetime
+temporal operator search-attribute create --name TurnCount --type Int
+```
+
+If you leave the default enabled without pre-registering the attributes, the workflow fails with an opaque "unexpected workflow task failure".
+
 ---
 
 ## Testing
+
+### Do use exact exception types with Assert.Throws
+
+```csharp
+// WRONG — xUnit requires exact type match
+Assert.Throws<ArgumentException>(() => Foo(null));
+
+// CORRECT
+Assert.Throws<ArgumentNullException>(() => Foo(null));
+Assert.Throws<ArgumentException>(() => Foo(""));
+```
+
+**Why:** xUnit's `Assert.Throws<T>` matches the **exact** type, not subtypes. `ArgumentNullException` inherits from `ArgumentException`, but `Assert.Throws<ArgumentException>` will fail if `ArgumentNullException` is thrown.
 
 ### Do use TestEnvironmentHelper.StartLocalAsync() for Agents integration tests
 
@@ -195,16 +329,75 @@ opts.AddDurableAgent("Assistant", agent =>
 var env = await TestEnvironmentHelper.StartLocalAsync();
 ```
 
-`AgentWorkflow` calls `UpsertTypedSearchAttributes` only when `EnableSearchAttributes = true`. If search attributes are enabled in your test fixture, the three custom attributes (`AgentName`, `SessionCreatedAt`, `TurnCount`) must be pre-registered when the embedded server starts — otherwise the workflow fails with an opaque "unexpected workflow task failure". `TestEnvironmentHelper.StartLocalAsync()` passes the required `--search-attribute` CLI args automatically.
+`AgentWorkflow` calls `UpsertTypedSearchAttributes` only when `EnableSearchAttributes = true`. If search attributes are enabled in your test fixture, the three custom attributes (`AgentName`, `SessionCreatedAt`, `TurnCount`) must be pre-registered when the embedded server starts — otherwise the workflow fails with an opaque "unexpected workflow task failure". `TestEnvironmentHelper.StartLocalAsync()` passes the required `--search-attribute` CLI args to `WorkflowEnvironment.StartLocalAsync()` automatically.
 
-Because `EnableSearchAttributes` defaults to `true`, use `TestEnvironmentHelper` for standard Agents integration tests. Bare `WorkflowEnvironment.StartLocalAsync()` is sufficient only when the test explicitly disables search attributes. For `TemporalCommunity.Extensions.AI` integration tests (which use `DurableChatWorkflow` and never require custom search attributes):
+Because `EnableSearchAttributes` defaults to `true`, use `TestEnvironmentHelper` for standard Agents integration tests. Bare `WorkflowEnvironment.StartLocalAsync()` is sufficient only when the test explicitly disables search attributes. It is always appropriate for `TemporalCommunity.Extensions.AI` integration tests, which use `DurableChatWorkflow` and never require custom search attributes:
 
 ```csharp
-// TemporalCommunity.Extensions.AI integration tests only
+// TemporalCommunity.Extensions.AI integration tests only — no custom search attributes needed
 var env = await WorkflowEnvironment.StartLocalAsync();
 ```
 
-See [Testing Agents](./testing-agents.md) for the full fixture pattern.
+Both approaches start an in-process Temporal server — no external process or Docker needed. See
+[Testing Agents](./testing-agents.md) for the full fixture pattern.
+
+### Do validate eagerly with string.IsNullOrEmpty + InvalidOperationException
+
+```csharp
+// GOOD — for configuration values
+if (string.IsNullOrEmpty(apiKey))
+    throw new InvalidOperationException("OPENAI_API_KEY is required.");
+
+// LESS GOOD — ArgumentNullException implies a parameter, not a config value
+if (apiKey is null) throw new ArgumentNullException(nameof(apiKey));
+```
+
+---
+
+## Security and Configuration
+
+### Don't treat per-run tool selection as authorization
+
+```csharp
+// Exposure control: useful, but not an authorization grant.
+var options = new TemporalAgentRunOptions
+{
+    EnableToolNames = ["issue_refund"],
+};
+```
+
+`EnableToolCalls` and `EnableToolNames` control which registered tool declarations reach the
+provider and which model-returned calls the workflow may dispatch. They do not authenticate the
+caller or authorize an external effect. A write tool must validate current tenant, user, resource,
+and policy data inside its activity immediately before the effect. Do not put function arguments,
+tool inventories, or unknown-versus-excluded distinctions in tenant-visible denial text; the
+library uses one generic blocked result and limits requested-name diagnostics to operator logs.
+
+### Don't commit real API keys in appsettings.json
+
+```jsonc
+// WRONG — checked into source control
+{ "OPENAI_API_KEY": "sk-abc123..." }
+```
+
+```bash
+# CORRECT — store secrets outside the repo using dotnet user-secrets
+dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project <path-to-project>
+```
+
+All samples load secrets from `dotnet user-secrets`, which stores values in `~/.microsoft/usersecrets/` (outside the repo) and is automatically picked up by `Host.CreateApplicationBuilder()` in the Development environment.
+
+### Do use NuGet packages for Temporal SDK dependencies
+
+```xml
+<!-- CORRECT -->
+<PackageReference Include="Temporalio" Version="1.11.1" />
+
+<!-- WRONG — requires Rust toolchain to build from source -->
+<ProjectReference Include="path/to/sdk-dotnet/src/Temporalio/Temporalio.csproj" />
+```
+
+**Why:** The Temporal .NET SDK includes a native Rust bridge (`sdk-core-c-bridge`). Project references require the Rust toolchain to compile.
 
 ---
 
@@ -225,7 +418,7 @@ opts.AddDurableAgent("SupportAgent", agent =>
 });
 ```
 
-**Why:** Every tool in a durable agent is dispatched as a separate Temporal activity (`InvokeAgentTool`). A transient activity failure normally retries — for a non-idempotent write tool that already had a side effect, the retry would fire the side effect a second time. `opts.NoRetry()` is sugar for `RetryPolicy = new() { MaximumAttempts = 1 }`, which tells Temporal not to re-execute the activity. See [Durable Agents](./durable-agents.md).
+**Why:** Every tool in a durable agent is dispatched as a separate Temporal activity (`InvokeAgentTool`). A transient activity failure normally retries — for a non-idempotent write tool that already had a side effect, the retry would fire the side effect a second time. `opts.NoRetry()` is sugar for `RetryPolicy = new() { MaximumAttempts = 1 }`, which tells Temporal not to re-execute the activity. The retry policy binds to the `AIFunction` reference at registration time, so a typo on the tool name is a build error rather than a silent fall-through to the default retry. See [Durable Agents](./durable-agents.md).
 
 ### Do use `Workflow.WhenAllAsync` for parallel activity fan-out
 
@@ -238,7 +431,7 @@ var tasks = toolCalls.Select(tc =>
 var results = await Workflow.WhenAllAsync(tasks);
 ```
 
-**Why:** `Workflow.WhenAllAsync` is the workflow-safe combinator and preserves input order — `results[i]` corresponds to `tasks[i]`, which lets you correlate fan-out activity results to the requests that produced them. The durable-agent loop in `AgentWorkflow` uses exactly this pattern.
+**Why:** `Workflow.WhenAllAsync` is the workflow-safe combinator and preserves input order — `results[i]` corresponds to `tasks[i]`, which lets you correlate fan-out activity results to the requests that produced them without a side lookup. The durable-agent loop in `AgentWorkflow` uses exactly this pattern.
 
 ---
 
@@ -266,30 +459,34 @@ opts.AddScheduledAgentRun("Agent", "my-schedule", request, updatedSpec);
 
 ## Quick Reference Table
 
-| Rule | Category | Impact |
-|------|----------|--------|
-| Use `GetTemporalAgent()` with constants or activity results | Workflow safety | Determinism error on registry change |
-| Don't reuse `TemporalAIAgent` instances | Sessions | Unintended history mixing |
-| Pass `ActivityOptions` to `GetTemporalAgent()` sub-agents | Sub-agents | Activity timeout failure |
+| Rule | Category | Severity |
+|------|----------|----------|
+| Use `Workflow.UtcNow` not `DateTime.UtcNow` | Determinism | Fatal |
+| Use `Workflow.NewGuid()` not `Guid.NewGuid()` | Determinism | Fatal |
+| Don't query agent registry in workflows | Determinism | Fatal |
+| Don't call `ActivitySource.StartActivity()` in workflows | Determinism | Fatal |
+| Use `Workflow.WhenAllAsync`, not `Task.WhenAll`, in workflows | Determinism | Convention |
+| Don't use `ConfigureAwait(false)` in `[Workflow]` code | Determinism | Workflow scheduler is lost |
 | Pass `opts => opts.NoRetry()` to `agent.AddTool` for write tools | Per-tool retry | Non-idempotent re-execution |
-| Pre-register search attributes or opt out | Observability | "Unexpected workflow task failure" |
-| Use `TestEnvironmentHelper.StartLocalAsync()` for agent tests | Testing | Search attribute registration failure |
-| Delete schedules before removing agents | Scheduling | Orphaned schedules firing forever |
-| Don't assume schedule config changes take effect | Scheduling | Silent misconfig |
+| Register all 4 OTel sources | Observability | Silent data loss |
+| Set `ActivityTimeout` for HITL | Timeouts | Activity failure |
+| Don't reuse `TemporalAIAgent` instances | Sessions | Incorrect behavior |
+| Delete schedules before removing agents | Scheduling | Orphaned schedules |
+| Use `dotnet user-secrets` for secrets | Security | Credential leak |
+| Use exact exception types in xUnit | Testing | Test failures |
 
 ---
 
 ## References
 
-- [CLAUDE.md — Workflow Best Practices](../../CLAUDE.md#workflow-best-practices) — Temporal determinism rules, ActivitySource, timeouts, ConfigureAwait
 - [Durability & Determinism](../../architecture/MAF/durability-and-determinism.md) — replay guarantees and failure scenarios
 - [Routing Patterns](./routing.md) — safe vs. unsafe registry access contexts
-- [Durable Agents](./durable-agents.md) — per-tool retry pattern, `opts.NoRetry()` sugar
-- [Scheduling](./scheduling.md) — schedule lifecycle and pitfalls
-- [LLM-Call Interception](./llm-call-interception.md) — per-LLM-call decorators
+- [Observability](./observability.md) — OTel setup and span hierarchy
+- [LLM-Call Interception](./llm-call-interception.md) — per-LLM-call decorators via `ChatClientFactory`
 - [Testing Agents](./testing-agents.md) — test patterns and fixtures
-- [Temporal .NET SDK Docs](https://docs.temporal.io/develop/dotnet) — determinism, workflow rules, activity configuration
+- [Scheduling](./scheduling.md) — schedule lifecycle and pitfalls
+- [Durable Agents](./durable-agents.md) — per-tool retry pattern, `opts.NoRetry()` sugar, iteration cap
 
 ---
 
-_Last updated: 2026-09-07_
+_Last updated: 2026-05-05_
