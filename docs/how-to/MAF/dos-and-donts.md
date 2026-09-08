@@ -323,11 +323,12 @@ builder.AddSource(
 
 ### Do decorate the registered `IChatClient` when you need per-LLM-call visibility
 
-The `agent.turn` span captures one whole turn (LLM call plus all tool rounds). If you need to see each individual LLM request/response — token counts per round, finish reason per round, the exact tool-call payloads — decorate the registered `IChatClient` before the durable agent resolves it:
+The `agent.turn` span is emitted per LLM-step activity, not per whole turn — a turn with two tool rounds produces three of them. It carries Temporal-owned correlation, not provider-semantic request/response detail. To see token counts, finish reason, and the exact payloads for each round, decorate the `IChatClient` your agent factory returns:
 
 ```csharp
-builder.Services.AddSingleton<IChatClient>(
-    new LoggingChatClient(innerChatClient, logger));
+agent.ChatClient = sp => new LoggingChatClient(
+    sp.GetRequiredService<OpenAIClient>().GetChatClient("gpt-4o-mini").AsIChatClient(),
+    sp.GetRequiredService<ILogger<LoggingChatClient>>());
 
 opts.AddDurableAgent("Assistant", agent =>
 {
@@ -335,7 +336,7 @@ opts.AddDurableAgent("Assistant", agent =>
 });
 ```
 
-**Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. Do not add `UseFunctionInvocation()`; the workflow owns durable tool dispatch. See [LLM-Call Interception](./llm-call-interception.md) for the full guide.
+**Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. Do not add `UseFunctionInvocation()`; the workflow owns durable tool dispatch. See [Intercepting LLM Calls](./llm-call-interception.md) for the full guide — note that a durable agent only ever calls `GetStreamingResponseAsync` on your decorator.
 
 ### Do pre-register search attributes, or explicitly opt out
 
@@ -538,7 +539,7 @@ opts.AddScheduledAgentRun("Agent", "my-schedule", request, updatedSpec);
 - [Durability & Determinism](../../architecture/MAF/durability-and-determinism.md) — replay guarantees and failure scenarios
 - [Routing Patterns](./routing.md) — safe vs. unsafe registry access contexts
 - [Observability](./observability.md) — OTel setup and span hierarchy
-- [LLM-Call Interception](./llm-call-interception.md) — per-LLM-call decorators via `ChatClientFactory`
+- [Intercepting LLM Calls](./llm-call-interception.md) — chat-client decorators via `agent.ChatClient`, and agent middleware via `ConfigureAgentPipeline`
 - [Testing Agents](./testing-agents.md) — test patterns and fixtures
 - [Scheduling](./scheduling.md) — schedule lifecycle and pitfalls
 - [Durable Agents](./durable-agents.md) — per-tool retry pattern, `opts.NoRetry()` sugar, iteration cap

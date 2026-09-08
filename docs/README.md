@@ -16,7 +16,7 @@ Welcome to the documentation for **Temporal .NET Agents**, providing durable exe
 - **[Context Providers & Memory](how-to/MAF/individual-context-providers.md)** — Session memory, state bags, working set providers, and dynamic prompt injection.
 - **[Skills & Toolsets](how-to/MAF/skills.md)** — Progressive skill loading and filesystem/inline skills.
 - **[Tool Interceptors](how-to/MAF/tool-interceptor.md)** — Intercepting, auditing, and gating tool invocations.
-- **[LLM Call Interception](how-to/MAF/llm-call-interception.md)** — Pipeline middleware and agent decorators (`AIAgentBuilder`).
+- **[Intercepting LLM Calls](how-to/MAF/llm-call-interception.md)** — Chat-client decorators and `ConfigureAgentPipeline` agent middleware: which layer sees what, and why decorators must use `GetStreamingResponseAsync`.
 - **[Observability & OpenTelemetry](how-to/MAF/observability.md)** — Distributed tracing, metrics, and activity sources.
 - **[Testing Agents](how-to/MAF/testing-agents.md)** — Unit testing and integration testing patterns.
 - **[Scheduling & Delayed Runs](how-to/MAF/scheduling.md)** — Delayed agent execution and background scheduling.

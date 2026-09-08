@@ -361,7 +361,7 @@ Each `agent.turn` span already represents one LLM-step activity. To add provider
 response, model, and usage attributes, configure MAF `OpenTelemetryAgent` through
 `ConfigureAgentPipeline` or return an MEAI `OpenTelemetryChatClient` from `agent.ChatClient`.
 
-This is a doc-only pattern with no library opt-in flag. See [Per-LLM-Call Interception via `ChatClientFactory`](./llm-call-interception.md) for the full guide. It is the answer to "I want more visibility into when agents call the model and execute tools" — and it composes cleanly with the rest of the OTel setup described above.
+This is a doc-only pattern with no library opt-in flag. See [Intercepting LLM Calls](./llm-call-interception.md) for the full guide to both layers. It is the answer to "I want more visibility into when agents call the model and execute tools" — and it composes cleanly with the rest of the OTel setup described above.
 
 ---
 
