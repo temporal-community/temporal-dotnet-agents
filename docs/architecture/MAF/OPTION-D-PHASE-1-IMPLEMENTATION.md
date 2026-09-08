@@ -5,7 +5,7 @@
 **Scope:** Session-owned history + StateBag transfer + wire-contract validation  
 **Estimated Duration:** 5-8 engineer-days  
 **Start Date:** 2026-09-08  
-**Acceptance Criteria:** All test gates passing + benchmarks < threshold + no regressions
+**Acceptance Criteria:** All test gates passing, benchmark results compared to an established baseline, and no regressions
 
 ---
 
@@ -36,11 +36,7 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
    [JsonSerializable(typeof(TemporalAgentSessionSnapshot))]
    ```
 
-3. **Round-trip methods in TemporalAIAgent**
-   - `SerializeSessionCoreAsync()` → builds snapshot → serializes via source-gen
-   - `DeserializeSessionCoreAsync()` → deserializes snapshot → restores session
-
-4. **Implement Prototype Test Gates 1-4**
+3. **Implement Prototype Test Gates 1-4**
    - Gate 1: Source-gen resolver-origin
    - Gate 2: Polymorphic payload round-trip (with tool-call cycle)
    - Gate 3: Legacy payload compatibility (no history field)
@@ -49,7 +45,6 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
 ### Success Criteria
 
 - [ ] TemporalAgentSessionSnapshot compiles and is source-gen registered
-- [ ] Round-trip methods compile without reflection fallback
 - [ ] All 4 prototype gates pass
 - [ ] No regressions in existing serialization tests
 - [ ] CI/CD builds clean (no warnings)
@@ -60,6 +55,10 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
 - Do NOT move `_currentStateBag` to session ownership yet
 - Snapshot DTO is internal; no public API exposed
 - Use exact code from Phase 0 specification
+- This phase validates the DTO directly. Do not change the public agent serialization boundary
+  until Phase 1b can preserve history as well as the StateBag.
+- Do not release Phase 1a independently; the existing direct-session serialization remains until
+  the complete snapshot path and its public-boundary test land in Phase 1b.
 
 ---
 
@@ -67,26 +66,21 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
 
 ### Deliverables
 
-1. **Add history fields to TemporalAgentSession**
+1. **Add history storage to TemporalAgentSession**
    ```csharp
-   internal IReadOnlyList<DurableSessionEntry> History { get; private set; } = [];
+   private readonly List<DurableSessionEntry> _history = [];
+   internal IReadOnlyList<DurableSessionEntry> History => _history;
    internal void AppendHistoryEntry(DurableSessionEntry entry) { ... }
-   internal void SetHistory(IReadOnlyList<DurableSessionEntry> newHistory) { ... }
+   internal void RestoreHistory(IEnumerable<DurableSessionEntry> entries) { ... }
    ```
 
-2. **Update snapshot DTO constructor** to accept history parameter
-   ```csharp
-   internal TemporalAgentSession(
-       TemporalAgentSessionId sessionId,
-       AgentSessionStateBag stateBag,
-       IReadOnlyList<DurableSessionEntry>? history = null)
-   ```
-
-3. **Update round-trip methods**
+2. **Implement the public serialization boundary**
    - Serialization: Include history in snapshot
-   - Deserialization: Restore history via AppendHistoryEntry
+   - Deserialization: Restore `snapshot.History ?? []` through `RestoreHistory`
+   - `SerializeSessionCoreAsync()` and `DeserializeSessionCoreAsync()` use the generated
+     snapshot metadata, never direct session serialization
 
-4. **Implement Gate 5: Agent Serialization Boundary**
+3. **Implement Gate 5: Agent Serialization Boundary**
    - Validates typed StateBag and history restoration through public MAF session API
    - Tests legacy snapshot without history
 
@@ -103,7 +97,8 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
 - History is still read-only to callers (no public GetHistory yet)
 - Do NOT modify TemporalAIAgent._history field yet
 - Focus on session ownership contract first
-- Keep AppendHistoryEntry O(1) with mutable internal storage + read-only facade
+- Keep `AppendHistoryEntry` O(1): append to the private `List<T>` and expose only its
+  `IReadOnlyList<T>` facade. Do not rebuild a list on each append.
 
 ---
 
@@ -111,14 +106,20 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
 
 ### Deliverables
 
-1. **Move _currentStateBag ownership to TemporalAgentSession**
-   - Add internal field: `private JsonElement? _currentStateBag`
-   - Add internal method: `void ApplyStateBagUpdate(JsonElement update)`
-   - Remove `_currentStateBag` from TemporalAIAgent
+1. **Make the inherited `TemporalAgentSession.StateBag` the only authoritative StateBag**
+   - Do not add a second `_currentStateBag` field to the session.
+   - Reuse `SerializeStateBag()` for activity dispatch and add an internal operation that replaces
+     the current `StateBag` from a merged `JsonElement?` value.
+   - The replacement operation assigns the deserialized bag to the inherited protected
+     `StateBag` setter; it treats null, undefined, and JSON null as an empty bag.
+   - Remove `_currentStateBag` from `TemporalAIAgent`.
 
-2. **Update round-trip contract**
-   - Serialize: Include StateBag in snapshot
-   - Deserialize: Restore StateBag to session
+2. **Apply the defined StateBag operations in the agent loop**
+   - Before each activity dispatch, use the session's serialized StateBag.
+   - After an LLM step, call the session operation that overlays trusted output using
+     `StateBagMerge.OverlayTrustedStateBag`.
+   - After the complete tool/interceptor fan-out, call the session operation that merges
+     write-backs using `StateBagMerge.Merge` in original tool-call index order.
 
 3. **Implement StateBag merge rules** (determinism-critical)
    - After LLM step: Overlay trusted LLM output
@@ -126,16 +127,18 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
    - Document merge semantics in code comments
 
 4. **Update TemporalAIAgent.RunCoreAsync**
-   - Remove local `_currentStateBag` mutations
-   - Use `session.ApplyStateBagUpdate()` instead
-   - Preserve existing `StateBagMerge` logic (order-independent result)
+   - Remove local `_currentStateBag` mutations.
+   - Do not replace an LLM-step result directly: the current direct assignment must become the
+     trusted overlay operation.
+   - Preserve the existing security filtering of tool/interceptor write-backs.
 
 ### Success Criteria
 
 - [ ] StateBag owned by session (not agent)
 - [ ] Multi-session test: Two sessions on same agent have isolated StateBag
 - [ ] Continue-as-new: StateBag mutations preserved across CAN boundary
-- [ ] StateBag merge is deterministic (order-independent result)
+- [ ] StateBag merge is deterministic despite activity scheduling: tool/interceptor contributions
+  are merged in original tool-call index order and later indexes win on conflicts
 - [ ] No regressions in context-provider tests (WorkingSetContextProvider, etc.)
 
 ### Notes
@@ -158,13 +161,25 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
    - Replace `_history.Add()` → `session.AppendHistoryEntry()`
    - Replace `foreach (var entry in _history)` → `foreach (var entry in session.History)`
 
-3. **Add concurrent-use rejection validation**
+3. **Add session-local concurrent-use rejection**
    ```csharp
-   if (_isRunning)
-       throw new InvalidOperationException(
-           "Overlapping RunAsync() calls on same session are not allowed. " +
-           "Use distinct session objects for parallel conversations.");
+   // TemporalAgentSession
+   private bool _runInProgress;
+
+   internal void EnterRun()
+   {
+       if (_runInProgress)
+           throw new InvalidOperationException(
+               "Overlapping RunAsync() calls on the same session are not allowed. " +
+               "Use distinct session objects for parallel conversations.");
+       _runInProgress = true;
+   }
+
+   internal void ExitRun() => _runInProgress = false;
    ```
+   - Call `EnterRun()` after the session is validated and before the first await in `RunCoreAsync`.
+   - Call `ExitRun()` in a `finally` block covering every completion, cancellation, and failure path.
+   - Do not put this flag on `TemporalAIAgent`; one agent must support distinct live sessions.
 
 4. **Implement Gate 5 continuation: Concurrency tests**
    - Same-session overlap rejection test
@@ -199,10 +214,12 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
    - Context-provider state (WorkingSetContextProvider, etc.)
 
 2. **Performance benchmarks**
-   - 1-turn workflow: Baseline (< 10ms overhead)
-   - 10-turn workflow: Linear growth (< 20ms overhead)
-   - 100-turn workflow: Snapshot serialization overhead (< 100ms total)
-   - Memory usage: No growth beyond expected history size
+   - Establish a baseline on the pre-change implementation using representative message, tool-call,
+     and StateBag payload sizes.
+   - Measure 1-, 10-, and 100-turn workflows with the same fixture after the change.
+   - Record median and p95 elapsed time, allocation, and serialized snapshot size.
+   - Set the pass/fail regression budget from those baseline measurements; do not use unvalidated
+     absolute millisecond thresholds.
 
 3. **Regression test suite**
    - All existing TemporalAIAgent tests still pass
@@ -219,7 +236,7 @@ Phase 1 implements the wire-contract designed in Phase 0. Work is decomposed int
 ### Success Criteria
 
 - [ ] All integration tests pass (session isolation, history preservation, StateBag flow)
-- [ ] Benchmarks pass (overhead < threshold)
+- [ ] Benchmarks meet the documented regression budget relative to the established baseline
 - [ ] Zero regressions (all existing tests still pass)
 - [ ] Documentation complete and accurate
 - [ ] CI/CD pipeline green
@@ -243,7 +260,7 @@ public void SessionSnapshot_SourceGenResolver()
         .GetTypeInfo(typeof(TemporalAgentSessionSnapshot));
     
     Assert.NotNull(typeInfo);
-    Assert.Equal(nameof(AgentSessionJsonContext), typeInfo.Origin.Name);
+    Assert.Same(AgentSessionJsonContext.Default, typeInfo.OriginatingResolver);
 }
 ```
 **Pass Criteria:** TypeInfo origin is `AgentSessionJsonContext` (not reflection)
@@ -264,11 +281,11 @@ public void SessionSnapshot_SourceGenResolver()
 ---
 
 ### Gate 3: Legacy Payload Compatibility (Phase 1a)
-**Test:** Deserialize snapshot JSON without `history` field (v0.2 format)
+**Test:** Deserialize snapshot JSON without a `history` field (the supported legacy wire shape)
 
 **Pass Criteria:** 
 - SessionId parsed correctly
-- History deserialized as empty list (not null)
+- DTO `History` is null; the later public agent deserializer turns it into an empty session history
 - StateBag restored if present
 
 ---
@@ -283,15 +300,16 @@ public void SessionSnapshot_SourceGenResolver()
 
 ---
 
-### Gate 5: Agent Serialization Boundary (Phase 1b + Phase 1d)
+### Gate 5: Agent Serialization Boundary (Phase 1b–1d)
 **Test:** Full session round-trip through SerializeSessionAsync/DeserializeSessionAsync
 
 **Components:**
-- Create session with StateBag data
-- Run agent with history accumulation
-- Serialize session
-- Deserialize session
-- Verify StateBag and history intact
+- **Phase 1b structural subcase:** create a session, add typed StateBag and history entries
+  directly, then serialize and deserialize it through the public MAF boundary.
+- **Phase 1d end-to-end subcase:** run the agent to accumulate history and StateBag mutations,
+  then serialize and deserialize it.
+- In both subcases, restore a legacy snapshot without `history` through
+  `DeserializeSessionAsync`.
 
 **Pass Criteria:**
 - TypeInfo origin is source-gen
@@ -304,41 +322,28 @@ public void SessionSnapshot_SourceGenResolver()
 ## Concurrent-Use Tests (Phase 1d)
 
 ### Test: Same-Session Overlap Rejection
-```csharp
-[Fact]
-public async Task TemporalAIAgent_OverlappingRunAsync_Throws()
-{
-    var agent = WorkflowAgents.GetTemporalAgent("TestAgent");
-    var session = new TemporalAgentSession(...);
-    
-    var task1 = agent.RunAsync("msg1", session);
-    var task2 = agent.RunAsync("msg2", session); // Should throw immediately
-    
-    await Assert.ThrowsAsync<InvalidOperationException>(() => task2);
-}
-```
+**Fixture requirements:**
+- Execute inside a Temporal workflow integration fixture; `TemporalAIAgent` cannot run from an
+  ordinary unit-test thread.
+- Use a controllable first activity to suspend the first run after `session.EnterRun()` succeeds.
+- Start the second run with that same live session and assert it faults with
+  `InvalidOperationException` before another activity is scheduled.
+- Release the first activity and assert its original run completes, proving `ExitRun()` ran in the
+  completion path.
+
 **Pass Criteria:** Second RunAsync throws InvalidOperationException before first completes
 
 ---
 
 ### Test: Distinct-Session Isolation
-```csharp
-[Fact]
-public async Task TwoSessions_OnSameAgent_IsolateHistory()
-{
-    var agent = WorkflowAgents.GetTemporalAgent("TestAgent");
-    var session1 = new TemporalAgentSession(...);
-    var session2 = new TemporalAgentSession(...);
-    
-    await agent.RunAsync("msg1", session1);
-    await agent.RunAsync("msg2", session2);
-    
-    // session1.History should only contain "msg1" request
-    // session2.History should only contain "msg2" request
-    Assert.Single(session1.History);
-    Assert.Single(session2.History);
-}
-```
+**Fixture requirements:**
+- Execute both completed runs in a Temporal workflow integration fixture using one agent and two
+  distinct live sessions.
+- Assert each session contains only its own request and response entries (two entries after one
+  completed successful run).
+- Assert neither accumulated-message input nor StateBag contains data belonging to the other
+  session.
+
 **Pass Criteria:** Sessions have independent history; no contamination
 
 ---
@@ -356,13 +361,12 @@ public async Task TwoSessions_OnSameAgent_IsolateHistory()
 - [ ] Concurrency tests pass (overlap rejection, isolation)
 - [ ] Integration tests pass (carry-forward, history, StateBag)
 - [ ] Regression tests pass (no existing test failures)
-- [ ] Benchmarks pass (overhead < threshold)
+- [ ] Benchmarks meet the documented regression budget relative to the established baseline
 
 ### Performance
-- [ ] 1-turn overhead: < 10ms
-- [ ] 10-turn overhead: < 20ms
-- [ ] 100-turn overhead: < 100ms
-- [ ] Memory: No leak (expected growth only)
+- [ ] 1-, 10-, and 100-turn results recorded against the pre-change baseline
+- [ ] Median/p95 time, allocation, and serialized snapshot size meet the documented regression budget
+- [ ] Memory growth is attributable to retained history and bounded by the fixture's expected history size
 
 ### Documentation
 - [ ] CLAUDE.md updated (session ownership rules)
@@ -374,14 +378,15 @@ public async Task TwoSessions_OnSameAgent_IsolateHistory()
 - [ ] CI/CD pipeline green
 - [ ] No regressions reported
 - [ ] Sample tests updated (if needed)
-- [ ] Ready for v0.4.0 tag
+- [ ] Eligible for a separate release-readiness review
 
 ---
 
 ## Risk Mitigation
 
 ### Risk 1: StateBag Ordering Bug
-**Mitigation:** Document merge semantics in code; write determinism tests; benchmark order-independence
+**Mitigation:** Document merge semantics in code; write scheduling-independent determinism tests;
+benchmark the fixed index-order merge
 
 ### Risk 2: Multi-Session Corruption
 **Mitigation:** Concurrent-use rejection test; isolation test; manual multi-session workflow
@@ -390,7 +395,8 @@ public async Task TwoSessions_OnSameAgent_IsolateHistory()
 **Mitigation:** Integration test; validate StateBag and history preserved across CAN
 
 ### Risk 4: Performance Regression
-**Mitigation:** Benchmarks at 1, 10, 100 turns; validate < threshold before ship
+**Mitigation:** Benchmark at 1, 10, and 100 turns against the established baseline; enforce the
+documented regression budget before ship
 
 ### Risk 5: Reflection Fallback
 **Mitigation:** Gate 1 (resolver-origin test) catches if source-gen registration missing
@@ -400,9 +406,10 @@ public async Task TwoSessions_OnSameAgent_IsolateHistory()
 ## Communication Checkpoints
 
 1. **Phase 1a complete** → Confirm all 4 prototype gates pass
-2. **Phase 1b complete** → Confirm Gate 5 (serialization boundary) passes
+2. **Phase 1b complete** → Confirm Gate 5's structural serialization subcase passes
 3. **Phase 1c complete** → Confirm StateBag owned by session; multi-session test passes
-4. **Phase 1d complete** → Confirm TemporalAIAgent history removed; concurrency tests pass
+4. **Phase 1d complete** → Confirm TemporalAIAgent history removed, Gate 5's end-to-end subcase,
+   and concurrency tests pass
 5. **Phase 1e complete** → Confirm all integration tests + benchmarks pass; ready for ship
 
 ---
@@ -410,10 +417,12 @@ public async Task TwoSessions_OnSameAgent_IsolateHistory()
 ## Implementation Notes
 
 - **Use exact code from Phase 0 spec** — Don't innovate; follow design
-- **StateBag merge is critical** — Order-dependent serialization; get it right first
+- **StateBag merge is critical** — fixed tool-call index order makes it deterministic despite
+  non-deterministic activity completion; preserve that rule
 - **Concurrent-use rejection is non-negotiable** — Fail-fast prevents data corruption
 - **History ownership is the payoff** — Multi-session isolation guaranteed after this phase
-- **Benchmarking validates correctness** — Performance overhead must be acceptable
+- **Benchmarking validates performance** — Performance overhead must remain within the documented
+  regression budget
 
 ---
 
