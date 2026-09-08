@@ -169,9 +169,21 @@ registration (`GetTemporalAgent("X")` called twice) still share sessions freely.
 `TemporalAgentJsonUtilities`, not by attributes, so options that lack that registration cannot
 round-trip history — serializing would throw `NotSupportedException`.
 
-The session detects this and falls back to `TemporalAgentJsonUtilities.DefaultOptions`. Options
-derived from `TemporalAgentJsonUtilities.DefaultOptions` carry the registration and are used as
-given. If you pass custom options, derive them from `TemporalAgentJsonUtilities.DefaultOptions`.
+The session uses your options as given only when they satisfy **both** halves of the snapshot
+contract:
+
+1. `TemporalAgentSessionSnapshot` resolves from the generated `AgentSessionJsonContext` — not from
+   the reflection resolver. Accepting reflection-backed options here would serialize the snapshot
+   root through reflection and reintroduce the AOT and trimming exposure that registering the DTO
+   exists to remove.
+2. `DurableSessionEntry` carries the `agent_request` / `agent_response` derived types, so history
+   entries round-trip.
+
+Neither implies the other — options can declare the discriminators and still resolve the snapshot
+root reflectively. When either check fails the session falls back to
+`TemporalAgentJsonUtilities.DefaultOptions`. Options derived from
+`TemporalAgentJsonUtilities.DefaultOptions` copy the whole resolver chain and satisfy both, so
+derive from it if you pass custom options.
 
 When the fallback does engage, your `Encoder` and `MaxDepth` are carried across onto the derived
 options. The library default uses `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`, which leaves `<`,

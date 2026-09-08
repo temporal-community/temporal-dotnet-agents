@@ -16,40 +16,76 @@ dotnet run --project benchmarks/TemporalCommunity.Extensions.Agents.Benchmarks -
 
 The spec called for a baseline on the pre-change implementation. Rather than measure across two git
 revisions — which mixes in machine, runtime, and dependency drift — both models run in the same
-binary against the same fixtures. `LegacyAgentOwnedTurnLoop` reproduces the v0.3 model exactly: a
+binary against the same fixtures. `LegacyAgentOwnedTurnLoop` reproduces the v0.3 model: a
 `List<DurableSessionEntry>` field plus a carried `JsonElement` StateBag that each LLM step replaces
 wholesale. `SessionOwnedTurnLoop` does the same work through the session.
 
 Only per-turn state bookkeeping is measured — no Temporal server, no model call. Those dominate real
 wall-clock by orders of magnitude and would bury a genuine regression.
 
+### The three turn shapes, and which one is the baseline
+
+`Shape` distinguishes two questions that an earlier revision of this document conflated:
+
+| Shape | What it is |
+|---|---|
+| `NoTools` | One LLM step per turn, no tool round. |
+| **`ToolsHistorical`** | Four tool calls whose StateBag write-backs are **all null**. **This is the exact v0.3 comparison.** |
+| `ToolsProspective` | Four tool calls with **populated** write-backs. **Not a historical baseline** — a forward cost model. |
+
+`ToolsHistorical` is the real one because tool StateBag write-backs were *always* null on the
+sub-agent path, and still are: `InvokeAgentToolInput` carries no session ID, so the tool activity
+derives its session from the orchestrating workflow's ID, fails to parse it, and never establishes a
+`TemporalAgentContext`. The tool therefore returns no bag. Populated write-backs describe a world
+where that gap is closed — useful for sizing that future change, misleading as a regression
+measure. **Read `ToolsHistorical` when asking "did this change regress v0.3?"**
+
 `SerializeSnapshot` / `DeserializeSnapshot` have **no v0.3 counterpart** (history never crossed the
-wire), so their `Ratio` column is not a regression measure — it is only their cost relative to the
-turn loop in the same parameter group. Read their absolute numbers.
+wire), so their `Ratio` column is not a regression measure either — it is only their cost relative
+to the turn loop in the same group. Read their absolute numbers.
 
 **Environment:** BenchmarkDotNet v0.15.8, macOS 26.6.2, Apple M4 Max (14 cores), .NET SDK 10.0.201,
 ShortRun job (3 warmup, 3 iterations). Ratios are stable; absolute times are indicative.
 
 ---
 
-## Turn-loop results
+## Historical baseline — the regression measure
 
-| Turns | Tools/turn | Legacy (v0.3) | Session-owned (v0.4) | Ratio | Legacy alloc | Session alloc | Alloc ratio |
-|------:|-----------:|--------------:|---------------------:|------:|-------------:|--------------:|------------:|
-| 1     | 0          | 134.8 ns      | 707.4 ns             | 5.25× | 1.09 KB      | 3.84 KB       | 3.51×       |
-| 1     | 4          | 1.08 µs       | 3.11 µs              | 2.88× | 4.00 KB      | 10.46 KB      | 2.62×       |
-| 10    | 0          | 2.14 µs       | 15.52 µs             | 7.24× | 15.61 KB     | 57.24 KB      | 3.67×       |
-| 10    | 4          | 11.68 µs      | 56.13 µs             | 4.81× | 44.67 KB     | 152.24 KB     | 3.41×       |
-| 100   | 0          | 88.51 µs      | 245.22 µs            | 2.77× | 649.96 KB    | 1080.42 KB    | 1.66×       |
-| 100   | 4          | 187.22 µs     | 810.67 µs            | 4.33× | 940.59 KB    | 2059.25 KB    | 2.19×       |
+| Turns | Shape | Legacy (v0.3) | Session-owned (v0.4) | Ratio | Added per turn | Legacy alloc | Session alloc | Alloc ratio |
+|------:|---|--------------:|---------------------:|------:|---------------:|-------------:|--------------:|------------:|
+| 1     | NoTools         | 135.0 ns  | 756.4 ns   | 5.60× | 0.62 µs | 1.09 KB   | 3.84 KB    | 3.51× |
+| 1     | ToolsHistorical | 204.5 ns  | 1.03 µs    | 5.02× | 0.82 µs | 1.48 KB   | 4.17 KB    | 2.83× |
+| 10    | NoTools         | 2.18 µs   | 16.07 µs   | 7.37× | 1.39 µs | 15.61 KB  | 57.24 KB   | 3.67× |
+| 10    | ToolsHistorical | 2.96 µs   | 22.72 µs   | 7.66× | 1.98 µs | 19.44 KB  | 60.52 KB   | 3.11× |
+| 100   | NoTools         | 88.44 µs  | 249.73 µs  | 2.82× | 1.61 µs | 649.96 KB | 1080.42 KB | 1.66× |
+| 100   | ToolsHistorical | 94.98 µs  | 279.54 µs  | 2.94× | 1.85 µs | 688.24 KB | 1113.23 KB | 1.62× |
+
+"Added per turn" is `(session − legacy) / turns` — the marginal cost the change introduces per
+conversational turn.
+
+> The 10-turn `ToolsHistorical` row is noisy (StdDev 5.47 µs on a 22.72 µs mean). Treat its ratio as
+> approximate; the 100-turn rows are the stable ones.
+
+## Prospective model — cost if tool write-backs are ever enabled on this path
+
+Not a regression measure. Included to size the missing-session-ID fix before anyone attempts it.
+
+| Turns | Legacy shape-matched | Session-owned | Ratio | Added per turn | Alloc ratio |
+|------:|---------------------:|--------------:|------:|---------------:|------------:|
+| 1     | 1.09 µs    | 3.12 µs   | 2.85× | 2.02 µs | 2.62× |
+| 10    | 11.84 µs   | 56.25 µs  | 4.75× | 4.44 µs | 3.41× |
+| 100   | 189.98 µs  | 783.66 µs | 4.12× | 5.94 µs | 2.19× |
+
+Enabling tool write-backs roughly triples the marginal per-turn cost (1.85 µs → 5.94 µs at 100
+turns). Still small in absolute terms, but worth knowing before committing to it.
 
 ## Snapshot round-trip (new capability — no v0.3 baseline)
 
-| Turns | Tools/turn | Serialize | Deserialize | Serialize alloc | Deserialize alloc |
-|------:|-----------:|----------:|------------:|----------------:|------------------:|
-| 1     | 0          | 2.86 µs   | 2.79 µs     | 3.32 KB         | 6.56 KB           |
-| 10    | 0          | 20.68 µs  | 18.21 µs    | 16.56 KB        | 22.73 KB          |
-| 100   | 0          | 194.98 µs | 175.86 µs   | 149.37 KB       | 184.51 KB         |
+| Turns | Serialize | Deserialize | Serialize alloc | Deserialize alloc |
+|------:|----------:|------------:|----------------:|------------------:|
+| 1     | 2.99 µs   | 2.85 µs     | 3.32 KB         | 6.56 KB           |
+| 10    | 21.32 µs  | 18.85 µs    | 16.56 KB        | 22.73 KB          |
+| 100   | 190.53 µs | 178.51 µs   | 149.37 KB       | 184.51 KB         |
 
 ## Serialized snapshot size
 
@@ -71,15 +107,16 @@ with longer messages and tool payloads will be larger.
 
 **Accepted.** The change ships.
 
-The ratios are the honest headline, and they are not small. But the decisive figure is the absolute
-per-turn cost. At the worst measured point — a 100-turn conversation with four tools per turn —
-session ownership adds **623 µs spread across 100 turns, about 6 µs per turn**. Every one of those
-turns also performs at least one LLM activity round trip, which costs on the order of 100 ms. The
-added bookkeeping is therefore roughly **0.006% of turn latency**, against a correctness guarantee
-that did not previously exist: cross-session isolation and state that survives continue-as-new.
+Against the historical baseline, session ownership adds **about 1.9 µs per turn** at 100 turns with
+a tool round (94.98 µs → 279.54 µs across the whole conversation). Every one of those turns also
+performs at least one LLM activity round trip costing on the order of 100 ms, so the added
+bookkeeping is roughly **0.002% of turn latency** — in exchange for cross-session isolation and
+state that survives continue-as-new, neither of which existed before.
 
-Allocation grows 1.7×–3.7×, peaking at 2.06 MB for the 100-turn / 4-tool case. Gen2 stayed at zero
-throughout; the growth is short-lived Gen0/Gen1 traffic.
+The ratios are larger than that framing suggests and are worth stating plainly: 2.8×–7.7× on the
+bookkeeping itself, peaking at short conversations where the legacy baseline is only a few hundred
+nanoseconds. Allocation grows 1.6×–3.7×, peaking at 1.11 MB for a 100-turn conversation. Gen2 stayed
+at zero throughout; the growth is short-lived Gen0/Gen1 traffic.
 
 ### Where the cost comes from
 
@@ -88,8 +125,7 @@ assignment. Session ownership makes the inherited `AgentSession.StateBag` author
 mutation round-trips: serialize the typed bag, merge, deserialize back. That is what keeps
 `session.StateBag` readable by workflow code and by anything MAF hands the session to.
 
-Per tool-calling iteration that is three serializations and two deserializations. Two obvious
-reductions were considered and deliberately not taken:
+Two reductions were considered and deliberately not taken:
 
 - **Caching the serialized form on the session.** User code can call `session.StateBag.SetValue(...)`
   directly, and the session cannot observe that, so any cache would go stale and serve wrong state.

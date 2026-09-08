@@ -286,4 +286,111 @@ public class TemporalAgentSessionBoundaryTests
 
         Assert.Equal(first.GetRawText(), second.GetRawText());
     }
+
+    // ─── Snapshot contract gating ───────────────────────────────────────────
+
+    /// <summary>
+    /// Builds reflection-backed options that DO declare the two MAF history discriminators —
+    /// the case that satisfies a polymorphism-only check while still resolving the snapshot root
+    /// through reflection.
+    /// </summary>
+    private static JsonSerializerOptions ReflectionOptionsWithAgentPolymorphism()
+    {
+        var resolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver();
+        resolver.Modifiers.Add(typeInfo =>
+        {
+            if (typeInfo.Type != typeof(DurableSessionEntry))
+            {
+                return;
+            }
+
+            typeInfo.PolymorphismOptions ??= new System.Text.Json.Serialization.Metadata.JsonPolymorphismOptions
+            {
+                TypeDiscriminatorPropertyName = "$type",
+            };
+            typeInfo.PolymorphismOptions.DerivedTypes.Add(
+                new System.Text.Json.Serialization.Metadata.JsonDerivedType(typeof(AgentSessionRequest), "agent_request"));
+            typeInfo.PolymorphismOptions.DerivedTypes.Add(
+                new System.Text.Json.Serialization.Metadata.JsonDerivedType(typeof(AgentSessionResponse), "agent_response"));
+        });
+
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = resolver,
+        };
+        options.MakeReadOnly();
+        return options;
+    }
+
+    [Fact]
+    public void SnapshotContract_RequiresGeneratedRoot_NotJustHistoryPolymorphism()
+    {
+        // The gap this closes: options can carry the agent_request / agent_response discriminators
+        // and still resolve TemporalAgentSessionSnapshot itself through reflection. Accepting them
+        // would serialize the snapshot root via DefaultJsonTypeInfoResolver — reintroducing exactly
+        // the AOT and trimming exposure that registering the DTO in AgentSessionJsonContext removes.
+        var mixed = ReflectionOptionsWithAgentPolymorphism();
+
+        // Precondition: these options genuinely satisfy the history half of the contract, so the
+        // test is exercising the snapshot-root half and not just a missing registration.
+        var derivedTypes = mixed.GetTypeInfo(typeof(DurableSessionEntry)).PolymorphismOptions!.DerivedTypes;
+        Assert.Contains(derivedTypes, d => d.DerivedType == typeof(AgentSessionRequest));
+        Assert.Contains(derivedTypes, d => d.DerivedType == typeof(AgentSessionResponse));
+
+        // ...and the snapshot root resolves through reflection under them.
+        Assert.IsType<System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver>(
+            mixed.GetTypeInfo(typeof(TemporalAgentSessionSnapshot)).OriginatingResolver);
+
+        Assert.False(TemporalAgentSession.CanRoundTripSnapshotContract(mixed));
+    }
+
+    [Fact]
+    public void SnapshotContract_AcceptsDefaultAndDerivedOptions()
+    {
+        Assert.True(TemporalAgentSession.CanRoundTripSnapshotContract(TemporalAgentJsonUtilities.DefaultOptions));
+
+        var derived = new JsonSerializerOptions(TemporalAgentJsonUtilities.DefaultOptions);
+        derived.MakeReadOnly();
+        Assert.True(TemporalAgentSession.CanRoundTripSnapshotContract(derived));
+    }
+
+    [Fact]
+    public void SnapshotContract_RejectsPlainReflectionOptions()
+    {
+        var reflection = new JsonSerializerOptions
+        {
+            TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver(),
+        };
+        reflection.MakeReadOnly();
+
+        Assert.False(TemporalAgentSession.CanRoundTripSnapshotContract(reflection));
+    }
+
+    [Fact]
+    public async Task MixedOptions_StillRoundTripThroughTheGeneratedContract()
+    {
+        // Behavioural companion to the predicate test: the fallback must engage, so the payload is
+        // still written by the generated contract and still restores its history subtypes.
+        var mixed = ReflectionOptionsWithAgentPolymorphism();
+
+        var session = new TemporalAgentSession(new TemporalAgentSessionId("Assistant", "abc123"));
+        session.AppendHistoryEntry(Request("c1", "hello"));
+        session.AppendHistoryEntry(Response("c1", "hi back"));
+
+        var agent = CreateAgent();
+        var serialized = await agent.SerializeSessionAsync(session, mixed);
+        var restored = Assert.IsType<TemporalAgentSession>(
+            await agent.DeserializeSessionAsync(serialized, mixed));
+
+        Assert.Equal(2, restored.History.Count);
+        Assert.IsType<AgentSessionRequest>(restored.History[0]);
+        Assert.IsType<AgentSessionResponse>(restored.History[1]);
+
+        // And the generated path can read it back without the caller's options at all, which is
+        // the property that would break if the snapshot root had gone through reflection with a
+        // divergent naming policy.
+        var restoredByDefault = Assert.IsType<TemporalAgentSession>(
+            await agent.DeserializeSessionAsync(serialized));
+        Assert.Equal(2, restoredByDefault.History.Count);
+    }
 }

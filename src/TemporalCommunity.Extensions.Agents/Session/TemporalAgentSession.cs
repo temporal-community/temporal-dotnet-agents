@@ -204,9 +204,10 @@ public sealed class TemporalAgentSession : AgentSession
     /// <para>
     /// This mattered nothing while history never crossed the wire — an empty history serializes
     /// fine under any options. It is load-bearing now, so the snapshot is written with options
-    /// that are known to carry the registration. Caller options are used as given whenever they
-    /// can round-trip history (they usually derive from
-    /// <see cref="TemporalAgentJsonUtilities.DefaultOptions"/> and so pass this check).
+    /// that are known to carry the registration. Caller options are used as given only when they
+    /// satisfy the full contract — see <see cref="CanRoundTripSnapshotContract"/>, which requires
+    /// both the generated snapshot root and the history discriminators. Options derived from
+    /// <see cref="TemporalAgentJsonUtilities.DefaultOptions"/> satisfy both.
     /// </para>
     /// <para>
     /// <strong>When a fallback is needed, the caller's security-relevant settings are carried
@@ -229,7 +230,7 @@ public sealed class TemporalAgentSession : AgentSession
             return TemporalAgentJsonUtilities.DefaultOptions;
         }
 
-        if (CarriesAgentEntryPolymorphism(jsonSerializerOptions))
+        if (CanRoundTripSnapshotContract(jsonSerializerOptions))
         {
             return jsonSerializerOptions;
         }
@@ -249,12 +250,39 @@ public sealed class TemporalAgentSession : AgentSession
         });
     }
 
-    private static bool CarriesAgentEntryPolymorphism(JsonSerializerOptions options)
+    /// <summary>
+    /// Whether <paramref name="options"/> can serve the snapshot contract in full: the snapshot
+    /// root must resolve from generated metadata, <em>and</em> history entries must round-trip
+    /// under their MAF discriminators.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both conditions are required, and neither implies the other. Checking only the polymorphism
+    /// registration would accept reflection-backed options that happen to declare the two agent
+    /// subtypes — the snapshot itself would then serialize through
+    /// <see cref="System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver"/>, quietly
+    /// reintroducing the AOT and trimming exposure that registering
+    /// <see cref="TemporalAgentSessionSnapshot"/> in <c>AgentSessionJsonContext</c> exists to
+    /// remove. Checking only the resolver origin would accept a generated context that never
+    /// registered the derived types, which throws on any session holding history.
+    /// </para>
+    /// <para>
+    /// Options derived from <see cref="TemporalAgentJsonUtilities.DefaultOptions"/> copy the whole
+    /// resolver chain, so they satisfy both and are used as given (verified by test, not assumed).
+    /// </para>
+    /// </remarks>
+    internal static bool CanRoundTripSnapshotContract(JsonSerializerOptions options)
     {
         try
         {
             // JsonTypeInfo is cached per options instance, so this resolves once per distinct
             // caller-supplied options object rather than once per session serialization.
+            var snapshotInfo = options.GetTypeInfo(typeof(TemporalAgentSessionSnapshot));
+            if (!ReferenceEquals(snapshotInfo.OriginatingResolver, AgentSessionJsonContext.Default))
+            {
+                return false;
+            }
+
             var derivedTypes = options.GetTypeInfo(typeof(DurableSessionEntry)).PolymorphismOptions?.DerivedTypes;
             if (derivedTypes is null)
             {
@@ -279,8 +307,8 @@ public sealed class TemporalAgentSession : AgentSession
         }
         catch (Exception ex) when (ex is NotSupportedException or InvalidOperationException)
         {
-            // Options that cannot produce metadata for DurableSessionEntry at all (e.g. a
-            // source-gen-only context that never registered it) also cannot round-trip history.
+            // Options that cannot produce metadata for these types at all (e.g. a source-gen-only
+            // context that never registered them) also cannot round-trip the snapshot.
             return false;
         }
     }

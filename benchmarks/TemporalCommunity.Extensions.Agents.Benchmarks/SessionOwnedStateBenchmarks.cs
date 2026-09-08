@@ -35,6 +35,16 @@ namespace TemporalCommunity.Extensions.Agents.Benchmarks;
 /// of multi-session isolation and continue-as-new carry-forward; this benchmark is what keeps it
 /// honest.
 /// </para>
+/// <para>
+/// <strong>Tool write-backs: two different questions.</strong>
+/// <see cref="TurnShape.ToolsHistorical"/> is the exact v0.3 comparison — tool StateBag write-backs
+/// were always <see langword="null"/> on the sub-agent path, because
+/// <c>InvokeAgentToolInput</c> carries no session ID and the tool activity therefore never
+/// established a <c>TemporalAgentContext</c>. <see cref="TurnShape.ToolsProspective"/> populates
+/// them instead; that is <em>not</em> a historical baseline but a forward cost model for what a
+/// tool round would cost if that gap were closed. Read the ratios in
+/// <see cref="TurnShape.ToolsHistorical"/> when asking "did this change regress v0.3?".
+/// </para>
 /// </remarks>
 [MemoryDiagnoser]
 [ShortRunJob(RuntimeMoniker.Net10_0)]
@@ -45,6 +55,7 @@ public class SessionOwnedStateBenchmarks
 
     private JsonElement _llmStepBag;
     private JsonElement?[] _toolWriteBacks = [];
+    private bool _hasToolRound;
     private TemporalAgentSessionId _sessionId;
     private JsonElement _snapshotOfPopulatedSession;
     private TemporalAgentSession _populatedSession = null!;
@@ -53,9 +64,11 @@ public class SessionOwnedStateBenchmarks
     [Params(1, 10, 100)]
     public int TurnCount { get; set; }
 
-    /// <summary>Gets or sets how many tools fan out per turn (0 = no tool round).</summary>
-    [Params(0, 4)]
-    public int ToolsPerTurn { get; set; }
+    /// <summary>Gets or sets the tool-round shape for the turn. See the type-level remarks.</summary>
+    [Params(TurnShape.NoTools, TurnShape.ToolsHistorical, TurnShape.ToolsProspective)]
+    public TurnShape Shape { get; set; }
+
+    private const int ToolsPerTurn = 4;
 
     [GlobalSetup]
     public void Setup()
@@ -67,12 +80,17 @@ public class SessionOwnedStateBenchmarks
         providerBag.SetValue("test.step_counter", "1");
         _llmStepBag = providerBag.Serialize();
 
-        _toolWriteBacks = new JsonElement?[Math.Max(ToolsPerTurn, 1)];
-        for (var i = 0; i < _toolWriteBacks.Length; i++)
+        _hasToolRound = Shape != TurnShape.NoTools;
+        _toolWriteBacks = new JsonElement?[ToolsPerTurn];
+        if (Shape == TurnShape.ToolsProspective)
         {
-            _toolWriteBacks[i] = JsonSerializer.SerializeToElement(
-                new Dictionary<string, string> { [$"tool.{i}.note"] = $"result-{i}" });
+            for (var i = 0; i < _toolWriteBacks.Length; i++)
+            {
+                _toolWriteBacks[i] = JsonSerializer.SerializeToElement(
+                    new Dictionary<string, string> { [$"tool.{i}.note"] = $"result-{i}" });
+            }
         }
+        // ToolsHistorical leaves every slot null — the shape the sub-agent path actually produced.
 
         _populatedSession = new TemporalAgentSession(_sessionId);
         RunSessionOwnedTurns(_populatedSession, TurnCount);
@@ -104,7 +122,7 @@ public class SessionOwnedStateBenchmarks
             // Old behaviour: the LLM step's bag replaced the carried bag outright.
             carriedBag = _llmStepBag;
 
-            if (ToolsPerTurn > 0)
+            if (_hasToolRound)
             {
                 carriedBag = StateBagMerge.Merge(carriedBag, _toolWriteBacks, alwaysScopesStoreKey: null);
             }
@@ -147,7 +165,7 @@ public class SessionOwnedStateBenchmarks
             _ = session.SerializeStateBag();
             session.OverlayTrustedStateBag(_llmStepBag);
 
-            if (ToolsPerTurn > 0)
+            if (_hasToolRound)
             {
                 _ = session.SerializeStateBag();
                 session.MergeToolStateBagWriteBacks(_toolWriteBacks);
@@ -157,6 +175,26 @@ public class SessionOwnedStateBenchmarks
         }
 
         return session.History.Count;
+    }
+
+    /// <summary>The tool-round shape a benchmarked turn uses.</summary>
+    public enum TurnShape
+    {
+        /// <summary>No tool calls — one LLM step per turn.</summary>
+        NoTools,
+
+        /// <summary>
+        /// Four tool calls whose StateBag write-backs are all null. This is what the sub-agent path
+        /// actually produced in v0.3 and still produces today, so it is the exact historical
+        /// baseline.
+        /// </summary>
+        ToolsHistorical,
+
+        /// <summary>
+        /// Four tool calls with populated StateBag write-backs. Not a historical baseline — a
+        /// forward cost model for closing the missing-session-ID gap in InvokeAgentToolInput.
+        /// </summary>
+        ToolsProspective,
     }
 
     private static AgentSessionRequest BuildRequest(int turn) => new()

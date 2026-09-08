@@ -580,4 +580,158 @@ public class SessionOwnedStateTests
             ];
         }
     }
+
+    /// <summary>
+    /// The property the sequential isolation test cannot show: two sessions on ONE agent genuinely
+    /// overlap. Both runs are started before either is awaited, and the chat client refuses to
+    /// answer until both calls are in flight — so if the agent serialized them, or if the run guard
+    /// were agent-scoped rather than session-scoped, the first call would block until it times out.
+    /// </summary>
+    [Fact]
+    public async Task TwoSessionsOnOneAgent_RunConcurrently_WithoutContaminatingEachOther()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var probe = new ConcurrencyProbingChatClient(expectedConcurrency: 2);
+
+        var taskQueue = $"session-concurrent-{Guid.NewGuid():N}";
+        using var host = await StartWorkerAsync<ConcurrentSessionsWorkflow>(env.Client, probe, taskQueue);
+        try
+        {
+            var result = await env.Client.ExecuteWorkflowAsync(
+                (ConcurrentSessionsWorkflow wf) => wf.RunAsync(),
+                new WorkflowOptions($"session-concurrent-{Guid.NewGuid():N}", taskQueue));
+
+            _output.WriteLine(
+                $"max concurrency observed: {probe.MaxObservedConcurrency}; " +
+                $"A: {string.Join("|", result.SessionAUserTexts)}; B: {string.Join("|", result.SessionBUserTexts)}");
+
+            // The load-bearing assertion: both LLM calls were in flight at the same moment. The
+            // client only releases once two have arrived, so reaching here at all already proves
+            // it — this pins the reason the test passed.
+            Assert.Equal(2, probe.MaxObservedConcurrency);
+
+            // Overlap must not cost isolation.
+            Assert.Equal(2, result.SessionAEntryCount);
+            Assert.Equal(2, result.SessionBEntryCount);
+            Assert.Equal(["alpha question"], result.SessionAUserTexts);
+            Assert.Equal(["beta question"], result.SessionBUserTexts);
+            Assert.NotEqual(result.SessionAId, result.SessionBId);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    /// <summary>
+    /// A chat client that blocks each call until <c>expectedConcurrency</c> calls are in flight,
+    /// then releases them all. Turns "did these overlap?" into a pass/fail rather than a race:
+    /// without real overlap the first caller waits out the timeout and the test fails loudly.
+    /// </summary>
+    private sealed class ConcurrencyProbingChatClient : IChatClient
+    {
+        private readonly int _expectedConcurrency;
+        private readonly TaskCompletionSource _allArrived =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _active;
+        private int _maxObserved;
+
+        public ConcurrencyProbingChatClient(int expectedConcurrency) =>
+            _expectedConcurrency = expectedConcurrency;
+
+        public int MaxObservedConcurrency => Volatile.Read(ref _maxObserved);
+
+        public async Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var inFlight = Interlocked.Increment(ref _active);
+
+            int seen;
+            while (inFlight > (seen = Volatile.Read(ref _maxObserved))
+                   && Interlocked.CompareExchange(ref _maxObserved, inFlight, seen) != seen)
+            {
+                // Another call raised the watermark first; re-read and retry.
+            }
+
+            if (inFlight >= _expectedConcurrency)
+            {
+                _allArrived.TrySetResult();
+            }
+
+            try
+            {
+                await _allArrived.Task.WaitAsync(TimeSpan.FromSeconds(20), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _active);
+            }
+
+            return new ChatResponse(new ChatMessage(ChatRole.Assistant, "Reply."));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() { }
+    }
+
+    [Workflow("SessionOwnedState.ConcurrentSessions")]
+    internal class ConcurrentSessionsWorkflow
+    {
+        [WorkflowRun]
+        public async Task<DistinctSessionsResult> RunAsync()
+        {
+            var agent = GetTemporalAgent("SubAgent");
+            var a = (TemporalAgentSession)await agent.CreateSessionAsync().ConfigureAwait(true);
+            var b = (TemporalAgentSession)await agent.CreateSessionAsync().ConfigureAwait(true);
+
+            a.StateBag.SetValue("owner", "a-only");
+            b.StateBag.SetValue("owner", "b-only");
+
+            // Both started before either is awaited: RunCoreAsync runs synchronously through
+            // EnterRun and the activity schedule, so both turns are genuinely in flight here.
+            var runA = agent.RunAsync([new ChatMessage(ChatRole.User, "alpha question")], a);
+            var runB = agent.RunAsync([new ChatMessage(ChatRole.User, "beta question")], b);
+
+            await Workflow.WhenAllAsync([runA, runB]).ConfigureAwait(true);
+
+            return new DistinctSessionsResult
+            {
+                SessionAEntryCount = a.History.Count,
+                SessionBEntryCount = b.History.Count,
+                SessionAUserTexts = UserTexts(a),
+                SessionBUserTexts = UserTexts(b),
+                SessionBPromptText = string.Empty,
+                SessionAId = a.SessionId.WorkflowId,
+                SessionBId = b.SessionId.WorkflowId,
+                SessionAOwnerTag = a.StateBag.TryGetValue<string>("owner", out var av) ? av : null,
+                SessionBOwnerTag = b.StateBag.TryGetValue<string>("owner", out var bv) ? bv : null,
+            };
+        }
+
+        private static IReadOnlyList<string> UserTexts(TemporalAgentSession session) =>
+        [
+            .. session.History
+                .SelectMany(e => e.Messages)
+                .Where(m => m.Role == ChatRole.User)
+                .Select(m => m.Text ?? string.Empty)
+        ];
+    }
 }
