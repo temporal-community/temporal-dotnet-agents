@@ -87,9 +87,36 @@ internal sealed class McpSampleConnection : IAsyncDisposable
         return new McpSampleConnection(services, client, shutdown, serverTask);
     }
 
+    /// <summary>
+    /// Loads the pinned MCP tool catalog. A relative <paramref name="path"/> is resolved against
+    /// the directory the sample assembly runs from, not the current working directory.
+    /// </summary>
+    /// <remarks>
+    /// Both McpTools samples declare the catalog as <c>CopyToOutputDirectory</c> content, so it
+    /// lands next to the assembly. A bare relative path, however, resolves against the working
+    /// directory — and <c>dotnet run --project samples/…/McpTools</c>, the command both READMEs
+    /// document, sets that to the <em>project</em> directory. The catalog is not there, so the
+    /// documented invocation failed immediately with a <see cref="FileNotFoundException"/> naming a
+    /// path the build never writes to. Resolving against <see cref="AppContext.BaseDirectory"/>
+    /// keeps the file next to the binary that owns it.
+    /// </remarks>
     internal static IReadOnlyList<Tool> LoadPinnedDefinitions(string path)
     {
-        var json = File.ReadAllText(path);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        var resolved = Path.IsPathRooted(path)
+            ? path
+            : Path.Combine(AppContext.BaseDirectory, path);
+
+        if (!File.Exists(resolved))
+        {
+            throw new FileNotFoundException(
+                $"The pinned MCP tool catalog was not found at '{resolved}'. It is copied there by " +
+                "the sample's CopyToOutputDirectory content item — try rebuilding the sample.",
+                resolved);
+        }
+
+        var json = File.ReadAllText(resolved);
         return JsonSerializer.Deserialize<Tool[]>(json, McpJsonUtilities.DefaultOptions)
             ?? throw new InvalidOperationException("The pinned MCP tool catalog is empty.");
     }
