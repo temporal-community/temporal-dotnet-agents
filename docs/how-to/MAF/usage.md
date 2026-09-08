@@ -347,8 +347,14 @@ public class ResearchWorkflow
 }
 ```
 
-`TemporalAIAgent` (returned by `GetTemporalAgent`) stores the conversation history as workflow state. This means it survives
-worker restarts, supports retries, and is durable by design — all without any extra persistence code.
+The session returned by `CreateSessionAsync` holds the conversation history, and it lives in workflow state. This means it
+survives worker restarts, supports retries, and is durable by design — all without any extra persistence code.
+
+Reuse one session for the turns of one conversation; give each independent conversation its own. One `TemporalAIAgent`
+instance drives any number of sessions without their history or StateBag colliding. Two runs may not overlap on the same
+session, a session may only be run by the agent that created it, and carrying a conversation across continue-as-new means
+serializing the session into your workflow's continue-as-new input yourself. See
+[Migrating to session-owned state](./migrating-to-session-owned-state.md).
 
 ---
 
@@ -1129,7 +1135,7 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
 | `RetryPolicy` | Retry policy for the agent's `RunAgentStep` activity (the LLM call). Per-tool retry is configured separately via `DurableToolOptions`. |
 | `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
-| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached for the lifetime of the `TemporalAIAgent` session instance. Changes to the builder value after worker startup do not affect sessions already in progress. |
+| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached on the `TemporalAIAgent` instance for its lifetime — it describes the agent, not the conversation, so every session that instance drives shares the resolved value. Changes to the builder value after worker startup do not affect agents already resolved. |
 | `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
 
 ### `DurableToolOptions` reference

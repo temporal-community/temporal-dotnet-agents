@@ -23,6 +23,7 @@ Welcome to the documentation for **Temporal .NET Agents**, providing durable exe
 - **[Structured Output](how-to/MAF/structured-output.md)** — Schema-enforced responses and JSON output.
 - **[Prompt Caching & Token Optimization](how-to/MAF/prompt-caching.md)** — History compaction, truncation, and token budgeting.
 - **[Do's and Don'ts](how-to/MAF/dos-and-donts.md)** — Best practices for deterministic workflow development.
+- **[Migrating to Session-Owned State (v0.3 → v0.4)](how-to/MAF/migrating-to-session-owned-state.md)** — Sessions now own conversation history and the StateBag: what breaks, wire compatibility, and the rolling-deployment hazard.
 
 ### Microsoft.Extensions.AI (MEAI Integration)
 *`TemporalCommunity.Extensions.AI`*

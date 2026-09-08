@@ -97,22 +97,39 @@ You can also create session IDs explicitly:
 var sessionId = WorkflowAgents.NewAgentSessionId("MyAgent");
 ```
 
-### Important: One Instance Per Conversation
+### One Session Per Conversation
 
-Two sessions on the same `TemporalAIAgent` instance share history because history is stored on the instance. If you need independent conversations, create separate `GetTemporalAgent` calls:
+Each independent conversation needs its own session. One `TemporalAIAgent` instance can drive any
+number of them:
 
 ```csharp
-// CORRECT: two independent agents with independent histories
-var agent1 = WorkflowAgents.GetTemporalAgent("Analyst");
-var agent2 = WorkflowAgents.GetTemporalAgent("Analyst");
-
-// WRONG: session2 will see session1's history
+// CORRECT: one agent, two independent conversations
 var agent = WorkflowAgents.GetTemporalAgent("Analyst");
 var session1 = await agent.CreateSessionAsync();
-await agent.RunAsync("Question 1", session1);
 var session2 = await agent.CreateSessionAsync();
-await agent.RunAsync("Question 2", session2); // sees "Question 1" in history!
+await agent.RunAsync("Question 1", session1);
+await agent.RunAsync("Question 2", session2); // does not see Question 1
 ```
+
+Reuse the same session object for the turns that belong to one conversation — a fresh session per
+call accumulates nothing.
+
+Two runs may not overlap on the *same* session; the second throws `InvalidOperationException`.
+Parallel conversations get a session each:
+
+```csharp
+await Workflow.WhenAllAsync([
+    agent.RunAsync("Question 1", session1),
+    agent.RunAsync("Question 2", session2)]);   // fine: distinct sessions
+```
+
+> **Changed in v0.4.** Before session ownership, history lived on the agent instance, so two
+> sessions on one agent shared it and the second conversation replayed the first. The old
+> workaround — resolving a second agent instance per conversation — is no longer needed. See
+> [Migrating to session-owned state](../../how-to/MAF/migrating-to-session-owned-state.md).
+
+A session is also bound to the agent that created it: passing an `Analyst` session to a
+`Summarizer` agent throws, because the session now carries the transcript.
 
 ### Iterative Agent Communication
 

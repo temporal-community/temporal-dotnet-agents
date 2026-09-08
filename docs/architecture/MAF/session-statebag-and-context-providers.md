@@ -381,49 +381,55 @@ stateInitializer: session => new Mem0Provider.State(
 
 Choosing between shared vs. isolated memory scopes is a product decision: shared memories let one session "remember" facts learned in another (good for a single user across multiple conversations), while isolated memories give each session a clean slate.
 
-#### `TemporalAIAgent` — history is on the instance, not the session
+#### `TemporalAIAgent` — history and StateBag are on the session
 
-This is the critical difference for workflow-internal agents. `TemporalAIAgent.RunCoreAsync` accumulates history in a `_history` field on the **instance itself**, not in the session object. The session parameter is only used to avoid being `null` — it is not used to route or isolate history:
+`TemporalAIAgent.RunCoreAsync` keeps nothing conversational on the agent instance. The session it
+is handed owns both the conversation history and the StateBag, so one agent instance drives any
+number of isolated conversations:
 
 ```csharp
 // TemporalAIAgent.RunCoreAsync (simplified)
 session ??= await CreateSessionAsync(cancellationToken);
-// session is never referenced again below this line
 
-_history.Add(request);                              // ← instance field
-// Drives the durable per-step loop with [.. _history] flattened into AgentStepInput.AccumulatedMessages
+if (session is not TemporalAgentSession temporalSession) throw ...;   // type required
+if (temporalSession.SessionId.AgentName != _agentName) throw ...;     // and bound to this agent
+
+temporalSession.EnterRun();                          // rejects an overlapping run on this session
+temporalSession.AppendHistoryEntry(request);         // ← session, not an instance field
+// The per-step loop flattens temporalSession.History into AgentStepInput.AccumulatedMessages
 ```
 
-This means calling `CreateSessionAsync` twice on the same `TemporalAIAgent` and using both sessions produces **shared, interleaved history**:
+Two sessions from the same instance are therefore fully isolated:
 
 ```csharp
-// ⚠️ FOOTGUN — do not do this
-var agent = GetTemporalAgent("WeatherAgent");  // one TemporalAIAgent instance
+var agent = GetTemporalAgent("WeatherAgent");   // one TemporalAIAgent instance
 var s1 = await agent.CreateSessionAsync();
 var s2 = await agent.CreateSessionAsync();
 
-await agent.RunAsync("Question A", s1);
-// _history: [A_req, A_resp]
-
-await agent.RunAsync("Question B", s2);
-// _history: [A_req, A_resp, B_req, B_resp]
-//            ↑ s2 turn sees Question A — they are NOT isolated
+await agent.RunAsync("Question A", s1);   // s1.History: [A_req, A_resp]
+await agent.RunAsync("Question B", s2);   // s2.History: [B_req, B_resp] — no Question A
 ```
 
-`TemporalAIAgent` is designed for a single conversation thread inside an orchestrating workflow. If you need two truly independent sub-agents, get two separate instances via `GetTemporalAgent`:
+Three rules follow from session ownership:
 
-```csharp
-// ✅ CORRECT — two separate TemporalAIAgent instances, each with its own _history
-var researchAgent = GetTemporalAgent("ResearchAgent");
-var summaryAgent  = GetTemporalAgent("SummaryAgent");
+- **The session must be a `TemporalAgentSession`.** A foreign `AgentSession` has nowhere to hold
+  history or StateBag, so it is rejected rather than silently dropping every mutation.
+- **The session is bound to its agent, by name.** Passing a `Researcher` session to a `Summarizer`
+  agent throws — the session carries a transcript, and replaying it into another agent's prompt and
+  event history would be a cross-agent disclosure. Two instances resolved from the same
+  registration stay interchangeable.
+- **One run at a time per session.** Overlapping `RunAsync` calls on the same session throw
+  `InvalidOperationException`; they would otherwise append to one history and merge into one
+  StateBag with no defined ordering. Distinct sessions run in parallel freely.
 
-var researchSession = await researchAgent.CreateSessionAsync();
-var summarySession  = await summaryAgent.CreateSessionAsync();
+State survives continue-as-new only if the orchestrating workflow explicitly carries the serialized
+session forward — the library does not guess. See
+[Migrating to session-owned state](../../how-to/MAF/migrating-to-session-owned-state.md).
 
-var findings = await researchAgent.RunAsync("Research quantum computing.", researchSession);
-var summary  = await summaryAgent.RunAsync(findings.Text!, summarySession);
-// Each agent sees only its own conversation — no cross-contamination
-```
+> **Changed in v0.4.** Before this, history lived in a `_history` field on the agent instance and
+> the session parameter was never read, so two sessions on one instance produced shared, interleaved
+> history and nothing survived continue-as-new. The old workaround — one agent instance per
+> conversation — is no longer needed.
 
 ### Summary table
 
@@ -431,8 +437,9 @@ var summary  = await summaryAgent.RunAsync(findings.Text!, summarySession);
 |---|---|---|
 | `TemporalAIAgentProxy`, two sessions | Fully isolated (separate workflows) | Depends on `stateInitializer` scoping |
 | `TemporalAIAgentProxy`, same session reused | Shared (same workflow) | Shared |
-| `TemporalAIAgent`, two sessions, **same instance** | ⚠️ Shared (same `_history` field) | Depends on `stateInitializer` scoping |
-| `TemporalAIAgent`, two sessions, **two instances** | Fully isolated (separate `_history` fields) | Depends on `stateInitializer` scoping |
+| `TemporalAIAgent`, two sessions, **same instance** | Fully isolated (history is per session) | Depends on `stateInitializer` scoping |
+| `TemporalAIAgent`, two sessions, **two instances** | Fully isolated (history is per session) | Depends on `stateInitializer` scoping |
+| `TemporalAIAgent`, same session reused | Shared — this is how a multi-turn conversation accumulates | Depends on `stateInitializer` scoping |
 
 ---
 
