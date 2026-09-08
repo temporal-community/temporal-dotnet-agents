@@ -118,7 +118,6 @@ topology. It is validated against tracked sample projects.
 - [Human-in-the-Loop](../../docs/how-to/MAF/hitl-patterns.md) — approval gates, dashboards, timeouts, and testing
 - [History & Token Optimization](../../docs/how-to/MAF/prompt-caching.md) — managing conversation history and reducing costs
 - [Do's and Don'ts](../../docs/how-to/MAF/dos-and-donts.md) — common mistakes and best practices
-- [Pre-release Worker Cutover](../../docs/how-to/MAF/pre-release-cutover.md) — drain, verify, deploy, and rollback steps for workflow-behavior changes
 
 ### Architecture
 
