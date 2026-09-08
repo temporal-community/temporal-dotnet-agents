@@ -37,11 +37,6 @@ public sealed class TemporalAIAgent : AIAgent
     private readonly List<DurableSessionEntry> _history = [];
     private readonly ActivityOptions _activityOptions;
     private int _requestCount;
-    // Carried StateBag for context-provider state (e.g. WorkingSetContextProvider) across
-    // steps and turns. Threaded into each RunDurableAgentStep activity and refreshed from
-    // stepResult.UpdatedStateBag, mirroring AgentWorkflow's _currentStateBag (AgentWorkflow.cs
-    // :345 in / :381 out). Without this, sub-agent context providers lose state every step.
-    private JsonElement? _currentStateBag;
     // Cached after the first successful worker-settings resolution step so subsequent turns
     // skip the resolution handshake and use the resolved value rather than the hard-coded default.
     private bool _settingsResolved;
@@ -111,6 +106,17 @@ public sealed class TemporalAIAgent : AIAgent
 
         session ??= await CreateSessionAsync(cancellationToken).ConfigureAwait(true);
 
+        // The session — not this agent — owns the conversation's StateBag, so that one agent
+        // instance can drive several sessions without their state colliding. A foreign
+        // AgentSession has nowhere to hold that state, so reject it here instead of silently
+        // dropping every mutation. SerializeSessionCoreAsync already rejects the same case.
+        if (session is not TemporalAgentSession temporalSession)
+        {
+            throw new InvalidOperationException(
+                $"Expected a {nameof(TemporalAgentSession)} but got '{session.GetType().Name}'. " +
+                $"Create the session with {nameof(CreateSessionAsync)} on this agent.");
+        }
+
         IList<string>? enableToolNames = null;
         bool enableToolCalls = true;
         string? callerCorrelationId = null;
@@ -143,7 +149,7 @@ public sealed class TemporalAIAgent : AIAgent
         _history.Add(AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow));
         _requestCount++;
 
-        var sessionId = session is TemporalAgentSession ts ? ts.SessionId : (TemporalAgentSessionId?)null;
+        var sessionId = temporalSession.SessionId;
 
         Workflow.Logger.LogInWorkflowAgentDispatching(_agentName, _requestCount);
 
@@ -168,7 +174,7 @@ public sealed class TemporalAIAgent : AIAgent
                 AgentName = _agentName,
                 Request = request,
                 AccumulatedMessages = accumulated,
-                SerializedStateBag = _currentStateBag,
+                SerializedStateBag = temporalSession.SerializeStateBag(),
                 SessionId = sessionId,
                 NeedsWorkerSettingsResolution = !_settingsResolved && iteration == 0,
             };
@@ -177,13 +183,14 @@ public sealed class TemporalAIAgent : AIAgent
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 _activityOptions);
 
-            // Persist the step's StateBag mutations so context-provider state (e.g.
-            // WorkingSetContextProvider) survives across steps and turns. Mirrors
-            // AgentWorkflow.cs:381. Context providers run inside the LLM-step activity and are
-            // trusted-tier by design, so their StateBag output is applied unfiltered here —
-            // unlike tool/interceptor write-backs below, which are deny-list filtered via
-            // StateBagMerge.
-            _currentStateBag = stepResult.UpdatedStateBag;
+            // Persist the step's StateBag mutations on the session so context-provider state
+            // (e.g. WorkingSetContextProvider) survives across steps, turns, and continue-as-new.
+            // Context providers run inside the LLM-step activity and are trusted-tier by design,
+            // so their output is overlaid unfiltered — unlike tool/interceptor write-backs below,
+            // which are deny-list filtered. Overlay rather than replace: a hash-gated step returns
+            // a null or partial bag, and replacing would wipe keys the workflow thread wrote
+            // between activities.
+            temporalSession.OverlayTrustedStateBag(stepResult.UpdatedStateBag);
 
             if (stepResult.ResolvedWorkerConfig is not null)
             {
@@ -320,6 +327,11 @@ public sealed class TemporalAIAgent : AIAgent
                 interceptorResults = await Workflow.WhenAllAsync(interceptorTasks).ConfigureAwait(true);
             }
 
+            // Snapshot the session bag once for this iteration's tool fan-out: every tool in the
+            // turn must observe the same pre-fan-out state, and re-serializing per tool would both
+            // cost more and risk handing different tools different views.
+            var toolDispatchStateBag = temporalSession.SerializeStateBag();
+
             // Feature L: Phase 2 — process decisions. PauseForApproval degrades to Block
             // since TemporalAIAgent has no DurableApprovalMixin.
             var toolTasks = new List<Task<InvokeAgentToolResult>?>(toolCalls.Count);
@@ -351,7 +363,7 @@ public sealed class TemporalAIAgent : AIAgent
                             CallId = tc.CallId,
                             // X-1: seed the tool with accumulated session state so context
                             // providers / scope-aware tools see it (was implicitly null before).
-                            SerializedStateBag = _currentStateBag,
+                            SerializedStateBag = toolDispatchStateBag,
                         };
                         // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)
                         // falling back to the shared _activityOptions (P1-2 fix).
@@ -426,8 +438,7 @@ public sealed class TemporalAIAgent : AIAgent
             // (StateBagMerge.ApprovalScopesReservedPrefix). TemporalAIAgent has no approval-scope
             // store plumbing, so there is no custom always-scopes store key to pass — the prefix
             // deny-list (covering the session key and default always key) is sufficient here.
-            _currentStateBag = StateBagMerge.Merge(
-                _currentStateBag,
+            temporalSession.MergeToolStateBagWriteBacks(
                 toolStateBagWriteBacks,
                 alwaysScopesStoreKey: null,
                 Workflow.Logger);

@@ -2,7 +2,9 @@ using System.Collections.ObjectModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.Agents.State;
+using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI.Session;
 
 namespace TemporalCommunity.Extensions.Agents.Session;
@@ -239,6 +241,81 @@ public sealed class TemporalAgentSession : AgentSession
         }
 
         return this.StateBag.Serialize();
+    }
+
+    /// <summary>
+    /// Applies <em>trusted</em> StateBag output returned by an LLM-step activity — context-provider
+    /// mutations — on top of this session's bag, per-key, preserving keys the step did not touch.
+    /// </summary>
+    /// <remarks>
+    /// Unfiltered by design: context providers are developer-registered and carry the same trust as
+    /// the workflow thread. Tool and interceptor write-backs are untrusted and must go through
+    /// <see cref="MergeToolStateBagWriteBacks"/> instead. See
+    /// <see cref="StateBagMerge.OverlayTrustedStateBag"/>.
+    /// </remarks>
+    internal void OverlayTrustedStateBag(JsonElement? updated)
+    {
+        // A hash-gated or empty step returns no bag. Skipping here avoids a pointless
+        // serialize/deserialize round-trip of the whole bag and matches
+        // StateBagMerge.OverlayTrustedStateBag's "return current unchanged" behaviour.
+        if (updated is not { ValueKind: JsonValueKind.Object })
+        {
+            return;
+        }
+
+        ReplaceStateBag(StateBagMerge.OverlayTrustedStateBag(this.SerializeStateBag(), updated));
+    }
+
+    /// <summary>
+    /// Merges <em>untrusted</em> tool and interceptor StateBag write-backs into this session's bag.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <paramref name="writeBacks"/> must be ordered by original tool-call index, not by activity
+    /// completion order: tool activities fan out concurrently, so completion order is
+    /// non-deterministic and using it would break workflow replay. The merge applies contributions
+    /// in the supplied index order, so a later index wins a top-level key conflict.
+    /// </para>
+    /// <para>
+    /// Reserved approval-scope keys are dropped from every contribution — see
+    /// <see cref="StateBagMerge.Merge"/>.
+    /// </para>
+    /// </remarks>
+    internal void MergeToolStateBagWriteBacks(
+        IReadOnlyList<JsonElement?> writeBacks,
+        string? alwaysScopesStoreKey = null,
+        ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(writeBacks);
+
+        var hasContribution = false;
+        for (var i = 0; i < writeBacks.Count; i++)
+        {
+            if (writeBacks[i] is { ValueKind: JsonValueKind.Object })
+            {
+                hasContribution = true;
+                break;
+            }
+        }
+
+        if (!hasContribution)
+        {
+            return;
+        }
+
+        ReplaceStateBag(StateBagMerge.Merge(
+            this.SerializeStateBag(), writeBacks, alwaysScopesStoreKey, logger));
+    }
+
+    /// <summary>
+    /// Replaces this session's <see cref="AgentSession.StateBag"/> with the merge result. A null,
+    /// <see cref="JsonValueKind.Undefined"/>, or JSON-null value clears the bag.
+    /// </summary>
+    private void ReplaceStateBag(JsonElement? merged)
+    {
+        this.StateBag = merged is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } el
+            ? AgentSessionStateBag.Deserialize(el)
+            : new AgentSessionStateBag();
     }
 
     /// <inheritdoc/>
