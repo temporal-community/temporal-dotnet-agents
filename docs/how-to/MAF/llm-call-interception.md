@@ -17,23 +17,38 @@ There are two places to intercept, plus a third mechanism people often arrive he
 
 | I want to see… | Use | Covered |
 |---|---|---|
-| The raw model request and response — tokens, finish reason, provider payload | Decorate the `IChatClient` returned from `agent.ChatClient` | [below](#the-chat-client-layer) |
-| One event per LLM step, above context providers and options-stamping | `agent.ConfigureAgentPipeline` with a `DelegatingAIAgent` | [below](#the-agent-middleware-layer) |
+| Raw model transport — streaming updates as they arrive, tokens, finish reason, provider payload | Decorate the `IChatClient` returned from `agent.ChatClient` | [below](#the-chat-client-layer) |
+| One event wrapping the whole agent run for the step, with the durable session in hand | `agent.ConfigureAgentPipeline` with a `DelegatingAIAgent` | [below](#the-agent-middleware-layer) |
 | Tool names, arguments, or a gate before a tool runs | `IAgentToolInterceptor` | [tool-interceptor.md](./tool-interceptor.md) |
 
-The two layers differ in *what they can see*, and the ordering is the reason. Outermost to innermost:
+**Both layers observe the same effective request values.** Context providers run, and the effective
+`ChatOptions` is built, *in the activity* — before the agent pipeline is invoked at all. Neither
+layer sees a pre-provider view:
 
 ```
-your ConfigureAgentPipeline middleware      ← sees the run before context providers touch it
-  └─ TemporalSessionBoundaryAgent           ← library-owned; carries the durable session inward
-      └─ ChatClientAgent                    ← applies context providers, stamps ChatOptions
-          └─ your IChatClient decorator     ← sees the final, fully-stamped request
-              └─ provider client (OpenAI, Azure, …)
+RunDurableAgentStep activity
+├─ resolves the chat client and context providers from a per-attempt DI scope
+├─ invokes the context providers, chaining each one's output into the next
+├─ builds the augmented messages and the effective ChatOptions / ChatClientAgentRunOptions
+└─ agent.RunStreamingAsync(augmentedMessages, session, runOptions, ct)
+     └─ your ConfigureAgentPipeline middleware   ← outermost; receives the restored durable session
+         └─ TemporalSessionBoundaryAgent         ← library-owned session boundary
+             └─ ChatClientAgent                  ← constructed with AIContextProviders = null
+                 └─ your IChatClient decorator   ← provider-level transport and streaming updates
+                     └─ provider client (OpenAI, Azure, …)
 ```
 
-So agent middleware sees the run *before* provider-injected messages and the library's `Tools` /
-`Instructions` / `ResponseFormat` stamping; the chat-client decorator sees the request *after* all of
-it. If you want to know what was actually sent to the model, you want the chat-client layer.
+`ChatClientAgent` does **not** run the providers in this library. It is deliberately constructed with
+`AIContextProviders = null`, because the activity has already executed them — it replicates what
+MAF's `PrepareSessionAndMessagesAsync` would otherwise do, so that provider output is captured in
+the durable step rather than hidden inside the agent.
+
+So the choice between layers is not "before or after providers." It is:
+
+- **Agent middleware** wraps the agent run for the step and has the restored `TemporalAgentSession`.
+  Use it for run-level spans, and for retry-safe StateBag work.
+- **Chat-client decorator** sits at the transport boundary. Use it when you need the streaming
+  updates themselves, token usage, finish reason, or anything about how the provider call behaved.
 
 ---
 
@@ -71,42 +86,88 @@ internal sealed class LoggingChatClient(IChatClient inner, ILogger<LoggingChatCl
         var stopwatch = Stopwatch.StartNew();
         var updates = new List<ChatResponseUpdate>();
 
-        // Log the request. `messages` carries user content and system instructions — redact before
-        // shipping this anywhere you would not put PII.
+        // Pessimistic default: if we never reach the end of the stream and nothing threw, the
+        // consumer stopped enumerating.
+        var outcome = "consumer-stopped";
+
+        // `messages` carries user content and system instructions — redact before shipping this
+        // anywhere you would not put PII.
         logger.LogInformation(
             "LLM request: messages={Count}, tools={ToolCount}",
             messages.Count(),
             options?.Tools?.Count ?? 0);
 
+        var stream = base.GetStreamingResponseAsync(messages, options, cancellationToken)
+            .GetAsyncEnumerator(cancellationToken);
         try
         {
-            await foreach (var update in base
-                .GetStreamingResponseAsync(messages, options, cancellationToken)
-                .WithCancellation(cancellationToken))
+            while (true)
             {
+                // `yield return` cannot live inside a try/catch, so the catch wraps only the
+                // advance. This is what lets the outcome distinguish a fault from a cancellation
+                // from a consumer that simply stopped reading.
+                ChatResponseUpdate update;
+                try
+                {
+                    if (!await stream.MoveNextAsync())
+                    {
+                        outcome = "completed";
+                        break;
+                    }
+
+                    update = stream.Current;
+                }
+                catch (OperationCanceledException)
+                {
+                    outcome = "canceled";
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    outcome = "faulted";
+                    logger.LogError(ex,
+                        "LLM call failed after {DurationMs}ms", stopwatch.ElapsedMilliseconds);
+                    throw;
+                }
+
                 updates.Add(update);
                 yield return update;
             }
         }
         finally
         {
-            // A `finally` matters here: if the consumer stops enumerating early, or the stream
-            // faults, code placed after the `await foreach` never runs and you silently lose the
-            // completion log for exactly the calls you most wanted to see.
-            var response = updates.ToChatResponse();
+            await stream.DisposeAsync();
 
-            logger.LogInformation(
-                "LLM response: duration={DurationMs}ms, input_tokens={Input}, " +
-                "output_tokens={Output}, total_tokens={Total}, finish_reason={FinishReason}",
-                stopwatch.ElapsedMilliseconds,
-                response.Usage?.InputTokenCount,
-                response.Usage?.OutputTokenCount,
-                response.Usage?.TotalTokenCount,
-                response.FinishReason);
+            // Only a completed stream yields a trustworthy aggregate. Usage and finish reason are
+            // absent or partial in every other terminal state, so do not report them as a result.
+            if (outcome == "completed")
+            {
+                var response = updates.ToChatResponse();
+                logger.LogInformation(
+                    "LLM response completed: duration={DurationMs}ms, input_tokens={Input}, " +
+                    "output_tokens={Output}, total_tokens={Total}, finish_reason={FinishReason}",
+                    stopwatch.ElapsedMilliseconds,
+                    response.Usage?.InputTokenCount,
+                    response.Usage?.OutputTokenCount,
+                    response.Usage?.TotalTokenCount,
+                    response.FinishReason);
+            }
+            else
+            {
+                logger.LogWarning(
+                    "LLM call ended without completing: outcome={Outcome}, " +
+                    "duration={DurationMs}ms, partial_updates={Count}",
+                    outcome, stopwatch.ElapsedMilliseconds, updates.Count);
+            }
         }
     }
 }
 ```
+
+The `finally` runs on **every** terminal path — success, provider fault, cancellation, and a consumer
+that stops enumerating early. Emitting one unconditional "LLM response" event from it would report a
+partial or empty aggregate as if it were a result, and would hide failures behind a success-shaped
+log line. Use `finally` for duration and cleanup; record the outcome explicitly.
 
 `ChatResponseUpdate` fragments aggregate into a single `ChatResponse` via
 `ToChatResponse()`, which is where `Usage` and `FinishReason` become available — they are not on the
@@ -133,10 +194,17 @@ opts.AddDurableAgent("Assistant", agent =>
 });
 ```
 
-Registering the decorator as a DI **singleton** also works, but then one instance is shared across
-every concurrent activity on the worker — including activities for different sessions. If you do
-that, the decorator must be thread-safe, and it must not accumulate per-conversation state in
-fields. See [Where state belongs](#where-state-belongs).
+Registering the decorator as a DI **singleton** also works, and changes its lifetime:
+
+| Registration | Lifetime |
+|---|---|
+| Built in the `agent.ChatClient` factory (above) | **Attempt-local** — a new instance per activity attempt |
+| DI singleton | **Shared** — one instance across attempts, sessions, and concurrent activities on the worker |
+
+A singleton must therefore be thread-safe. But the important point applies to both: **neither is
+session-scoped.** An attempt-local instance is discarded when the attempt ends; a singleton is shared
+by conversations that have nothing to do with each other. Per-conversation state belongs in neither —
+see [Where state belongs](#where-state-belongs).
 
 No caller-side change is needed. Invoke the agent as usual:
 
@@ -202,8 +270,9 @@ attempt**. Four consequences, all of which bite in production:
   non-idempotent side effect — billing rows, audit writes, counters — will duplicate.
 - **If your decorator throws, the activity fails.** Temporal retries the model call, and you pay for
   the tokens again.
-- **Instance state is attempt-local at best.** It is never session-local. An attempt can retry, land
-  on a different worker, or run concurrently with another session.
+- **Decorator instance state is never session-scoped.** Whether it is attempt-local or a shared
+  singleton depends on how you registered it — and neither tracks a conversation. Attempts retry,
+  land on other workers, and run concurrently with other sessions.
 - **There is no workflow-side interception point.** Nothing your decorator emits is recorded in
   workflow history, and you cannot decorate from workflow context.
 
@@ -221,8 +290,10 @@ var session = TemporalAgentContext.Current.CurrentSession;
 session.StateBag.SetValue("my.counter", value);
 ```
 
-The StateBag is carried across steps and turns and survives continue-as-new when the workflow
-carries the session forward. Decorator fields survive none of that.
+The StateBag is carried across steps and turns, and survives continue-as-new when the workflow
+carries the session forward. That is the durability a decorator field cannot give you: an
+attempt-local instance is discarded when the attempt ends, and a singleton outlives the conversation
+while being shared with every other one on the worker.
 
 ---
 
