@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This phase defines the wire contract for carrying session state (session ID, StateBag, history) across Temporal workflow boundaries (continue-as-new, activity I/O). 
+This phase defines the wire contract for serializing session state (session ID, StateBag, history) across explicit persistence and continue-as-new boundaries. It does not replace the existing activity inputs, which continue to carry accumulated messages and serialized StateBag values independently.
 
 **Core Decision:** Use an internal, source-gen registered snapshot DTO (`TemporalAgentSessionSnapshot`) instead of directly serializing `TemporalAgentSession` (which violates CLAUDE.md line 155 constraint).
 
@@ -54,10 +54,9 @@ namespace TemporalCommunity.Extensions.Agents.Session;
 
 /// <summary>
 /// Internal snapshot DTO for serializing session state across Temporal boundaries.
-/// This is the wire format for session carry-forward in workflow inputs and activity I/O.
+/// This is the wire format for session persistence and carry-forward in workflow inputs.
 /// NOT exposed in public API; used internally by SerializeSessionCoreAsync/DeserializeSessionCoreAsync.
 /// </summary>
-[JsonSerializable]  // Will be registered in AgentSessionJsonContext
 internal sealed class TemporalAgentSessionSnapshot
 {
     /// <summary>
@@ -102,7 +101,7 @@ protected override ValueTask<JsonElement> SerializeSessionCoreAsync(
     // Build snapshot from session state
     var snapshot = new TemporalAgentSessionSnapshot
     {
-        SessionId = temporalSession.SessionId.WorkflowId,
+        SessionId = temporalSession.SessionId.ToString(),  // Preserves agentName-key format
         StateBag = temporalSession.StateBag.Count > 0 
             ? temporalSession.StateBag.Serialize() 
             : null,
@@ -186,8 +185,7 @@ public void SessionSnapshot_SourceGenResolver()
     
     Assert.NotNull(typeInfo);
     // Verify it came from AgentSessionJsonContext, not reflection
-    Assert.Equal(nameof(AgentSessionJsonContext), 
-        typeInfo.Origin.Name);
+    Assert.Same(AgentSessionJsonContext.Default, typeInfo.OriginatingResolver);
 }
 ```
 
@@ -197,68 +195,97 @@ public void SessionSnapshot_SourceGenResolver()
 
 ```csharp
 [Fact]
-public async Task SessionSnapshot_TemporalAgentDataConverter_RoundTrip()
+public void SessionSnapshot_TemporalAgentDataConverter_RoundTrip()
 {
+    var stateBag = new AgentSessionStateBag();
+    stateBag.SetValue("key", "value");
     var snapshot = new TemporalAgentSessionSnapshot
     {
         SessionId = "ta-agent-abc123",
-        StateBag = JsonDocument.Parse("""{ "key": "value" }""").RootElement,
+        StateBag = stateBag.Serialize(),
         History = new[]
         {
             new AgentSessionRequest 
             { 
                 CorrelationId = "req1",
                 CreatedAt = DateTimeOffset.UtcNow,
-                Messages = new[] { new ChatMessage(ChatRole.User, "Hello") }
+                Messages = new[]
+                {
+                    new ChatMessage(ChatRole.User, "Hello"),
+                    new ChatMessage(ChatRole.Assistant, new FunctionCallContent(
+                        "call-1", "weather", new Dictionary<string, object?> { ["city"] = "Seattle" }))
+                }
             },
             new AgentSessionResponse
             {
                 CorrelationId = "req1",
                 CreatedAt = DateTimeOffset.UtcNow,
-                Messages = new[] { new ChatMessage(ChatRole.Assistant, "Hi") }
+                Messages = new[]
+                {
+                    new ChatMessage(ChatRole.Tool, new FunctionResultContent("call-1", "sunny"))
+                }
             }
         }
     };
 
     // Serialize via TemporalAgentDataConverter
-    var payload = TemporalAgentDataConverter.Instance.ToPayload(snapshot);
+    var converter = TemporalAgentDataConverter.Instance.PayloadConverter;
+    var payload = converter.ToPayload(snapshot);
     
     // Deserialize back
-    var restored = TemporalAgentDataConverter.Instance
-        .FromPayload<TemporalAgentSessionSnapshot>(payload);
+    var restored = (TemporalAgentSessionSnapshot)converter.ToValue(
+        payload, typeof(TemporalAgentSessionSnapshot))!;
 
     Assert.NotNull(restored);
     Assert.Equal(snapshot.SessionId, restored.SessionId);
     Assert.Equal(2, restored.History?.Count);
+    Assert.IsType<AgentSessionRequest>(restored.History![0]);
+    Assert.IsType<AgentSessionResponse>(restored.History[1]);
+    Assert.IsType<FunctionCallContent>(restored.History[0].Messages[1].Contents.Single());
+    Assert.IsType<FunctionResultContent>(restored.History[1].Messages[0].Contents.Single());
+    var restoredBag = AgentSessionStateBag.Deserialize(restored.StateBag!.Value);
+    Assert.True(restoredBag.TryGetValue<string>("key", out var value));
+    Assert.Equal("value", value);
 }
 ```
 
-### Gate 3: Legacy Payload Compatibility
+### Gate 3: Legacy Snapshot Compatibility
 
-**Purpose:** Verify old sessions (v0.2 without history) deserialize correctly.
+**Purpose:** Verify legacy session payloads without a `history` field deserialize correctly.
 
 ```csharp
 [Fact]
 public void SessionSnapshot_LegacyPayload_NoHistory()
 {
-    // Simulate v0.2 session without history field
-    var legacyJson = JsonDocument.Parse("""
+    var stateBag = new AgentSessionStateBag();
+    stateBag.SetValue("context", "data");
+    var serializedStateBag = stateBag.Serialize().GetRawText();
+
+    // Legacy payload shape: no history field.
+    var legacyJson = JsonDocument.Parse($$"""
     {
         "sessionId": "ta-agent-key",
-        "stateBag": { "context": "data" }
-        // Note: no "history" field
+        "stateBag": {{serializedStateBag}}
     }
     """).RootElement;
 
     var snapshot = JsonSerializer.Deserialize<TemporalAgentSessionSnapshot>(
-        legacyJson, 
+        legacyJson,
         TemporalAgentJsonUtilities.DefaultOptions);
 
     Assert.NotNull(snapshot);
     Assert.Equal("ta-agent-key", snapshot.SessionId);
-    Assert.Null(snapshot.History); // Treated as empty
+    Assert.Null(snapshot.History);
+    Assert.True(
+        AgentSessionStateBag.Deserialize(snapshot.StateBag!.Value)
+            .TryGetValue<string>("context", out var value));
+    Assert.Equal("data", value);
 }
 ```
+
+**Validates:** Missing `history` is backward compatible at the persisted wire boundary. Existing
+snapshots decode with no history and preserve their StateBag. Gate 5 exercises that compatibility
+through the public agent serialization boundary once session-owned history exists.
 
 ### Gate 4: Empty State Optimization
 
@@ -286,6 +313,62 @@ public void SessionSnapshot_EmptyState_OmitFields()
 }
 ```
 
+### Gate 5: Agent Serialization Boundary (Phase 1)
+
+**Phase boundary:** Define this test in Phase 0. It becomes executable when Phase 1 adds
+session-owned history (`AppendHistoryEntry` and `History`) and makes
+`TemporalAIAgent.SerializeSessionAsync` / `DeserializeSessionAsync` use the snapshot contract.
+The Phase 1 test suite must also pass a legacy snapshot with no `history` field through
+`DeserializeSessionAsync`, proving the compatibility established by Gate 3 at the public boundary.
+
+**Purpose:** Verify the public MAF session serialization boundary, not only the snapshot DTO.
+
+```csharp
+[Fact]
+public async Task SessionSnapshot_FreshAgent_RestoresTypedStateAndHistory()
+{
+    var sourceAgent = new TemporalAIAgent("agent");
+    var sourceSession = new TemporalAgentSession(new TemporalAgentSessionId("agent", "key"));
+    sourceSession.StateBag.SetValue("key", "value");
+    sourceSession.AppendHistoryEntry(new AgentSessionRequest
+    {
+        CorrelationId = "req-1",
+        CreatedAt = DateTimeOffset.UtcNow,
+        Messages = [new ChatMessage(ChatRole.User, "Hello")],
+    });
+
+    var serialized = await sourceAgent.SerializeSessionAsync(sourceSession);
+    var restored = await new TemporalAIAgent("agent").DeserializeSessionAsync(serialized);
+    var session = Assert.IsType<TemporalAgentSession>(restored);
+
+    Assert.True(session.StateBag.TryGetValue<string>("key", out var value));
+    Assert.Equal("value", value);
+    Assert.Single(session.History);
+    Assert.IsType<AgentSessionRequest>(session.History[0]);
+}
+```
+
+### StateBag Update Contract
+
+`TemporalAgentSession.StateBag` is the sole StateBag model. The session exposes an internal
+operation that accepts a serialized StateBag snapshot and replaces its in-memory StateBag only
+after the applicable deterministic merge has completed.
+
+- After every LLM-step activity, overlay the trusted `UpdatedStateBag` onto the session snapshot
+  with `StateBagMerge.OverlayTrustedStateBag` before dispatching the next LLM step.
+- After concurrent tool and interceptor activities finish, merge their write-backs once in original
+  tool-call index order with `StateBagMerge.Merge`, then apply the merged result to the session.
+- Never apply a tool or interceptor write-back in activity completion order, and do not defer either
+  update category until the turn ends.
+
+### Concurrent-Use Contract (Phase 1)
+
+The Phase 1 integration suite must start two overlapping `RunAsync` calls using the same live
+`TemporalAgentSession` and assert that the second call fails immediately with the documented
+`InvalidOperationException`. The test must separately demonstrate that distinct sessions can run
+independently. This protects the contract from regressing into silent serialization or shared-state
+corruption.
+
 ---
 
 ## Customer Workflow Pattern (Post-Design)
@@ -296,32 +379,35 @@ Once wire contract is validated, workflows will use it like this:
 [Workflow("MyOrchestrationWorkflow")]
 public class MyOrchestrationWorkflow
 {
-    private TemporalAgentSession? _session;
-
     [WorkflowRun]
     public async Task RunAsync(MyWorkflowInput input)
     {
+        var agent = WorkflowAgents.GetTemporalAgent("MyAgent");
+
         // Restore or create session
-        if (input.SerializedSession is not null)
+        TemporalAgentSession session;
+        if (input.SerializedSession is { } serializedSession)
         {
-            _session = await agent.DeserializeSessionAsync(
-                input.SerializedSession, 
-                cancellationToken);
+            var restored = await agent.DeserializeSessionAsync(
+                serializedSession,
+                cancellationToken: Workflow.CancellationToken);
+            session = restored as TemporalAgentSession
+                ?? throw new InvalidOperationException("The serialized session is not a TemporalAgentSession.");
         }
         else
         {
-            _session = await agent.CreateSessionAsync(cancellationToken);
+            session = (TemporalAgentSession)await agent.CreateSessionAsync(Workflow.CancellationToken);
         }
 
         // Use session
-        var response = await agent.RunAsync("request", _session);
+        var response = await agent.RunAsync("request", session, cancellationToken: Workflow.CancellationToken);
 
         // Carry forward on continue-as-new (explicit)
         if (Workflow.ContinueAsNewSuggested)
         {
             var serialized = await agent.SerializeSessionAsync(
-                _session, 
-                cancellationToken);
+                session,
+                cancellationToken: Workflow.CancellationToken);
             
             throw Workflow.CreateContinueAsNewException(
                 (MyOrchestrationWorkflow w) => w.RunAsync(
@@ -336,6 +422,10 @@ public record MyWorkflowInput
 }
 ```
 
+The worker that executes this custom workflow must use `TemporalAgentDataConverter` (or an
+equivalent converter created by `TemporalAgentDataConverter.CreateDataConverter`) so MAF session
+entry polymorphism is preserved in workflow history.
+
 ---
 
 ## Design Checklist
@@ -344,9 +434,10 @@ public record MyWorkflowInput
 - [ ] Source-gen registration in `AgentSessionJsonContext` approved
 - [ ] Round-trip contract (serialize/deserialize logic) approved
 - [ ] Legacy payload compatibility strategy approved (treat missing history as empty)
-- [ ] All 4 test gates defined and passing
-- [ ] Concurrent-use semantics defined (overlapping calls: reject or serialize?)
-- [ ] StateBag mutation flow documented (how updates flow from activities back to session)
+- [ ] Gates 1–4 defined and passing in the wire-contract prototype
+- [ ] Gate 5 specified, then passing with the Phase 1 session-owned-history implementation
+- [ ] Concurrent-use rejection semantics documented and tested
+- [ ] StateBag mutation flow documented and tested against LLM-step overlay plus tool/interceptor merge
 - [ ] Performance characteristics understood (snapshot serialization overhead)
 
 ---
@@ -356,7 +447,7 @@ public record MyWorkflowInput
 1. **Implementation** (Phase 1 team)
    - Implement `TemporalAgentSessionSnapshot` exactly as designed
    - Add round-trip methods to `TemporalAIAgent`
-   - Implement all 4 test gates
+   - Implement Gates 1–4 in the wire-contract prototype and Gate 5 with session-owned history
    - Run benchmarks at 1, 10, 100-turn scales
 
 2. **Validation** (Phase 1 team)
@@ -371,25 +462,20 @@ public record MyWorkflowInput
 
 ---
 
-## Open Questions for Architecture Team
+## Decisions Carried into Implementation
 
-1. **Concurrent-use semantics:** Should overlapping `RunAsync()` calls on same live session:
-   - **A) Reject immediately** with `InvalidOperationException` (recommended)?
-   - **B) Serialize internally** (queue calls, process sequentially)?
-   - **C) Allow (undefined behavior)** (NOT recommended)?
+1. **Concurrent use:** Reject overlapping `RunAsync()` calls on the same live session with a
+   clear `InvalidOperationException`. Parallel conversations require distinct session objects.
 
-2. **StateBag update flow:** Should session apply StateBag updates from activities:
-   - **A) On every activity completion** (current proxy behavior)?
-   - **B) On turn completion** (after all tool calls)?
-   - **C) Configurable per agent**?
+2. **StateBag timing:** Apply trusted LLM-step output after each LLM activity. Merge concurrent
+   tool/interceptor output after its full fan-out completes in original tool-call index order. Both
+   updates are applied before the next dispatch, never at turn completion.
 
-3. **History truncation:** Should snapshot omit very old history entries:
-   - **A) No (keep full history always)**?
-   - **B) Yes, with configurable threshold** (Phase 2+ work)?
+3. **History truncation:** Keep complete history in this scope. Do not introduce an automatic
+   threshold or compaction policy; durable history reduction remains separate work.
 
-4. **Version field:** Add version to snapshot for future migrations?
-   - **A) Not yet (defer until needed)**?
-   - **B) Yes, default to 1** (safer for evolution)?
+4. **Versioning:** Do not add a version field. A missing `history` property is the supported legacy
+   shape; add a version only with a defined migration behavior.
 
 ---
 
@@ -401,8 +487,8 @@ public record MyWorkflowInput
 - [ ] Snapshot DTO structure is correct
 - [ ] Test gates are comprehensive
 - [ ] Customer workflow pattern is acceptable
-- [ ] Concurrent-use semantics chosen
-- [ ] StateBag update strategy defined
+- [ ] Concurrent-use rejection contract confirmed
+- [ ] StateBag update contract confirmed
 - [ ] Ready to proceed to Phase 1 (Revised) implementation
 
 **Approved by:** ________________  
