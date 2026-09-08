@@ -32,6 +32,7 @@ public sealed class TemporalAgentSession : AgentSession
     // instead of _history itself, so callers cannot cast the facade back to a mutable list.
     private readonly List<DurableSessionEntry> _history = [];
     private readonly ReadOnlyCollection<DurableSessionEntry> _historyView;
+    private bool _runInProgress;
 
     /// <summary>
     /// Initializes a new <see cref="TemporalAgentSession"/> with the given session ID.
@@ -63,6 +64,39 @@ public sealed class TemporalAgentSession : AgentSession
     /// decision that has not been made; nothing here depends on it.
     /// </remarks>
     internal IReadOnlyList<DurableSessionEntry> History => _historyView;
+
+    /// <summary>
+    /// Marks this session as having a run in flight, rejecting a second overlapping run.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The flag lives on the session, not on the agent: one agent instance is expected to drive
+    /// several distinct sessions at once, and blocking that would defeat the point of session
+    /// ownership. What is not safe is two runs interleaving over the <em>same</em> session, since
+    /// they would append to one history and merge into one StateBag with no defined ordering.
+    /// </para>
+    /// <para>
+    /// Fail fast rather than serialize the second caller: silently queueing would hide a
+    /// programming error behind non-deterministic turn ordering.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">A run is already in progress on this session.</exception>
+    internal void EnterRun()
+    {
+        if (_runInProgress)
+        {
+            throw new InvalidOperationException(
+                "Overlapping RunAsync() calls on the same session are not allowed. " +
+                "Use distinct session objects for parallel conversations.");
+        }
+
+        _runInProgress = true;
+    }
+
+    /// <summary>
+    /// Clears the in-flight marker. Must run on every completion, cancellation, and failure path.
+    /// </summary>
+    internal void ExitRun() => _runInProgress = false;
 
     /// <summary>Appends one entry to the session history. O(1).</summary>
     internal void AppendHistoryEntry(DurableSessionEntry entry)

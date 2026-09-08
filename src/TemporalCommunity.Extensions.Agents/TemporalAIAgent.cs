@@ -34,7 +34,6 @@ namespace TemporalCommunity.Extensions.Agents;
 public sealed class TemporalAIAgent : AIAgent
 {
     private readonly string _agentName;
-    private readonly List<DurableSessionEntry> _history = [];
     private readonly ActivityOptions _activityOptions;
     private int _requestCount;
     // Cached after the first successful worker-settings resolution step so subsequent turns
@@ -117,6 +116,25 @@ public sealed class TemporalAIAgent : AIAgent
                 $"Create the session with {nameof(CreateSessionAsync)} on this agent.");
         }
 
+        // Reject a second run over the same live session before any activity is scheduled — two
+        // interleaved runs would append to one history and merge into one StateBag with no
+        // defined ordering. Distinct sessions on this same agent remain free to run in parallel.
+        temporalSession.EnterRun();
+        try
+        {
+            return await RunTurnAsync(messages, temporalSession, options).ConfigureAwait(true);
+        }
+        finally
+        {
+            temporalSession.ExitRun();
+        }
+    }
+
+    private async Task<AgentResponse> RunTurnAsync(
+        IEnumerable<ChatMessage> messages,
+        TemporalAgentSession temporalSession,
+        AgentRunOptions? options)
+    {
         IList<string>? enableToolNames = null;
         bool enableToolCalls = true;
         string? callerCorrelationId = null;
@@ -146,7 +164,7 @@ public sealed class TemporalAIAgent : AIAgent
                 : callerCorrelationId,
         };
 
-        _history.Add(AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow));
+        temporalSession.AppendHistoryEntry(AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow));
         _requestCount++;
 
         var sessionId = temporalSession.SessionId;
@@ -157,7 +175,7 @@ public sealed class TemporalAIAgent : AIAgent
         // Mirrors the AgentWorkflow main loop but without continue-as-new / search attributes /
         // history reduction (the orchestrating workflow owns those concerns).
         var accumulated = new List<ChatMessage>();
-        foreach (var entry in _history)
+        foreach (var entry in temporalSession.History)
         {
             foreach (var m in entry.Messages)
                 accumulated.Add(m);
@@ -251,7 +269,7 @@ public sealed class TemporalAIAgent : AIAgent
                     CreatedAt = Workflow.UtcNow,
                 };
 
-                _history.Add(AgentSessionResponse.FromAgentResponse(
+                temporalSession.AppendHistoryEntry(AgentSessionResponse.FromAgentResponse(
                     request.CorrelationId!, response, Workflow.UtcNow));
 
                 return response;
@@ -454,7 +472,7 @@ public sealed class TemporalAIAgent : AIAgent
             Usage = totalUsage,
             CreatedAt = Workflow.UtcNow,
         };
-        _history.Add(AgentSessionResponse.FromAgentResponse(
+        temporalSession.AppendHistoryEntry(AgentSessionResponse.FromAgentResponse(
             request.CorrelationId!, iterCapResponse, Workflow.UtcNow));
 
         return iterCapResponse;
