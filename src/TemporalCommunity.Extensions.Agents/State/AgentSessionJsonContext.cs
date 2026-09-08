@@ -22,6 +22,9 @@ namespace TemporalCommunity.Extensions.Agents.State;
 [JsonSerializable(typeof(DurableSessionResponse))]
 [JsonSerializable(typeof(AgentSessionRequest))]
 [JsonSerializable(typeof(AgentSessionResponse))]
+// Session wire contract — TemporalAgentSession is not itself a serialization root
+// (see TemporalAgentSessionSnapshot remarks); the snapshot DTO is registered in its place.
+[JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionSnapshot))]
 // Activity I/O types — workflow ↔ activity boundary
 [JsonSerializable(typeof(AgentStepInput))]
 [JsonSerializable(typeof(AgentStepResult))]
