@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;
+using TemporalCommunity.Extensions.AI.Session;
 
 namespace TemporalCommunity.Extensions.Agents.Session;
 
@@ -19,15 +20,87 @@ public sealed class TemporalAgentSession : AgentSession
     }
 
     [JsonConstructor]
-    internal TemporalAgentSession(TemporalAgentSessionId sessionId, AgentSessionStateBag stateBag) : base(stateBag)
+    internal TemporalAgentSession(
+        TemporalAgentSessionId sessionId,
+        AgentSessionStateBag stateBag,
+        IReadOnlyList<DurableSessionEntry>? history = null,
+        SessionHistoryMetadata? historyMetadata = null) : base(stateBag)
     {
         this.SessionId = sessionId;
+        this.History = history ?? [];
+        this.HistoryMetadata = historyMetadata;
     }
 
     /// <summary>Gets the Temporal agent session ID.</summary>
     [JsonInclude]
     [JsonPropertyName("sessionId")]
     public TemporalAgentSessionId SessionId { get; }
+
+    /// <summary>
+    /// Gets the session's conversation history (request/response entries and markers).
+    /// Internal storage; mutated by TemporalAIAgent and restored via deserialization.
+    /// </summary>
+    internal IReadOnlyList<DurableSessionEntry> History { get; private set; } = [];
+
+    /// <summary>
+    /// Gets metadata about session history (compaction, entry counts).
+    /// Internal storage; carried forward across continue-as-new.
+    /// </summary>
+    internal SessionHistoryMetadata? HistoryMetadata { get; set; }
+
+    /// <summary>
+    /// Gets a read-only snapshot of the session's conversation history.
+    /// </summary>
+    public IReadOnlyList<DurableSessionEntry> GetHistory() => this.History;
+
+    /// <summary>
+    /// Gets the total number of history entries in this session.
+    /// </summary>
+    public int HistoryEntryCount => this.History.Count;
+
+    /// <summary>
+    /// JSON property for serializing history. Excludes nulls/empty lists to save space.
+    /// </summary>
+    [JsonInclude]
+    [JsonPropertyName("history")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal IReadOnlyList<DurableSessionEntry>? SerializedHistory
+    {
+        get => this.History.Count > 0 ? this.History : null;
+        init => this.History = value ?? [];
+    }
+
+    /// <summary>
+    /// JSON property for serializing history metadata.
+    /// </summary>
+    [JsonInclude]
+    [JsonPropertyName("historyMetadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal SessionHistoryMetadata? SerializedHistoryMetadata
+    {
+        get => this.HistoryMetadata;
+        init => this.HistoryMetadata = value;
+    }
+
+    /// <summary>
+    /// Appends an entry to the session's history. Called by TemporalAIAgent.RunCore
+    /// after each agent turn.
+    /// </summary>
+    internal void AppendHistoryEntry(DurableSessionEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        var mutableHistory = new List<DurableSessionEntry>(this.History) { entry };
+        this.History = mutableHistory.AsReadOnly();
+    }
+
+    /// <summary>
+    /// Replaces the session's history (for compaction or migration scenarios).
+    /// </summary>
+    internal void SetHistory(IReadOnlyList<DurableSessionEntry> newHistory)
+    {
+        ArgumentNullException.ThrowIfNull(newHistory);
+        this.History = newHistory;
+    }
 
     internal JsonElement Serialize(JsonSerializerOptions? jsonSerializerOptions = null)
     {
@@ -49,7 +122,28 @@ public sealed class TemporalAgentSession : AgentSession
             ? AgentSessionStateBag.Deserialize(stateBagElement)
             : new AgentSessionStateBag();
 
-        return new TemporalAgentSession(sessionId, stateBag);
+        // Restore history entries from serialized form.
+        IReadOnlyList<DurableSessionEntry>? history = null;
+        if (serializedSession.TryGetProperty("history", out JsonElement historyElement) &&
+            historyElement.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            history = JsonSerializer.Deserialize<IReadOnlyList<DurableSessionEntry>>(
+                historyElement,
+                jsonSerializerOptions ?? TemporalAgentJsonUtilities.DefaultOptions)
+                ?? [];
+        }
+
+        // Restore history metadata.
+        SessionHistoryMetadata? historyMetadata = null;
+        if (serializedSession.TryGetProperty("historyMetadata", out JsonElement metadataElement) &&
+            metadataElement.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            historyMetadata = JsonSerializer.Deserialize<SessionHistoryMetadata>(
+                metadataElement,
+                jsonSerializerOptions ?? TemporalAgentJsonUtilities.DefaultOptions);
+        }
+
+        return new TemporalAgentSession(sessionId, stateBag, history, historyMetadata);
     }
 
     /// <summary>
@@ -69,7 +163,7 @@ public sealed class TemporalAgentSession : AgentSession
         // anything other than a real value as "no bag" and returning a fresh session.
         if (serializedStateBag is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } bagEl)
         {
-            return new TemporalAgentSession(sessionId, AgentSessionStateBag.Deserialize(bagEl));
+            return new TemporalAgentSession(sessionId, AgentSessionStateBag.Deserialize(bagEl), history: null);
         }
 
         return new TemporalAgentSession(sessionId);

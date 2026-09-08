@@ -218,6 +218,8 @@ TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.RequestApproval
 TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.SignalWorkflowAsync<TWorkflow>(string! workflowId, System.Linq.Expressions.Expression<System.Func<TWorkflow, System.Threading.Tasks.Task!>!>! signalCall) -> System.Threading.Tasks.Task!
 TemporalCommunity.Extensions.Agents.Session.TemporalAgentContext.StartWorkflowAsync<TWorkflow>(System.Linq.Expressions.Expression<System.Func<TWorkflow, System.Threading.Tasks.Task!>!>! workflowRunCall, Temporalio.Client.WorkflowOptions! options) -> System.Threading.Tasks.Task<string!>!
 TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession.GetHistory() -> System.Collections.Generic.IReadOnlyList<TemporalCommunity.Extensions.AI.Session.DurableSessionEntry!>!
+TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession.HistoryEntryCount.get -> int
 TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession.SessionId.get -> TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
 TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession.TemporalAgentSession(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId sessionId) -> void
 TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId

@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using TemporalCommunity.Extensions.Agents.Approvals;
+using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI.Session;
 
@@ -22,6 +23,8 @@ namespace TemporalCommunity.Extensions.Agents.State;
 [JsonSerializable(typeof(DurableSessionResponse))]
 [JsonSerializable(typeof(AgentSessionRequest))]
 [JsonSerializable(typeof(AgentSessionResponse))]
+// Session history metadata
+[JsonSerializable(typeof(SessionHistoryMetadata))]
 // Activity I/O types — workflow ↔ activity boundary
 [JsonSerializable(typeof(AgentStepInput))]
 [JsonSerializable(typeof(AgentStepResult))]
