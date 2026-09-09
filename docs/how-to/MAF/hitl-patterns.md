@@ -276,9 +276,8 @@ var response = await turn;
 
 Resolution is retry-safe, but the equivalence check compares **both** `Approved` and `Reason` as
 exact strings — resubmitting the same decision with re-typed reason text returns `Conflict`, not
-`AlreadyResolved`. Five statuses exist (`Accepted`, `AlreadyResolved`, `NotPending`,
-`RequestMismatch`, `Conflict`); a reviewer UI should handle all of them. See
-[Durable approvals](../../concepts/durable-approvals.md).
+`AlreadyResolved`. A reviewer UI must handle all five statuses; they are defined in
+[Durable approvals](../../concepts/durable-approvals.md#one-call-decisions).
 
 ### What the reviewer can be shown
 
@@ -367,18 +366,19 @@ silently bypass their gate. Pick one per agent.
 **Granting a scope also approves the call in front of you.** `GrantSessionScopeAsync` resolves the
 pending request as approved *and* records the grant — call it **instead of** `ResolveApprovalAsync`.
 
-**Grants are workflow-parked only**, session-local, always expiring, and bounded (256 records /
-32 KiB by default, tunable). They expire on workflow time, survive continue-as-new, and never cross
-sessions. Permanent and cross-session grants are intentionally unsupported.
+**Grants are workflow-parked only.** In-tool approval never reaches the code that records one. They
+are also bounded — 256 records / 32 KiB per session by default, tunable through `UseApprovalScopes`.
 
-The administrative service registration, the grant request contract, and the revoke path are covered
-in [Durable approvals](../../concepts/durable-approvals.md). It is a separate registration on
-purpose: keep it behind an authenticated backend.
+Everything else about grants is contract, not choice: the administrative service registration, the
+`SessionApprovalScopeGrantRequest` shape, expiry and revocation semantics, and the rule that
+permanent and cross-session grants are unsupported are all specified in
+[Durable approvals](../../concepts/durable-approvals.md#maf-reusable-session-grants). The separate
+registration is deliberate — keep it behind an authenticated backend.
 
 **Approval is not effect-time authorization.** A tool that changes an external system must re-read
-current tenant, ownership, and authorization state immediately before performing the effect —
-especially after a long wait. `Actor`, `Reason`, descriptions, and review data are untrusted data,
-not authentication evidence.
+current tenant, ownership, and authorization state immediately before performing the effect,
+especially after a long wait. The normative rules for reviewer identity and untrusted request data
+are in the [security boundary](../../security.md).
 
 ---
 

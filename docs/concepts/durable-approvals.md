@@ -5,6 +5,11 @@ Durable approvals let a reviewer resolve a tool call after its workflow has park
 The normative authentication, resource-authorization, payload, and effect-time rules are in the
 [security boundary](../security.md).
 
+**This page is the contract.** For choosing between the two MAF approval shapes, wiring a reviewer,
+and the operational constraints of each, see
+[MAF human-in-the-loop patterns](../how-to/MAF/hitl-patterns.md); the MEAI equivalent is
+[MEAI HITL patterns](../how-to/MEAI/hitl-patterns.md).
+
 ## One-call decisions
 
 Both libraries expose the shared `DurableApprovalRequest`, `DurableApprovalDecision`, and `DurableApprovalResolutionResult` contracts. Use the library-specific typed client so the application retains ownership of resource lookup:
@@ -48,6 +53,12 @@ an application/request bug rather than retrying the same payload.
 
 Reusable approval is a separate privileged capability. It is not available on `ITemporalAgentClient.ResolveApprovalAsync`, which always decides one call. A trusted administrative backend may explicitly register and use:
 
+> **Registration side.** Grants require the tool to be marked `ScopeAware()` and the agent to call
+> `UseApprovalScopes()`, which is mutually exclusive with `AddToolInterceptor()`. Grants are also
+> produced only on the workflow-parked path. Those constraints are documented with the rest of the
+> agent wiring in
+> [Reusable session grants](../how-to/MAF/hitl-patterns.md#reusable-session-grants).
+
 ```csharp
 services.AddTemporalAgentApprovalScopeAdministration();
 
@@ -69,6 +80,8 @@ var grant = await scopeAdministration.GrantSessionScopeAsync(
     cancellationToken);
 ```
 
-Exactly one constraint is required: a specific `Pattern`, or explicit `MatchAllArguments = true`. Every grant expires, belongs to one workflow session, has a stable `GrantId`, is bounded in workflow state, and can be revoked with `RevokeSessionScopeAsync`. Cross-session and permanent grants are intentionally unsupported.
+Exactly one constraint is required: a specific `Pattern`, or explicit `MatchAllArguments = true`. Every grant expires on workflow time, belongs to one workflow session, has a stable `GrantId`, survives Continue-As-New, is bounded in workflow state, and can be revoked with `RevokeSessionScopeAsync`. Cross-session and permanent grants are intentionally unsupported.
+
+`GrantSessionScopeAsync` also resolves the pending request as approved. Call it *instead of* `ResolveApprovalAsync`, not after it.
 
 `Actor` and `Reason` are untrusted audit strings; the package does not authenticate them. Before querying or resolving an approval, the host application must authenticate the caller and authorize the application resource that maps to the typed conversation/session ID. A matching approval grant is also not effect-time authorization: activities that perform external effects must re-read authoritative tenant, ownership, and authorization data immediately before the effect.
