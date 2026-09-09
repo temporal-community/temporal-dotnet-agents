@@ -450,4 +450,75 @@ public class DurableAgentPipelineValidatorTests
             }
         }
     }
+
+    /// <summary>
+    /// Startup validation must never invoke <c>agent.ChatClient</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The documented lifecycle is that the factory runs from the activity's scoped provider on
+    /// every LLM-step attempt. Probing it at boot would widen that contract and can misfire:
+    /// factories may construct scoped or disposable objects, or defer credential and network
+    /// initialization that is not available at startup.
+    /// </para>
+    /// <para>
+    /// The companion test in <c>AgentActivitiesFunctionInvocationGuardTests</c> shows the factory
+    /// IS invoked once per activity attempt. It cannot show this, because it never runs the
+    /// validator — so a future startup check that resolved the chat client would leave it green.
+    /// This test is the one that fails.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void PostConfigure_DoesNotInvokeTheChatClientFactory()
+    {
+        var factoryCalls = 0;
+
+        var (validator, options) = BuildValidator(opts =>
+        {
+            // Both shapes: one plain agent, and one whose ConfigureAgentPipeline makes the
+            // validator do its dry-run work — neither may reach the chat-client factory.
+            opts.AddDurableAgent("PlainAgent", agent =>
+            {
+                agent.ChatClient = _ =>
+                {
+                    Interlocked.Increment(ref factoryCalls);
+                    return new NoOpChatClient();
+                };
+            });
+
+            opts.AddDurableAgent("PipelineAgent", agent =>
+            {
+                agent.ChatClient = _ =>
+                {
+                    Interlocked.Increment(ref factoryCalls);
+                    return new NoOpChatClient();
+                };
+                agent.ConfigureAgentPipeline = pipeline => pipeline.Use(inner => inner);
+            });
+        });
+
+        var ex = Record.Exception(() => validator.PostConfigure(null, options));
+
+        Assert.Null(ex);
+        Assert.Equal(0, factoryCalls);
+    }
+
+    private sealed class NoOpChatClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "stub")));
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose() { }
+    }
 }

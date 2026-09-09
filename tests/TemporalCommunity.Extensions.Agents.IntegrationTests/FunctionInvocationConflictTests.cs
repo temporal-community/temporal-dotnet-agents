@@ -85,6 +85,16 @@ public class FunctionInvocationConflictTests
             Assert.Equal("DurableConfigurationException", appFailure.ErrorType);
             Assert.Contains("agent.ChatClient", appFailure.Message, StringComparison.Ordinal);
 
+            // The CLR exception type does NOT survive the wire. Temporal's DefaultFailureConverter
+            // turns the worker-side DurableFunctionInvocationConflictException into a nested
+            // ApplicationFailureException whose ErrorType carries the type name. A remote caller
+            // therefore never receives the typed exception itself — only this shape. Pinned here so
+            // the documentation and this behaviour cannot drift apart again.
+            var serializedCause = Assert.IsType<ApplicationFailureException>(appFailure.InnerException);
+            Assert.Equal(
+                nameof(TemporalCommunity.Extensions.AI.Exceptions.DurableFunctionInvocationConflictException),
+                serializedCause.ErrorType);
+
             // The model was never reached — the guard runs before ChatClientAgent is constructed.
             Assert.Equal(0, scripted.CallCount);
 
