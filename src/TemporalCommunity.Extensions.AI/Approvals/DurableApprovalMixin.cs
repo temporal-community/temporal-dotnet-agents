@@ -235,7 +235,7 @@ internal sealed class DurableApprovalMixin
     /// different locale must produce byte-identical output on replay.
     /// </para>
     /// </remarks>
-    private static string DescribeDuration(TimeSpan value)
+    internal static string DescribeDuration(TimeSpan value)
     {
         if (value < TimeSpan.FromMinutes(1))
         {

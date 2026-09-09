@@ -579,14 +579,18 @@ just capture-agent-histories
 ```
 
 > **Run the integration suite through `just`, not a bare `dotnet test`.** The capture tests are
-> tagged `Category=HistoryCapture` and every `just` recipe that runs the suite filters them out
-> with `--filter "Category!=HistoryCapture"`. A bare
-> `dotnet test tests/TemporalCommunity.Extensions.Agents.IntegrationTests` has no such filter, so
-> it *includes* them — and they do not assert against the checked-in fixtures, they
-> `File.WriteAllTextAsync` over them in the source tree. The result is a working tree full of
-> rewritten `Compat/Histories/*.json` that looks like an unrelated diff. If that happens,
-> `git checkout -- tests/*/Compat/Histories` and re-run through `just`. Regenerate deliberately,
-> via the recipe above, only when the workflow command sequence has intentionally changed.
+> tagged `Category=HistoryCapture`, and they do not assert against the checked-in fixtures — they
+> `File.WriteAllTextAsync` over them in the source tree. Every `just` recipe that executes tests
+> passes `--filter "Category!=HistoryCapture"`, including the diagnostic recipes
+> `test-individual` (which excludes them at discovery, since it runs every test it finds) and
+> `test-logged`. A bare `dotnet test tests/TemporalCommunity.Extensions.Agents.IntegrationTests`
+> carries no filter, so it *includes* them and leaves a working tree full of rewritten
+> `Compat/Histories/*.json` that looks like an unrelated diff. Recover with
+> `git checkout -- tests/*/Compat/Histories`. Regenerate deliberately, via the recipe above, only
+> when the workflow command sequence has intentionally changed.
+>
+> Any new recipe that runs `dotnet test` against an integration project must carry that filter —
+> the exclusion lives in each recipe, not in the projects.
 
 > **Integration tests** use `TestEnvironmentHelper.StartLocalAsync()`; no external server is
 > required. The helper pins Temporal CLI `v1.8.0` (embedded Temporal Server 1.31.2), verifies the

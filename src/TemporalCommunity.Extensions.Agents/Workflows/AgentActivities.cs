@@ -994,7 +994,9 @@ internal sealed class AgentActivities(
                 // Leave TemporalAgentContext unset, recording why so a tool that reaches for it
                 // gets told which path it is on rather than a bare "no context".
                 TemporalAgentContext.SetUnavailable(
-                    ContextUnavailableReason.ScheduledJobPath, ctx.Info.WorkflowId);
+                    ContextUnavailableReason.ScheduledJobPath,
+                    ctx.Info.WorkflowId,
+                    detail: $"names agent '{sessionId.AgentName}', not '{input.AgentName}'");
             }
             else
             {

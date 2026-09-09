@@ -370,14 +370,17 @@ just test
 
 > **Run the integration suite through `just`, not a bare `dotnet test`.** The replay fixtures under
 > `tests/TemporalCommunity.Extensions.AI.Tests/Compat/Histories/` are produced by tests tagged
-> `Category=HistoryCapture`, and every `just` recipe filters them out with
-> `--filter "Category!=HistoryCapture"`. A bare
-> `dotnet test tests/TemporalCommunity.Extensions.AI.IntegrationTests` does not, so it runs them —
-> and they `File.WriteAllTextAsync` over the checked-in JSON rather than asserting against it. The
-> symptom is a pile of unexplained fixture diffs in your working tree; the fix is
+> `Category=HistoryCapture`, which `File.WriteAllTextAsync` over the checked-in JSON rather than
+> asserting against it. Every `just` recipe that executes tests passes
+> `--filter "Category!=HistoryCapture"` — including the diagnostic recipes `test-individual` and
+> `test-logged`. A bare `dotnet test tests/TemporalCommunity.Extensions.AI.IntegrationTests` does
+> not, so it runs them. The symptom is a pile of unexplained fixture diffs; the fix is
 > `git checkout -- tests/*/Compat/Histories`. Regenerate on purpose with `just capture-histories`
 > (MEAI) or `just capture-agent-histories` (MAF) when a workflow's command sequence has genuinely
 > changed.
+>
+> Any new recipe that runs `dotnet test` against an integration project must carry that filter —
+> the exclusion lives in each recipe, not in the projects.
 
 Both test suites use an embedded Temporal Server 1.31.2 — no separate `temporal server start-dev`
 process is needed. AI integration tests use `TemporalServiceTestEnvironment.StartLocalAsync()`;

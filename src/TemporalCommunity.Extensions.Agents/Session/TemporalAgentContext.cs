@@ -59,8 +59,11 @@ public sealed class TemporalAgentContext
     /// <see cref="InvalidOperationException"/> for plenty of reasons of its own, and relabelling
     /// one of those as an unsupported-path diagnostic would mislead worse than saying nothing.
     /// </remarks>
-    internal static void SetUnavailable(ContextUnavailableReason? reason, string? workflowId = null) =>
-        s_unavailable.Value = reason is { } r ? new ContextUnavailability(r, workflowId) : null;
+    internal static void SetUnavailable(
+        ContextUnavailableReason? reason,
+        string? workflowId = null,
+        string? detail = null) =>
+        s_unavailable.Value = reason is { } r ? new ContextUnavailability(r, workflowId, detail) : null;
 
     private static string UnavailableMessage()
     {
@@ -75,28 +78,34 @@ public sealed class TemporalAgentContext
         {
             ContextUnavailableReason.SubAgentPath =>
                 $"TemporalAgentContext is not available to this tool{where}: the activity's workflow " +
-                "ID is not an agent session ID, so there is no agent session to attach. This is the " +
-                "workflow-local sub-agent path (WorkflowAgents.GetTemporalAgent) — the tool activity " +
-                "runs under your orchestrating workflow. In-tool approval (RequestApprovalAsync) is " +
-                "not supported here, and neither is workflow-parked approval: RequireApproval() and " +
-                "an interceptor's PauseForApproval() both degrade to Block on this path. Own the " +
-                "approval in the orchestrating workflow, or drive the agent through a managed " +
-                "session via TemporalAIAgentProxy.",
+                "ID is not an agent session ID, so there is no agent session to attach. In a running " +
+                "application this means the workflow-local sub-agent path " +
+                "(WorkflowAgents.GetTemporalAgent) — the tool activity runs under your orchestrating " +
+                "workflow. (A test harness supplying an arbitrary workflow ID reaches this same " +
+                "state.) In-tool approval (RequestApprovalAsync) is not supported on the sub-agent " +
+                "path, and neither is workflow-parked approval: RequireApproval() and an " +
+                "interceptor's PauseForApproval() both degrade to Block there. Own the approval in " +
+                "the orchestrating workflow, or drive the agent through a managed session via " +
+                "TemporalAIAgentProxy.",
 
             ContextUnavailableReason.ScheduledJobPath =>
-                $"TemporalAgentContext is not available to this tool{where}: the workflow ID belongs " +
-                "to a scheduled agent job, whose agent identity differs from the tool's agent, so " +
-                "attaching a session would target the wrong workflow. In-tool approval " +
-                "(RequestApprovalAsync) is not supported here, and neither is workflow-parked " +
-                "approval: RequireApproval() and an interceptor's PauseForApproval() both degrade to " +
-                "Block on this path. Use a managed session via TemporalAIAgentProxy for work that " +
-                "needs human review.",
+                $"TemporalAgentContext is not available to this tool{where}: the workflow ID parses " +
+                $"as an agent session but {u.Detail ?? "names a different agent than this tool's"}, " +
+                "so attaching that session would target the wrong workflow. A scheduled agent job " +
+                "has exactly this shape — its workflow ID is ta-{agent}-scheduled-{runId}, which " +
+                "parses to the agent name plus a '-scheduled' suffix. Scheduled jobs cannot park for " +
+                "external review at all: in-tool approval (RequestApprovalAsync) is unsupported, and " +
+                "RequireApproval() and an interceptor's PauseForApproval() both degrade to Block. " +
+                "Use a managed session via TemporalAIAgentProxy for work that needs human review.",
 
             _ => "No TemporalAgentContext is available in the current async context.",
         };
     }
 
-    private sealed record ContextUnavailability(ContextUnavailableReason Reason, string? WorkflowId);
+    private sealed record ContextUnavailability(
+        ContextUnavailableReason Reason,
+        string? WorkflowId,
+        string? Detail);
 
 
     /// <summary>

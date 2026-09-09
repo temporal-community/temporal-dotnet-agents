@@ -397,6 +397,7 @@ test-logged project limit="600": build
     timeout --kill-after=30 {{limit}} dotnet test {{project}} \
         --configuration {{configuration}} \
         --no-build \
+        --filter "Category!=HistoryCapture" \
         --logger "console;verbosity=normal" \
         > "$$LOG" 2>&1; \
     EXIT=$$?; \
@@ -545,8 +546,13 @@ test-individual project filter="" limit="180": build
     echo "Logs:  $LOGDIR"
     echo "Cap:   {{limit}}s per test"
     LIST_FILTER=""
+    # Capture tests overwrite the checked-in Compat/Histories fixtures instead of asserting
+    # against them, so they must never be discovered here — this recipe executes every test it
+    # finds. An array, because the VSTest filter needs & and parentheses that would word-split.
     if [ -n "{{filter}}" ]; then
-        LIST_FILTER="--filter FullyQualifiedName~{{filter}}"
+        LIST_FILTER=(--filter "(FullyQualifiedName~{{filter}})&(Category!=HistoryCapture)")
+    else
+        LIST_FILTER=(--filter "Category!=HistoryCapture")
     fi
     # Discover tests. --list-tests prints test method names indented after a
     # header line ("The following Tests are available:"). Strip headers
@@ -554,7 +560,7 @@ test-individual project filter="" limit="180": build
     # NOT swallowed). Keep one FQN per line.
     dotnet test {{project}} \
         --configuration {{configuration}} --no-build \
-        $LIST_FILTER --list-tests 2>&1 \
+        "${LIST_FILTER[@]}" --list-tests 2>&1 \
         | awk '/^[ \t]+[A-Za-z]/ {gsub(/^[ \t]+/,""); print}' \
         | grep -Ev "^(Test run for|Microsoft \(R\)|Copyright |The following Tests|Build |MinVer:)" \
         | sort -u > "$LOGDIR/tests.txt" || true
@@ -570,7 +576,7 @@ test-individual project filter="" limit="180": build
         # test classes share a method name.
         timeout --kill-after=30 {{limit}} dotnet test {{project}} \
             --configuration {{configuration}} --no-build \
-            --filter "FullyQualifiedName=$test" \
+            --filter "(FullyQualifiedName=$test)&(Category!=HistoryCapture)" \
             --logger "console;verbosity=minimal" \
             > "$LOGDIR/$SHORT.log" 2>&1
         status=$?

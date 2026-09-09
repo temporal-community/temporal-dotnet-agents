@@ -372,6 +372,9 @@ public class InvokeAgentToolActivityTests
 
         Assert.Contains("scheduled", message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ta-WidgetAgent-scheduled-run7", message, StringComparison.Ordinal);
+        // Name both sides of the mismatch — the parsed identity and the tool's own agent.
+        Assert.Contains("WidgetAgent-scheduled", message, StringComparison.Ordinal);
+        Assert.Contains("'WidgetAgent'", message, StringComparison.Ordinal);
         Assert.Contains("RequireApproval()", message, StringComparison.Ordinal);
         Assert.Contains("TemporalAIAgentProxy", message, StringComparison.Ordinal);
         // Must not be mislabelled as the sub-agent path — different cause, different remedy.
