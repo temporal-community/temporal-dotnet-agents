@@ -133,6 +133,7 @@ public class InToolApprovalHeartbeatTests
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private static string? _timeoutDecision;
+    private static string? _timeoutReason;
 
     /// <summary>
     /// Keeping the activity alive must not keep it alive forever: an unanswered review still hits
@@ -187,6 +188,13 @@ public class InToolApprovalHeartbeatTests
 
             Assert.NotNull(response);
             Assert.Equal("Not published", _timeoutDecision);
+
+            // The rejection reason is shown to operators and fed back to the model, so it has to
+            // describe the window it actually waited. A fixed "hours" rendering reported this
+            // six-second timeout as "0 hours".
+            Assert.NotNull(_timeoutReason);
+            Assert.Contains("6 seconds", _timeoutReason!, StringComparison.Ordinal);
+            Assert.DoesNotContain("0 hours", _timeoutReason!, StringComparison.Ordinal);
         }
         finally
         {
@@ -205,6 +213,7 @@ public class InToolApprovalHeartbeatTests
                 Description = "Publish this draft?",
             });
 
+        _timeoutReason = decision.Reason;
         _timeoutDecision = decision.Approved ? "Published" : "Not published";
         return _timeoutDecision;
     }

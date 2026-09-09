@@ -1,3 +1,4 @@
+using System.Globalization;
 using Temporalio.Workflows;
 using Temporalio.Exceptions;
 
@@ -124,7 +125,7 @@ internal sealed class DurableApprovalMixin
             {
                 RequestId = request.RequestId,
                 Approved = false,
-                Reason = $"Approval timed out after {approvalTimeout.TotalHours:F0} hours with no human response.",
+                Reason = $"Approval timed out after {DescribeDuration(approvalTimeout)} with no human response.",
             };
 
             onResolved?.Invoke(timedOutDecision);   // callback first
@@ -221,6 +222,50 @@ internal sealed class DurableApprovalMixin
             RequestId = requestId,
             Status = status,
         };
+
+    /// <summary>
+    /// Renders an approval window at a scale that matches its size.
+    /// </summary>
+    /// <remarks>
+    /// This reason text is handed to the model and shown to operators. The previous fixed
+    /// <c>{TotalHours:F0} hours</c> reported every sub-hour window as "0 hours" — a fifteen-minute
+    /// timeout claimed to have waited no time at all.
+    /// <para>
+    /// Invariant culture, because the string is built on the workflow thread: a worker with a
+    /// different locale must produce byte-identical output on replay.
+    /// </para>
+    /// </remarks>
+    private static string DescribeDuration(TimeSpan value)
+    {
+        if (value < TimeSpan.FromMinutes(1))
+        {
+            return Render(value.TotalSeconds, "second");
+        }
+
+        if (value < TimeSpan.FromHours(1))
+        {
+            return Render(value.TotalMinutes, "minute");
+        }
+
+        if (value < TimeSpan.FromDays(1))
+        {
+            return Render(value.TotalHours, "hour");
+        }
+
+        return Render(value.TotalDays, "day");
+
+        static string Render(double amount, string unit)
+        {
+            var rounded = Math.Round(amount, 1);
+            var text = rounded.ToString(
+                // ReSharper disable once CompareOfFloatsByEqualityOperator - exact-integer check
+                rounded == Math.Floor(rounded) ? "F0" : "F1",
+                CultureInfo.InvariantCulture);
+
+            // ReSharper disable once CompareOfFloatsByEqualityOperator - exact-one check
+            return rounded == 1d ? $"{text} {unit}" : $"{text} {unit}s";
+        }
+    }
 
     private static ApplicationFailureException Failure(string message, string errorType) =>
         new(message, errorType, nonRetryable: true);
