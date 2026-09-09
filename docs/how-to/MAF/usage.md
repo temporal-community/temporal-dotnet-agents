@@ -86,7 +86,7 @@ builder.Services
 | Select a package or sample | [Library Combinations Guide](../../library-combinations.md) and [Sample Catalog](../../../samples/catalog.md) |
 | Use a client-only process | [Invoking Agents from External Code](#invoking-agents-from-external-code-proxy) |
 | Configure tools, retries, and writes | [Durable Agents](durable-agents.md) |
-| Add a compatible context provider | [Individual MAF Context Providers](individual-context-providers.md) |
+| Write and register a context provider | [Context Providers](individual-context-providers.md) |
 | Understand supported MAF inputs | [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md) |
 | Manage prompt/context size | [History & Token Optimization](prompt-caching.md) |
 | Full builder/options reference | [Reference](#reference) below |

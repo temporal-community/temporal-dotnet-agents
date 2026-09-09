@@ -326,7 +326,7 @@ For skills that need resources or scripts, use `AgentInlineSkill` or a custom `A
 
 ## See also
 
-- [Individual MAF Context Providers](./individual-context-providers.md) — `TodoProvider`, `AgentModeProvider`, and other MAF `AIContextProvider` subclasses compatible with `AddContextProvider`
+- [Context Providers](./individual-context-providers.md) — writing your own `AIContextProvider`; MAF's built-ins contribute tools dynamically and are not drop-ins
 - [Tool Interceptor](./tool-interceptor.md) — apply policy before `InvokeAgentTool` activities, including those dispatched by skill tools
 - [HITL Patterns](./hitl-patterns.md) — reviewer-side approval flow used by `run_skill_script`
 - [Testing Agents](./testing-agents.md) — unit-testing `UseSkills` registration with `DurableAgentBuilder` and `StubChatClient`

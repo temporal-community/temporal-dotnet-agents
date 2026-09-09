@@ -1,125 +1,246 @@
 # Context providers
 
-An `AIContextProvider` injects instructions or messages before each LLM call. This library supports
-them — with one structural constraint: **a provider may not contribute tools dynamically.**
+An `AIContextProvider` injects instructions or messages into every LLM call an agent makes — the
+current date, the calling tenant, a note about which files are in play. You write one class and
+register it on the agent; the library runs it before each call.
 
-A provider fits the [bounded durable `ChatClientAgent` contract](../../architecture/MAF/bounded-durable-agent-compatibility.md)
-when it contributes retry-safe instructions and messages, keeps its session state in
-`AgentSessionStateBag`, and declares any tools statically.
+**The provider is code. The session is memory.** Your provider object is not where the conversation
+lives — it is code the library calls again for every LLM call, possibly on a different machine than
+the last one. The only thing that travels between those calls is the session's `StateBag`.
+
+Providers contribute **instructions and messages**. They cannot contribute tools — see
+[If your provider contributes tools](#if-your-provider-contributes-tools).
 
 ---
 
-## Registering a provider
+## Inject context into every LLM call
 
-Pass an instance or a DI factory to `agent.AddContextProvider(...)`:
+Subclass `AIContextProvider` and override `ProvideAIContextAsync`. Return only what you are adding:
+
+```csharp
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+
+public sealed class DateTimeProvider : AIContextProvider
+{
+    protected override ValueTask<AIContext> ProvideAIContextAsync(
+        InvokingContext context,
+        CancellationToken cancellationToken = default) =>
+        new(new AIContext
+        {
+            Messages =
+            [
+                new ChatMessage(
+                    ChatRole.System,
+                    $"[Context] Current UTC time: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}"),
+            ],
+        });
+}
+```
 
 ```csharp
 opts.AddDurableAgent("TaskAgent", agent =>
 {
     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-
-    agent.AddContextProvider(new WorkingSetContextProvider());          // instance
-    agent.AddContextProvider(sp => new TenantProvider(sp.GetRequiredService<ITenantLookup>()));  // factory
+    agent.AddContextProvider(sp => new DateTimeProvider());
 });
 ```
 
-Providers fire in registration order on every LLM step, each receiving the previous provider's
-output through `InvokingContext` — so a chain can extend or replace what came before.
+That is the whole path. Two things worth noting from it:
 
-A factory is rebuilt from a fresh activity DI scope on every step attempt. The instance overload
-retains the object you supplied. **Neither gives the provider a durable, process-local session** —
-per-session state must live in the `StateBag`.
+- **Wall-clock time is fine here.** Providers run inside a Temporal *activity* — the unit of
+  retryable work Temporal records the result of — not inside the workflow. `DateTimeOffset.UtcNow`
+  and `Guid.NewGuid()` are safe. The determinism rules for `[Workflow]` code do not apply.
+- **Return only your addition.** The library merges it with what is already there; you never rebuild
+  the conversation.
+
+A runnable version, plus a stateful provider that counts LLM calls in the `StateBag`, is in
+[`samples/MAF/ContextProviders`](../../../samples/MAF/ContextProviders/).
 
 ---
 
-## The one hard limit: provider-contributed tools
+## What a provider can and cannot see
+
+Two limits that produce no error and no log line — just a provider that quietly reads the wrong
+thing.
+
+### It does not see what another provider injected
+
+Providers run in registration order, and every provider's output reaches the model. But the view
+*your code* gets is narrower. MAF tags each message with where it came from, and by default a
+provider is shown only messages that came from outside the agent — not ones other providers
+injected this step.
+
+So if a tenant provider adds "Acme Corp, enterprise plan" as a message, a later provider looking for
+it in `context.AIContext.Messages` will not find it. **The model sees it. Your other provider does
+not.**
+
+The practical reframing: providers do not compose into a pipeline. They run over the same input and
+their outputs are concatenated.
+
+**When providers must share, share through the `StateBag`** — one writes a key, the other reads it.
+That is what `WorkingSetContextProvider` does, and it is also the only channel that survives a
+worker restart.
+
+> If you genuinely need the unfiltered view, MAF lets you override `InvokingCoreAsync` instead of
+> `ProvideAIContextAsync`, or pass `provideInputMessageFilter: m => m` to the base constructor. Both
+> make you responsible for the merging and source-stamping the default does for you.
+
+### It does not see the agent's registered tools
+
+The context handed to a provider carries `Messages` and `Instructions` only. The agent's durable
+tools are attached to the model call separately and never appear in `AIContext`. A provider cannot
+check whether `send_email` is registered before mentioning it. `Tools` on the incoming context is
+simply always empty.
+
+### Reach session state through `context.Session`
+
+`TemporalAgentContext.Current` is **not** available to a provider. It is established later in the
+step, and in the tool activity — not when providers run. Use the session you are handed:
+
+```csharp
+if (context.Session is not TemporalAgentSession session)
+{
+    return new ValueTask<AIContext>(new AIContext());
+}
+
+session.StateBag.SetValue("app.tenant", "acme", JsonSerializerOptions.Default);
+```
+
+`StateBag` values are **reference types only** — `SetValue<T>`/`TryGetValue<T>` are constrained
+`where T : class`, so a counter is stored as a string, not an `int`.
+
+---
+
+## Choosing how to register
+
+**Default: `agent.AddContextProvider(sp => sp.GetRequiredService<MyProvider>())`.** The factory runs
+in each step attempt's DI scope, so you get a fresh provider, constructor injection, and
+scope-managed disposal.
+
+| You need | Register with | Lifetime | Cost |
+|---|---|---|---|
+| The common case | `AddContextProvider(sp => sp.GetRequiredService<T>())` | New per activity attempt | None |
+| No DI dependencies | `AddContextProvider(sp => new T(...))` | New per activity attempt | The library does not dispose what your factory `new`s |
+| The provider declares tools via `IDurableToolSource` | `AddContextProvider(instance)` | **One shared object** | Must be thread-safe; experimental API |
+| It contributes tools but you don't own the type | `AddContextProvider(instance, durableTools: [...])` | **One shared object** | Must be thread-safe |
+
+### A factory cannot carry tool declarations
+
+Declarations are collected at registration time, when the provider must already exist — a
+factory-registered one does not. Register an `IDurableToolSource` provider through the factory
+overload and **the first LLM step fails with a non-retryable configuration error**. That is
+deliberate: silently dropping the tools would leave an agent that looks configured and never calls
+them.
+
+### A shared instance is shared across sessions
+
+The instance overload keeps the object you handed it. One provider serves **every session on this
+worker and every concurrent activity attempt**. A field like `private string? _tenantId;` will not
+throw — it will occasionally serve one customer's context to another, under load, in a way you
+cannot reproduce locally.
+
+Treat it as immutable configuration: no mutable fields, no session state, and nothing needing
+disposal (the library disposes neither a supplied instance nor one your factory creates).
+
+### `IDurableToolSource` requires suppressing TA001
+
+It is marked `[Experimental("TA001")]`, and experimental diagnostics are **errors**. Implementing it
+fails your build with `error TA001 … Suppress this diagnostic to proceed` until you suppress it:
+
+```xml
+<NoWarn>$(NoWarn);TA001</NoWarn>
+```
+
+The `durableTools:` parameter has no such requirement and reaches the same place. **Prefer
+`durableTools:`** unless you need the declaration on the type itself.
+
+---
+
+## Providers run once per LLM step
+
+One turn can involve several LLM calls — one per iteration of the tool-call loop — and every
+provider fires on each. A turn that calls three tools runs every provider four times.
+
+**`StateBag` caching is not deduplication.** A `StateBag` write becomes durable only when the whole
+step succeeds. If your provider calls an external service, writes the result, and the step then
+fails, the write is discarded while the external call already happened — and the retry calls it
+again. Caching saves tokens and latency; it does not make a side effect happen once. If a side
+effect must happen at most once, it belongs in a durable tool with `NoRetry()`, not a provider.
+
+**Keep providers cheap.** They run inside the activity's start-to-close budget, ahead of the model
+call. A slow provider eats the timeout the model needs, and the resulting failure looks like a model
+timeout.
+
+**Validate configuration in the constructor**, not per step — a provider is built on a hot path.
+
+---
+
+## How your output reaches the model
+
+**`Instructions` concatenate.** The agent's registered instructions come first, then each provider's,
+joined with a newline — `"registered-instructions\nprovider-instructions"`. A provider **appends**;
+it cannot override the agent's instructions through the default path.
+
+**`Messages` append at the end**, so an injected system note lands *after* the user's most recent
+message. That is usually right for a "current state" note and usually wrong for a persona.
+
+**`Tools` are ignored** — see below.
+
+**`InvokedAsync` fires on failure too.** `InvokedContext` carries an `InvokeException` and has a
+dedicated failure shape, so code that records results must handle the failed-invocation case rather
+than assuming response messages exist.
+
+---
+
+## If your provider contributes tools
 
 `AIContext.Tools` is **not dispatched**. Tools returned this way never become Temporal activities;
-they are dropped, and the library logs one error per turn (not per provider, not per tool):
+they are dropped and the library logs an error — **once per LLM step**, so a multi-step turn logs it
+repeatedly. There is no compile-time check.
 
-```
-Context provider {ProviderType} returned {ToolCount} tool(s) for agent {AgentName}.
-Provider-contributed tools are not dispatched as durable activities and are ignored.
-Register tools via agent.AddTool(), `IDurableToolSource`, or AddContextProvider(provider, durableTools) to ensure durable execution.
-```
-
-There is no compile-time check — this surfaces at runtime only. Three supported ways to give a
-provider's tools durable execution:
+Three supported ways to give a provider's tools durable execution:
 
 | Situation | Do this |
 |---|---|
-| You own the provider | Implement `IDurableToolSource`, declaring fixed `DurableToolRegistrationSpec` values |
-| You don't own it | `AddContextProvider(provider, durableTools)` with equivalent explicit `AIFunction`s |
+| You don't own the provider, or want the stable path | `AddContextProvider(provider, durableTools: [...])` |
+| You own it and want the declaration on the type | Implement `IDurableToolSource` (instance overload only; see TA001 above) |
 | The tool is unrelated to the provider | Plain `agent.AddTool(...)` |
 
-That second row is an adapter for *static* tools. It is not a way to make an opaque provider or its
-in-process approval loop durable.
-
-### MAF's Harness providers are not drop-ins
-
-`TodoProvider`, `AgentModeProvider`, `FileMemoryProvider`, `AgentSkillsProvider`, the CodeAct
-providers, and similar built-ins ship as part of MAF's `HarnessAgent` bundle. They expose tools
-dynamically through `AIContext.Tools` or depend on Harness orchestration, so registering them
-unchanged hits exactly the limit above. See
-[`harness-agent-compatibility.md`](./harness-agent-compatibility.md) for why the bundle as a whole
-does not fit.
-
-### `BackgroundAgentsProvider` cannot work here at all
-
-It stores live `Task<AgentResponse>` handles in its runtime state. Those are in-process objects:
-they cannot be serialized, cannot survive continue-as-new, and cannot replay from history. **Do not
-register it.**
-
-For parallel agent fan-out use `WorkflowAgents.ExecuteAgentsInParallelAsync`, which reaches the same
-result through `Workflow.WhenAllAsync` and is fully replay-safe. See [usage.md](./usage.md) and the
-[`MultiAgentRouting`](../../../samples/MAF/MultiAgentRouting/) sample.
+MAF's own built-in providers — `TodoProvider`, `AgentModeProvider`, `FileMemoryProvider`,
+`AgentSkillsProvider`, `FileAccessProvider`, `BackgroundAgentsProvider` — all contribute tools
+dynamically and are not drop-ins. See
+[harness-agent-compatibility.md](./harness-agent-compatibility.md), which covers each of them and
+why `BackgroundAgentsProvider` cannot work here at all. For skills specifically, this library ships
+`agent.UseSkills(...)` — see [skills.md](./skills.md).
 
 ---
 
-## How provider output is applied
+## Session state and size
 
-**`Instructions`** — the final aggregated value **replaces** `ChatOptions.Instructions` for that
-step. The agent's own registered instructions seed the chain, so providers extend or override them
-rather than being appended to them. This matches MAF's own `ChatClientAgent` behaviour.
+The `StateBag` is the only durable slot a provider has.
 
-**`Messages`** — the final aggregated list becomes the message sequence sent to the LLM.
+- `AgentWorkflow` carries it across its own continue-as-new automatically.
+- A **custom orchestrating workflow** using `TemporalAIAgent` must serialize and carry its
+  `TemporalAgentSession` when it continues as new. The `StateBag` does not cross an arbitrary
+  workflow's boundary by itself.
+- It is serialized into activity and workflow payloads. Above 64 KiB the managed workflow logs a
+  warning — it does not trim or reject. Measure with
+  `stateBag.GetDurableSerializedUtf8ByteCount()`.
 
-**`Tools`** — ignored, as above. Providers implementing `IDurableToolSource` have their tools
-stripped from the aggregate right after they run, so a downstream provider's `InvokingContext` stays
-clean and the error above cannot fire against the wrong provider.
-
----
-
-## Providers run per step, not per turn
-
-One turn can involve several LLM calls — one per iteration of the tool-call loop — and every
-provider fires on each. Keep provider logic idempotent and cheap:
-
-- Read from `StateBag` instead of making an external call on every step.
-- If a network call is unavoidable, cache the result in `StateBag` and skip it on later steps in
-  the same turn.
-- Assume the provider may be reconstructed on a different worker between steps. All per-session
-  state belongs in `StateBag`.
+**Treat retrieved content as untrusted.** Anything a provider pulls from an external source and
+injects — especially as a system message — is a prompt-injection surface. Validate and sanitize it.
 
 ---
 
 ## `WorkingSetContextProvider`
 
-Ships with `TemporalCommunity.Extensions.Agents` — no extra package reference. It keeps a coding-
-style agent oriented on which files are currently in play, without the user re-stating them.
-
-On each LLM step it scans accumulated **assistant and tool** messages and extracts file paths from:
-
-- `TextContent` — the first line inside a code fence, and path-shaped tokens (containing `/` or `\`
-  **and** carrying a recognized extension)
-- `FunctionCallContent` arguments — the higher-signal source, since this is a path the model
-  explicitly named
-- `FunctionResultContent` results
-
-Paths are deduplicated case-insensitively, kept in most-recently-seen order, and capped at
-`MaxPaths`. It then injects a compact `## Working set` system note and writes the same paths to
-`AgentSessionStateBag["temporal.working_set"]` as a comma-separated string, so the working set
-survives worker restarts and continue-as-new.
+The one provider that ships with the library. On each LLM step it scans accumulated **assistant and
+tool** messages for file paths — from `TextContent`, from `FunctionCallContent` arguments, and from
+`FunctionResultContent` results (the latter two only when the value is a string or a JSON string) —
+deduplicates case-insensitively, keeps most-recently-seen order, caps at `MaxPaths`, injects a
+compact `## Working set` note, and publishes the same list to
+`AgentSessionStateBag["temporal.working_set"]` as comma-separated text.
 
 ```csharp
 agent.AddContextProvider(new WorkingSetContextProvider());
@@ -127,22 +248,22 @@ agent.AddContextProvider(new WorkingSetContextProvider());
 
 | Property | Behaviour |
 |---|---|
-| `MaxPaths` | Default `20`. Most-recent paths win when the window overflows. `0` disables tracking; a negative value throws `ArgumentOutOfRangeException` rather than silently behaving like `0`. |
-| `SilentMode` | Suppresses the injected note — zero added tokens — while still writing the `StateBag` entry for downstream providers and tools. |
+| `MaxPaths` | Default `20`. `0` disables tracking; a negative value throws `ArgumentOutOfRangeException` rather than silently behaving like `0`. |
+| `SilentMode` | Suppresses the injected note while still publishing the `StateBag` entry. |
 
-The `StateBag` key mirrors the **current** working set: when a step extracts nothing, the key is
-removed rather than left holding a stale list. A reader can therefore trust that what is there is
-in scope.
+That key is a **recomputed observational mirror**, not a structured persistence contract: it holds
+whatever paths appear in the currently retained history, which is not a judgement that a file is
+still relevant. When a step extracts nothing the key is removed rather than left stale.
 
-**History boundary.** Durable workflows own conversation history. Do not pair this with a
-provider-owned history store — provider-owned external persistence has no atomic idempotent retry
-contract in this library.
+[`samples/MAF/WorkingSet`](../../../samples/MAF/WorkingSet/) demonstrates the two-provider
+`StateBag` handoff — a second provider reads `WorkingSetContextProvider.StateBagKey` rather than
+parsing the injected note, which is the pattern to copy.
 
 ---
 
-## Samples
+## See also
 
-| Sample | Shows |
-|---|---|
-| [`samples/MAF/ContextProviders/`](../../../samples/MAF/ContextProviders/) | Two custom providers — a turn counter reading and writing `StateBag`, and a date/time injector |
-| [`samples/MAF/WorkingSet/`](../../../samples/MAF/WorkingSet/) | A four-turn code assistant that builds a working set from mock file reads, with the last turn answered from injected context alone |
+- [harness-agent-compatibility.md](./harness-agent-compatibility.md) — MAF's built-in providers, in detail
+- [skills.md](./skills.md) — `UseSkills`, the durable equivalent of `AgentSkillsProvider`
+- [`samples/MAF/ContextProviders`](../../../samples/MAF/ContextProviders/) — minimal `StateBag` read/write
+- [`samples/MAF/WorkingSet`](../../../samples/MAF/WorkingSet/) — two-provider `StateBag` handoff
