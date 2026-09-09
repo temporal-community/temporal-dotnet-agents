@@ -85,12 +85,23 @@ builder.Services
     .AddHostedTemporalWorker("hitl-sample")
     .AddTemporalAgents(opts =>
     {
-        // HITL requires timeouts that cover the full human review window. The
-        // underlying activity heartbeats during this period so the worker won't
-        // treat it as stuck — as long as DefaultHeartbeatTimeout < DefaultActivityTimeout.
-        opts.DefaultActivityTimeout  = TimeSpan.FromHours(24);
-        opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(5);
-        opts.DefaultApprovalTimeout  = TimeSpan.FromHours(23); // must be < DefaultActivityTimeout so the activity outlives the approval window
+        // This sample demonstrates IN-TOOL approval: the tool calls
+        // TemporalAgentContext.Current.RequestApprovalAsync and the tool activity stays open for
+        // the whole review. The library heartbeats for the duration of that wait, so the review
+        // may outlast DefaultHeartbeatTimeout.
+        //
+        // What heartbeating does NOT buy you: the wait is WORKER-RESIDENT. The activity lives on
+        // one worker for its whole duration, so a deploy, crash, or scale-down during the review
+        // ends it — and with NoRetry() on a write tool, ends the turn. That is why this sample
+        // uses minutes rather than the hours a real approval queue implies.
+        //
+        // For unattended review that must survive worker restarts, use WORKFLOW-PARKED approval
+        // instead: RequireApproval() on the tool, or PauseForApproval() from an
+        // IAgentToolInterceptor. The workflow then waits durably and schedules no tool activity
+        // at all until a decision arrives. See docs/how-to/MAF/hitl-patterns.md.
+        opts.DefaultActivityTimeout  = TimeSpan.FromMinutes(20);
+        opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);
+        opts.DefaultApprovalTimeout  = TimeSpan.FromMinutes(15); // < DefaultActivityTimeout so the activity outlives the approval window
 
         opts.AddDurableAgent("EmailAssistant", agent =>
         {

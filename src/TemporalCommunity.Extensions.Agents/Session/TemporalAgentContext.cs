@@ -1,4 +1,5 @@
 using System.Linq.Expressions;
+using Temporalio.Activities;
 using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Client;
 using Temporalio.Exceptions;
@@ -132,8 +133,96 @@ public sealed class TemporalAgentContext
         ArgumentNullException.ThrowIfNull(request);
 
         var handle = _client.GetWorkflowHandle<AgentWorkflow>(CurrentSession.SessionId.WorkflowId);
-        return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
+        var approval = handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
             wf => wf.RequestApprovalAsync(request),
-            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } });
+
+        // Outside an activity (unit tests, direct use) there is no heartbeat to send.
+        if (!ActivityExecutionContext.HasCurrent)
+        {
+            return await approval.ConfigureAwait(false);
+        }
+
+        var ctx = ActivityExecutionContext.Current;
+        var interval = HeartbeatInterval(ctx.Info.HeartbeatTimeout);
+
+        // No heartbeat timeout configured means nothing can expire for lack of one.
+        if (interval is null)
+        {
+            return await approval.ConfigureAwait(false);
+        }
+
+        // Cancelling the activity must stop the pump as well as propagate to the update RPC —
+        // heartbeating a cancelled activity is pointless and would mask the cancellation.
+        using var pumpCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, ctx.CancellationToken);
+        var pump = HeartbeatUntilStoppedAsync(ctx, interval.Value, pumpCancellation.Token);
+
+        try
+        {
+            return await approval.ConfigureAwait(false);
+        }
+        finally
+        {
+            pumpCancellation.Cancel();
+
+            // Observe the pump so a fault in it cannot surface later as an unobserved task
+            // exception. Its own cancellation is expected and uninteresting.
+            try
+            {
+                await pump.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// Heartbeat cadence for a review wait, or <see langword="null"/> when the activity has no
+    /// heartbeat timeout and therefore cannot expire for want of one.
+    /// </summary>
+    /// <remarks>
+    /// A third of the timeout leaves room for two missed beats — scheduling jitter, a slow worker,
+    /// a GC pause — before Temporal declares the activity dead. The one-second floor stops a
+    /// deliberately tiny timeout from turning into a heartbeat storm.
+    /// </remarks>
+    private static TimeSpan? HeartbeatInterval(TimeSpan? heartbeatTimeout)
+    {
+        if (heartbeatTimeout is not { } timeout || timeout <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        var third = TimeSpan.FromTicks(timeout.Ticks / 3);
+        return third < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : third;
+    }
+
+    /// <summary>
+    /// Heartbeats until cancelled, keeping the activity alive for the length of a human review.
+    /// </summary>
+    /// <remarks>
+    /// Without this the tool activity heartbeats exactly once — before the tool body runs — so any
+    /// review outlasting the heartbeat timeout killed the activity long before the approval
+    /// timeout was reached.
+    /// </remarks>
+    private static async Task HeartbeatUntilStoppedAsync(
+        ActivityExecutionContext ctx,
+        TimeSpan interval,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            try
+            {
+                await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            ctx.Heartbeat("awaiting approval decision");
+        }
     }
 }
