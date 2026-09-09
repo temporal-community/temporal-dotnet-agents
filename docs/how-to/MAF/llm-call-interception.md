@@ -232,9 +232,19 @@ agent.ChatClient = sp => sp.GetRequiredService<OpenAIClient>()
 > **Never call `.UseFunctionInvocation()` on this chain.** The workflow owns the tool-dispatch loop —
 > each tool call is its own `InvokeAgentTool` activity. A `FunctionInvokingChatClient` in your chat
 > client would run tools **in-process inside the LLM activity instead**, and per-tool durability,
-> retry policies, and timeouts silently stop applying. Unlike the agent-middleware layer, which
-> rejects function-invocation middleware at startup, this case is **not currently detected** — there
-> is no exception, only tools that quietly stop being durable.
+> retry policies, and timeouts would stop applying.
+>
+> The library rejects this. On every activity attempt, before the model is called, the chat client is
+> inspected and a `DurableFunctionInvocationConflictException` is raised as a **non-retryable**
+> Temporal failure — a misconfiguration cannot be fixed by trying again, so it must not consume the
+> retry budget.
+>
+> Rejection is **unconditional**, including for an agent with no registered tools:
+> `FunctionInvokingChatClient.AdditionalTools` is consulted for tools that were not sent on the
+> request, so a tool-less agent can still execute functions in-process.
+>
+> If you need an in-process tool loop for other, non-durable work, register a separate decorated
+> client for it and give the durable agent an undecorated one.
 
 ---
 
@@ -341,9 +351,22 @@ duplicated tools, instructions, or stop sequences. Per-request tool filtering
 | `model=` is always empty | `options.ModelId` is not set by the library — the model is pinned on the provider client. |
 | Usage and finish reason are always null | Read from `updates.ToChatResponse()`, not from individual `ChatResponseUpdate` values. |
 | Duplicate log lines for one user message | Expected: one entry per LLM round, plus a fresh set per activity retry. |
-| Tools stop appearing as `InvokeAgentTool` activities | `.UseFunctionInvocation()` is in your chat-client chain. It is not detected — tools now run in-process. |
+| `DurableFunctionInvocationConflictException`, activity fails once and does not retry | `.UseFunctionInvocation()` is in your chat-client chain. Remove it — see the warning above. |
 | Decorator never constructed at all | `agent.ChatClient` is returning a different client than the one you decorated. Check the factory, not the DI registration. |
 | You want tool names and arguments, but see serialized `FunctionCallContent` | Wrong layer — use [`IAgentToolInterceptor`](./tool-interceptor.md). |
+
+---
+
+## Detection boundary
+
+The check walks `DelegatingChatClient.InnerClient` and then falls back to
+`GetService(typeof(FunctionInvokingChatClient))` — a non-null result there is treated as evidence
+that the client participates in the effective pipeline. Since `FunctionInvokingChatClient` derives
+from `DelegatingChatClient`, any chain built by convention is caught by one path or the other.
+
+A wrapper that neither derives from `DelegatingChatClient` nor forwards `GetService` to its inner
+client is **not** detectable. The guard is a backstop for the rule, not a substitute for following
+it.
 
 ---
 

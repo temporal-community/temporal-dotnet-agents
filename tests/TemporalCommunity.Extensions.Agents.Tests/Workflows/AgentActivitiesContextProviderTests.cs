@@ -2,6 +2,7 @@
 #pragma warning disable TA001 // IDurableToolSource is experimental; intentional consumption in these tests
 using System.Runtime.CompilerServices;
 using FakeItEasy;
+using Temporalio.Exceptions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -77,10 +78,16 @@ public class AgentActivitiesContextProviderTests
         });
         var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
 
-        var ex = await Assert.ThrowsAsync<DurableConfigurationException>(
+        // A configuration failure surfaces as a NON-RETRYABLE Temporal application failure with
+        // the typed exception preserved as inner. Left unwrapped it would consume the activity's
+        // retry budget on an error that can never succeed on a retry.
+        var ex = await Assert.ThrowsAsync<ApplicationFailureException>(
             () => env.RunAsync(() =>
                 activities.RunDurableAgentStepAsync(MakeInput("SeveredAgent"))));
 
+        Assert.True(ex.NonRetryable);
+        Assert.Equal(nameof(DurableConfigurationException), ex.ErrorType);
+        Assert.IsAssignableFrom<DurableConfigurationException>(ex.InnerException);
         Assert.Contains("SeveredAgent", ex.Message);
         Assert.Equal(0, replacement.StreamingRunCount);
     }
@@ -100,10 +107,13 @@ public class AgentActivitiesContextProviderTests
         });
         var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
 
-        var ex = await Assert.ThrowsAsync<DurableConfigurationException>(
+        var ex = await Assert.ThrowsAsync<ApplicationFailureException>(
             () => env.RunAsync(() =>
                 activities.RunDurableAgentStepAsync(MakeInput("DisposableAgent"))));
 
+        Assert.True(ex.NonRetryable);
+        Assert.Equal(nameof(DurableConfigurationException), ex.ErrorType);
+        Assert.IsAssignableFrom<DurableConfigurationException>(ex.InnerException);
         Assert.Contains("DisposableAgent", ex.Message);
         Assert.Contains("ownership", ex.Message, StringComparison.OrdinalIgnoreCase);
     }

@@ -147,4 +147,37 @@ public class BaseContractGuardTests
             "detection in AgentActivities would no longer encounter it as a chain link.");
     }
 
+    // -----------------------------------------------------------------------------------------
+    // Chat-client side — AgentChainWalker reflects over DelegatingChatClient.InnerClient, and
+    // DurableFunctionInvocationGuard depends on FunctionInvokingChatClient being reachable
+    // through it. A MEAI refactor that breaks either assumption would silently disable detection
+    // and let in-process tool loops back into durable agents. Fail the build instead.
+    // -----------------------------------------------------------------------------------------
+
+    [Fact]
+    public void Meai_FunctionInvokingChatClient_StillDerivesFromDelegatingChatClient()
+    {
+        Assert.True(
+            typeof(Microsoft.Extensions.AI.DelegatingChatClient)
+                .IsAssignableFrom(typeof(Microsoft.Extensions.AI.FunctionInvokingChatClient)),
+            "FunctionInvokingChatClient no longer derives from DelegatingChatClient. " +
+            "AgentChainWalker walks the chain via DelegatingChatClient.InnerClient, so detection " +
+            "now depends solely on the GetService fallback. Re-verify DurableFunctionInvocationGuard.");
+    }
+
+    [Fact]
+    public void Meai_DelegatingChatClient_InnerClient_StillResolves()
+    {
+        var property = typeof(Microsoft.Extensions.AI.DelegatingChatClient).GetProperty(
+            "InnerClient",
+            System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.NonPublic
+                | System.Reflection.BindingFlags.Public);
+
+        Assert.NotNull(property);
+        Assert.True(
+            typeof(Microsoft.Extensions.AI.IChatClient).IsAssignableFrom(property!.PropertyType),
+            "DelegatingChatClient.InnerClient is no longer an IChatClient. AgentChainWalker " +
+            "resolves this property by string name to walk the chat-client decorator chain.");
+    }
 }

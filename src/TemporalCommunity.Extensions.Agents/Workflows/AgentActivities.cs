@@ -130,12 +130,36 @@ internal sealed class AgentActivities(
 
         // Build and own a fresh AIAgent pipeline from the scoped IChatClient. The pipeline lease
         // is declared after the DI scope so it is disposed before scoped services at method exit.
-        using var agentPipeline = BuildLiveAgentPipeline(
-            blueprint,
-            chatClient,
-            session,
-            turnTelemetry,
-            scopedServices);
+        //
+        // The catch is deliberately narrow. It covers the guard and pipeline composition — both
+        // pure configuration checks whose failure can never succeed on a retry — but NOT the
+        // registration.ChatClient(scopedServices) call above, which is user code that may fail
+        // transiently (deferred credential acquisition, a cold dependency) and should keep its
+        // normal retry behaviour.
+        AgentPipelineLease pipelineLease;
+        try
+        {
+            pipelineLease = BuildLiveAgentPipeline(
+                blueprint,
+                chatClient,
+                session,
+                turnTelemetry,
+                scopedServices);
+        }
+        catch (DurableConfigurationException ex)
+        {
+            // A misconfiguration cannot be fixed by trying again. Left unwrapped it burns the
+            // bounded default retry budget — or retries forever when the user set
+            // MaximumAttempts = 0. The error type is the shared DurableConfigurationException
+            // name because TemporalFailureInspector matches on that string.
+            throw new ApplicationFailureException(
+                ex.Message,
+                ex,
+                errorType: nameof(DurableConfigurationException),
+                nonRetryable: true);
+        }
+
+        using var agentPipeline = pipelineLease;
         var agent = agentPipeline.Agent;
 
         // When the workflow was started by a proxy-only client, resolve
@@ -630,6 +654,12 @@ internal sealed class AgentActivities(
     {
         var registration = blueprint.Registration;
         var agentsOptions = blueprint.AgentsOptions;
+
+        // Reject an in-process function-invocation loop before anything is constructed, so no
+        // pipeline lease exists to unwind and no model or tool call has happened yet. This is the
+        // authoritative check: the factory runs per activity attempt and may return a different
+        // client each time, so it cannot be settled at startup.
+        DurableFunctionInvocationGuard.ThrowIfChatClientInvokesFunctions(registration.Name, chatClient);
 
         var agentOptions = new ChatClientAgentOptions
         {
