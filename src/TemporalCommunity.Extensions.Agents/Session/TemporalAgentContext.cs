@@ -180,10 +180,12 @@ public sealed class TemporalAgentContext
     /// </para>
     /// <para>
     /// <b>Cancellation risk:</b> if the activity is cancelled or times out while the workflow is
-    /// waiting for a human response, <c>_pendingApproval</c> remains set in the workflow state.
-    /// The workflow will then reject any new <c>RunAgentAsync</c> updates until the stale approval
-    /// is resolved. To recover, submit an explicit denial externally using
-    /// <see cref="ITemporalAgentClient.ResolveApprovalAsync"/> with a
+    /// waiting for a human response, the pending approval remains set in workflow state. Ordinary
+    /// runs still proceed — the <c>RunAgentAsync</c> validator does not consult pending approvals —
+    /// but the next approval request fails with <c>DurableApprovalAlreadyPending</c>, because only
+    /// one may be outstanding at a time. To recover, resolve the stale request externally with
+    /// <see cref="ITemporalAgentClient.CancelPendingApprovalAsync"/>, or with
+    /// <see cref="ITemporalAgentClient.ResolveApprovalAsync"/> and a
     /// <see cref="TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision"/> whose <c>Approved</c> is
     /// <see langword="false"/>.
     /// </para>
