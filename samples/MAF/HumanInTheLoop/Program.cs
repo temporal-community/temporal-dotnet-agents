@@ -55,7 +55,7 @@ var sendEmailTool = AIFunctionFactory.Create(
 
         // This call sends a [WorkflowUpdate] and blocks until ResolveApprovalAsync
         // is called from the approval console below, or until agent.ApprovalTimeout
-        // (effective: 23 h) elapses — at which point a rejected decision is returned.
+        // (effective: 10 min) elapses — at which point a rejected decision is returned.
         var decision = await ctx.RequestApprovalAsync(new DurableApprovalRequest
         {
             RequestId = Guid.NewGuid().ToString("N"),

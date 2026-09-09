@@ -259,8 +259,9 @@ public sealed class TemporalAgentContext
     /// </summary>
     /// <remarks>
     /// A third of the timeout leaves room for two missed beats — scheduling jitter, a slow worker,
-    /// a GC pause — before Temporal declares the activity dead. The one-second floor stops a
-    /// deliberately tiny timeout from turning into a heartbeat storm.
+    /// a GC pause — before Temporal declares the activity dead. There is no lower floor: a floor
+    /// larger than a sub-second heartbeat timeout would expire the activity before the first beat
+    /// went out. Only a degenerate sub-3-tick timeout is clamped, and only to one tick.
     /// </remarks>
     private static TimeSpan? HeartbeatInterval(TimeSpan? heartbeatTimeout)
     {
