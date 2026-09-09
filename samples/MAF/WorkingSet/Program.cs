@@ -71,12 +71,18 @@ builder.Services
             //
             //   ## Working set
             //   Recently referenced files/paths in this session:
-            //   - AuthService.cs
-            //   - UserRepository.cs
+            //   - src/Auth/AuthService.cs
+            //   - src/Data/UserRepository.cs
             //
             // SilentMode defaults to false so the note is visible to the LLM.
             // State is persisted in AgentSessionStateBag under "temporal.working_set".
             agent.AddContextProvider(new WorkingSetContextProvider());
+
+            // Sample-only. Demonstrates the documented capability that downstream consumers can
+            // read the working set from the StateBag, and gives this sample a deterministic
+            // marker to assert on instead of relying on the model's wording. Registered after
+            // WorkingSetContextProvider so it observes that provider's write for this step.
+            agent.AddContextProvider(new WorkingSetEchoProvider());
 
             // read_file: read-only tool, no retry override needed.
             agent.AddTool(
@@ -105,21 +111,21 @@ Console.WriteLine("Worker started. Running four-turn code assistant session...\n
 var proxy = host.Services.GetTemporalAgentProxy("CodeAssistant");
 var session = await proxy.CreateSessionAsync();
 
-// ── Turn 1: Read AuthService.cs ───────────────────────────────────────────────
-Console.WriteLine("User : Show me the AuthService implementation");
-var r1 = await proxy.RunAsync("Show me the AuthService implementation", session);
+// ── Turn 1: Read src/Auth/AuthService.cs ───────────────────────────────────────────────
+Console.WriteLine("User : Show me src/Auth/AuthService.cs");
+var r1 = await proxy.RunAsync("Show me src/Auth/AuthService.cs", session);
 Console.WriteLine($"Agent: {r1.Text ?? "(no response)"}");
 Console.WriteLine();
 
-// ── Turn 2: Read UserRepository.cs ───────────────────────────────────────────
-// WorkingSetContextProvider now has AuthService.cs in the working set.
-Console.WriteLine("User : What does UserRepository look like?");
-var r2 = await proxy.RunAsync("What does UserRepository look like?", session);
+// ── Turn 2: Read src/Data/UserRepository.cs ───────────────────────────────────────────
+// WorkingSetContextProvider now has src/Auth/AuthService.cs in the working set.
+Console.WriteLine("User : Now show me src/Data/UserRepository.cs");
+var r2 = await proxy.RunAsync("Now show me src/Data/UserRepository.cs", session);
 Console.WriteLine($"Agent: {r2.Text ?? "(no response)"}");
 Console.WriteLine();
 
 // ── Turn 3: Cross-file question ───────────────────────────────────────────────
-// Working set: AuthService.cs + UserRepository.cs.
+// Working set: src/Auth/AuthService.cs + src/Data/UserRepository.cs.
 Console.WriteLine("User : How does auth relate to the repository?");
 var r3 = await proxy.RunAsync("How does auth relate to the repository?", session);
 Console.WriteLine($"Agent: {r3.Text ?? "(no response)"}");

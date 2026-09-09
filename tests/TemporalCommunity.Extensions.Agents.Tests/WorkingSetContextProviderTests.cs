@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Xunit;
 
@@ -144,5 +145,110 @@ public class WorkingSetContextProviderTests
     {
         var provider = new WorkingSetContextProvider();
         Assert.False(provider.SilentMode);
+    }
+
+    // ── Production-shaped messages ──────────────────────────────────────────────────────────
+    //
+    // The tests above build ChatMessage(ChatRole.Tool, text), which produces TextContent. Real
+    // tool traffic never looks like that: a call carries FunctionCallContent and a result carries
+    // FunctionResultContent. That gap is why the provider shipped scanning only TextContent while
+    // its own tests passed, and why samples/MAF/WorkingSet extracted nothing.
+
+    [Fact]
+    public void ExtractFilePaths_ReadsPathFromToolCallArguments()
+    {
+        var call = new ChatMessage(ChatRole.Assistant, [
+            new FunctionCallContent("c1", "read_file", new Dictionary<string, object?>
+            {
+                ["path"] = "src/Auth/AuthService.cs",
+            }),
+        ]);
+
+        Assert.Equal(["src/Auth/AuthService.cs"], WorkingSetContextProvider.ExtractFilePaths([call], 20));
+    }
+
+    [Fact]
+    public void ExtractFilePaths_ReadsPathFromToolResult()
+    {
+        var result = new ChatMessage(ChatRole.Tool, [
+            new FunctionResultContent("c1", "opened src/Data/UserRepository.cs successfully"),
+        ]);
+
+        Assert.Equal(["src/Data/UserRepository.cs"], WorkingSetContextProvider.ExtractFilePaths([result], 20));
+    }
+
+    [Fact]
+    public void ExtractFilePaths_ReadsJsonStringArguments()
+    {
+        // Arguments deserialized from the wire arrive as JsonElement, not string.
+        var json = JsonDocument.Parse("""{"path":"src/Api/OrderController.cs"}""").RootElement;
+        var call = new ChatMessage(ChatRole.Assistant, [
+            new FunctionCallContent("c1", "read_file", new Dictionary<string, object?>
+            {
+                ["path"] = json.GetProperty("path"),
+            }),
+        ]);
+
+        Assert.Equal(["src/Api/OrderController.cs"], WorkingSetContextProvider.ExtractFilePaths([call], 20));
+    }
+
+    [Fact]
+    public void ExtractFilePaths_IgnoresNonStringArguments()
+    {
+        // ToString() on a POCO or JSON object yields a type name or braces — junk candidates.
+        var call = new ChatMessage(ChatRole.Assistant, [
+            new FunctionCallContent("c1", "read_file", new Dictionary<string, object?>
+            {
+                ["count"] = 42,
+                ["flag"] = true,
+                ["obj"] = new { path = "src/Nested/Hidden.cs" },
+            }),
+        ]);
+
+        Assert.Empty(WorkingSetContextProvider.ExtractFilePaths([call], 20));
+    }
+
+    [Fact]
+    public void ExtractFilePaths_StillRequiresAPathSeparator()
+    {
+        // The separator rule is a deliberate false-positive guard and must survive the widened
+        // content scan — this is what samples/MAF/WorkingSet violated with bare filenames.
+        var call = new ChatMessage(ChatRole.Assistant, [
+            new FunctionCallContent("c1", "read_file", new Dictionary<string, object?>
+            {
+                ["path"] = "AuthService.cs",
+            }),
+        ]);
+
+        Assert.Empty(WorkingSetContextProvider.ExtractFilePaths([call], 20));
+    }
+
+    // ── Defects found by review ─────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ExtractFilePaths_CaseDifferingDuplicate_IsDeduplicated()
+    {
+        // `seen` compares OrdinalIgnoreCase but List.Remove is case-sensitive, so the move-to-end
+        // silently failed and left both spellings in the result.
+        var messages = new[]
+        {
+            new ChatMessage(ChatRole.Assistant, "opened src/Auth/AuthService.cs"),
+            new ChatMessage(ChatRole.Assistant, "reopened SRC/AUTH/AUTHSERVICE.CS"),
+        };
+
+        var paths = WorkingSetContextProvider.ExtractFilePaths(messages, 20);
+
+        Assert.Single(paths);
+        Assert.Equal("SRC/AUTH/AUTHSERVICE.CS", paths[0]);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void ExtractFilePaths_NonPositiveCap_ReturnsEmptyInsteadOfThrowing(int maxPaths)
+    {
+        var messages = new[] { new ChatMessage(ChatRole.Assistant, "opened src/A.cs") };
+
+        Assert.Empty(WorkingSetContextProvider.ExtractFilePaths(messages, maxPaths));
     }
 }

@@ -9,17 +9,31 @@ A multi-turn code assistant reads mock C# source files across four turns. `Worki
 ```
 ## Working set
 Recently referenced files/paths in this session:
-- AuthService.cs
-- UserRepository.cs
+- src/Auth/AuthService.cs
+- src/Data/UserRepository.cs
 ```
 
-By Turn 4, the agent can answer "what files are we working with?" from the injected note alone — without calling any tool.
+Paths must contain a separator — the extractor deliberately rejects bare filenames like
+`AuthService.cs` to avoid matching ordinary prose. The sample's prompts therefore name real
+repository-relative paths, which is how a developer addresses a coding agent anyway.
+
+The sample also registers a small `WorkingSetEchoProvider` that prints the stored working set on
+each LLM step, so you can see the set accumulate rather than having to infer it from the model's
+wording:
+
+```
+[WorkingSet] src/Auth/AuthService.cs
+[WorkingSet] src/Auth/AuthService.cs,src/Data/UserRepository.cs
+```
+
+By Turn 4 the working set is in the injected note, so the agent can answer "what files are we
+working with?" without calling `list_files` again.
 
 ## What it demonstrates
 
 - `WorkingSetContextProvider` — automatic working-set tracking from chat history
 - Cross-turn context accumulation surviving in `AgentSessionStateBag`
-- Turn 4 zero-tool-call answer: the agent reads the injected context rather than calling `list_files`
+- Turn 4: the injected context carries the working set, so the agent need not call `list_files` again
 - How `AIContextProvider` fires once per LLM step and accumulates state through the session
 
 ## Prerequisites

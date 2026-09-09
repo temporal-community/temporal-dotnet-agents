@@ -77,15 +77,26 @@ public sealed class WorkingSetContextProvider : AIContextProvider
         // Providers run inside RunDurableAgentStepAsync; TemporalAgentContext.Current is set
         // by InvokeAgentToolAsync (a different activity) and is not available here.
         // Accessing the StateBag directly through the session avoids that dependency.
-        if (paths.Count > 0)
         {
             try
             {
-                var csv = string.Join(",", paths);
                 if (context.Session is TemporalAgentSession agentSession)
                 {
-                    agentSession.StateBag.SetValue(
-                        StateBagKey, csv, System.Text.Json.JsonSerializerOptions.Default);
+                    if (paths.Count > 0)
+                    {
+                        agentSession.StateBag.SetValue(
+                            StateBagKey,
+                            string.Join(",", paths),
+                            System.Text.Json.JsonSerializerOptions.Default);
+                    }
+                    else
+                    {
+                        // The key mirrors the CURRENT working set. Leaving a previous value in
+                        // place when nothing is extracted would advertise files that are no
+                        // longer in scope — worse than absence, because readers cannot tell the
+                        // difference between stale and current.
+                        agentSession.StateBag.TryRemoveValue(StateBagKey);
+                    }
                 }
             }
             catch (Exception ex)
@@ -136,6 +147,13 @@ public sealed class WorkingSetContextProvider : AIContextProvider
         IEnumerable<ChatMessage> messages,
         int maxPaths)
     {
+        // A non-positive cap means "no working set". Without this, GetRange below throws
+        // ArgumentOutOfRangeException far from the cause.
+        if (maxPaths <= 0)
+        {
+            return [];
+        }
+
         // Use a linked-set pattern: seen tracks uniqueness, ordered preserves recency.
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var ordered = new List<string>();
@@ -149,9 +167,28 @@ public sealed class WorkingSetContextProvider : AIContextProvider
 
             foreach (var content in msg.Contents)
             {
-                if (content is TextContent tc)
+                switch (content)
                 {
-                    ExtractFromText(tc.Text, seen, ordered);
+                    case TextContent tc:
+                        ExtractFromText(tc.Text, seen, ordered);
+                        break;
+
+                    // A tool-role message carries FunctionResultContent, not TextContent, so
+                    // scanning text alone never sees real tool output. The path a model asked to
+                    // read lives in the call's arguments, which is the higher-signal source: an
+                    // explicit path the model named, rather than one that happens to appear in
+                    // returned file content.
+                    case FunctionCallContent call when call.Arguments is not null:
+                        foreach (var argument in call.Arguments.Values)
+                        {
+                            ExtractFromText(AsScannableString(argument), seen, ordered);
+                        }
+
+                        break;
+
+                    case FunctionResultContent result:
+                        ExtractFromText(AsScannableString(result.Result), seen, ordered);
+                        break;
                 }
             }
         }
@@ -285,12 +322,34 @@ public sealed class WorkingSetContextProvider : AIContextProvider
         return s_knownExtensions.Contains(ext, StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Returns text worth scanning from a tool argument or result, or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately narrow: only a <see cref="string"/> or a JSON string. Arbitrary objects are
+    /// not stringified — <c>ToString()</c> on a POCO yields a type name, and on a JSON object
+    /// yields braces and quoting that produce junk candidates. Recognising fewer real paths is
+    /// preferable to inventing ones.
+    /// </remarks>
+    private static string? AsScannableString(object? value) => value switch
+    {
+        string s => s,
+        System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.String } e => e.GetString(),
+        _ => null,
+    };
+
     private static void AddPath(string path, HashSet<string> seen, List<string> ordered)
     {
         if (!seen.Add(path))
         {
-            // Move to end (most recent wins).
-            ordered.Remove(path);
+            // Move to end (most recent wins). `seen` compares OrdinalIgnoreCase, so the stored
+            // entry may differ only in casing — List.Remove uses the default case-SENSITIVE
+            // comparer and would silently fail to remove it, leaving a duplicate behind.
+            var existing = ordered.FindIndex(p => StringComparer.OrdinalIgnoreCase.Equals(p, path));
+            if (existing >= 0)
+            {
+                ordered.RemoveAt(existing);
+            }
         }
 
         ordered.Add(path);

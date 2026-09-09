@@ -14,7 +14,7 @@ public sealed class FakeFileSystem
     private static readonly Dictionary<string, string> s_files =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["AuthService.cs"] = """
+            ["src/Auth/AuthService.cs"] = """
                 public class AuthService
                 {
                     private readonly IUserRepository _users;
@@ -32,7 +32,7 @@ public sealed class FakeFileSystem
                 }
                 """,
 
-            ["UserRepository.cs"] = """
+            ["src/Data/UserRepository.cs"] = """
                 public class UserRepository : IUserRepository
                 {
                     private readonly AppDbContext _db;
@@ -52,7 +52,7 @@ public sealed class FakeFileSystem
                 }
                 """,
 
-            ["OrderController.cs"] = """
+            ["src/Api/OrderController.cs"] = """
                 [ApiController]
                 [Route("api/orders")]
                 public class OrderController : ControllerBase
@@ -84,7 +84,7 @@ public sealed class FakeFileSystem
     /// </summary>
     [Description("Read the contents of a source file by its filename.")]
     public string ReadFile(
-        [Description("The filename to read, e.g. AuthService.cs")] string filename)
+        [Description("The repository-relative path to read, e.g. src/Auth/AuthService.cs")] string filename)
     {
         return s_files.TryGetValue(filename, out var content)
             ? content
@@ -97,4 +97,34 @@ public sealed class FakeFileSystem
     [Description("List all files available in this repository.")]
     public string[] ListFiles() =>
         [.. s_files.Keys];
+}
+
+/// <summary>
+/// Sample-only observer: prints the working set that <c>WorkingSetContextProvider</c> stored in
+/// the session StateBag, so this sample proves its own behaviour without depending on how the
+/// model chooses to phrase an answer.
+/// </summary>
+/// <remarks>
+/// This is also the documented pattern for reading the working set from downstream code — the
+/// StateBag key mirrors the current working set for exactly this purpose. A real consumer would
+/// act on the value rather than write to stdout.
+/// </remarks>
+public sealed class WorkingSetEchoProvider : Microsoft.Agents.AI.AIContextProvider
+{
+    protected override ValueTask<Microsoft.Agents.AI.AIContext> ProvideAIContextAsync(
+        InvokingContext context,
+        CancellationToken cancellationToken = default)
+    {
+        if (context.Session is TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession session
+            && session.StateBag.TryGetValue(
+                TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.StateBagKey,
+                out string? csv,
+                System.Text.Json.JsonSerializerOptions.Default)
+            && !string.IsNullOrEmpty(csv))
+        {
+            Console.WriteLine($"[WorkingSet] {csv}");
+        }
+
+        return new ValueTask<Microsoft.Agents.AI.AIContext>(new Microsoft.Agents.AI.AIContext());
+    }
 }
