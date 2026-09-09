@@ -1,4 +1,4 @@
-// ContextProviders — custom AIContextProvider subclasses with TemporalCommunity.Extensions.Agents (v0.3).
+// ContextProviders — custom AIContextProvider subclasses with TemporalCommunity.Extensions.Agents.
 //
 // Demonstrates registering custom AIContextProvider subclasses via
 // DurableAgentBuilder.AddContextProvider. Providers fire once per LLM step, not once

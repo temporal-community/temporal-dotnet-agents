@@ -7,7 +7,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
-/// Phase 2 (v0.3 API redesign): coverage for the per-tool dispatch activity
+/// coverage for the per-tool dispatch activity
 /// (<c>TemporalCommunity.Extensions.Agents.InvokeAgentTool</c>) used by durable agents. Exercises the
 /// activity directly via <see cref="ActivityEnvironment"/> — no Temporal server required.
 /// </summary>

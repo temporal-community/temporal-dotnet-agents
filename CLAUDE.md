@@ -79,7 +79,7 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 - `services.AddHostedTemporalWorker(...).AddTemporalAgents(opts => opts.AddDurableAgent("Name", a => { a.ChatClient = sp => ...; a.AddTool(...); }))`
 - `services.AddHostedTemporalWorker(...).AddWorkerPlugin(new TemporalAgentsPlugin(opts => ...))` — `[Experimental("TA001")]`. Idempotent if mixed with `AddTemporalAgents()`.
 
-**`AddDurableAgent` is the only registration path in v0.3.** A single fluent `DurableAgentBuilder` consolidates `ChatClient`, tools (with per-tool retry overrides via `DurableToolOptions`), context providers, per-agent timeouts, and external history. DI access happens via per-slot factories on the builder — no `BuildServiceProvider()` bootstrap, no string-keyed dictionaries. Each LLM call dispatches a separate `RunDurableAgentStep` activity; each tool call dispatches a separately named `InvokeAgentTool` activity (per-agent local registry, distinct from MEAI's flat `InvokeFunction`). The library composes the chat pipeline with `UseProvidedChatClientAsIs = true` so users do NOT call `.UseFunctionInvocation()` on their `IChatClient`.
+**`AddDurableAgent` is the only registration path.** A single fluent `DurableAgentBuilder` consolidates `ChatClient`, tools (with per-tool retry overrides via `DurableToolOptions`), context providers, per-agent timeouts, and external history. DI access happens via per-slot factories on the builder — no `BuildServiceProvider` bootstrap, no string-keyed dictionaries. Each LLM call dispatches a separate `RunDurableAgentStep` activity; each tool call dispatches a separately named `InvokeAgentTool` activity (per-agent local registry, distinct from MEAI's flat `InvokeFunction`). The library composes the chat pipeline with `UseProvidedChatClientAsIs = true` so users do NOT call `.UseFunctionInvocation` on their `IChatClient`.
 
 `ConfigureAgentPipeline` is dry-built once at startup in a validation scope and built once per
 `RunDurableAgentStep` activity attempt in that attempt's DI scope. No pipeline is cached in the
@@ -337,7 +337,8 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 
 ### TemporalCommunity.Extensions.Agents (MAF)
 
-- **Usage Guide**: `docs/how-to/MAF/usage.md`
+- **Quickstart**: `docs/how-to/MAF/quickstart.md`
+- **Usage Reference**: `docs/how-to/MAF/usage.md`
 - **Routing Patterns**: `docs/how-to/MAF/routing.md`
 - **Testing Agents**: `docs/how-to/MAF/testing-agents.md`
 - **Observability**: `docs/how-to/MAF/observability.md`

@@ -1,6 +1,6 @@
 # PerToolActivities — Per-Tool Temporal Activity Granularity
 
-This sample demonstrates **per-tool Temporal activities** in v0.3 of
+This sample demonstrates **per-tool Temporal activities** in
 `TemporalCommunity.Extensions.Agents`. Every LLM call is its own
 `TemporalCommunity.Extensions.Agents.RunDurableAgentStep` activity, and every tool call
 is its own `TemporalCommunity.Extensions.Agents.InvokeAgentTool` activity. Per-tool
@@ -126,7 +126,7 @@ resource state inside their activity.
 
 ---
 
-## How It Wires Together (v0.3)
+## How It Wires Together
 
 ### One registration call — `AddDurableAgent`
 
@@ -173,7 +173,7 @@ builder.Services
     .AddWorkflow<RefundWorkflow>();
 ```
 
-What v0.3 simplifies away:
+What this design simplifies away:
 
 - **No `BuildServiceProvider()` bootstrap** — the `AddTool(string, sp => ...)`
   factory runs at first activity dispatch with the worker's runtime

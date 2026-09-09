@@ -44,8 +44,7 @@ were retired before ever shipping as a recommended pattern:
    mentioned here only because the two reasons below were surfaced *while evaluating whether to
    build it*, and the reasons apply equally to the sentinel-based version that did briefly exist.
 
-Both are gone — see [Non-breaking note](#non-breaking-note) below for exactly what that means for
-anyone who might have been depending on either.
+Both are gone.
 
 ---
 
@@ -223,18 +222,6 @@ this section is a terse index so you don't have to leave this doc to find your w
    pattern does not affect this tier in any way.
 3. **Hand-written Activity + `AIFunction.AsDurable()`** (see Quick Answer above for what this
    covers) — sample: `samples/MEAI/DirectAdapters` (`ResearchActivities.cs` + `ResearchWorkflow.cs`).
-
----
-
-## Non-breaking note
-
-This was a pre-release course-correction, not a breaking change to any released version.
-`WorkflowOnlyChatClient` and `WorkflowOnlyEmbeddingGenerator` never appeared in
-`PublicAPI.Shipped.txt` — both were `Unshipped`-only — and `DurableChatClient.CreateForWorkflow(...)`
-was discussed but never implemented or shipped. No consumer of a released package version had
-anything to migrate away from.
-
----
 
 ## References
 

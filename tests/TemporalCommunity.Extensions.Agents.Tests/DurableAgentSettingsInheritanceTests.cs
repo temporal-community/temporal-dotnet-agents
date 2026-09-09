@@ -7,7 +7,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
-/// Phase 4 (v0.3 API redesign): coverage for the per-agent settings-inheritance rule applied by
+/// coverage for the per-agent settings-inheritance rule applied by
 /// <c>DefaultTemporalAgentClient.BuildAgentWorkflowInputCore</c>. For every settable scalar on
 /// <see cref="DurableAgentBuilder"/>, the rule is
 /// <c>effective = registration.X ?? options.X</c> — when the agent overrides a setting it wins;

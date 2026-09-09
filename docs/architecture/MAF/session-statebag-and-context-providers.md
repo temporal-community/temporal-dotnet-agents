@@ -422,8 +422,10 @@ Three rules follow from session ownership:
   `InvalidOperationException`; they would otherwise append to one history and merge into one
   StateBag with no defined ordering. Distinct sessions run in parallel freely.
 
-State survives continue-as-new only if the orchestrating workflow explicitly carries the serialized
-session forward — the library does not guess.
+Continue-as-new differs by path. The library's own `AgentWorkflow` — what a `TemporalAIAgentProxy`
+session runs in — carries its history and StateBag forward automatically. A workflow-local
+sub-agent session survives only if the orchestrating workflow serializes it into its own
+continue-as-new input; the library cannot guess that policy.
 
 #### Sub-agent tools cannot reach the session StateBag
 

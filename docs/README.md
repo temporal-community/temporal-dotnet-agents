@@ -9,7 +9,8 @@ Welcome to the documentation for **Temporal .NET Agents**, providing durable exe
 ### Microsoft Agent Framework (MAF Integration)
 *`TemporalCommunity.Extensions.Agents`*
 
-- **[Usage & Getting Started](how-to/MAF/usage.md)** — Registering durable agents, options, and hosting setup.
+- **[Quickstart](how-to/MAF/quickstart.md)** — One durable agent registered and called, start to finish.
+- **[Usage Reference](how-to/MAF/usage.md)** — Every builder slot, option, and hosting behaviour.
 - **[Durable Agents & Tools](how-to/MAF/durable-agents.md)** — Activity-backed tool execution, retry policies, and timeouts.
 - **[Routing & Agent Orchestration](how-to/MAF/routing.md)** — Multi-agent routing, workflow delegation, and sub-agents.
 - **[Human-in-the-Loop (HITL)](how-to/MAF/hitl-patterns.md)** — Workflow approval gates, session approval scopes, and interactive reviews.

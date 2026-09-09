@@ -10,7 +10,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 
 /// <summary>
-/// Crash-safety coverage for v0.3 durable agents (registered via <c>AddDurableAgent</c>).
+/// Crash-safety coverage for durable agents (registered via <c>AddDurableAgent</c>).
 /// Pins the load-bearing behavioral guarantee: a write tool registered with
 /// <c>opts.NoRetry()</c> never double-fires even across worker restarts, and a transient
 /// read-tool failure is retried independently of write-tool retries.

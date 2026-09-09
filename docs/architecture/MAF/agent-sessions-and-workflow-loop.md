@@ -512,7 +512,7 @@ The signal handler starts a background task inside the workflow that follows the
 
 ### Blueprint construction and per-step composition
 
-In v0.3, the durable-agent dispatch path does not accept or cache a caller-built `AIAgent`.
+the durable-agent dispatch path does not accept or cache a caller-built `AIAgent`.
 `AgentActivities` first builds an immutable blueprint that caches only registration and durable-tool
 shape; it does not resolve a chat client or construct middleware. For every LLM-step activity
 attempt it then:
@@ -529,7 +529,7 @@ constructed once at startup and once per activity attempt; retries construct a n
 
 The explicit provider loop is intentional: it makes StateBag serialization and the durable-tool boundary visible to `AgentActivities`, rather than allowing MAF's internal agent loop to own them.
 
-`UseProvidedChatClientAsIs = true` is load-bearing. Without it, MAF would auto-wrap the chat client in `FunctionInvokingChatClient`, which would execute tools inside the `IChatClient` pipeline — defeating the whole point of the v0.3 design where the **workflow** owns the tool-dispatch loop and each tool call becomes its own `InvokeAgentTool` activity.
+`UseProvidedChatClientAsIs = true` is load-bearing. Without it, MAF would auto-wrap the chat client in `FunctionInvokingChatClient`, which would execute tools inside the `IChatClient` pipeline — defeating the whole point of the design where the **workflow** owns the tool-dispatch loop and each tool call becomes its own `InvokeAgentTool` activity.
 
 ### Per-step `ChatOptions` shaping
 
@@ -562,13 +562,13 @@ Tools dispatched in `InvokeAgentToolAsync` need to discover their workflow conte
 - `TemporalAgentContext.Current` (an `AsyncLocal`) is set by `RunDurableAgentStepAsync` before the LLM call and by `InvokeAgentToolAsync` before each tool call. It carries `IServiceProvider`, the agent name, the session ID, and the activity execution context.
 - `TemporalAgentSession.GetService(typeof(TemporalAgentSessionId))` returns the session ID directly. The session is the `AgentSession` instance that the activity restores from `AgentStepInput.SerializedStateBag` at the start of each step.
 
-There is no `AgentWorkflowWrapper` interposed between the `ChatClientAgent` and the user's `IChatClient` in v0.3. Application code that needs to decorate the `IChatClient` should do so by returning a decorated client from `agent.ChatClient` — see [`docs/how-to/MAF/llm-call-interception.md`](../../how-to/MAF/llm-call-interception.md).
+There is no `AgentWorkflowWrapper` interposed between the `ChatClientAgent` and the user's `IChatClient`. Application code that needs to decorate the `IChatClient` should do so by returning a decorated client from `agent.ChatClient` — see [`docs/how-to/MAF/llm-call-interception.md`](../../how-to/MAF/llm-call-interception.md).
 
 ---
 
 ## Durable Agent Workflow Loop
 
-In v0.3 every agent registered via `TemporalAgentsOptions.AddDurableAgent(...)` runs in **durable mode**: the agentic loop lives inside `[Workflow]` code, each LLM call is its own `RunDurableAgentStep` activity, and each tool call is its own `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — this is the only worker-hosted agent-definition path; client-only processes declare proxies separately.
+every agent registered via `TemporalAgentsOptions.AddDurableAgent(...)` runs in **durable mode**: the agentic loop lives inside `[Workflow]` code, each LLM call is its own `RunDurableAgentStep` activity, and each tool call is its own `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — this is the only worker-hosted agent-definition path; client-only processes declare proxies separately.
 
 ### Why the loop must live in the workflow
 

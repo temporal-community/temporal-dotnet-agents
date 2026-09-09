@@ -1,4 +1,4 @@
-// Skills — progressive-disclosure skills with TemporalCommunity.Extensions.Agents (v0.3).
+// Skills — progressive-disclosure skills with TemporalCommunity.Extensions.Agents.
 //
 // Demonstrates UseSkills(Action<SkillsBuilder>) to wire up a compact skill index
 // and on-demand load_skill dispatch as separate InvokeAgentTool Temporal activities.

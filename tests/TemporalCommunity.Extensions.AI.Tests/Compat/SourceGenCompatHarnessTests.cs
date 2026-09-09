@@ -11,13 +11,13 @@ namespace TemporalCommunity.Extensions.AI.Tests.Compat;
 /// Baseline coverage for <see cref="SourceGenCompatHarness"/>. Asserts:
 /// <list type="bullet">
 ///   <item><description>
-///     Forward-compat: payloads produced under the v0.3 discriminator set
+///     Forward-compat: payloads produced under the frozen baseline discriminator set
 ///     deserialize cleanly under the current (new) options — one test per
 ///     current discriminator on <see cref="DurableSessionEntry"/>.
 ///   </description></item>
 ///   <item><description>
 ///     Backward-compat: a payload with a NEW (fake) discriminator
-///     deserializes under the frozen v0.3 options into a typed
+///     deserializes under the frozen options into a typed
 ///     <see cref="DurableReplayCompatibilityException"/>, not a raw
 ///     <see cref="JsonException"/>.
 ///   </description></item>
@@ -95,7 +95,7 @@ public class SourceGenCompatHarnessTests
         // Hand-roll a payload with an as-yet-unregistered discriminator. This
         // simulates: a future build registered "compaction-marker" via
         // [JsonDerivedType] and wrote a workflow history entry; an older
-        // worker (still on v0.3) replays the same history.
+        // worker (on the frozen baseline) replays the same history.
         const string FutureDiscriminator = "compaction-marker";
         var payload = $$"""
         {

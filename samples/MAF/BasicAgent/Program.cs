@@ -1,4 +1,4 @@
-// BasicAgent — single durable agent session via TemporalCommunity.Extensions.Agents (v0.3).
+// BasicAgent — single durable agent session via TemporalCommunity.Extensions.Agents.
 //
 // Demonstrates the canonical AddDurableAgent registration: an IChatClient registered
 // in DI, an agent registered via opts.AddDurableAgent("name", agent => { ... }), and
@@ -54,7 +54,7 @@ var weatherTool = AIFunctionFactory.Create(
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient());
 
 // ── Step 5: Register the durable agent ───────────────────────────────────────
-// AddDurableAgent is the single registration entry point in v0.3:
+// AddDurableAgent is the single registration entry point:
 //   • agent.ChatClient   — DI factory for the agent's IChatClient (required)
 //   • agent.AddTool(...) — registers a tool against this agent's local registry
 //   • agent.TimeToLive   — per-agent override of opts.DefaultTimeToLive (14 days)

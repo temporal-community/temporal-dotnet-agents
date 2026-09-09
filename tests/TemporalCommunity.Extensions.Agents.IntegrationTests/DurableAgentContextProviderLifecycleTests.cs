@@ -11,7 +11,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 
 /// <summary>
-/// Phase 4 (v0.3): integration coverage for the load-bearing lifecycle contract Q10/CP1 —
+/// integration coverage for the load-bearing lifecycle contract Q10/CP1 —
 /// <see cref="AIContextProvider.InvokingAsync"/> and <see cref="AIContextProvider.InvokedAsync"/>
 /// fire ONCE PER LLM CALL (per <c>RunDurableAgentStep</c> activity), not once per turn. The
 /// durable workflow loop runs multiple LLM calls per turn (one per tool-call iteration plus the

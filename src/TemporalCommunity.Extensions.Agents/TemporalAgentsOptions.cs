@@ -13,7 +13,7 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <summary>
 /// Options for configuring Temporal agents. Agents are registered exclusively via
 /// <see cref="AddDurableAgent(string, Action{DurableAgentBuilder})"/>; the v0.2 surface
-/// (<c>AddAIAgent</c>, <c>AddAIAgentFactory</c>, etc.) was removed in v0.3.
+/// (<c>AddAIAgent</c>, <c>AddAIAgentFactory</c>, etc.) is not supported.
 /// </summary>
 /// <remarks>
 /// Worker-level default properties on this class use the <c>Default*</c> prefix

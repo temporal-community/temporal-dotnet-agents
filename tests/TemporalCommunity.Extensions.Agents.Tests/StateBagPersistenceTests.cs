@@ -7,7 +7,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
-/// Tests that the StateBag round-trips correctly through the v0.3 durable-agent activity inputs
+/// Tests that the StateBag round-trips correctly through the durable-agent activity inputs
 /// (<see cref="AgentStepInput"/>) — verifying GAP 6.
 /// </summary>
 public class StateBagPersistenceTests

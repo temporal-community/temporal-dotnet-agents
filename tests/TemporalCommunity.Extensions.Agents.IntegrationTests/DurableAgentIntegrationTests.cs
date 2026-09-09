@@ -15,7 +15,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 
 /// <summary>
-/// End-to-end integration coverage for v0.3 durable agents registered via
+/// End-to-end integration coverage for durable agents registered via
 /// <c>TemporalAgentsOptions.AddDurableAgent</c>. Exercises the new workflow loop:
 /// <c>TemporalCommunity.Extensions.Agents.RunDurableAgentStep</c> for the LLM call and
 /// <c>TemporalCommunity.Extensions.Agents.InvokeAgentTool</c> per tool dispatch (parallel fan-out via

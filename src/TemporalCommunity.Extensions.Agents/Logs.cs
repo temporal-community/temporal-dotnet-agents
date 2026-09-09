@@ -152,7 +152,7 @@ internal static partial class Logs
     public static partial void LogProxyDispatchingDelayedRequest(
         this ILogger logger, string agentName, string workflowId, TimeSpan delay);
 
-    // ── Durable agent per-tool invocation logs (v0.3 API) ─────────────────────
+    // ── Durable agent per-tool invocation logs ─────────────────────
 
     [LoggerMessage(EventId = 26, Level = LogLevel.Information,
         Message = "[{AgentName}] Invoking tool '{ToolName}' as Temporal activity")]
@@ -169,7 +169,7 @@ internal static partial class Logs
     public static partial void LogAgentToolInvocationFailed(
         this ILogger logger, string agentName, string toolName, Exception ex);
 
-    // ── Durable-agent workflow loop (Phase 3, v0.3 API) ──────────────────────
+    // ── Durable-agent workflow loop (Phase 3) ────────────────────────────
 
     [LoggerMessage(EventId = 29, Level = LogLevel.Information,
         Message = "[{AgentName}/{WorkflowId}] Durable agent turn started")]

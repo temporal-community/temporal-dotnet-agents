@@ -8,7 +8,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
-/// Phase 2 (v0.3 API redesign): coverage for <see cref="TemporalAgentsOptions.AddDurableAgent"/>
+/// coverage for <see cref="TemporalAgentsOptions.AddDurableAgent"/>
 /// registration semantics. Validates the four checkpoints listed in Q9 of the plan, plus the
 /// introspection wiring that makes durable agents visible to <c>GetRegisteredAgentNames</c> and
 /// <c>GetAgentDescriptors</c>.

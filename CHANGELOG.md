@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- Moved conversation history and the StateBag from the `TemporalAIAgent` instance onto
+  `TemporalAgentSession`. One agent instance now drives any number of independent conversations
+  without their state colliding, and a session carries its own state wherever it goes.
+
+- Added session validation to `TemporalAIAgent.RunAsync`: the session must be a
+  `TemporalAgentSession`, must belong to the agent running it (matched by name), and may not have a
+  second run started while one is in flight. Distinct sessions on one agent still run in parallel.
+
+- A serialized session now contains the conversation transcript alongside its ID and StateBag.
+  Anywhere sessions are persisted therefore holds conversation content; there is no redaction hook.
+  Payload grows roughly 750 bytes per turn and history is uncompacted.
+
+- `FunctionInvokingChatClient` is now rejected unconditionally in a durable agent's chat client. It
+  executes tools in-process, which bypasses per-tool `InvokeAgentTool` activities and silently
+  disables retry policies, `NoRetry()`, timeouts, and event-history visibility. The activity fails
+  non-retryably before the model is called. Configuration failures in both libraries are now raised
+  as non-retryable Temporal failures rather than consuming the retry budget.
+
 - Enforced minimum `MaxEntryCount` of 4 across `DurableExecutionOptions` and `TemporalAgentsOptions`.
   Values below 4 cannot satisfy both the documented half-window carry policy and the complete-turn
   invariant. The validation rejects undersized configurations at worker startup with actionable error

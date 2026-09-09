@@ -444,7 +444,7 @@ public class EdgeCaseTests : IClassFixture<IntegrationTestFixture>
 
             var response = await proxy.RunAsync("Send me nothing back", session);
 
-            // The v0.3 durable path normalizes a stream that yields no updates by emitting
+            // The durable path normalizes a stream that yields no updates by emitting
             // a single empty-content assistant ChatMessage (see RunDurableAgentStepAsync's
             // assistantMessage fallback). The contract we care about is "doesn't crash" —
             // exactly one message comes back, and its content is empty.

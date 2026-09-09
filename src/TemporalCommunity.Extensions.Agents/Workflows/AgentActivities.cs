@@ -920,7 +920,7 @@ internal sealed class AgentActivities(
         // per-tool activity path. Mirrors the SetCurrent/clear-in-finally pattern at
         // RunDurableAgentStepAsync line ~296. Without this, HITL tools and any tool
         // that needs the agent context are broken when dispatched as InvokeAgentTool
-        // activities (which is the default since v0.3).
+        // activities (which is the default).
         //
         // SessionId parse is wrapped in try/catch: in tests, ActivityEnvironment uses
         // arbitrary workflow IDs (e.g. "test") that don't match the agent session

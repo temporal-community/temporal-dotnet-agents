@@ -1,4 +1,4 @@
-# MAF Quick Start and Usage Guide
+# MAF Usage Reference
 
 `TemporalCommunity.Extensions.Agents` makes a Microsoft Agent Framework (`Microsoft.Agents.AI`)
 `AIAgent` durable with Temporal. It builds on `TemporalCommunity.Extensions.AI`, adding named
@@ -11,7 +11,8 @@ registered agent:
 - **From inside an orchestrating workflow** — use `WorkflowAgents.GetTemporalAgent` for
   sub-agent orchestration.
 
-This page is the how-to reference once you've chosen this package. To choose between it and
+**New here? Start with the [Quickstart](./quickstart.md)** — one agent registered and called, in
+about thirty lines. This page is the full reference: every builder slot, option, and behaviour. To choose between it and
 `TemporalCommunity.Extensions.AI`, see the [Library Combinations Guide](../../library-combinations.md);
 for a runnable starting point, see the [Sample Catalog](../../../samples/catalog.md). For externally
 reachable session or approval endpoints, apply the normative [security boundary](../../security.md)
@@ -19,7 +20,7 @@ before calling a durable client.
 
 ---
 
-## Quick Start
+## Registration
 
 `AddDurableAgent` is the only **worker-hosted durable-agent definition** path. The client-only
 counterpart is `AddTemporalAgentProxies` plus `AddAgentProxy`; it declares proxies for an agent
@@ -353,8 +354,12 @@ survives worker restarts, supports retries, and is durable by design — all wit
 
 Reuse one session for the turns of one conversation; give each independent conversation its own. One `TemporalAIAgent`
 instance drives any number of sessions without their history or StateBag colliding. Two runs may not overlap on the same
-session, a session may only be run by the agent that created it, and carrying a conversation across continue-as-new means
-serializing the session into your workflow's continue-as-new input yourself.
+session, and a session may only be run by the agent that created it.
+
+Continue-as-new differs by path. A session driven through `TemporalAIAgentProxy` runs in the
+library's `AgentWorkflow`, which carries history and StateBag across its own continue-as-new
+automatically. A workflow-local sub-agent session is yours to carry: serialize it into your
+workflow's continue-as-new input, because the library cannot know your continue-as-new policy.
 
 ---
 

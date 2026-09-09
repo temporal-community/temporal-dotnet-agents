@@ -3,7 +3,7 @@ using Microsoft.Extensions.AI;
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 
 /// <summary>
-/// A minimal <see cref="IChatClient"/> for integration testing the v0.3 durable-agent path.
+/// A minimal <see cref="IChatClient"/> for integration testing the durable-agent path.
 /// Returns "Echo [{turnCount}]: {lastUserMessage}" without calling any real LLM.
 /// </summary>
 internal sealed class EchoChatClient : IChatClient

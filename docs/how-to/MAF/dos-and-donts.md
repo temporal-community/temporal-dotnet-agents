@@ -174,10 +174,8 @@ await agent.RunAsync("Question A", s1);
 await agent.RunAsync("Question B", s2); // does not see Question A
 ```
 
-**Why:** as of v0.4 the *session* owns the conversation history and StateBag, so one agent instance
-drives any number of independent conversations. Before v0.4 both lived on the agent instance and
-the second conversation replayed the first one's turns; the old workaround of resolving a second
-agent instance is no longer needed.
+**Why:** the *session* owns the conversation history and StateBag, so one agent instance drives any
+number of independent conversations without their state colliding.
 
 Reuse the same session object for the turns that belong to one conversation — a fresh session per
 call accumulates nothing.
@@ -248,7 +246,10 @@ cannot round-trip history.
 > framework itself (in `AgentActivities`). It is not part of the public API. User code should call
 > `session.StateBag.Serialize()` directly when only StateBag persistence is required.
 
-### Do carry the session across continue-as-new yourself
+### Do carry a sub-agent session across continue-as-new yourself
+
+This applies to **workflow-local sub-agents only** — a `TemporalAIAgent` obtained from
+`WorkflowAgents.GetTemporalAgent(...)` inside your own workflow:
 
 ```csharp
 var serialized = await agent.SerializeSessionAsync(session);
@@ -256,9 +257,13 @@ throw Workflow.CreateContinueAsNewException((MyWorkflow wf) => wf.RunAsync(
     new MyInput { CarriedSession = serialized }));
 ```
 
-**Why:** the orchestrating workflow owns its own continue-as-new policy, so the library does not
-guess when a sub-agent conversation should survive the boundary. A session that is not carried
-forward starts empty on the next run.
+**Why:** your workflow owns its own continue-as-new policy, so the library cannot guess when a
+sub-agent conversation should survive the boundary. A sub-agent session that is not carried forward
+starts empty on the next run.
+
+**Proxy-backed sessions need none of this.** A session driven through `TemporalAIAgentProxy` runs in
+the library's own `AgentWorkflow`, which carries its history and StateBag across its own
+continue-as-new automatically.
 
 ---
 

@@ -103,7 +103,7 @@ builder.Services
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
             agent.AddTool(sendEmailTool, opts => opts.NoRetry());
 
-            // Per-agent override of opts.DefaultApprovalTimeout. Demonstrates the v0.3
+            // Per-agent override of opts.DefaultApprovalTimeout. Demonstrates the
             // builder slot — not required (would inherit opts.DefaultApprovalTimeout otherwise).
             agent.ApprovalTimeout = TimeSpan.FromHours(23);
         });

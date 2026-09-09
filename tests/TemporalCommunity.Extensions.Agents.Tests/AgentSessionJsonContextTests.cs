@@ -9,7 +9,7 @@ namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
 /// Verifies that <see cref="AgentSessionJsonContext"/> includes source-gen metadata for the
-/// activity I/O types added in v0.3 per-tool-activities redesign. Each test calls
+/// activity I/O types added in the per-tool-activities redesign. Each test calls
 /// <see cref="System.Text.Json.JsonSerializerOptions.GetTypeInfo"/> on the context's options
 /// and asserts that the returned <see cref="JsonTypeInfo"/> originated from the generated
 /// context. A non-None kind alone is insufficient because a reflection resolver also produces

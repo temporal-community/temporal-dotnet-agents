@@ -66,7 +66,7 @@ builder.Services.AddSingleton<EmailService>();
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient());
 
 // ── Step 5: Register Temporal client + worker pipeline ───────────────────────
-// AddDurableAgent is the single registration entry point in v0.3:
+// AddDurableAgent is the single registration entry point:
 //   • agent.AddTool(...)                       — read tool, inherits worker default retry
 //   • agent.AddTool(..., opts => opts.NoRetry()) — write tool, MaximumAttempts = 1
 // Per-tool retry is bound to the AIFunction reference via the configure callback —

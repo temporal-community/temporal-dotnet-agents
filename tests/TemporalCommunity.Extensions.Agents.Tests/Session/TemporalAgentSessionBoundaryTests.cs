@@ -150,14 +150,14 @@ public class TemporalAgentSessionBoundaryTests
     // ─── Legacy wire compatibility ──────────────────────────────────────────
     //
     // The fixtures below are the shapes the pre-Option-D serializer actually emitted, captured by
-    // running the real v0.3 `TemporalAgentSession.Serialize()` against a built assembly — not
+    // running the real `TemporalAgentSession.Serialize` against a built assembly — not
     // hand-guessed. A break here means sessions already persisted in workflow histories can no
     // longer be restored.
 
     [Fact]
     public async Task Legacy_EmptyStateBagObject_RestoresAsEmptyBag()
     {
-        // The v0.3 writer always emitted the property, so an empty bag serialized as "stateBag":{}.
+        // The previous writer always emitted the property, so an empty bag serialized as "stateBag":{}.
         // The snapshot writer omits it instead; the reader must still accept the old form.
         var legacy = JsonDocument.Parse("""{"sessionId":"ta-assistant-abc123","stateBag":{}}""").RootElement;
 

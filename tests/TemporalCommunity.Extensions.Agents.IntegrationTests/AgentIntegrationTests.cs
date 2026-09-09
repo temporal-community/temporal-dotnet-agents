@@ -49,7 +49,7 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
 
         var response = await _fixture.AgentProxy.RunAsync("Ping", session);
 
-        // The v0.3 durable path does not stamp AgentResponse.AgentId (AgentWorkflowWrapper
+        // The durable path does not stamp AgentResponse.AgentId (AgentWorkflowWrapper
         // was removed). Instead, verify session-to-workflow routing: the workflow we just
         // ran is reachable via the session's WorkflowId, and its history includes the turn.
         Assert.NotNull(response);

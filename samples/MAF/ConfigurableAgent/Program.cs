@@ -1,7 +1,7 @@
 // ConfigurableAgent — two-tier customer support demo using DI factories on the
 // AddDurableAgent builder.
 //
-// Demonstrates the v0.3 DI-factory-per-slot pattern: every tool resolves its
+// Demonstrates the DI-factory-per-slot pattern: every tool resolves its
 // backing service via sp.GetRequiredService<T>() at first activity dispatch.
 // No BuildServiceProvider() bootstrap is needed — the library invokes each
 // factory once with the worker's runtime IServiceProvider.

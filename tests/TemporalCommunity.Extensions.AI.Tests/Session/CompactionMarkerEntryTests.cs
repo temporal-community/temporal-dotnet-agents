@@ -66,7 +66,7 @@ public class CompactionMarkerEntryTests
     [Fact]
     public void Marker_OldWorkerSnapshot_ThrowsReplayCompatibilityException()
     {
-        // Cypher mitigation #4: older worker (v0.3 snapshot — only knows ai_request/ai_response)
+        // Cypher mitigation #4: older worker (frozen baseline snapshot — only knows ai_request/ai_response)
         // pulls a workflow task whose history contains a compaction-marker entry. The harness
         // simulates that by filtering DurableSessionEntry's DerivedTypes down to the snapshot
         // set and asserting the typed exception fires with the marker discriminator named.
