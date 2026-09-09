@@ -273,13 +273,114 @@ opts.DefaultConfigureAgentPipeline = pipeline =>
 
 That exact line is live in `samples/MAF/MultiAgentRouting/Program.cs`.
 
-Custom middleware must be a **transparent, non-disposable `DelegatingAIAgent`**. The pipeline is
-dry-built once at startup in a validation scope — so a broken pipeline fails fast rather than at
-first request — and built once per activity attempt in that attempt's DI scope. MAF's built-in
-`OpenTelemetryAgent` is owned and disposed by the per-build lease; do not dispose it yourself.
+### Writing custom middleware
 
-Middleware receives the exact restored `TemporalAgentSession` for the run. It may make retry-safe
-StateBag changes, but it cannot replace the session.
+The wrapper must derive from `DelegatingAIAgent`, preserve the exact supplied `inner` through
+`base(inner)`, and delegate both run shapes it customizes:
+
+```csharp
+sealed class TimingAgent(AIAgent inner, ILogger<TimingAgent> logger)
+    : DelegatingAIAgent(inner)
+{
+    protected override async Task<AgentResponse> RunCoreAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            return await base.RunCoreAsync(messages, session, options, cancellationToken);
+        }
+        finally
+        {
+            logger.LogInformation("Agent run completed in {Elapsed}",
+                Stopwatch.GetElapsedTime(started));
+        }
+    }
+
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            await foreach (var update in base.RunCoreStreamingAsync(
+                messages, session, options, cancellationToken))
+            {
+                yield return update;
+            }
+        }
+        finally
+        {
+            logger.LogInformation("Agent stream completed in {Elapsed}",
+                Stopwatch.GetElapsedTime(started));
+        }
+    }
+}
+
+agent.ConfigureAgentPipeline = pipeline =>
+    pipeline.Use((inner, services) =>
+        new TimingAgent(inner, services.GetRequiredService<ILogger<TimingAgent>>()));
+```
+
+Note the durable agent only ever streams (see [above](#only-getstreamingresponseasync-is-ever-called)),
+so `RunCoreStreamingAsync` is the override that fires — the same trap as the chat-client layer.
+
+### Rules the library enforces
+
+**Stay transparent.** Do not return a separate agent from the factory, and do not hide `inner`
+inside a custom `AIAgent` subclass. Both are rejected, because the library cannot otherwise prove
+its `ChatClientAgent` is still the durable model-call leaf. Request-level short-circuiting inside a
+valid `DelegatingAIAgent` is supported.
+
+**Do not implement `IDisposable` / `IAsyncDisposable`.** MAF 1.17.0 does not expose whether a
+factory-created wrapper or DI owns the instance, so the library rejects that ambiguous shape. Put
+resource-owning dependencies in the activity DI scope. The one exception is MAF's built-in
+`OpenTelemetryAgent` — the library knows that wrapper owns its telemetry client and disposes it at
+the end of each validation or activity build. If `AIAgentBuilder.Build` throws before returning a
+root, MAF exposes no partially built wrappers, so the library cannot dispose what it cannot reach.
+
+**Pass the exact session through.** Middleware receives the restored `TemporalAgentSession` and may
+persist retry-safe state in its `StateBag`, but must hand that same object to `next`:
+
+```csharp
+sealed class AttemptCountingAgent(AIAgent inner) : DelegatingAIAgent(inner)
+{
+    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var durable = (TemporalAgentSession)session!;
+        // Read/write a JSON-serializable StateBag value here. The activity persists the bag.
+
+        await foreach (var update in base.RunCoreStreamingAsync(
+            messages, durable, options, cancellationToken))
+        {
+            yield return update;
+        }
+    }
+}
+```
+
+Passing `null` or substituting another session is rejected: only the original restored StateBag is
+durably serialized. The innermost `ChatClientAgent` uses a separate transient
+`ChatClientAgentSession` behind the library's own boundary; middleware that requires that
+leaf-specific type is not supported.
+
+### Lifetime
+
+The pipeline callback runs **once during worker-startup validation** — so a broken pipeline fails at
+boot rather than at first request — and **once per `RunDurableAgentStep` activity attempt**,
+including retries. Both use a DI scope, so middleware factories may resolve scoped dependencies.
+Treat wrapper fields as attempt-local, never session-local; durable state goes in the
+[StateBag](#where-state-belongs).
 
 ---
 

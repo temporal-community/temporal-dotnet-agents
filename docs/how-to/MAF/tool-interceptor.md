@@ -2,6 +2,8 @@
 
 A pre-tool lifecycle hook that runs as a Temporal activity before each `InvokeAgentTool` dispatch. Use it to apply policy, enrich approval context, score risk, scrub PII from arguments, or short-circuit tool execution — all without modifying individual tool implementations.
 
+> **Looking to intercept the *model* call instead** — logging prompts and responses, token usage, or wrapping the agent run? That is a different layer: see [Intercepting LLM Calls](./llm-call-interception.md).
+
 ---
 
 ## Table of Contents

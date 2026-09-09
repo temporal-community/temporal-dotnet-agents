@@ -165,6 +165,7 @@ var chatClient = openAiClient.GetChatClient("gpt-4o-mini")
     .Build();
 //  Note: do NOT call .UseFunctionInvocation() — the durable-agent path composes
 //  the chat pipeline internally and tools are dispatched as separate Temporal activities.
+//  This is enforced: the activity fails non-retryably before the model is called.
 
 builder.Services.AddChatClient(chatClient);
 builder.Services.AddTemporalClient("localhost:7233", "default");
@@ -1176,118 +1177,40 @@ There is **no per-agent "default for all my tools" cascade beyond `agent.RetryPo
 
 ### Custom agent middleware
 
-Custom agent middleware belongs in `ConfigureAgentPipeline`. Its wrapper must derive from
-`DelegatingAIAgent`, preserve the exact supplied `inner` agent through `base(inner)`, and delegate
-both run shapes it customizes:
+To wrap the whole agent run — timing, tracing, request-level short-circuiting — set
+`agent.ConfigureAgentPipeline` (`Action<AIAgentBuilder>`), or `opts.DefaultConfigureAgentPipeline`
+for every agent; the per-agent value wins when both are set.
 
 ```csharp
-sealed class TimingAgent(AIAgent inner, ILogger<TimingAgent> logger)
-    : DelegatingAIAgent(inner)
-{
-    protected override async Task<AgentResponse> RunCoreAsync(
-        IEnumerable<ChatMessage> messages,
-        AgentSession? session = null,
-        AgentRunOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        var started = Stopwatch.GetTimestamp();
-        try
-        {
-            return await base.RunCoreAsync(messages, session, options, cancellationToken);
-        }
-        finally
-        {
-            logger.LogInformation("Agent run completed in {Elapsed}",
-                Stopwatch.GetElapsedTime(started));
-        }
-    }
-
-    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
-        IEnumerable<ChatMessage> messages,
-        AgentSession? session = null,
-        AgentRunOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var started = Stopwatch.GetTimestamp();
-        try
-        {
-            await foreach (var update in base.RunCoreStreamingAsync(
-                messages, session, options, cancellationToken))
-            {
-                yield return update;
-            }
-        }
-        finally
-        {
-            logger.LogInformation("Agent stream completed in {Elapsed}",
-                Stopwatch.GetElapsedTime(started));
-        }
-    }
-}
-
 agent.ConfigureAgentPipeline = pipeline =>
     pipeline.Use((inner, services) =>
         new TimingAgent(inner, services.GetRequiredService<ILogger<TimingAgent>>()));
 ```
 
-Do not return a separate agent from the factory, and do not hide `inner` inside a custom
-`AIAgent` subclass. Both shapes are rejected because the library cannot prove that its
-`ChatClientAgent` remains the durable model-call leaf. Request-level short-circuiting inside a
-valid `DelegatingAIAgent` remains supported.
+Wrappers must derive from `DelegatingAIAgent`, stay transparent, avoid `IDisposable`, and pass the
+exact supplied session through. Full guidance, worked examples, and the rules the library enforces
+live in **[Intercepting LLM Calls](./llm-call-interception.md)** — which also covers the other
+interception layer, decorating the `IChatClient` your `agent.ChatClient` factory returns.
 
-Tool factories run once when the worker first builds its immutable agent blueprint and their
+### Factory lifetimes
+
+Tool factories run once when the worker first builds its immutable agent blueprint, and their
 `AIFunction` values are cached for that worker. The chat-client, context-provider, and interceptor
-factories run from a fresh DI scope for every activity attempt. Do not use provider fields as
-session storage: an attempt can retry, run on another worker, or overlap another session; use
-`AgentSession.StateBag` instead.
+factories run from a fresh DI scope for **every activity attempt**. Do not use factory or wrapper
+fields as session storage: an attempt can retry, run on another worker, or overlap another session.
+Use `AgentSession.StateBag` instead.
 
 The library composes the chat pipeline internally and passes `UseProvidedChatClientAsIs = true` to
-MAF so that `FunctionInvokingChatClient` is **not** auto-injected — the workflow owns the
-tool-dispatch loop. Register a bare `IChatClient` in DI (do not call `.UseFunctionInvocation()`).
+MAF, so `FunctionInvokingChatClient` is **not** auto-injected — the workflow owns the tool-dispatch
+loop. Register a bare `IChatClient` and do not call `.UseFunctionInvocation()`. This is **enforced**:
+a `FunctionInvokingChatClient` anywhere in the chat client your factory returns fails the activity
+non-retryably, before the model is called. See
+[Intercepting LLM Calls](./llm-call-interception.md#the-chat-client-layer).
 
-The pipeline callback runs once during worker-startup validation and once for each
-`RunDurableAgentStep` activity attempt, including retries. Both validation and live construction
-use a DI scope, so middleware factories may resolve scoped dependencies. Treat wrapper fields as
-attempt-local, never session-local.
-
-Custom middleware wrappers must not implement `IDisposable` or `IAsyncDisposable`: MAF 1.17.0 does
-not expose whether a factory-created wrapper or DI owns that instance, so the library rejects that
-ambiguous shape. Put resource-owning dependencies in the activity DI scope instead. The one
-supported exception is MAF's built-in `OpenTelemetryAgent`; the library knows that wrapper owns
-its internal telemetry client and disposes it at the end of each validation or activity build.
-If `AIAgentBuilder.Build` throws before returning a root, MAF does not expose any partially built
-wrappers, so this library cannot dispose inaccessible instances.
-
-Live middleware receives the restored `TemporalAgentSession`. It may persist retry-safe state in
-the supplied session's `StateBag`, but it must pass the exact session object to `next`:
-
-```csharp
-sealed class AttemptCountingAgent(AIAgent inner) : DelegatingAIAgent(inner)
-{
-    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
-        IEnumerable<ChatMessage> messages,
-        AgentSession? session = null,
-        AgentRunOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var durable = (TemporalAgentSession)session!;
-        // Read/write a JSON-serializable StateBag value here. The activity persists the bag.
-
-        await foreach (var update in base.RunCoreStreamingAsync(
-            messages, durable, options, cancellationToken))
-        {
-            yield return update;
-        }
-    }
-}
-```
-
-Do not pass `null` or substitute another session. The library rejects either shape because only the
-original restored StateBag is durably serialized. The final `ChatClientAgent` uses a separate,
-transient `ChatClientAgentSession` behind the library's innermost boundary; middleware that
-requires that leaf-specific type is not supported.
-
-`AIContextProvider.InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per `RunDurableAgentStep` activity). A turn that takes 3 LLM-step iterations to converge will see 3 invocation pairs. Make these hooks idempotent and cheap, or cache results via `StateBag` to skip redundant work within a turn.
+`AIContextProvider.InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per
+`RunDurableAgentStep` activity). A turn that takes 3 LLM-step iterations to converge will see 3
+invocation pairs. Make these hooks idempotent and cheap, or cache results via `StateBag` to skip
+redundant work within a turn.
 
 For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).
 For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md).

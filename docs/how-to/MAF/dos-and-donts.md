@@ -336,7 +336,7 @@ opts.AddDurableAgent("Assistant", agent =>
 });
 ```
 
-**Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. Do not add `UseFunctionInvocation()`; the workflow owns durable tool dispatch. See [Intercepting LLM Calls](./llm-call-interception.md) for the full guide — note that a durable agent only ever calls `GetStreamingResponseAsync` on your decorator.
+**Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. Do not add `UseFunctionInvocation()`; the workflow owns durable tool dispatch, and a `FunctionInvokingChatClient` in that chain now fails the activity non-retryably before the model is called. See [Intercepting LLM Calls](./llm-call-interception.md) for the full guide — note that a durable agent only ever calls `GetStreamingResponseAsync` on your decorator.
 
 ### Do pre-register search attributes, or explicitly opt out
 
