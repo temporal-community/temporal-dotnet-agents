@@ -7,8 +7,8 @@ one rejects it at compile time and the other compiles but is rejected at worker 
 `Microsoft.Agents.AI` this library depends on. Version `1.17.0` exists there, matching the MAF
 version pinned in `Directory.Packages.props`. This library does not reference it.
 
-Verified against the `Microsoft.Agents.AI.Harness` 1.17.0 and `Microsoft.Agents.AI` 1.17.0 package
-documentation.
+Verified against the `Microsoft.Agents.AI.Harness` 1.17.0 and `Microsoft.Agents.AI` 1.17.0 packages,
+with both code samples below compiled against them.
 
 ---
 
@@ -63,7 +63,7 @@ that does not preserve the library-created inner agent is rejected with
 
 > Agent '{name}' has a ConfigureAgentPipeline factory that removed or hid the library-created inner
 > agent. Every custom wrapper must derive from DelegatingAIAgent and pass the factory's supplied
-> inner agent to its base constructor.
+> inner agent to its base constructor. […]
 
 MAF decorators that *are* transparent `DelegatingAIAgent` wrappers do compose here —
 `OpenTelemetryAgent` is supported and its disposal is handled by the pipeline lease.
@@ -91,15 +91,27 @@ it does not own them.
 
 Registering one directly with `agent.AddContextProvider(...)` is supported *only* when it meets the
 [bounded durable `ChatClientAgent` contract](../../architecture/MAF/bounded-durable-agent-compatibility.md).
-Most of these do not, because they expose tools dynamically through `AIContext.Tools`, which this
-library never dispatches. See [individual-context-providers.md](./individual-context-providers.md)
-for the supported pattern and the three ways to give a provider's tools durable execution.
+**All six fail it**, because each exposes tools dynamically through `AIContext.Tools`, which this
+library never dispatches — `TodoProvider`, `AgentModeProvider`, `FileMemoryProvider`, and
+`FileAccessProvider` each publish their own tool set, `AgentSkillsProvider` publishes `load_skill`,
+`read_skill_resource`, and `run_skill_script`, and `BackgroundAgentsProvider` publishes six. See
+[individual-context-providers.md](./individual-context-providers.md) for the supported pattern and
+the three ways to give a provider's tools durable execution.
+
+For skills specifically, this library ships its own durable equivalent: `agent.UseSkills(...)`
+registers skill tools as ordinary durable tools. See [skills.md](./skills.md).
 
 ### `BackgroundAgentsProvider` can never work
 
-It stores live `Task<AgentResponse>` handles in its runtime state. Those are in-process objects:
-not serializable, meaningless after continue-as-new, and unrecoverable on a worker restart —
-`AgentWorkflow` continues-as-new once history passes `MaxEntryCount`.
+It keeps in-flight work in `BackgroundAgentRuntimeState`, which MAF documents as holding
+"non-serializable runtime references" — its `Task<AgentResponse>` and `AgentSession` properties are
+`[JsonIgnore]`d precisely because they cannot be serialized.
+
+MAF handles that loss deliberately rather than crashing: after deserialization it builds a fresh
+empty runtime state and marks every previously-running task `BackgroundTaskStatus.Lost`. That is
+survivable in a long-lived process. It is not survivable here, because `AgentWorkflow`
+continues-as-new every time history reaches `MaxEntryCount` — so in a durable session the provider
+would quietly mark in-flight delegated work `Lost` at each transition, losing it without an error.
 
 Use `WorkflowAgents.ExecuteAgentsInParallelAsync` for fan-out. It reaches the same result through
 `Workflow.WhenAllAsync` and is replay-safe.
