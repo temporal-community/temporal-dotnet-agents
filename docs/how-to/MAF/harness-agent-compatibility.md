@@ -95,7 +95,7 @@ Registering one directly with `agent.AddContextProvider(...)` is supported *only
 library never dispatches — `TodoProvider`, `AgentModeProvider`, `FileMemoryProvider`, and
 `FileAccessProvider` each publish their own tool set, `AgentSkillsProvider` publishes `load_skill`,
 `read_skill_resource`, and `run_skill_script`, and `BackgroundAgentsProvider` publishes six. See
-[individual-context-providers.md](./individual-context-providers.md) for the supported pattern and
+[context-providers.md](./context-providers.md) for the supported pattern and
 the three ways to give a provider's tools durable execution.
 
 For skills specifically, this library ships its own durable equivalent: `agent.UseSkills(...)`
@@ -138,6 +138,6 @@ Use `RequireApproval()`, an `IAgentToolInterceptor` returning `PauseForApproval(
 
 ## See also
 
-- [individual-context-providers.md](./individual-context-providers.md) — the supported provider pattern
+- [context-providers.md](./context-providers.md) — the supported provider pattern
 - [hitl-patterns.md](./hitl-patterns.md) — durable approval
 - [usage.md](./usage.md) — full agent registration API

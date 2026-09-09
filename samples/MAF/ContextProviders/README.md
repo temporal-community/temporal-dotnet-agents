@@ -9,7 +9,7 @@ This sample demonstrates:
 - Implementing `DateTimeProvider` — a stateless provider that injects the current UTC date/time on every step, without touching `AgentSessionStateBag`.
 - Registering both providers via `agent.AddContextProvider(...)` — multiple providers compose cleanly in registration order.
 
-MAF's own providers (`TodoProvider`, `AgentModeProvider`) are standard `AIContextProvider` subclasses and register via the same `AddContextProvider` call. See the note in [`individual-context-providers.md`](../../../docs/how-to/MAF/individual-context-providers.md) for details on when they will be demonstrated here.
+MAF's own built-in providers (`TodoProvider`, `AgentModeProvider`, and the rest) are **not** drop-ins: each contributes tools dynamically through `AIContext.Tools`, which this library never dispatches. See [`harness-agent-compatibility.md`](../../../docs/how-to/MAF/harness-agent-compatibility.md) for each of them, and [`context-providers.md`](../../../docs/how-to/MAF/context-providers.md) for the three supported ways to give a provider's tools durable execution.
 
 ## Highlights
 
@@ -60,6 +60,6 @@ Done.
 
 ## Further Reading
 
-- [Individual MAF context providers how-to](../../../docs/how-to/MAF/individual-context-providers.md)
+- [Context providers how-to](../../../docs/how-to/MAF/context-providers.md)
 - [Why `HarnessAgent` is incompatible](../../../docs/how-to/MAF/harness-agent-compatibility.md)
 - [Usage Guide](../../../docs/how-to/MAF/usage.md)

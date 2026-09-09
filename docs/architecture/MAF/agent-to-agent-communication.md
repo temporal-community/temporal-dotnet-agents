@@ -7,7 +7,7 @@ How agents communicate with each other in TemporalAgents — from simple workflo
 ## Table of Contents
 
 1. [Overview](#overview)
-2. [Pattern 1: Workflow → Sub-Agent (GetAgent)](#pattern-1-workflow--sub-agent-getagent)
+2. [Pattern 1: Workflow → Sub-Agent (GetAgent)](#pattern-1-workflow--sub-agent-gettemporalagent)
 3. [Pattern 2: Parallel Fan-Out (ExecuteAgentsInParallelAsync)](#pattern-2-parallel-fan-out-executeagentsinparallelasync)
 4. [Pattern 3: Cross-Workflow Communication from Agent Tools](#pattern-3-cross-workflow-communication-from-agent-tools)
 5. [Pattern Comparison](#pattern-comparison)

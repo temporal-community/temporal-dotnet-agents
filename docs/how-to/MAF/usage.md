@@ -86,7 +86,7 @@ builder.Services
 | Select a package or sample | [Library Combinations Guide](../../library-combinations.md) and [Sample Catalog](../../../samples/catalog.md) |
 | Use a client-only process | [Invoking Agents from External Code](#invoking-agents-from-external-code-proxy) |
 | Configure tools, retries, and writes | [Durable Agents](durable-agents.md) |
-| Write and register a context provider | [Context Providers](individual-context-providers.md) |
+| Write and register a context provider | [Context Providers](context-providers.md) |
 | Understand supported MAF inputs | [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md) |
 | Manage prompt/context size | [History & Token Optimization](prompt-caching.md) |
 | Full builder/options reference | [Reference](#reference) below |
@@ -203,7 +203,7 @@ With this configuration:
 > `HistoryReducerKey` path for continue-as-new history reduction.
 
 See the equivalent guidance for `TemporalCommunity.Extensions.AI` in
-[the MEAI usage guide](../MEAI/usage.md#reducing-the-llm-context-window).
+[the MEAI usage guide](../MEAI/usage.md).
 
 ---
 
@@ -962,7 +962,7 @@ authenticate the server or prove the remote implementation is compatible. See th
 
 `AIContextProvider` instances run before each LLM call inside `AgentActivities`. Compatible providers
 contribute retry-safe instructions or messages and store compact per-session state in
-`AgentSessionStateBag`; see [Individual MAF Context Providers](individual-context-providers.md) and
+`AgentSessionStateBag`; see [Context Providers](context-providers.md) and
 the [bounded compatibility contract](../../architecture/MAF/bounded-durable-agent-compatibility.md).
 
 Provider-owned history and external writes, including direct Mem0-style registrations, are not
@@ -1226,7 +1226,7 @@ For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientA
 **How-to guides**
 
 - [Durable Agents](durable-agents.md) — the canonical write-vs-read tool example and per-tool retry hierarchy
-- [Individual MAF Context Providers](individual-context-providers.md) — building compatible `AIContextProvider` implementations
+- [Context Providers](context-providers.md) — writing and registering an `AIContextProvider`
 - [HITL Patterns](hitl-patterns.md) — the two approval flavors, full guide and testing patterns
 - [Routing Patterns](routing.md) — static and dynamic agent routing
 - [Tool Interceptor](tool-interceptor.md) — pre-dispatch lifecycle hooks

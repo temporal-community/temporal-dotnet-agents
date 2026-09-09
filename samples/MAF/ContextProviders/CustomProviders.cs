@@ -3,7 +3,7 @@
 // Demonstrates the AIContextProvider pattern with hand-rolled providers rather than MAF's
 // built-in TodoProvider/AgentModeProvider, which expose tools dynamically via AIContext.Tools
 // and are not direct drop-ins for this library's durable tool dispatch (see
-// docs/how-to/MAF/individual-context-providers.md).
+// docs/how-to/MAF/context-providers.md).
 //
 // TurnCounterProvider — stateful: increments a per-session LLM-call counter in StateBag
 //                       and injects it as a system message on every step.

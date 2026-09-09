@@ -17,7 +17,7 @@ A pre-tool lifecycle hook that runs as a Temporal activity before each `InvokeAg
 7. [Registration](#registration)
 8. [Per-tool opt-out](#per-tool-opt-out)
 9. [Interceptor activity timeout](#interceptor-activity-timeout)
-10. [Batch fan-out and safety guarantee](#batch-fan-out-and-safety-guarantee)
+10. [Batch fan-out and approval behavior](#batch-fan-out-and-approval-behavior)
 11. [PauseForApproval on scheduled and sub-agent paths](#pauseforapproval-on-scheduled-and-sub-agent-paths)
 12. [Implementation examples](#implementation-examples)
 

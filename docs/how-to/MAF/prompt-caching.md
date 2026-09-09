@@ -253,7 +253,7 @@ opts.AddDurableAgent("CodingAgent", agent =>
 
 Provider-owned history and external writes are not supported direct durable registrations because
 the provider lifecycle runs in retryable activities without an atomic idempotent persistence
-contract. See [Individual MAF Context Providers](individual-context-providers.md) for supported
+contract. See [Context Providers](context-providers.md) for supported
 patterns and [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md) for exclusions.
 
 ### 4. Use One-Shot Sessions for Independent Tasks

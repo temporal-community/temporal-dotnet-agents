@@ -233,36 +233,25 @@ injects — especially as a system message — is a prompt-injection surface. Va
 
 ---
 
-## `WorkingSetContextProvider`
+## The built-in provider
 
-The one provider that ships with the library. On each LLM step it scans accumulated **assistant and
-tool** messages for file paths — from `TextContent`, from `FunctionCallContent` arguments, and from
-`FunctionResultContent` results (the latter two only when the value is a string or a JSON string) —
-deduplicates case-insensitively, keeps most-recently-seen order, caps at `MaxPaths`, injects a
-compact `## Working set` note, and publishes the same list to
-`AgentSessionStateBag["temporal.working_set"]` as comma-separated text.
+The library ships one provider, `WorkingSetContextProvider`, which keeps a coding-style agent
+oriented on which files are in play by deriving them from the conversation and publishing the list
+to `AgentSessionStateBag["temporal.working_set"]`.
 
 ```csharp
 agent.AddContextProvider(new WorkingSetContextProvider());
 ```
 
-| Property | Behaviour |
-|---|---|
-| `MaxPaths` | Default `20`. `0` disables tracking; a negative value throws `ArgumentOutOfRangeException` rather than silently behaving like `0`. |
-| `SilentMode` | Suppresses the injected note while still publishing the `StateBag` entry. |
-
-That key is a **recomputed observational mirror**, not a structured persistence contract: it holds
-whatever paths appear in the currently retained history, which is not a judgement that a file is
-still relevant. When a step extracts nothing the key is removed rather than left stale.
-
-[`samples/MAF/WorkingSet`](../../../samples/MAF/WorkingSet/) demonstrates the two-provider
-`StateBag` handoff — a second provider reads `WorkingSetContextProvider.StateBagKey` rather than
-parsing the injected note, which is the pattern to copy.
+It is also the reference example of the `StateBag` handoff described above: a second provider reads
+`WorkingSetContextProvider.StateBagKey` rather than trying to parse the note it injected. See
+[working-set.md](./working-set.md).
 
 ---
 
 ## See also
 
+- [working-set.md](./working-set.md) — the built-in `WorkingSetContextProvider`
 - [harness-agent-compatibility.md](./harness-agent-compatibility.md) — MAF's built-in providers, in detail
 - [skills.md](./skills.md) — `UseSkills`, the durable equivalent of `AgentSkillsProvider`
 - [`samples/MAF/ContextProviders`](../../../samples/MAF/ContextProviders/) — minimal `StateBag` read/write

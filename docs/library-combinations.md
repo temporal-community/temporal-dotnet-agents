@@ -208,7 +208,7 @@ In short:
 
 For MAF deployments, choose the registration role separately: use `AddDurableAgent` on the worker
 that hosts an agent implementation; use `AddTemporalAgentProxies` plus `AddAgentProxy` only in a
-client process that calls an already-hosted agent. See [MAF usage](how-to/MAF/usage.md#quick-start)
+client process that calls an already-hosted agent. See [MAF usage](how-to/MAF/usage.md#quick-one-shot-call)
 for the two topologies.
 
 ---
