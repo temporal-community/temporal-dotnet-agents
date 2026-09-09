@@ -1,7 +1,7 @@
 # MAF `HarnessAgent` compatibility
 
-**Short answer: you cannot use `HarnessAgent` with this library, and you cannot do so by accident —
-it fails to compile in both slots where you might try.**
+**Short answer: you cannot use `HarnessAgent` with this library.** Of the two slots you might try,
+one rejects it at compile time and the other compiles but is rejected at worker startup.
 
 `HarnessAgent` ships in **`Microsoft.Agents.AI.Harness`**, a package separate from the
 `Microsoft.Agents.AI` this library depends on. Version `1.17.0` exists there, matching the MAF
@@ -45,14 +45,28 @@ evaluators are supplied).
 agent.ChatClient = sp => new HarnessAgent(innerChatClient, options);
 ```
 
-### The pipeline slot rejects it too
+### The pipeline slot compiles, then fails at startup
 
-`ConfigureAgentPipeline` is an `Action<AIAgentBuilder>`, so it composes middleware that *wraps* this
-library's inner agent. `HarnessAgent` cannot: its only constructor takes an `IChatClient` and builds
-its own `ChatClientAgent` underneath. There is no way to hand it the inner agent to delegate to.
+`ConfigureAgentPipeline` is an `Action<AIAgentBuilder>`, and `AIAgentBuilder.Use(Func<AIAgent,
+AIAgent>)` accepts a factory that ignores the inner agent it is handed. So this **does** compile:
 
-MAF decorators that *are* plain wrappers do compose here — `OpenTelemetryAgent` is supported and its
-disposal is handled by the pipeline lease.
+```csharp
+// Compiles. Rejected when the worker starts.
+agent.ConfigureAgentPipeline = b => b.Use(_ => new HarnessAgent(chatClient, harnessOptions));
+```
+
+`HarnessAgent`'s only constructor takes an `IChatClient` and builds its own `ChatClientAgent`
+underneath, so there is no way to hand it the library's inner agent to delegate to — the factory can
+only discard it. Every configured pipeline is dry-built during startup validation, and a factory
+that does not preserve the library-created inner agent is rejected with
+`DurableConfigurationException`:
+
+> Agent '{name}' has a ConfigureAgentPipeline factory that removed or hid the library-created inner
+> agent. Every custom wrapper must derive from DelegatingAIAgent and pass the factory's supplied
+> inner agent to its base constructor.
+
+MAF decorators that *are* transparent `DelegatingAIAgent` wrappers do compose here —
+`OpenTelemetryAgent` is supported and its disposal is handled by the pipeline lease.
 
 ### And its tool loop is the thing this library replaces
 
