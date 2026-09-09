@@ -578,6 +578,16 @@ sequence intentionally changes:
 just capture-agent-histories
 ```
 
+> **Run the integration suite through `just`, not a bare `dotnet test`.** The capture tests are
+> tagged `Category=HistoryCapture` and every `just` recipe that runs the suite filters them out
+> with `--filter "Category!=HistoryCapture"`. A bare
+> `dotnet test tests/TemporalCommunity.Extensions.Agents.IntegrationTests` has no such filter, so
+> it *includes* them — and they do not assert against the checked-in fixtures, they
+> `File.WriteAllTextAsync` over them in the source tree. The result is a working tree full of
+> rewritten `Compat/Histories/*.json` that looks like an unrelated diff. If that happens,
+> `git checkout -- tests/*/Compat/Histories` and re-run through `just`. Regenerate deliberately,
+> via the recipe above, only when the workflow command sequence has intentionally changed.
+
 > **Integration tests** use `TestEnvironmentHelper.StartLocalAsync()`; no external server is
 > required. The helper pins Temporal CLI `v1.8.0` (embedded Temporal Server 1.31.2), verifies the
 > reported version through `GetSystemInfo`, and pre-registers the `AgentName`, `SessionCreatedAt`,
