@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+- A tool that reaches for `TemporalAgentContext.Current` where no agent context can exist now gets
+  an error naming the execution path — workflow-local sub-agent or scheduled job — the offending
+  workflow ID, and the supported alternative. Both paths also state that `RequireApproval()` and an
+  interceptor's `PauseForApproval()` degrade to `Block` there, so the suggested remedy is accurate.
+
+- Fixed the approval auto-denial reason, which reported every sub-hour window as "0 hours". It now
+  renders seconds, minutes, hours, or days to match the configured `ApprovalTimeout`.
+
+- The sample canary now asserts application-produced output markers per sample instead of trusting
+  the exit code alone. Samples without markers are listed in the run summary rather than counted as
+  silently verified.
+
 - Moved conversation history and the StateBag from the `TemporalAIAgent` instance onto
   `TemporalAgentSession`. One agent instance now drives any number of independent conversations
   without their state colliding, and a session carries its own state wherever it goes.

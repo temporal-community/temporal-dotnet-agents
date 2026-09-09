@@ -394,14 +394,14 @@ test-logged project limit="600": build
     echo "Watch with:  tail -f $$LOG"; \
     echo "Wall-clock cap: {{limit}}s"; \
     echo ""; \
-    timeout {{limit}} dotnet test {{project}} \
+    timeout --kill-after=30 {{limit}} dotnet test {{project}} \
         --configuration {{configuration}} \
         --no-build \
         --logger "console;verbosity=normal" \
         > "$$LOG" 2>&1; \
     EXIT=$$?; \
     echo ""; \
-    if [ "$$EXIT" -eq 124 ] || [ "$$EXIT" -eq 143 ]; then \
+    if [ "$$EXIT" -eq 124 ] || [ "$$EXIT" -eq 143 ] || [ "$$EXIT" -eq 137 ]; then \
         echo "HANG — test exceeded {{limit}}s and was killed. Log: $$LOG"; \
     else \
         echo "Test exited with status $$EXIT. Log: $$LOG"; \
@@ -568,14 +568,14 @@ test-individual project filter="" limit="180": build
         start=$(date +%s)
         # Exact match (=) not substring (~) — `~SHORT` collides when two
         # test classes share a method name.
-        timeout {{limit}} dotnet test {{project}} \
+        timeout --kill-after=30 {{limit}} dotnet test {{project}} \
             --configuration {{configuration}} --no-build \
             --filter "FullyQualifiedName=$test" \
             --logger "console;verbosity=minimal" \
             > "$LOGDIR/$SHORT.log" 2>&1
         status=$?
         elapsed=$(($(date +%s)-start))
-        if [ $status -eq 124 ] || [ $status -eq 143 ]; then
+        if [ $status -eq 124 ] || [ $status -eq 143 ] || [ $status -eq 137 ]; then
             HANG=$((HANG+1)); printf "[%4ds] HANG  %s\n" "$elapsed" "$SHORT"
         elif [ $status -eq 0 ]; then
             PASS=$((PASS+1)); printf "[%4ds] PASS  %s\n" "$elapsed" "$SHORT"
@@ -690,37 +690,58 @@ test-samples-meai: build _sample-preflight
     LOGDIR="artifacts/sample-runs/meai-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$LOGDIR"
     echo "Logs: $LOGDIR"
-    PASS=0; FAIL=0; HANG=0
+    PASS=0; FAIL=0; HANG=0; UNCHECKED=""
     # Format: name:dir:timeout_seconds. Each sample runs from its own dir so
     # Host.CreateApplicationBuilder finds appsettings.json. OpenTelemetry uses
     # DurableOpenTelemetry.csproj — still the only .csproj in that directory.
     for entry in \
-        "DurableChat:samples/MEAI/DurableChat:120" \
-        "DurableTools:samples/MEAI/DurableTools:90" \
-        "DurableEmbeddings:samples/MEAI/DurableEmbeddings:180" \
-        "CustomWorkflow:samples/MEAI/CustomWorkflow:90" \
-        "DirectAdapters:samples/MEAI/DirectAdapters:90" \
-        "OpenTelemetry:samples/MEAI/OpenTelemetry:90" \
-        "ToolInterceptor:samples/MEAI/ToolInterceptor:120" \
-        "HumanInTheLoop:samples/MEAI/HumanInTheLoop:120" \
-        "ExtensibleDurableTurns:samples/MEAI/ExtensibleDurableTurns:120" \
-        "McpTools:samples/MEAI/McpTools:90" \
-        "PayloadCodec:samples/MEAI/PayloadCodec:90" ; do
-        IFS=':' read -r name dir cap <<< "$entry"
+        "DurableChat:samples/MEAI/DurableChat:120:Total entries stored:" \
+        "DurableTools:samples/MEAI/DurableTools:90:City      : London|Done." \
+        "DurableEmbeddings:samples/MEAI/DurableEmbeddings:180:Completed activities replay from history on worker restart" \
+        "CustomWorkflow:samples/MEAI/CustomWorkflow:90:Cart actions:" \
+        "DirectAdapters:samples/MEAI/DirectAdapters:90:City      : Seattle|Done." \
+        "OpenTelemetry:samples/MEAI/OpenTelemetry:90:telemetry.sdk.name: opentelemetry" \
+        "ToolInterceptor:samples/MEAI/ToolInterceptor:120:delete_file ran after human approval" \
+        "HumanInTheLoop:samples/MEAI/HumanInTheLoop:120:messages persisted in workflow state.|Done." \
+        "ExtensibleDurableTurns:samples/MEAI/ExtensibleDurableTurns:120:Denied turn failed before the ordinary function effect:" \
+        "McpTools:samples/MEAI/McpTools:90:SKU-123 has 12 units available." \
+        "PayloadCodec:samples/MEAI/PayloadCodec:90:Round-trip succeeded:" ; do
+        IFS=':' read -r name dir cap markers <<< "$entry"
         echo "═══ MEAI/$name (cap ${cap}s) ═══"
         start=$(date +%s)
-        ( cd "$dir" && timeout "$cap" dotnet run --configuration {{configuration}} --no-build ) \
+        ( cd "$dir" && timeout --kill-after=20 "$cap" dotnet run --configuration {{configuration}} --no-build ) \
             > "$LOGDIR/$name.log" 2>&1
         status=$?
         elapsed=$(($(date +%s)-start))
-        if [ $status -eq 124 ] || [ $status -eq 143 ]; then
+        if [ $status -eq 124 ] || [ $status -eq 143 ] || [ $status -eq 137 ]; then
             HANG=$((HANG+1)); printf "[%4ds] HANG  MEAI/%s\n" "$elapsed" "$name"
         elif [ $status -eq 0 ]; then
-            PASS=$((PASS+1)); printf "[%4ds] PASS  MEAI/%s\n" "$elapsed" "$name"
+            # Exit 0 only proves the process ended. Require the sample to have printed the
+            # application-owned markers that show its feature actually ran — three samples once
+            # shipped broken while passing this canary on exit code alone.
+            missing=""
+            if [ -n "${markers:-}" ]; then
+                while IFS= read -r marker; do
+                    [ -z "$marker" ] && continue
+                    grep -qF -- "$marker" "$LOGDIR/$name.log" || missing="${missing}|${marker}"
+                done <<< "$(printf '%s' "$markers" | tr '|' '\n')"
+            else
+                UNCHECKED="${UNCHECKED} MEAI/$name"
+            fi
+            if [ -n "$missing" ]; then
+                FAIL=$((FAIL+1))
+                printf "[%4ds] FAIL  MEAI/%s (ran, but missing marker(s))\n" "$elapsed" "$name"
+                printf '%s\n' "${missing#|}" | tr '|' '\n' | sed 's/^/            missing: /'
+            else
+                PASS=$((PASS+1)); printf "[%4ds] PASS  MEAI/%s\n" "$elapsed" "$name"
+            fi
         else
             FAIL=$((FAIL+1)); printf "[%4ds] FAIL  MEAI/%s (exit %d)\n" "$elapsed" "$name" "$status"
         fi
     done
+    if [ -n "$UNCHECKED" ]; then
+        echo "Exit-code only (no output markers asserted):$UNCHECKED"
+    fi
     echo "----- MEAI Summary: $PASS pass / $FAIL fail / $HANG hang -----"
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
 
@@ -750,34 +771,52 @@ test-samples-maf: build _sample-preflight _sample-preflight-maf
     LOGDIR="artifacts/sample-runs/maf-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$LOGDIR"
     echo "Logs: $LOGDIR"
-    PASS=0; FAIL=0; HANG=0
+    PASS=0; FAIL=0; HANG=0; UNCHECKED=""
     for entry in \
-        "BasicAgent:samples/MAF/BasicAgent:90" \
-        "WorkflowOrchestration:samples/MAF/WorkflowOrchestration:90" \
-        "EvaluatorOptimizer:samples/MAF/EvaluatorOptimizer:120" \
-        "MultiAgentRouting:samples/MAF/MultiAgentRouting:90" \
-        "WorkflowRouting:samples/MAF/WorkflowRouting:120" \
-        "AmbientAgent:samples/MAF/AmbientAgent:90" \
-        "ConfigurableAgent:samples/MAF/ConfigurableAgent:150" \
-        "PerToolActivities:samples/MAF/PerToolActivities:90" \
-        "ContextProviders:samples/MAF/ContextProviders:90" \
-        "ToolInterceptor:samples/MAF/ToolInterceptor:120" \
-        "WorkingSet:samples/MAF/WorkingSet:90" \
-        "Skills:samples/MAF/Skills:90" \
-        "MixedActivities:samples/MAF/MixedActivities:120" \
-        "DurableContextProvider:samples/MAF/DurableContextProvider:90" \
-        "McpTools:samples/MAF/McpTools:90" ; do
-        IFS=':' read -r name dir cap <<< "$entry"
+        "BasicAgent:samples/MAF/BasicAgent:90:Shutdown signal sent to agent workflow.|Done." \
+        "WorkflowOrchestration:samples/MAF/WorkflowOrchestration:90:Orchestration workflow result:" \
+        "EvaluatorOptimizer:samples/MAF/EvaluatorOptimizer:120:Final Draft" \
+        "MultiAgentRouting:samples/MAF/MultiAgentRouting:90:Parallel responses:" \
+        "WorkflowRouting:samples/MAF/WorkflowRouting:120:Dynamic Routing" \
+        "AmbientAgent:samples/MAF/AmbientAgent:90:Monitor Status" \
+        "ConfigurableAgent:samples/MAF/ConfigurableAgent:150:[TriageAgent]|[EscalationAgent]" \
+        "PerToolActivities:samples/MAF/PerToolActivities:90:Scenario 4: Tool calls disabled" \
+        "ContextProviders:samples/MAF/ContextProviders:90:[TurnCounter] LLM call #1|[TurnCounter] LLM call #2" \
+        "ToolInterceptor:samples/MAF/ToolInterceptor:240:[Approval requested]" \
+        "WorkingSet:samples/MAF/WorkingSet:90:[WorkingSet] src/Auth/AuthService.cs|src/Data/UserRepository.cs" \
+        "Skills:samples/MAF/Skills:90:Shutdown signal sent to agent workflow." \
+        "MixedActivities:samples/MAF/MixedActivities:120:FetchDocumentAsync|StoreAnalysisAsync" \
+        "DurableContextProvider:samples/MAF/DurableContextProvider:90:=== Approach A: IDurableToolSource ===|=== Approach B: DurableToolRegistrationSpec ===" \
+        "McpTools:samples/MAF/McpTools:90:SKU-123 has 12 units available." ; do
+        IFS=':' read -r name dir cap markers <<< "$entry"
         echo "═══ MAF/$name (cap ${cap}s) ═══"
         start=$(date +%s)
-        ( cd "$dir" && timeout "$cap" dotnet run --configuration {{configuration}} --no-build ) \
+        ( cd "$dir" && timeout --kill-after=20 "$cap" dotnet run --configuration {{configuration}} --no-build ) \
             > "$LOGDIR/$name.log" 2>&1
         status=$?
         elapsed=$(($(date +%s)-start))
-        if [ $status -eq 124 ] || [ $status -eq 143 ]; then
+        if [ $status -eq 124 ] || [ $status -eq 143 ] || [ $status -eq 137 ]; then
             HANG=$((HANG+1)); printf "[%4ds] HANG  MAF/%s\n" "$elapsed" "$name"
         elif [ $status -eq 0 ]; then
-            PASS=$((PASS+1)); printf "[%4ds] PASS  MAF/%s\n" "$elapsed" "$name"
+            # Exit 0 only proves the process ended. Require the sample to have printed the
+            # application-owned markers that show its feature actually ran — three samples once
+            # shipped broken while passing this canary on exit code alone.
+            missing=""
+            if [ -n "${markers:-}" ]; then
+                while IFS= read -r marker; do
+                    [ -z "$marker" ] && continue
+                    grep -qF -- "$marker" "$LOGDIR/$name.log" || missing="${missing}|${marker}"
+                done <<< "$(printf '%s' "$markers" | tr '|' '\n')"
+            else
+                UNCHECKED="${UNCHECKED} MAF/$name"
+            fi
+            if [ -n "$missing" ]; then
+                FAIL=$((FAIL+1))
+                printf "[%4ds] FAIL  MAF/%s (ran, but missing marker(s))\n" "$elapsed" "$name"
+                printf '%s\n' "${missing#|}" | tr '|' '\n' | sed 's/^/            missing: /'
+            else
+                PASS=$((PASS+1)); printf "[%4ds] PASS  MAF/%s\n" "$elapsed" "$name"
+            fi
         else
             FAIL=$((FAIL+1)); printf "[%4ds] FAIL  MAF/%s (exit %d)\n" "$elapsed" "$name" "$status"
         fi
@@ -785,6 +824,9 @@ test-samples-maf: build _sample-preflight _sample-preflight-maf
     echo "Skipped (interactive):    MAF/HumanInTheLoop — run manually."
     echo "Skipped (interactive):    MAF/ApprovalScopes — run manually."
     echo "Skipped (two-process):    MAF/SplitWorkerClient — run Worker then Client."
+    if [ -n "$UNCHECKED" ]; then
+        echo "Exit-code only (no output markers asserted):$UNCHECKED"
+    fi
     echo "----- MAF Summary: $PASS pass / $FAIL fail / $HANG hang -----"
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
 
