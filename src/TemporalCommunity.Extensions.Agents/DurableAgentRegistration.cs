@@ -19,7 +19,7 @@ internal sealed record DurableAgentRegistration(
     Func<IServiceProvider, IChatClient> ChatClient,
     ChatOptions? ChatOptions,
     IReadOnlyList<DurableToolRegistration> Tools,
-    IReadOnlyList<Func<IServiceProvider, AIContextProvider>> ContextProviderFactories,
+    IReadOnlyList<ContextProviderRegistration> ContextProviderFactories,
     TimeSpan? TimeToLive,
     TimeSpan? ApprovalTimeout,
     TimeSpan? ActivityTimeout,
@@ -33,3 +33,25 @@ internal sealed record DurableAgentRegistration(
     bool UseApprovalScopes = false,
     ApprovalScopesOptions? ApprovalScopesOptions = null,
     IReadOnlyList<(string ToolName, string SourceProviderType)>? ProviderContributedTools = null);
+
+/// <summary>
+/// One registered context provider, plus the registration-time fact the activity cannot recover
+/// from the delegate alone: whether this provider's durable tool declarations were registered.
+/// </summary>
+/// <remarks>
+/// Both <c>AddContextProvider</c> overloads collapse to a
+/// <see cref="Func{IServiceProvider, AIContextProvider}"/>, so at activity time an instance
+/// registration and a factory registration are indistinguishable. That matters because an
+/// <c>IDurableToolSource</c> can only have its declarations collected on the instance path — a
+/// factory-resolved one would otherwise have its tools stripped silently, and be excluded from the
+/// provider-tool warning precisely because it implements the interface. Recording the fact here is
+/// what lets the activity tell "declared and registered" from "declared and lost".
+/// </remarks>
+/// <param name="Factory">Resolves the provider from the activity's scoped service provider.</param>
+/// <param name="DeclarationsRegistered">
+/// <see langword="true"/> when durable tool declarations for this provider were registered at
+/// build time, either from explicit specs or from <c>IDurableToolSource.GetDurableTools()</c>.
+/// </param>
+internal sealed record ContextProviderRegistration(
+    Func<IServiceProvider, AIContextProvider> Factory,
+    bool DeclarationsRegistered);

@@ -991,4 +991,86 @@ public class AgentActivitiesContextProviderTests
             });
         }
     }
+
+    // ── IDurableToolSource must not lose its tools to the factory overload ──────────────────
+
+    /// <summary>
+    /// A factory-registered <see cref="IDurableToolSource"/> fails the attempt non-retryably.
+    /// </summary>
+    /// <remarks>
+    /// Declarations can only be collected on the instance path. Registered through a factory, the
+    /// provider's tools would be stripped further down — and silently, because implementing the
+    /// interface is exactly what excludes it from the provider-tool warning. Failing loudly beats
+    /// an agent whose tools quietly do not exist.
+    /// </remarks>
+    [Fact]
+    public async Task RunDurableAgentStep_FactoryRegisteredDurableToolSource_FailsNonRetryably()
+    {
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("FactorySourceAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.AddContextProvider(_ => new DurableToolSourceProvider(
+                    AIFunctionFactory.Create(() => "ok", new AIFunctionFactoryOptions { Name = "guarded_tool" })));
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        var ex = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => env.RunAsync(() =>
+                activities.RunDurableAgentStepAsync(MakeInput("FactorySourceAgent"))));
+
+        Assert.True(ex.NonRetryable);
+        Assert.Equal(nameof(DurableConfigurationException), ex.ErrorType);
+        Assert.Contains("IDurableToolSource", ex.Message, StringComparison.Ordinal);
+        Assert.Contains("AddContextProvider(provider)", ex.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The same provider registered as an instance is fine — its declarations were collected, so
+    /// the guard must not fire. This is the half that keeps the guard from being a blunt ban.
+    /// </summary>
+    [Fact]
+    public async Task RunDurableAgentStep_InstanceRegisteredDurableToolSource_IsAccepted()
+    {
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("InstanceSourceAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.AddContextProvider(new DurableToolSourceProvider(
+                    AIFunctionFactory.Create(() => "ok", new AIFunctionFactoryOptions { Name = "guarded_tool" })));
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        var result = await env.RunAsync(() =>
+            activities.RunDurableAgentStepAsync(MakeInput("InstanceSourceAgent")));
+
+        Assert.NotNull(result);
+    }
+
+    /// <summary>
+    /// An ordinary provider with no declarations is unaffected by the guard, whichever overload
+    /// registered it.
+    /// </summary>
+    [Fact]
+    public async Task RunDurableAgentStep_FactoryRegisteredPlainProvider_IsAccepted()
+    {
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("PlainFactoryAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.AddContextProvider(_ => new AppendingInstructionsProvider());
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        var result = await env.RunAsync(() =>
+            activities.RunDurableAgentStepAsync(MakeInput("PlainFactoryAgent")));
+
+        Assert.NotNull(result);
+    }
 }

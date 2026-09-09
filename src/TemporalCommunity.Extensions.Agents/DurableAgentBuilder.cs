@@ -59,7 +59,7 @@ public sealed class DurableAgentBuilder
     // TemporalAgentsOptions agent-name handling).
     private readonly List<DurableToolRegistration> _tools = new();
     private readonly HashSet<string> _toolNames = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<Func<IServiceProvider, AIContextProvider>> _contextProviders = new();
+    private readonly List<ContextProviderRegistration> _contextProviders = new();
     private readonly List<(string ToolName, string SourceProviderType)> _providerContributedTools = new();
     private Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? _toolInterceptorFactory;
     private bool _useApprovalScopes;
@@ -414,7 +414,9 @@ public sealed class DurableAgentBuilder
                 specs.Select(s => (s.Tool.Name, provider.GetType().Name)));
         }
 
-        _contextProviders.Add(_ => registered);
+        // specs is non-null exactly when declarations were registered above — from explicit
+        // specs or from the provider's own IDurableToolSource.GetDurableTools().
+        _contextProviders.Add(new ContextProviderRegistration(_ => registered, specs is { Count: > 0 }));
         return this;
     }
 
@@ -457,7 +459,9 @@ public sealed class DurableAgentBuilder
     public DurableAgentBuilder AddContextProvider(Func<IServiceProvider, AIContextProvider> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
-        _contextProviders.Add(factory);
+        // A factory cannot have its IDurableToolSource declarations collected here — the provider
+        // does not exist yet. The activity rejects that combination rather than dropping tools.
+        _contextProviders.Add(new ContextProviderRegistration(factory, DeclarationsRegistered: false));
         return this;
     }
 
@@ -682,7 +686,7 @@ public sealed class DurableAgentBuilder
     internal IReadOnlyList<DurableToolRegistration> ToolRegistrations => _tools;
 
     /// <summary>Internal accessor for Phase 2 registration plumbing.</summary>
-    internal IReadOnlyList<Func<IServiceProvider, AIContextProvider>> ContextProviderFactories => _contextProviders;
+    internal IReadOnlyList<ContextProviderRegistration> ContextProviderFactories => _contextProviders;
 
     /// <summary>
     /// Produces an immutable <see cref="DurableAgentRegistration"/> snapshot of this builder. Called

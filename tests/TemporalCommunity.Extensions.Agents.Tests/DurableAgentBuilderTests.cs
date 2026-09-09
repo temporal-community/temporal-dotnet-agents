@@ -213,7 +213,7 @@ public class DurableAgentBuilderTests
         builder.AddContextProvider(provider);
 
         Assert.Single(builder.ContextProviderFactories);
-        Assert.Same(provider, builder.ContextProviderFactories[0](null!));
+        Assert.Same(provider, builder.ContextProviderFactories[0].Factory(null!));
     }
 
     [Fact]
@@ -232,7 +232,7 @@ public class DurableAgentBuilderTests
         builder.AddContextProvider(_ => provider);
 
         Assert.Single(builder.ContextProviderFactories);
-        Assert.Same(provider, builder.ContextProviderFactories[0](null!));
+        Assert.Same(provider, builder.ContextProviderFactories[0].Factory(null!));
     }
 
     [Fact]
@@ -300,7 +300,7 @@ public class DurableAgentBuilderTests
         Assert.Single(reg.Tools);
         Assert.Equal("t1", reg.Tools[0].Name);
         Assert.Single(reg.ContextProviderFactories);
-        Assert.Same(provider, reg.ContextProviderFactories[0](null!));
+        Assert.Same(provider, reg.ContextProviderFactories[0].Factory(null!));
     }
 
     [Fact]

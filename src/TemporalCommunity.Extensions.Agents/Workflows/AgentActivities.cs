@@ -117,7 +117,7 @@ internal sealed class AgentActivities(
         var chatClient = registration.ChatClient(scopedServices);
         AIContextProvider[] contextProviders = registration.ContextProviderFactories.Count == 0
             ? []
-            : registration.ContextProviderFactories.Select(f => f(scopedServices)).ToArray();
+            : ResolveContextProviders(registration, scopedServices);
 
         var interceptorFactory = registration.ToolInterceptorFactory ?? agentsOptions.DefaultToolInterceptor;
         var toolInterceptor = interceptorFactory?.Invoke(scopedServices);
@@ -645,6 +645,53 @@ internal sealed class AgentActivities(
     }
 
     // ── Per-call helper: build and own a live AIAgent pipeline ───────────────────────────────
+    /// <summary>
+    /// Resolves each registered context provider from the attempt's scope, rejecting a
+    /// factory-registered <see cref="IDurableToolSource"/> whose declarations were never
+    /// registered.
+    /// </summary>
+    /// <remarks>
+    /// Declarations can only be collected on the instance path, where the provider exists at build
+    /// time. A factory-resolved source would otherwise have its tools stripped further down —
+    /// silently, because implementing the interface is exactly what excludes it from the
+    /// provider-tool warning. Tools vanishing with no diagnostic is the worst available outcome, so
+    /// this fails the attempt instead. The failure is non-retryable: no number of retries turns an
+    /// unregistered declaration into a registered one.
+    /// </remarks>
+    private static AIContextProvider[] ResolveContextProviders(
+        DurableAgentRegistration registration,
+        IServiceProvider scopedServices)
+    {
+        var resolved = new AIContextProvider[registration.ContextProviderFactories.Count];
+
+        for (var i = 0; i < resolved.Length; i++)
+        {
+            var entry = registration.ContextProviderFactories[i];
+            var provider = entry.Factory(scopedServices);
+
+            if (!entry.DeclarationsRegistered && provider is IDurableToolSource)
+            {
+                var conflict = new DurableConfigurationException(
+                    $"Agent '{registration.Name}' registered '{provider.GetType().Name}' through the " +
+                    "AddContextProvider(Func<IServiceProvider, AIContextProvider>) overload, but it " +
+                    "implements IDurableToolSource. Declarations can only be collected when the " +
+                    "provider instance is available at build time, so its tools would be dropped " +
+                    "without a warning. Register it as an instance — AddContextProvider(provider) — " +
+                    "or pass its tools explicitly via AddContextProvider(provider, durableTools: [...]).");
+
+                throw new ApplicationFailureException(
+                    conflict.Message,
+                    conflict,
+                    errorType: nameof(DurableConfigurationException),
+                    nonRetryable: true);
+            }
+
+            resolved[i] = provider;
+        }
+
+        return resolved;
+    }
+
     private AgentPipelineLease BuildLiveAgentPipeline(
         AgentBlueprint blueprint,
         IChatClient chatClient,

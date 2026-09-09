@@ -90,7 +90,7 @@ public class DurableAgentBuilderContextProviderTests
         builder.AddContextProvider(provider, [new DurableToolRegistrationSpec(fn)]);
 
         Assert.Single(builder.ContextProviderFactories);
-        var resolved = builder.ContextProviderFactories[0](null!);
+        var resolved = builder.ContextProviderFactories[0].Factory(null!);
         Assert.IsAssignableFrom<IDurableToolSource>(resolved);
     }
 
@@ -243,7 +243,7 @@ public class DurableAgentBuilderContextProviderTests
         builder.AddContextProvider(provider, []);
 
         Assert.Single(builder.ContextProviderFactories);
-        var resolved = builder.ContextProviderFactories[0](null!);
+        var resolved = builder.ContextProviderFactories[0].Factory(null!);
         Assert.Same(provider, resolved);
     }
 

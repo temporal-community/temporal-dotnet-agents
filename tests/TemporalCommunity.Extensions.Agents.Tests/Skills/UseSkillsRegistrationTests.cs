@@ -146,7 +146,7 @@ public class UseSkillsRegistrationTests
         // The SkillsContextProvider should be present in ContextProviderFactories.
         var stubProvider = new StubServiceProvider();
         var providers = reg.ContextProviderFactories
-            .Select(f => f(stubProvider))
+            .Select(f => f.Factory(stubProvider))
             .ToList();
 
         Assert.Contains(providers, p => p is SkillsContextProvider);
