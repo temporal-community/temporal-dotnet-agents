@@ -234,10 +234,14 @@ agent.ChatClient = sp => sp.GetRequiredService<OpenAIClient>()
 > client would run tools **in-process inside the LLM activity instead**, and per-tool durability,
 > retry policies, and timeouts would stop applying.
 >
-> The library rejects this. On every activity attempt, before the model is called, the chat client is
-> inspected and a `DurableFunctionInvocationConflictException` is raised as a **non-retryable**
-> Temporal failure — a misconfiguration cannot be fixed by trying again, so it must not consume the
-> retry budget.
+> The library rejects this. On every activity attempt, before the model is called, the chat client
+> is inspected and the activity fails **non-retryably** — a misconfiguration cannot be fixed by
+> trying again, so it must not consume the retry budget.
+>
+> A workflow caller sees `WorkflowFailedException` → `ActivityFailureException` →
+> `ApplicationFailureException` with `ErrorType == "DurableConfigurationException"`. The typed
+> `DurableFunctionInvocationConflictException` is the worker-side cause and arrives as the inner
+> exception; it is not the top-level failure you catch.
 >
 > Rejection is **unconditional**, including for an agent with no registered tools:
 > `FunctionInvokingChatClient.AdditionalTools` is consulted for tools that were not sent on the
@@ -351,7 +355,7 @@ duplicated tools, instructions, or stop sequences. Per-request tool filtering
 | `model=` is always empty | `options.ModelId` is not set by the library — the model is pinned on the provider client. |
 | Usage and finish reason are always null | Read from `updates.ToChatResponse()`, not from individual `ChatResponseUpdate` values. |
 | Duplicate log lines for one user message | Expected: one entry per LLM round, plus a fresh set per activity retry. |
-| `DurableFunctionInvocationConflictException`, activity fails once and does not retry | `.UseFunctionInvocation()` is in your chat-client chain. Remove it — see the warning above. |
+| Activity fails once and does not retry; `ApplicationFailureException` with `ErrorType` `DurableConfigurationException` | `.UseFunctionInvocation()` is in your chat-client chain. The inner exception is `DurableFunctionInvocationConflictException`. Remove it — see the warning above. |
 | Decorator never constructed at all | `agent.ChatClient` is returning a different client than the one you decorated. Check the factory, not the DI registration. |
 | You want tool names and arguments, but see serialized `FunctionCallContent` | Wrong layer — use [`IAgentToolInterceptor`](./tool-interceptor.md). |
 
