@@ -1,6 +1,7 @@
 #pragma warning disable MAAI001 // experimental AIContextProvider.InvokingContext ctor; see ExperimentalApiSuppressions.cs
 #pragma warning disable TA001 // IDurableToolSource is experimental; intentional consumption in these tests
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using FakeItEasy;
 using Temporalio.Exceptions;
 using Microsoft.Agents.AI;
@@ -866,5 +867,128 @@ public class AgentActivitiesContextProviderTests
         }
 
         private sealed record ProviderState(int Count);
+    }
+
+    // ── Provider state must come from context.Session, not TemporalAgentContext ──────────────
+
+    /// <summary>
+    /// Pins the ordering that broke the ContextProviders sample: context providers run BEFORE the
+    /// activity establishes <c>TemporalAgentContext.Current</c>, so a provider that reaches for it
+    /// throws. Session-scoped provider state must come from <c>context.Session</c>.
+    /// </summary>
+    /// <remarks>
+    /// The sample's counter reached for <c>TemporalAgentContext.Current</c>, caught the resulting
+    /// exception, and reported 1 forever — a permanent defect that looked like working output.
+    /// </remarks>
+    [Fact]
+    public async Task RunDurableAgentStep_TemporalAgentContext_IsNotAvailableToContextProviders()
+    {
+        var observed = new List<string>();
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("ContextProbeAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.AddContextProvider(new ContextProbingProvider(observed));
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        await env.RunAsync(() =>
+            activities.RunDurableAgentStepAsync(MakeInput("ContextProbeAgent")));
+
+        Assert.Equal(["unavailable"], observed);
+    }
+
+    /// <summary>
+    /// The supported path: a provider reads and writes <c>context.Session.StateBag</c>, and the
+    /// activity carries the mutation out so the next step sees it. Deterministic — no model
+    /// involved.
+    /// </summary>
+    [Fact]
+    public async Task RunDurableAgentStep_ProviderStateBagWrite_CarriesToTheNextStep()
+    {
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("CountingAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.AddContextProvider(new SessionCountingProvider());
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+        var sessionId = TemporalAgentSessionId.WithRandomKey("CountingAgent");
+
+        JsonElement? carried = null;
+        var counts = new List<string>();
+
+        for (var step = 0; step < 3; step++)
+        {
+            var input = new AgentStepInput
+            {
+                AgentName = "CountingAgent",
+                Request = new RunRequest("hello"),
+                AccumulatedMessages = [new ChatMessage(ChatRole.User, "hello")],
+                SessionId = sessionId,
+                SerializedStateBag = carried,
+            };
+
+            var result = await env.RunAsync(() => activities.RunDurableAgentStepAsync(input));
+
+            carried = result.UpdatedStateBag;
+            Assert.NotNull(carried);
+            counts.Add(carried!.Value.GetProperty(SessionCountingProvider.StateBagKey).GetString()!);
+        }
+
+        // Frozen at "1" is exactly the sample's defect; this asserts the counter actually advances.
+        Assert.Equal(["1", "2", "3"], counts);
+    }
+
+    /// <summary>Records whether <c>TemporalAgentContext.Current</c> is reachable at provider time.</summary>
+    private sealed class ContextProbingProvider(List<string> observed) : AIContextProvider
+    {
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                _ = TemporalAgentContext.Current;
+                observed.Add("available");
+            }
+            catch (InvalidOperationException)
+            {
+                observed.Add("unavailable");
+            }
+
+            return new ValueTask<AIContext>(new AIContext());
+        }
+    }
+
+    /// <summary>Mirrors the supported sample pattern: per-session counter in the session StateBag.</summary>
+    private sealed class SessionCountingProvider : AIContextProvider
+    {
+        internal const string StateBagKey = "test.provider_count";
+
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context,
+            CancellationToken cancellationToken = default)
+        {
+            var session = Assert.IsType<TemporalAgentSession>(context.Session);
+
+            var count = 1;
+            if (session.StateBag.TryGetValue(StateBagKey, out string? stored, JsonSerializerOptions.Default)
+                && int.TryParse(stored, out var existing))
+            {
+                count = existing + 1;
+            }
+
+            session.StateBag.SetValue(StateBagKey, count.ToString(), JsonSerializerOptions.Default);
+
+            return new ValueTask<AIContext>(new AIContext
+            {
+                Messages = [new ChatMessage(ChatRole.System, $"call #{count}")],
+            });
+        }
     }
 }

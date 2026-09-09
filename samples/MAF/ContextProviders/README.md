@@ -14,7 +14,7 @@ MAF's own providers (`TodoProvider`, `AgentModeProvider`) are standard `AIContex
 ## Highlights
 
 - **Providers fire per LLM step, not per turn.** A single agent turn may involve multiple LLM calls (one per step in the tool-call loop). Providers must be idempotent and cheap.
-- **Stateful providers use `AgentSessionStateBag`.** `TurnCounterProvider` reads and writes `"session.turn_count"` via `TemporalAgentContext.Current`. The StateBag is serialized after every turn and carried forward through continue-as-new transitions and worker restarts — no extra storage needed.
+- **Stateful providers use `AgentSessionStateBag`.** `TurnCounterProvider` reads and writes `"session.turn_count"` via `context.Session.StateBag` — the durable session carried on the `InvokingContext`. Do **not** reach for `TemporalAgentContext.Current` in a provider: providers run before the activity establishes that context, so it throws. The StateBag is serialized after every turn and carried forward through continue-as-new transitions and worker restarts — no extra storage needed.
 - **Stateless providers need no StateBag.** `DateTimeProvider` computes its value on the fly and returns it directly — showing that `StateBag` is opt-in.
 - **`BackgroundAgentsProvider` is not supported.** It holds live `Task<T>` references that cannot survive serialization. Use `WorkflowAgents.ExecuteAgentsInParallelAsync` for parallel agent fan-out instead.
 

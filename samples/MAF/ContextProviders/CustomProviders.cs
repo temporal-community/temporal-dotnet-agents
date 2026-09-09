@@ -31,32 +31,42 @@ public sealed class TurnCounterProvider : AIContextProvider
         InvokingContext context,
         CancellationToken cancellationToken = default)
     {
-        int count = 1;
-
-        try
+        // The InvokingContext carries the durable session — use it. Do NOT reach for
+        // TemporalAgentContext.Current here: context providers run BEFORE the activity
+        // establishes that context, so it throws and the counter silently never advances.
+        // Fail loudly rather than silently counting 1 forever. Inside the durable activity the
+        // session is always a TemporalAgentSession; anything else means the provider is being
+        // driven outside the supported path, and a frozen counter would look like working code.
+        if (context.Session is not TemporalAgentSession session)
         {
-            var agentContext = TemporalAgentContext.Current;
-            var stateBag = agentContext.CurrentSession.StateBag;
+            throw new InvalidOperationException(
+                $"{nameof(TurnCounterProvider)} requires a {nameof(TemporalAgentSession)}, but got " +
+                $"'{context.Session?.GetType().Name ?? "null"}'. Session-scoped provider state lives " +
+                "in the durable session's StateBag.");
+        }
 
-            // Read the current counter (stored as a string to satisfy the reference-type
-            // constraint on AgentSessionStateBag.SetValue<T>).
+        var count = 1;
+        {
+            var stateBag = session.StateBag;
+
+            // Stored as a string to satisfy the reference-type constraint on
+            // AgentSessionStateBag.SetValue<T>.
             if (stateBag.TryGetValue(StateBagKey,
                     out string? stored,
                     System.Text.Json.JsonSerializerOptions.Default)
-                && int.TryParse(stored, out int existing))
+                && int.TryParse(stored, out var existing))
             {
                 count = existing + 1;
             }
 
-            // Persist the incremented value back into the StateBag so it survives
-            // across continue-as-new and worker restarts.
+            // The activity re-serializes the bag after the step, so this survives worker
+            // restarts and continue-as-new.
             stateBag.SetValue(StateBagKey, count.ToString(),
                 System.Text.Json.JsonSerializerOptions.Default);
-        }
-        catch
-        {
-            // TemporalAgentContext is not available outside of an active agent activity
-            // (e.g. in unit tests). Fall back to count = 1 so the message is still injected.
+
+            // Sample-only: makes the provider's effect visible on the console. A real provider
+            // would not write to stdout from inside an activity.
+            Console.WriteLine($"[TurnCounter] LLM call #{count}");
         }
 
         return new ValueTask<AIContext>(new AIContext
