@@ -354,8 +354,7 @@ survives worker restarts, supports retries, and is durable by design — all wit
 Reuse one session for the turns of one conversation; give each independent conversation its own. One `TemporalAIAgent`
 instance drives any number of sessions without their history or StateBag colliding. Two runs may not overlap on the same
 session, a session may only be run by the agent that created it, and carrying a conversation across continue-as-new means
-serializing the session into your workflow's continue-as-new input yourself. See
-[Migrating to session-owned state](./migrating-to-session-owned-state.md).
+serializing the session into your workflow's continue-as-new input yourself.
 
 ---
 

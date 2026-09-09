@@ -123,11 +123,6 @@ await Workflow.WhenAllAsync([
     agent.RunAsync("Question 2", session2)]);   // fine: distinct sessions
 ```
 
-> **Changed in v0.4.** Before session ownership, history lived on the agent instance, so two
-> sessions on one agent shared it and the second conversation replayed the first. The old
-> workaround — resolving a second agent instance per conversation — is no longer needed. See
-> [Migrating to session-owned state](../../how-to/MAF/migrating-to-session-owned-state.md).
-
 A session is also bound to the agent that created it: passing an `Analyst` session to a
 `Summarizer` agent throws, because the session now carries the transcript.
 

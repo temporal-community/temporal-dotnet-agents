@@ -98,7 +98,7 @@ its required transient `ChatClientAgentSession`.
 - `TemporalAIAgent` — workflow-context sub-agent. Access via `WorkflowAgents.GetTemporalAgent("Name")`.
 - `TemporalAIAgentProxy` — external-context proxy. Access via `services.GetTemporalAgentProxy("Name")`.
 
-**Session ownership (v0.4)**: `TemporalAgentSession` — not the agent instance — owns the
+**Session ownership**: `TemporalAgentSession` — not the agent instance — owns the
 conversation history and the StateBag. One agent may drive many sessions; nothing conversational
 lives on the agent. Consequences:
 - `TemporalAIAgent.RunAsync` **requires** a `TemporalAgentSession`; a foreign `AgentSession` is rejected.
@@ -111,7 +111,6 @@ lives on the agent. Consequences:
 - StateBag updates: LLM-step output is **overlaid** (trusted, unfiltered, preserves untouched keys);
   tool/interceptor write-backs are **merged in tool-call index order** (later index wins) with the
   reserved approval-scope deny-list applied. Never let activity completion order drive the merge.
-See `docs/how-to/MAF/migrating-to-session-owned-state.md`.
 
 **HITL**: see `docs/how-to/MAF/hitl-patterns.md`. Activity timeout must accommodate human review time.
 
@@ -350,7 +349,6 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **Durable Agents (per-tool activities)**: `docs/how-to/MAF/durable-agents.md`
 - **Tool Interceptor**: `docs/how-to/MAF/tool-interceptor.md`
 - **Do's and Don'ts**: `docs/how-to/MAF/dos-and-donts.md`
-- **Migrating to Session-Owned State (v0.3 → v0.4)**: `docs/how-to/MAF/migrating-to-session-owned-state.md`
 - **Durability Guarantees**: `docs/architecture/MAF/durability-and-determinism.md`
 - **Sessions and Workflow Loop**: `docs/architecture/MAF/agent-sessions-and-workflow-loop.md`
 - **Pub/Sub Equivalents**: `docs/architecture/MAF/pub-sub-and-event-driven.md`

@@ -423,13 +423,32 @@ Three rules follow from session ownership:
   StateBag with no defined ordering. Distinct sessions run in parallel freely.
 
 State survives continue-as-new only if the orchestrating workflow explicitly carries the serialized
-session forward — the library does not guess. See
-[Migrating to session-owned state](../../how-to/MAF/migrating-to-session-owned-state.md).
+session forward — the library does not guess.
 
-> **Changed in v0.4.** Before this, history lived in a `_history` field on the agent instance and
-> the session parameter was never read, so two sessions on one instance produced shared, interleaved
-> history and nothing survived continue-as-new. The old workaround — one agent instance per
-> conversation — is no longer needed.
+#### Sub-agent tools cannot reach the session StateBag
+
+A tool invoked by a `TemporalAIAgent` sub-agent gets no `TemporalAgentContext`, so it can neither
+read nor write the session StateBag — its write-back always comes back empty.
+
+`InvokeAgentToolInput` carries no session ID, so `InvokeAgentToolAsync` derives the session from the
+activity's workflow ID. For a sub-agent that is the *orchestrating* workflow's ID, not a
+`ta-{agent}-{key}` session ID, so the parse fails and no context is established.
+
+Context providers are unaffected: `AgentStepInput` does carry a session ID and the LLM-step activity
+prefers it over the workflow ID, which is why provider state threads correctly while tool
+write-backs do not. Tools running under the long-lived `AgentWorkflow` path are also unaffected —
+there the activity's workflow ID *is* the session ID.
+
+#### A serialized session contains the conversation
+
+`SerializeSessionAsync` emits the full transcript — user messages, model replies, tool arguments and
+results — alongside the session ID and StateBag. Anywhere you persist a serialized session now holds
+conversation content, which usually means user data. There is no redaction hook; serialize
+`session.StateBag` alone if you need the state without the transcript.
+
+Payload grows roughly linearly at ~750 bytes per turn for short messages, so a carried session
+approaches Temporal's default 256 KB payload warning near 350 turns. History is uncompacted. This is
+separate from the 64 KB `CarriedStateBag` size guard, which does not cover session history.
 
 ### Summary table
 
