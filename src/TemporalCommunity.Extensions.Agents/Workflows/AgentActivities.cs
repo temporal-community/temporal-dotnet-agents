@@ -350,7 +350,27 @@ internal sealed class AgentActivities(
                     responseMessages: response.Messages);
                 foreach (var provider in contextProviders)
                 {
-                    await provider.InvokedAsync(invokedCtx, ct).ConfigureAwait(false);
+                    try
+                    {
+                        await provider.InvokedAsync(invokedCtx, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception providerEx) when (
+                        providerEx is not OperationCanceledException || !ct.IsCancellationRequested)
+                    {
+                        // Contain the fault here. Letting it reach the outer catch would run the
+                        // failure-path InvokedAsync loop as well, so every provider that already
+                        // received the success notification would be notified a second time for
+                        // the same LLM step. The model call itself succeeded and its response is
+                        // already collected; a post-invocation notification failing is not a
+                        // reason to discard it and pay for the call again on retry.
+                        _logger.LogError(
+                            providerEx,
+                            "Context provider {ProviderType} threw from InvokedAsync for agent " +
+                            "{AgentName}. The step's result is unaffected; the provider did not " +
+                            "observe this call to completion.",
+                            provider.GetType().Name,
+                            input.AgentName);
+                    }
                 }
             }
 

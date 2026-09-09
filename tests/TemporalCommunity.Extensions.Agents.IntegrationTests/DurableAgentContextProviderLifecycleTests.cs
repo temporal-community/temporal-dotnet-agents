@@ -108,11 +108,92 @@ public class DurableAgentContextProviderLifecycleTests
         }
     }
 
+    /// <summary>
+    /// A provider that faults in its post-call hook must not cause a second notification of the
+    /// providers that already succeeded, and must not discard an LLM response that was produced.
+    /// </summary>
+    /// <remarks>
+    /// The success-path and failure-path <c>InvokedAsync</c> loops are separate. Without a guard
+    /// on the success loop, one provider throwing sends the whole step into the failure path,
+    /// which notifies <em>every</em> provider again — so a provider earlier in registration order
+    /// observes the same LLM step twice, and the completed model call is thrown away.
+    /// </remarks>
+    [Fact]
+    public async Task DurableAgent_ProviderThrowsFromInvokedAsync_NotifiesOthersOnceAndKeepsResult()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var scripted = new ScriptedChatClient(new[]
+        {
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Hello.")),
+        });
+
+        var counting = new CountingContextProvider();
+        var faulting = new ThrowingInvokedProvider();
+
+        // counting is registered first, so it receives the success notification before the
+        // faulting provider throws.
+        using var host = BuildHost(env.Client, scripted, tool: null, providerInstance: counting,
+            extraProvider: faulting);
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("DurableAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+
+            var response = await proxy.RunAsync("Hi", session);
+
+            // The model call succeeded; a post-invocation fault must not discard it.
+            Assert.Contains("Hello.", response.Messages[^1].Text);
+
+            // Exactly one notification for one LLM step — not two.
+            Assert.Equal(1, counting.InvokedCount);
+            Assert.Equal(1, counting.InvokingCount);
+
+            // The faulting provider was reached once and threw once.
+            Assert.Equal(1, faulting.Attempts);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    /// <summary>Faults from the post-call hook only; its pre-call hook is inert.</summary>
+    private sealed class ThrowingInvokedProvider : AIContextProvider
+    {
+        private long _attempts;
+
+        public ThrowingInvokedProvider()
+            : base(provideInputMessageFilter: null,
+                   storeInputRequestMessageFilter: null,
+                   storeInputResponseMessageFilter: null)
+        {
+        }
+
+        public int Attempts => (int)Interlocked.Read(ref _attempts);
+
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context,
+            CancellationToken cancellationToken = default) =>
+            new(new AIContext());
+
+        protected override ValueTask InvokedCoreAsync(
+            InvokedContext context,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _attempts);
+            throw new InvalidOperationException("post-invocation fault");
+        }
+    }
+
     private static IHost BuildHost(
         ITemporalClient client,
         ScriptedChatClient scripted,
         AIFunction? tool,
-        CountingContextProvider providerInstance)
+        CountingContextProvider providerInstance,
+        AIContextProvider? extraProvider = null)
     {
         var taskQueue = $"durable-agent-ctxprov-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
@@ -132,6 +213,10 @@ public class DurableAgentContextProviderLifecycleTests
                         agent.AddTool(tool);
                     }
                     agent.AddContextProvider(providerInstance);
+                    if (extraProvider is not null)
+                    {
+                        agent.AddContextProvider(extraProvider);
+                    }
                 });
             });
 
@@ -145,10 +230,10 @@ public class DurableAgentContextProviderLifecycleTests
     /// has no side-effect on the LLM call beyond observation.
     /// </summary>
     /// <remarks>
-    /// In MAF 1.0 <c>InvokingAsync</c> is the public override of the lifecycle entry point and
-    /// <c>ProvideAIContextAsync</c> is the protected virtual called by it. Counting the protected
-    /// hook is sufficient — every <c>InvokingAsync</c> call invokes <c>ProvideAIContextAsync</c>
-    /// exactly once.
+    /// The two counters must be incremented in <em>different</em> hooks. Incrementing both inside
+    /// <c>ProvideAIContextAsync</c> makes them equal by construction, so the post-call assertion
+    /// cannot fail no matter what the activity does. <c>InvokedCoreAsync</c> is the overridable
+    /// post-call hook on this surface, so the invoked counter is taken there.
     /// </remarks>
     private sealed class CountingContextProvider : AIContextProvider
     {
@@ -163,10 +248,8 @@ public class DurableAgentContextProviderLifecycleTests
         }
 
         public int InvokingCount => (int)Interlocked.Read(ref _invoking);
-        // Symmetric counter exposed for parity with InvokingCount; in MAF 1.0 the post-call hook
-        // is not virtual on this surface, so we increment from inside ProvideAIContextAsync after
-        // the AIContext is constructed (just before return) — a reasonable proxy for "the
-        // provider observed this LLM call to completion of its own pre-call work".
+
+        /// <summary>Counts the real post-call hook, so a double notification is observable.</summary>
         public int InvokedCount => (int)Interlocked.Read(ref _invoked);
 
         protected override ValueTask<AIContext> ProvideAIContextAsync(
@@ -174,9 +257,15 @@ public class DurableAgentContextProviderLifecycleTests
             CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref _invoking);
-            var result = new AIContext();
+            return new ValueTask<AIContext>(new AIContext());
+        }
+
+        protected override ValueTask InvokedCoreAsync(
+            InvokedContext context,
+            CancellationToken cancellationToken = default)
+        {
             Interlocked.Increment(ref _invoked);
-            return new ValueTask<AIContext>(result);
+            return default;
         }
     }
 }
