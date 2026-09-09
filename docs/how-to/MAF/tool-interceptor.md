@@ -124,7 +124,8 @@ The `description` string is shown to the reviewer via `DurableApprovalRequest.De
 
 If approved, the tool proceeds. If rejected, the tool is skipped and the agent receives a synthetic rejection result.
 
-For the full approval dashboard API and testing patterns, see [HITL Patterns — Workflow-parked approval](./hitl-patterns.md#workflow-parked-approval).
+For reviewer-side polling, resolution statuses, and operational constraints, see
+[HITL Patterns — Workflow-parked approval](./hitl-patterns.md#workflow-parked-approval).
 
 ### `Skip`
 
@@ -346,21 +347,21 @@ agent.AddTool(
 
 ---
 
-## Batch fan-out and safety guarantee
+## Batch fan-out and approval behavior
 
-All `RunToolInterceptor` activities for a given turn fan out in parallel via `Workflow.WhenAllAsync`. No `InvokeAgentTool` activity is dispatched until every interceptor result for that turn is recorded in history.
-
-This matters for write tools. If a turn fans out three tool calls and one of them requires human approval, the approval gate parks the entire turn before any of the three tools executes. The workflow does not start two tools while waiting for approval on the third — that ordering guarantee is built into the two-phase structure of each turn.
+All `RunToolInterceptor` activities for a turn fan out in parallel. Tool dispatch waits until every
+interceptor result is recorded. For the resulting batch-safety guarantee, timeout implications, and
+the difference from approval requested inside a running tool, see
+[Human-in-the-loop patterns](./hitl-patterns.md#what-usually-decides-it).
 
 ---
 
 ## PauseForApproval on scheduled and sub-agent paths
 
-`PauseForApproval` requires a workflow with a persistent session — it relies on the `[WorkflowUpdate]` handlers on `AgentWorkflow` to park and resume the turn loop.
-
-On `AgentJobWorkflow` (the workflow backing `AddScheduledAgentRun` and `ScheduleAgentAsync`) and on `TemporalAIAgent` (workflow-context sub-agents accessed via `GetTemporalAgent()`), neither has the approval mixin. If an interceptor returns `PauseForApproval` on these paths, the decision degrades automatically to `Block` and a warning is logged. The tool is not dispatched and the LLM receives a block error result.
-
-If an interceptor may return `PauseForApproval`, use it only with session-backed agents (`TemporalAIAgentProxy` → `AgentWorkflow`). For scheduled jobs and sub-agents, prefer `Skip` or `Block` for policy enforcement.
+Scheduled jobs and workflow-local sub-agents cannot park for external review. On those paths,
+`PauseForApproval` degrades to `Block`; use `Skip` or `Block` for policy enforcement instead. See
+[Where approval does not work](./hitl-patterns.md#where-approval-does-not-work) for the supported
+alternative and the behavior of `RequireApproval()` and in-tool approval on the same paths.
 
 ---
 
@@ -460,10 +461,10 @@ The tool receives the token instead of the raw SSN. `ModifiedArguments` affects 
 ## See also
 
 - [Durable Agents](./durable-agents.md) — per-tool activity configuration, `DurableToolOptions` reference
-- [HITL Patterns](./hitl-patterns.md) — approval dashboard API, `ResolveApprovalAsync`, in-tool vs workflow-parked comparison
+- [HITL Patterns](./hitl-patterns.md) — reviewer-side approval flow, `ResolveApprovalAsync`, and approval-pattern comparison
 - [Usage Guide — Per-Tool Activity Configuration](./usage.md#per-tool-activity-configuration)
 - [`samples/MAF/ToolInterceptor/`](../../../samples/MAF/ToolInterceptor/) — runnable sample: all four decision paths + `RequireApproval()` in a refund-agent scenario
 
 ---
 
-_Last updated: 2026-06-05_
+_Last updated: 2026-09-09_

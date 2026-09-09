@@ -20,9 +20,10 @@ running while it waits. That works, and it costs you everything in the paragraph
 in [What usually decides it](#what-usually-decides-it).
 
 > **New to Temporal?** An *activity* is the unit of real work Temporal runs on one of your worker
-> processes; its result is recorded, so completed work is never redone. A *workflow* is the durable
-> coordinator deciding which activities run; its state survives process restarts. "Parking" the
-> workflow means it stops and waits with nothing running.
+> processes. Once its completion is recorded, workflow replay reuses that result. The activity can
+> still run more than once before completion is recorded, so effectful work must tolerate retries or
+> disable them. A *workflow* is the durable coordinator deciding which activities run; its state
+> survives process restarts. "Parking" the workflow means it stops and waits with nothing running.
 
 Approval routing and application authorization are separate concerns. Follow the normative
 [security boundary](../../security.md) for reviewer endpoints and effectful tools.
@@ -61,7 +62,8 @@ approvals strictly one at a time in tool-call order, so several in one turn queu
 For workflow-parked those are fine — no activity is open, so a seven-day window is reasonable. For
 in-tool it is a trap: the tool activity dies after five minutes while the workflow holds the
 approval for another six days. Nothing validates the relationship at startup. Every in-tool
-approval must set all three together.
+approval must set `ActivityTimeout` and `ApprovalTimeout` together. The inherited heartbeat timeout
+already keeps the heartbeat pump active; change it only when you need a different cadence.
 
 ### The differences that matter
 
@@ -73,7 +75,7 @@ approval must set all three together.
 | Sibling tools in the same turn | Held until all approvals settle | **Run concurrently** |
 | More than one approval per turn | Queued in call order | **Fails** — one pending at a time |
 | Realistic review window | Hours to days | Minutes |
-| Extra configuration | None — defaults suit it | Three timeouts, all must change |
+| Extra configuration | None — defaults suit it | Activity and approval budgets must align; heartbeat cadence is optional |
 | Reusable session grants (`ScopeAware()`) | Available | Not available |
 | Who owns the `RequestId` | The workflow, after the interceptor returns | The tool, before it asks |
 | Declared by | `RequireApproval()`, or an interceptor's `PauseForApproval(...)` | `RequestApprovalAsync` in the tool body |
@@ -132,8 +134,9 @@ options.AddDurableAgent("Operations", agent =>
 });
 ```
 
-`NoRetry()` matters here: an approved send that fails to report success would otherwise be retried,
-re-entering the gate and potentially sending twice.
+`NoRetry()` matters here: an approved send that performs its effect but fails to report success
+would otherwise be retried and could send twice. The approval gate has already resolved before the
+tool activity is scheduled, so an activity retry does not ask for approval again.
 
 To decide per call rather than per tool, register an interceptor returning
 `DurableToolDecision.PauseForApproval(...)` — see [tool-interceptor.md](./tool-interceptor.md). The
@@ -143,12 +146,14 @@ interceptor is also where you author what the reviewer sees, and the natural pla
 
 ## In-tool approval
 
-### Budget the three timeouts first
+### Budget the approval and activity timeouts first
 
 ```csharp
 opts.DefaultActivityTimeout  = TimeSpan.FromMinutes(20);  // outer bound on the whole review
-opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);   // pump runs at a third of this
 opts.DefaultApprovalTimeout  = TimeSpan.FromMinutes(15);  // must stay under ActivityTimeout
+
+// Optional: change the inherited 2-minute heartbeat cadence.
+opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);   // pump runs at a third of this
 
 agent.AddTool(publishDraft, tool => tool.NoRetry());
 ```
@@ -160,10 +165,10 @@ leaves the workflow holding an approval nobody is waiting on.
 issues a *fresh* approval request while the first is still pending, so every attempt after the first
 fails with `DurableApprovalAlreadyPending`.
 
-**The heartbeat pump is on by default.** Every tool activity inherits a heartbeat timeout (2 minutes
-unless overridden), and the package heartbeats at exactly a third of it for the whole wait. You lose
-the pump only by setting `HeartbeatTimeout` to `TimeSpan.Zero`. The hazard to watch is
-`ActivityTimeout`, not a missing heartbeat.
+**The heartbeat pump is on by default.** Every package-managed tool activity receives an effective
+heartbeat timeout (2 minutes unless overridden), and the package heartbeats at exactly a third of
+it for the whole wait. The public options do not provide a supported way to disable this pump. The
+hazard to watch is `ActivityTimeout`, not a missing heartbeat.
 
 **Heartbeating is not durability.** The wait is resident on one worker for its entire duration. A
 deploy, crash, or scale-down ends it — heartbeats or not — and with `NoRetry()` on a write tool that
@@ -172,7 +177,7 @@ ends the turn.
 ### The tool body
 
 ```csharp
-static async Task<string> PublishDraftAsync(string draft, string callId)
+static async Task<string> PublishDraftAsync(string draft)
 {
     var decision = await TemporalAgentContext.Current.RequestApprovalAsync(
         new DurableApprovalRequest
@@ -180,8 +185,7 @@ static async Task<string> PublishDraftAsync(string draft, string callId)
             // Guid.NewGuid() is fine here — a tool body runs in an activity, not in workflow
             // code. Never do this inside a [Workflow] method.
             RequestId    = Guid.NewGuid().ToString("N"),
-            FunctionName = "publish_draft",   // set these, or the reviewer sees an
-            CallId       = callId,            // approval card with no idea what it is for
+            FunctionName = "publish_draft",
             Description  = "Publish this draft?",
         });
 
@@ -191,6 +195,9 @@ static async Task<string> PublishDraftAsync(string draft, string callId)
 
 Unlike workflow-parked, the tool owns the `RequestId` *before* the request exists — so it can write
 your reviews-table row and send a deep link, then ask. That is in-tool's one genuine convenience.
+`TemporalAgentContext` does not expose the originating model tool-call ID. Leave `CallId` unset, or
+set it only to an application-owned correlation value that the tool already knows; do not add a
+`callId` tool parameter and trust the model to supply it.
 
 ---
 
@@ -212,18 +219,22 @@ and have your reviewer console read that. The library answers "is *this* session
 ### Driving the turn while it waits
 
 `SendAsync` does not return until the turn finishes, and a turn parked for approval does not finish
-until a human decides. Three ways to handle it:
+until a human decides. There are two dispatch choices and one hard rule:
 
 - **Interactive review** — start the turn without awaiting, poll, resolve, then await.
-- **Queued review** — use `RunAgentFireAndForgetAsync`. The turn runs with no caller attached and
-  you read the result from session history later. This is the right shape for a review SLA measured
-  in hours.
+- **Queued dispatch** — `RunAgentFireAndForgetAsync` starts the turn with no caller attached, but
+  `ITemporalAgentClient` currently has no high-level API for retrieving that turn's eventual result
+  or session history. Use it only when your application publishes results through its own durable
+  store or callback. Do not assume the local `TemporalAgentSession` will be updated afterward.
 - **Never** hold an inbound HTTP request open across a review window.
 
 ```csharp
-var sessionId = new TemporalAgentSessionId("Operations", sessionKey);
+var session = (TemporalAgentSession)await proxy.CreateSessionAsync(cancellationToken);
+var sessionId = session.SessionId;
 var turn = proxy.RunAsync("Refund order ORD-001", session);
 
+// Keep servicing approvals until the turn finishes. One turn can raise several, one at a
+// time, so exiting after the first would leave the next one hanging until it times out.
 while (!turn.IsCompleted)
 {
     await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
@@ -240,7 +251,7 @@ while (!turn.IsCompleted)
 
     if (pending is null) continue;
 
-    await client.ResolveApprovalAsync(
+    var resolution = await client.ResolveApprovalAsync(
         sessionId,
         new DurableApprovalDecision
         {
@@ -249,6 +260,13 @@ while (!turn.IsCompleted)
             Reason    = "Reviewed under ticket INC-1234.",
         },
         cancellationToken);
+
+    if (resolution.Status is not (DurableApprovalResolutionStatus.Accepted
+                              or DurableApprovalResolutionStatus.AlreadyResolved))
+    {
+        throw new InvalidOperationException(
+            $"Approval was not accepted: {resolution.Status}.");
+    }
 }
 
 var response = await turn;
@@ -267,7 +285,7 @@ exact strings — resubmitting the same decision with re-typed reason text retur
 | Field | Workflow-parked | In-tool |
 |---|---|---|
 | `RequestId` | Generated by the workflow | You supply it |
-| `FunctionName`, `CallId` | Filled from the tool call | **`null` unless you set them** |
+| `FunctionName`, `CallId` | Filled from the tool call | `FunctionName` is yours; `CallId` is `null` unless you supply an application-owned value |
 | `Description` | Interceptor's enriched description, else `"Approve invocation of tool '{name}'"` | Whatever you pass |
 | `ReviewData` | Interceptor metadata only | Whatever you pass |
 | `ExpiresAt` | Overwritten by the workflow to *now + `ApprovalTimeout`* — render a real countdown | Same |
@@ -283,10 +301,10 @@ string. Treat `Description` as model-influenced and scrub it in your own interce
 
 ### What the model sees when a call does not run
 
-Every refusal arrives as an ordinary tool result, so the turn continues and the model usually
+Workflow-parked decisions become ordinary tool results, so the turn continues and the model usually
 narrates the outcome:
 
-| Outcome | Result content |
+| Workflow-parked outcome | Result content |
 |---|---|
 | Denied, or approval timed out | `[Denied] {reason}` — the timeout reason names the elapsed window |
 | Blocked by an interceptor | `[Blocked] {message}` |
@@ -294,6 +312,10 @@ narrates the outcome:
 The model is not told a human was involved unless your reason text says so. "Nobody looked at it"
 and "a human said no" are indistinguishable to the agent unless the reviewer supplies a
 distinguishing reason — so always send one.
+
+In-tool approval is different: `RequestApprovalAsync` returns a `DurableApprovalDecision` to your
+tool. The tool decides whether to return a result, throw, or take another action. In the example
+above, the model receives `Not published: {reason}`, not the workflow-parked `[Denied]` format.
 
 ### When the activity dies mid-review
 
