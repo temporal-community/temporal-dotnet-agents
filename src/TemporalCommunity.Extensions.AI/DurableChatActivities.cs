@@ -120,12 +120,41 @@ internal sealed class DurableChatActivities(
             || (declarations is not null && declarations.Count > 0);
     }
 
+    /// <summary>
+    /// Rejects the mixed pattern — durable tools registered <em>and</em> an in-process
+    /// function-invocation loop in the resolved chat client.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only reached when durable tools are registered (see the caller). A
+    /// <see cref="FunctionInvokingChatClient"/> with <em>no</em> durable tools is Pattern 1 done
+    /// correctly — the caller has deliberately chosen the in-process loop and nothing promised
+    /// otherwise — and stays supported. This is the opposite of the MAF library's rule, which
+    /// rejects the middleware unconditionally because <c>AddDurableAgent</c> always promises the
+    /// workflow owns tool dispatch. The divergence is intentional; do not harmonize them.
+    /// </para>
+    /// <para>
+    /// The failure is raised as a non-retryable Temporal application failure. A misconfiguration
+    /// cannot be resolved by trying again, so it must not consume the activity's retry budget —
+    /// left unwrapped it burns the bounded default, or retries forever when the caller configured
+    /// <c>MaximumAttempts = 0</c>. The error type is the shared
+    /// <see cref="DurableConfigurationException"/> name that failure inspection matches on, and
+    /// the typed exception is preserved as the inner exception.
+    /// </para>
+    /// </remarks>
     private static void ThrowIfMixedPattern(IChatClient chatClient)
     {
-        if (Internal.AgentChainWalker.Contains<FunctionInvokingChatClient>(chatClient))
+        if (!Internal.AgentChainWalker.Contains<FunctionInvokingChatClient>(chatClient))
         {
-            throw new DurableMixedPatternException();
+            return;
         }
+
+        var conflict = new DurableMixedPatternException();
+        throw new Temporalio.Exceptions.ApplicationFailureException(
+            conflict.Message,
+            conflict,
+            errorType: nameof(DurableConfigurationException),
+            nonRetryable: true);
     }
 
     /// <summary>

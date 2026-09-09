@@ -68,7 +68,9 @@ public class DurableChatActivitiesMixedPatternBackstopTests
 
         var (provider, activities) = BuildActivities(withFI, registerDurableTool: true);
 
-        await Assert.ThrowsAsync<DurableMixedPatternException>(
+        // Surfaces as a NON-RETRYABLE Temporal application failure carrying the typed exception:
+        // a misconfiguration cannot succeed on a retry, so it must not consume the retry budget.
+        var ex = await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(
             () => activities.GetResponseAsync(new DurableChatInput
             {
                 Messages = new[] { new ChatMessage(ChatRole.User, "hello") },
@@ -76,6 +78,10 @@ public class DurableChatActivitiesMixedPatternBackstopTests
                 ConversationId = "test",
                 TurnNumber = 1,
             }));
+
+        Assert.True(ex.NonRetryable);
+        Assert.Equal(nameof(DurableConfigurationException), ex.ErrorType);
+        Assert.IsType<DurableMixedPatternException>(ex.InnerException);
         provider.Dispose();
     }
 
