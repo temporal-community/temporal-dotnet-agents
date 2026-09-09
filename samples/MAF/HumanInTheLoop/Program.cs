@@ -114,9 +114,12 @@ builder.Services
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
             agent.AddTool(sendEmailTool, opts => opts.NoRetry());
 
-            // Per-agent override of opts.DefaultApprovalTimeout. Demonstrates the
-            // builder slot — not required (would inherit opts.DefaultApprovalTimeout otherwise).
-            agent.ApprovalTimeout = TimeSpan.FromHours(23);
+            // Per-agent override of opts.DefaultApprovalTimeout. Demonstrates the builder slot —
+            // not required (it would inherit opts.DefaultApprovalTimeout otherwise). It must stay
+            // below DefaultActivityTimeout: an in-tool approval is held open by a live activity,
+            // so an approval window longer than the activity timeout leaves the workflow holding
+            // a pending approval that no activity is waiting on any more.
+            agent.ApprovalTimeout = TimeSpan.FromMinutes(10);
         });
     });
 

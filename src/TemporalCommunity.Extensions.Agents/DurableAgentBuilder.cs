@@ -414,9 +414,11 @@ public sealed class DurableAgentBuilder
                 specs.Select(s => (s.Tool.Name, provider.GetType().Name)));
         }
 
-        // specs is non-null exactly when declarations were registered above — from explicit
-        // specs or from the provider's own IDurableToolSource.GetDurableTools().
-        _contextProviders.Add(new ContextProviderRegistration(_ => registered, specs is { Count: > 0 }));
+        // Record that declarations were INSPECTED on the instance path, not that any were found.
+        // An IDurableToolSource may legitimately declare none; treating that as "not registered"
+        // made the runtime reject it as factory-registered and print advice about an overload the
+        // caller never used.
+        _contextProviders.Add(new ContextProviderRegistration(_ => registered, DeclarationsRegistered: true));
         return this;
     }
 
@@ -448,12 +450,17 @@ public sealed class DurableAgentBuilder
     /// <c>AddContextProvider(AIContextProvider, IEnumerable{DurableToolRegistrationSpec})</c> instead.
     /// </para>
     /// <para>
-    /// If the provider resolved by this factory implements <see cref="IDurableToolSource"/> or
-    /// returns tools from <c>InvokingAsync</c>, the framework cannot detect this at startup — the
-    /// <c>LogError</c> fires only at the first workflow execution. If the provider contributes
-    /// tools, prefer the instance overload
+    /// A provider resolved by this factory does not exist at build time, so its durable tool
+    /// declarations cannot be collected. If it implements <see cref="IDurableToolSource"/>, the
+    /// first LLM step fails with a non-retryable configuration error rather than dropping its
+    /// tools silently — use the instance overload
     /// <c>AddContextProvider(AIContextProvider, IEnumerable{DurableToolRegistrationSpec}?)</c>
-    /// so tool registration can occur at startup.
+    /// for such a provider.
+    /// </para>
+    /// <para>
+    /// A provider that merely returns tools from <c>InvokingAsync</c> without implementing that
+    /// interface is not rejected; those tools are dropped and a <c>LogError</c> is emitted once
+    /// per LLM step.
     /// </para>
     /// </remarks>
     public DurableAgentBuilder AddContextProvider(Func<IServiceProvider, AIContextProvider> factory)

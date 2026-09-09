@@ -40,8 +40,27 @@ public sealed class WorkingSetContextProvider : AIContextProvider
     /// <summary>
     /// Maximum number of file paths to include in the working-set note. Paths beyond this
     /// limit are dropped (most-recently-seen paths win when the window overflows).
+    /// Set to <c>0</c> to disable working-set tracking.
     /// </summary>
-    public int MaxPaths { get; set; } = 20;
+    /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
+    public int MaxPaths
+    {
+        get => _maxPaths;
+        set
+        {
+            // Zero is a meaningful "disabled". Negative is a mistake, and silently behaving like
+            // zero would hide it — the caller would see no working set and no reason why.
+            if (value < 0)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(value), value, "MaxPaths cannot be negative. Use 0 to disable working-set tracking.");
+            }
+
+            _maxPaths = value;
+        }
+    }
+
+    private int _maxPaths = 20;
 
     /// <summary>
     /// When <see langword="true"/>, the injected note is omitted and only the StateBag is
@@ -64,11 +83,9 @@ public sealed class WorkingSetContextProvider : AIContextProvider
         InvokingContext context,
         CancellationToken cancellationToken = default)
     {
-        var messages = context.AIContext.Messages;
-        if (messages is null || !messages.Any())
-        {
-            return new ValueTask<AIContext>(new AIContext());
-        }
+        // No early return on an empty history: the StateBag key mirrors the CURRENT working set,
+        // and bailing out here would leave a previous value advertising files no longer in scope.
+        var messages = context.AIContext.Messages ?? [];
 
         // Extract file paths from the history as a pure deterministic function.
         var paths = ExtractFilePaths(messages, MaxPaths);

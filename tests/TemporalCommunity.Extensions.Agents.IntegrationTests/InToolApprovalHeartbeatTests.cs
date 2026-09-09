@@ -208,4 +208,92 @@ public class InToolApprovalHeartbeatTests
         _timeoutDecision = decision.Approved ? "Published" : "Not published";
         return _timeoutDecision;
     }
+
+    private static readonly TaskCompletionSource StrandedToolParked =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Heartbeating keeps the activity alive, but it cannot outlive the activity timeout. When the
+    /// activity ends mid-review the workflow still holds the pending approval — recovery is
+    /// explicit, via <c>CancelPendingApprovalAsync</c>, not automatic.
+    /// </summary>
+    /// <remarks>
+    /// This is the stranding risk documented on <c>TemporalAgentContext.RequestApprovalAsync</c>.
+    /// Pinned so nobody mistakes the heartbeat pump for a fix to it.
+    /// </remarks>
+    [Fact]
+    public async Task InToolApproval_ActivityEndsMidReview_LeavesApprovalPendingUntilCancelled()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-1", "stranded_publish", new Dictionary<string, object?>())],
+            "Handled.");
+
+        var taskQueue = $"hb-strand-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(opts =>
+            {
+                // Activity dies well before the approval window closes.
+                opts.DefaultHeartbeatTimeout = TimeSpan.FromSeconds(2);
+                opts.DefaultActivityTimeout = TimeSpan.FromSeconds(8);
+                opts.DefaultApprovalTimeout = TimeSpan.FromMinutes(5);
+
+                opts.AddDurableAgent("StrandedPublisher", agent =>
+                {
+                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+                    agent.AddTool(
+                        AIFunctionFactory.Create(
+                            StrandedPublishAsync,
+                            new AIFunctionFactoryOptions { Name = "stranded_publish" }),
+                        tool => tool.NoRetry());
+                });
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("StrandedPublisher");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+            var client = host.Services.GetRequiredService<ITemporalAgentClient>();
+
+            var run = proxy.RunAsync("Publish the draft.", session);
+            await StrandedToolParked.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            // Nobody reviews; the activity times out first.
+            await Assert.ThrowsAnyAsync<Exception>(() => run.WaitAsync(TimeSpan.FromSeconds(60)));
+
+            // The approval outlives the activity that was waiting on it.
+            var stranded = await client.GetPendingApprovalAsync(session.SessionId);
+            Assert.NotNull(stranded);
+
+            await client.CancelPendingApprovalAsync(session.SessionId, "Reviewer went away.");
+
+            Assert.Null(await client.GetPendingApprovalAsync(session.SessionId));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    private static async Task<string> StrandedPublishAsync()
+    {
+        StrandedToolParked.TrySetResult();
+
+        var decision = await TemporalAgentContext.Current.RequestApprovalAsync(
+            new DurableApprovalRequest
+            {
+                RequestId = Guid.NewGuid().ToString("N"),
+                Description = "Publish this draft?",
+            });
+
+        return decision.Approved ? "Published" : "Not published";
+    }
 }

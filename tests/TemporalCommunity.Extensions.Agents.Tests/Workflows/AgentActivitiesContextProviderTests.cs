@@ -1073,4 +1073,43 @@ public class AgentActivitiesContextProviderTests
 
         Assert.NotNull(result);
     }
+
+    /// <summary>
+    /// An instance-registered <see cref="IDurableToolSource"/> that declares nothing is still
+    /// instance-registered, and must not be rejected as if it came from the factory overload.
+    /// </summary>
+    /// <remarks>
+    /// The metadata originally recorded whether any declarations were FOUND rather than whether
+    /// the instance path had INSPECTED them, so a source with an empty list was rejected with
+    /// advice about an overload the caller never used.
+    /// </remarks>
+    [Fact]
+    public async Task RunDurableAgentStep_InstanceDurableToolSourceDeclaringNothing_IsAccepted()
+    {
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("EmptySourceAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                agent.AddContextProvider(new EmptyDurableToolSourceProvider());
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        var result = await env.RunAsync(() =>
+            activities.RunDurableAgentStepAsync(MakeInput("EmptySourceAgent")));
+
+        Assert.NotNull(result);
+    }
+
+    /// <summary>An IDurableToolSource with nothing to declare — a legitimate shape.</summary>
+    private sealed class EmptyDurableToolSourceProvider : AIContextProvider, IDurableToolSource
+    {
+        public IReadOnlyList<DurableToolRegistrationSpec> GetDurableTools() => [];
+
+        protected override ValueTask<AIContext> ProvideAIContextAsync(
+            InvokingContext context,
+            CancellationToken cancellationToken = default) =>
+            new(new AIContext());
+    }
 }

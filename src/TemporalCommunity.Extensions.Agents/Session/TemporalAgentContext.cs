@@ -133,17 +133,32 @@ public sealed class TemporalAgentContext
         ArgumentNullException.ThrowIfNull(request);
 
         var handle = _client.GetWorkflowHandle<AgentWorkflow>(CurrentSession.SessionId.WorkflowId);
-        var approval = handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
-            wf => wf.RequestApprovalAsync(request),
-            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } });
 
-        // Outside an activity (unit tests, direct use) there is no heartbeat to send.
+        // Outside an activity (unit tests, direct use) there is no activity token to honour and
+        // no heartbeat to send.
         if (!ActivityExecutionContext.HasCurrent)
         {
-            return await approval.ConfigureAwait(false);
+            return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
+                wf => wf.RequestApprovalAsync(request),
+                new WorkflowUpdateOptions
+                {
+                    Rpc = new RpcOptions { CancellationToken = cancellationToken },
+                }).ConfigureAwait(false);
         }
 
         var ctx = ActivityExecutionContext.Current;
+
+        // Link BEFORE starting the update, and use the linked token for the RPC as well as the
+        // pump. Most tools pass no token of their own, so binding the RPC to the caller token
+        // alone would leave the tool awaiting the workflow after the activity was cancelled —
+        // the pump would stop and the wait would not.
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, ctx.CancellationToken);
+
+        var approval = handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
+            wf => wf.RequestApprovalAsync(request),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = linked.Token } });
+
         var interval = HeartbeatInterval(ctx.Info.HeartbeatTimeout);
 
         // No heartbeat timeout configured means nothing can expire for lack of one.
@@ -152,11 +167,7 @@ public sealed class TemporalAgentContext
             return await approval.ConfigureAwait(false);
         }
 
-        // Cancelling the activity must stop the pump as well as propagate to the update RPC —
-        // heartbeating a cancelled activity is pointless and would mask the cancellation.
-        using var pumpCancellation = CancellationTokenSource.CreateLinkedTokenSource(
-            cancellationToken, ctx.CancellationToken);
-        var pump = HeartbeatUntilStoppedAsync(ctx, interval.Value, pumpCancellation.Token);
+        var pump = HeartbeatUntilStoppedAsync(ctx, interval.Value, linked.Token);
 
         try
         {
@@ -164,7 +175,7 @@ public sealed class TemporalAgentContext
         }
         finally
         {
-            pumpCancellation.Cancel();
+            linked.Cancel();
 
             // Observe the pump so a fault in it cannot surface later as an unobserved task
             // exception. Its own cancellation is expected and uninteresting.
@@ -194,8 +205,15 @@ public sealed class TemporalAgentContext
             return null;
         }
 
+        // Strictly a third, with no floor. A one-second floor would exceed any sub-second
+        // heartbeat timeout, so the activity would expire before the pump ever sent a beat —
+        // the very failure this pump exists to prevent. A tiny timeout is the caller's choice;
+        // matching it is not a heartbeat storm we get to refuse.
         var third = TimeSpan.FromTicks(timeout.Ticks / 3);
-        return third < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : third;
+
+        // Guard the degenerate case: a timeout under 3 ticks floors to zero, and Task.Delay
+        // would then spin.
+        return third > TimeSpan.Zero ? third : TimeSpan.FromTicks(1);
     }
 
     /// <summary>
