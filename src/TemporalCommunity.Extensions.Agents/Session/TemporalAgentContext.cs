@@ -30,12 +30,74 @@ public sealed class TemporalAgentContext
         _services = services;
     }
 
-    /// <summary>Gets the current <see cref="TemporalAgentContext"/>.</summary>
-    /// <exception cref="InvalidOperationException">Thrown when no context is set.</exception>
-    public static TemporalAgentContext Current =>
-        s_current.Value ?? throw new InvalidOperationException("No TemporalAgentContext is available in the current async context.");
+    private static readonly AsyncLocal<ContextUnavailability?> s_unavailable = new();
 
-    internal static void SetCurrent(TemporalAgentContext? ctx) => s_current.Value = ctx;
+    /// <summary>Gets the current <see cref="TemporalAgentContext"/>.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// No context is set. When the tool activity recorded why, the message names the specific
+    /// execution path and what to use instead of in-tool approval there.
+    /// </exception>
+    public static TemporalAgentContext Current =>
+        s_current.Value ?? throw new InvalidOperationException(UnavailableMessage());
+
+    internal static void SetCurrent(TemporalAgentContext? ctx)
+    {
+        s_current.Value = ctx;
+        if (ctx is not null)
+        {
+            s_unavailable.Value = null;
+        }
+    }
+
+    /// <summary>
+    /// Records why no context could be established, so <see cref="Current"/> can explain itself.
+    /// Pass <see langword="null"/> to clear.
+    /// </summary>
+    /// <remarks>
+    /// An explicit signal recorded where the decision is made, rather than something inferred from
+    /// a caught exception at the call site: a tool body throws
+    /// <see cref="InvalidOperationException"/> for plenty of reasons of its own, and relabelling
+    /// one of those as an unsupported-path diagnostic would mislead worse than saying nothing.
+    /// </remarks>
+    internal static void SetUnavailable(ContextUnavailableReason? reason, string? workflowId = null) =>
+        s_unavailable.Value = reason is { } r ? new ContextUnavailability(r, workflowId) : null;
+
+    private static string UnavailableMessage()
+    {
+        if (s_unavailable.Value is not { } u)
+        {
+            return "No TemporalAgentContext is available in the current async context.";
+        }
+
+        var where = u.WorkflowId is { Length: > 0 } id ? $" (workflow ID '{id}')" : string.Empty;
+
+        return u.Reason switch
+        {
+            ContextUnavailableReason.SubAgentPath =>
+                $"TemporalAgentContext is not available to this tool{where}: the activity's workflow " +
+                "ID is not an agent session ID, so there is no agent session to attach. This is the " +
+                "workflow-local sub-agent path (WorkflowAgents.GetTemporalAgent) — the tool activity " +
+                "runs under your orchestrating workflow. In-tool approval (RequestApprovalAsync) is " +
+                "not supported here, and neither is workflow-parked approval: RequireApproval() and " +
+                "an interceptor's PauseForApproval() both degrade to Block on this path. Own the " +
+                "approval in the orchestrating workflow, or drive the agent through a managed " +
+                "session via TemporalAIAgentProxy.",
+
+            ContextUnavailableReason.ScheduledJobPath =>
+                $"TemporalAgentContext is not available to this tool{where}: the workflow ID belongs " +
+                "to a scheduled agent job, whose agent identity differs from the tool's agent, so " +
+                "attaching a session would target the wrong workflow. In-tool approval " +
+                "(RequestApprovalAsync) is not supported here, and neither is workflow-parked " +
+                "approval: RequireApproval() and an interceptor's PauseForApproval() both degrade to " +
+                "Block on this path. Use a managed session via TemporalAIAgentProxy for work that " +
+                "needs human review.",
+
+            _ => "No TemporalAgentContext is available in the current async context.",
+        };
+    }
+
+    private sealed record ContextUnavailability(ContextUnavailableReason Reason, string? WorkflowId);
+
 
     /// <summary>
     /// Gets the restored durable agent session for this activity attempt. This is the same

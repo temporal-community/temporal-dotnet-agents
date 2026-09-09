@@ -991,7 +991,10 @@ internal sealed class AgentActivities(
             if (!sessionId.AgentName.Equals(input.AgentName, StringComparison.OrdinalIgnoreCase))
             {
                 // Workflow ID parsed but belongs to a different agent (e.g. a scheduled job).
-                // Leave TemporalAgentContext unset — tools that need it will throw on access.
+                // Leave TemporalAgentContext unset, recording why so a tool that reaches for it
+                // gets told which path it is on rather than a bare "no context".
+                TemporalAgentContext.SetUnavailable(
+                    ContextUnavailableReason.ScheduledJobPath, ctx.Info.WorkflowId);
             }
             else
             {
@@ -1005,8 +1008,12 @@ internal sealed class AgentActivities(
         }
         catch (FormatException)
         {
-            // Workflow ID isn't a valid agent session ID — likely a test environment.
-            // Tools that need TemporalAgentContext.Current will throw on access.
+            // Workflow ID isn't an agent session ID. In production that means the workflow-local
+            // sub-agent path: the activity was scheduled by a customer orchestrating workflow, so
+            // there is no agent session to attach. (A test environment using an arbitrary workflow
+            // ID lands here too — the message describes the observable fact first for that reason.)
+            TemporalAgentContext.SetUnavailable(
+                ContextUnavailableReason.SubAgentPath, ctx.Info.WorkflowId);
         }
 
         // Snapshot the bag's serialized form before invocation so we can detect (and write back)
@@ -1056,6 +1063,12 @@ internal sealed class AgentActivities(
             if (contextSetUp)
             {
                 TemporalAgentContext.SetCurrent(null);
+            }
+            else
+            {
+                // Drop the recorded reason so it cannot outlive this invocation and mislabel an
+                // unrelated one.
+                TemporalAgentContext.SetUnavailable(null);
             }
         }
     }

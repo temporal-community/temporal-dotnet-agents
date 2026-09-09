@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Temporalio.Testing;
 using Xunit;
@@ -285,5 +286,160 @@ public class InvokeAgentToolActivityTests
             AIFunctionArguments arguments,
             CancellationToken cancellationToken) =>
             throw new InvalidOperationException($"{Name}!");
+    }
+
+    // ── Unsupported-path diagnostics ─────────────────────────────────────────
+    //
+    // A tool reaching for TemporalAgentContext.Current on a path that cannot supply one used to
+    // get a bare "No TemporalAgentContext is available in the current async context." These pin
+    // that each unsupported path names itself and points at the supported alternative. The two
+    // paths are asserted separately because they are reached by different code (parse failure vs
+    // agent-name mismatch) and have different remedies.
+
+    /// <summary>
+    /// Workflow-local sub-agent: the activity runs under the customer's orchestrating workflow, so
+    /// its workflow ID is not an agent session ID at all.
+    /// </summary>
+    [Fact]
+    public async Task InvokeAgentTool_SubAgentPath_ErrorNamesPathAndAlternative()
+    {
+        var probe = new ContextProbeFunction("probe");
+        var (activities, _, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("WidgetAgent", agent =>
+            {
+                agent.ChatClient = _ => new StubChatClient();
+                agent.AddTool(probe);
+            });
+        });
+
+        var env = new ActivityEnvironment
+        {
+            // An orchestrating workflow's own ID — no "ta-" prefix, so the parse fails.
+            Info = ActivityEnvironment.DefaultInfo with { WorkflowId = "order-orchestrator-42" },
+        };
+
+        await env.RunAsync(() => activities.InvokeAgentToolAsync(new InvokeAgentToolInput
+        {
+            AgentName = "WidgetAgent",
+            ToolName = "probe",
+            CallId = "call-1",
+        }));
+
+        var message = Assert.IsType<InvalidOperationException>(probe.Captured).Message;
+
+        Assert.Contains("sub-agent", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WorkflowAgents.GetTemporalAgent", message, StringComparison.Ordinal);
+        // The offending ID is named, so the reader can see why it did not parse.
+        Assert.Contains("order-orchestrator-42", message, StringComparison.Ordinal);
+        // The alternative must be accurate: workflow-parked approval is unsupported here too.
+        Assert.Contains("RequireApproval()", message, StringComparison.Ordinal);
+        Assert.Contains("TemporalAIAgentProxy", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("scheduled", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Scheduled job: <c>ta-{agent}-scheduled-{runId}</c> parses, but to a different agent identity
+    /// — so attaching a session would target the wrong workflow.
+    /// </summary>
+    [Fact]
+    public async Task InvokeAgentTool_ScheduledJobPath_ErrorNamesPathAndAlternative()
+    {
+        var probe = new ContextProbeFunction("probe");
+        var (activities, _, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("WidgetAgent", agent =>
+            {
+                agent.ChatClient = _ => new StubChatClient();
+                agent.AddTool(probe);
+            });
+        });
+
+        // Parses to agent "WidgetAgent-scheduled", key "run7" — deliberately not "WidgetAgent".
+        var env = new ActivityEnvironment
+        {
+            Info = ActivityEnvironment.DefaultInfo with { WorkflowId = "ta-WidgetAgent-scheduled-run7" },
+        };
+
+        await env.RunAsync(() => activities.InvokeAgentToolAsync(new InvokeAgentToolInput
+        {
+            AgentName = "WidgetAgent",
+            ToolName = "probe",
+            CallId = "call-1",
+        }));
+
+        var message = Assert.IsType<InvalidOperationException>(probe.Captured).Message;
+
+        Assert.Contains("scheduled", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ta-WidgetAgent-scheduled-run7", message, StringComparison.Ordinal);
+        Assert.Contains("RequireApproval()", message, StringComparison.Ordinal);
+        Assert.Contains("TemporalAIAgentProxy", message, StringComparison.Ordinal);
+        // Must not be mislabelled as the sub-agent path — different cause, different remedy.
+        Assert.DoesNotContain("WorkflowAgents.GetTemporalAgent", message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A recorded reason must not outlive the invocation that recorded it. Without the cleanup in
+    /// the activity's <c>finally</c>, an unrelated later failure inherits an unsupported-path
+    /// label and sends the reader chasing the wrong problem.
+    /// </summary>
+    [Fact]
+    public async Task InvokeAgentTool_AfterUnsupportedPath_DoesNotLeakReasonToLaterAccess()
+    {
+        var probe = new ContextProbeFunction("probe");
+        var (activities, _, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("WidgetAgent", agent =>
+            {
+                agent.ChatClient = _ => new StubChatClient();
+                agent.AddTool(probe);
+            });
+        });
+
+        var env = new ActivityEnvironment
+        {
+            Info = ActivityEnvironment.DefaultInfo with { WorkflowId = "order-orchestrator-42" },
+        };
+
+        await env.RunAsync(() => activities.InvokeAgentToolAsync(new InvokeAgentToolInput
+        {
+            AgentName = "WidgetAgent",
+            ToolName = "probe",
+            CallId = "call-1",
+        }));
+
+        Assert.Contains("sub-agent", probe.Captured!.Message, StringComparison.OrdinalIgnoreCase);
+
+        // Same async context, outside any tool activity: back to the generic message.
+        var leaked = Assert.Throws<InvalidOperationException>(() => TemporalAgentContext.Current);
+
+        Assert.DoesNotContain("sub-agent", leaked.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("order-orchestrator-42", leaked.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>Captures what <c>TemporalAgentContext.Current</c> throws, without failing the tool.</summary>
+    private sealed class ContextProbeFunction : AIFunction
+    {
+        public ContextProbeFunction(string name) => Name = name;
+
+        public override string Name { get; }
+
+        public InvalidOperationException? Captured { get; private set; }
+
+        protected override ValueTask<object?> InvokeCoreAsync(
+            AIFunctionArguments arguments,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                _ = TemporalAgentContext.Current;
+                return new ValueTask<object?>("context-available");
+            }
+            catch (InvalidOperationException ex)
+            {
+                Captured = ex;
+                return new ValueTask<object?>("context-unavailable");
+            }
+        }
     }
 }
