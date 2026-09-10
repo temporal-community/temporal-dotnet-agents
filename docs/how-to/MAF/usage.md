@@ -221,46 +221,60 @@ await agentProxy.RunAsync("Process this in the background.", session, options);
 
 ## Structured Output
 
-### Using `RunAsync<T>` (Recommended)
-
-`StructuredOutputExtensions.RunAsync<T>` deserializes the agent's text response directly into a typed object. It
-automatically strips markdown code fences (`` ```json ... ``` ``) that many models wrap around JSON output, and retries
-with error context when deserialization fails — allowing the LLM to self-correct:
+Start with MAF's own `AIAgent.RunAsync<T>`. It generates a JSON Schema from `T`, constrains the
+model to it, and returns `AgentResponse<T>` whose `.Result` deserializes:
 
 ```csharp
 var session = await agentProxy.CreateSessionAsync();
 
-// Automatically strips code fences, deserializes, and retries on failure
-WeatherReport report = await agentProxy.RunAsync<WeatherReport>(
-    new List<ChatMessage> { new(ChatRole.User, "What's the weather in Seattle?") },
+AgentResponse<WeatherReport> response = await agentProxy.RunAsync<WeatherReport>(
+    [new ChatMessage(ChatRole.User, "What's the weather in Seattle?")],
+    session);
+
+WeatherReport report = response.Result;
+```
+
+### Using `RunStructuredAsync<T>`
+
+Reach for this library's `RunStructuredAsync<T>` when the model wraps its JSON in markdown fences or
+adds prose — MAF's version throws on those — or when you want a corrective retry. It calls MAF's
+typed run underneath, so the generated schema still reaches the model, then strips fences and feeds
+any parse error back for self-correction. It returns `T` directly:
+
+```csharp
+WeatherReport report = await agentProxy.RunStructuredAsync<WeatherReport>(
+    [new ChatMessage(ChatRole.User, "What's the weather in Seattle?")],
     session);
 ```
 
 Control retry behavior with `StructuredOutputOptions`:
 
 ```csharp
-var report = await agentProxy.RunAsync<WeatherReport>(
-    new List<ChatMessage> { new(ChatRole.User, "What's the weather in Seattle?") },
+var report = await agentProxy.RunStructuredAsync<WeatherReport>(
+    [new ChatMessage(ChatRole.User, "What's the weather in Seattle?")],
     session,
     new StructuredOutputOptions
     {
         MaxRetries = 3,                // default: 2
         IncludeErrorContext = true,     // default: true — appends error details to retry prompt
-        JsonSerializerOptions = myOpts  // default: null — uses JsonSerializerOptions.Default
+        JsonSerializerOptions = myOpts  // default: null — uses web defaults (camelCase)
     });
 ```
 
-`RunAsync<T>` is also available on `TemporalAIAgent` (inside workflows) and `ITemporalAgentClient`:
+Available on all three receivers:
 
 ```csharp
 // Inside a workflow
 var agent = WorkflowAgents.GetTemporalAgent("AnalystAgent");
 var session = await agent.CreateSessionAsync();
-var analysis = await agent.RunAsync<AnalysisResult>(messages, session);
+var analysis = await agent.RunStructuredAsync<AnalysisResult>(messages, session);
 
 // Via the client
-var result = await client.RunAgentAsync<WeatherReport>(sessionId, request);
+var result = await client.RunStructuredAsync<WeatherReport>(sessionId, request);
 ```
+
+The name is deliberate: MAF declares `RunAsync<T>` as an instance method, which would shadow an
+extension of the same name. See [Structured output](./structured-output.md).
 
 ### Using `ChatResponseFormat` (Format Hint Only)
 
@@ -766,150 +780,22 @@ See [HITL Patterns](./hitl-patterns.md) for the full guide including the two-fla
 
 ## Scheduling
 
-Four primitives cover every proactive agent invocation pattern. They all run `AgentJobWorkflow` —
-a lightweight, fire-and-forget workflow with no conversation history, no StateBag, and no TTL loop.
-Results are visible in the Temporal Web UI; to capture output, start a regular agent session from
-inside the job using `TemporalAgentContext`.
+Choose the scheduling primitive by recurrence and whether the run needs session state:
 
-| Primitive                                         | Context           | Recurrence              |
-|---------------------------------------------------|-------------------|-------------------------|
-| `AddScheduledAgentRun`                            | Config time       | Recurring               |
-| `ITemporalAgentClient.ScheduleAgentAsync`         | Runtime           | Recurring               |
-| `ScheduleActivities.ScheduleOneTimeAgentRunAsync` | Inside a workflow | One-time                |
-| `ITemporalAgentClient.RunAgentDelayedAsync`       | External caller   | One-time (full session) |
+| Primitive | Use it for |
+|---|---|
+| `AddScheduledAgentRun` | Recurring stateless work declared with the worker |
+| `ScheduleAgentAsync` | Recurring stateless work created by the process that hosts the durable agent |
+| `ScheduleOneTimeAgentRunAsync` | One-time stateless work created inside another workflow |
+| `RunAgentDelayedAsync` | A delayed conversation with history, StateBag, and approval support |
 
-### Recurring Schedules
+The first three run `AgentJobWorkflow`, which has no session state or typed result. Persist useful
+output through an idempotent durable tool. `RunAgentDelayedAsync` creates a full `AgentWorkflow` but
+returns when Temporal accepts the request, not when the initial response is ready.
 
-#### Config-time registration
-
-Declare scheduled runs inside `AddTemporalAgents`. The `ScheduleRegistrationService` creates them
-automatically when the worker starts. If the schedule already exists (e.g., on subsequent restarts)
-a warning is logged and the existing schedule is left untouched.
-
-```csharp
-builder.Services.AddTemporalClient("localhost:7233", "default");
-
-builder.Services
-    .AddHostedTemporalWorker("agents")
-    .AddTemporalAgents(opts =>
-    {
-        opts.AddDurableAgent("SummaryAgent", agent =>
-        {
-            agent.Instructions = "Summarize the day's activity report.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-        });
-
-        opts.AddScheduledAgentRun(
-            agentName: "SummaryAgent",
-            scheduleId: "daily-summary",
-            request: new RunRequest("Summarize today's activity report."),
-            spec: new ScheduleSpec
-            {
-                Intervals = [new ScheduleIntervalSpec(Every: TimeSpan.FromDays(1))]
-            });
-    });
-```
-
-#### Programmatic scheduling
-
-Call `ScheduleAgentAsync` at any time to create a Temporal Schedule. The returned `ScheduleHandle`
-lets you pause, trigger, update, or delete the schedule:
-
-```csharp
-ITemporalAgentClient client = // resolved from DI
-
-ScheduleHandle handle = await client.ScheduleAgentAsync(
-    agentName: "ReportAgent",
-    scheduleId: "weekly-report",
-    request: new RunRequest("Generate the weekly metrics report."),
-    spec: new ScheduleSpec
-    {
-        Calendars =
-        [
-            new ScheduleCalendarSpec { Hour = [new ScheduleRange(9)], DayOfWeek = [new ScheduleRange(1)] }
-        ]
-    });
-
-// Trigger immediately (outside the normal cadence)
-await handle.TriggerAsync();
-
-// Pause and resume
-await handle.PauseAsync(note: "Pausing during maintenance window.");
-await handle.UnpauseAsync();
-
-// Retrieve an existing handle by ID
-ScheduleHandle existing = client.GetAgentScheduleHandle("weekly-report");
-await existing.DeleteAsync();
-```
-
-> **Schedule orphaning**: Temporal Schedules are independent of workers. Removing an agent from
-> `TemporalAgentsOptions` does **not** delete its schedule — it will keep firing. Always call
-> `DeleteAsync()` via `GetAgentScheduleHandle` when decommissioning a scheduled agent.
-
-> **Config drift**: if you change a schedule's spec in code, the change is silently skipped on
-> restart (the existing schedule is kept). To apply the updated spec, delete the schedule first via
-> `GetAgentScheduleHandle`, then restart the worker.
-
----
-
-### Deferred One-Time Runs
-
-#### From inside an orchestrating workflow
-
-Use `ScheduleActivities.ScheduleOneTimeAgentRunAsync` to schedule a future agent run from within a
-`[WorkflowRun]` method. This uses Temporal's `StartDelay` — a single workflow execution is created
-with a delayed start, leaving no persistent schedule entity behind after it completes.
-
-```csharp
-[Workflow]
-public class ResearchWorkflow
-{
-    [WorkflowRun]
-    public async Task RunAsync(string topic)
-    {
-        // Run the main analysis immediately
-        var analyst = WorkflowAgents.GetTemporalAgent("AnalystAgent");
-        var session = await analyst.CreateSessionAsync();
-        await analyst.RunAsync($"Analyze: {topic}", session);
-
-        // Schedule a follow-up comparison in 7 days — fire-and-forget, no blocking
-        await Workflow.ExecuteActivityAsync(
-            (ScheduleActivities a) => a.ScheduleOneTimeAgentRunAsync(new OneTimeAgentRun
-            {
-                AgentName = "AnalystAgent",
-                RunId     = $"followup-{topic}",
-                Request   = new RunRequest($"Compare today's findings on '{topic}' against last week's."),
-                RunAt     = Workflow.UtcNow + TimeSpan.FromDays(7)
-            }),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(30) });
-    }
-}
-```
-
-The activity is idempotent on retry: `WorkflowIdConflictPolicy.UseExisting` ensures that a second
-`StartWorkflowAsync` call (after a crash-before-ack) finds the already-scheduled execution and
-returns normally. If `RunAt` is in the past when the activity executes, the run starts immediately.
-
-#### From an external caller
-
-`RunAgentDelayedAsync` defers the start of a **full agent session** (`AgentWorkflow`, with
-conversation history and StateBag). It is intended for external callers, not workflow code.
-
-```csharp
-ITemporalAgentClient client = // resolved from DI
-
-var sessionId = new TemporalAgentSessionId("OnboardingAgent", userId);
-
-// Workflow is created now but does not start executing for 24 hours
-await client.RunAgentDelayedAsync(
-    sessionId,
-    new RunRequest("Welcome! Your trial period has started. How can I help you get set up?"),
-    delay: TimeSpan.FromHours(24));
-```
-
-> **Known limitation**: if a workflow with the same session ID is already running (`UseExisting`
-> policy), `StartDelay` is ignored and the existing workflow is reused immediately. This method
-> only applies the delay when starting a brand-new session.
+See [Scheduling Agent Runs](./scheduling.md) for the canonical worker setup, time-zone and catchup
+semantics, one-time idempotency, schedule updates, output capture, approval behavior, and lifecycle
+management.
 
 ---
 
@@ -1223,6 +1109,7 @@ For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientA
 
 ## Where to go next
 
+- [Using Temporal SDK plugins](../../library-combinations.md#using-temporal-sdk-plugins) — registering your own Temporal worker or client plugins alongside this library
 **How-to guides**
 
 - [Durable Agents](durable-agents.md) — the canonical write-vs-read tool example and per-tool retry hierarchy

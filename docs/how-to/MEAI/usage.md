@@ -236,6 +236,7 @@ adapter directly inside workflow code, see
 
 ## Where to go next
 
+- [Using Temporal SDK plugins](../../library-combinations.md#using-temporal-sdk-plugins) — registering your own Temporal worker or client plugins alongside this library
 **How-to guides**
 
 - [Tool functions](tool-functions.md) — the three durable tool registration levels

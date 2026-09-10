@@ -191,6 +191,49 @@ Incremental adoption paths:
 
 ---
 
+## Using Temporal SDK plugins
+
+Advanced, and not a registration path. Start from whichever canonical call your combination
+above prescribes — `AddDurableAI()` or `AddTemporalAgents()`. Neither library exposes plugin
+wrappers; if your application has its own Temporal plugin, register it through the SDK's own
+options.
+
+```csharp
+builder.Services
+    .AddHostedTemporalWorker("orders-worker")
+    .AddDurableAI()                                  // or .AddTemporalAgents(...)
+    .ConfigureOptions(options =>
+    {
+        // Worker plugins.
+        var workerPlugins = options.Plugins?.ToList() ?? [];
+        workerPlugins.Add(new MyWorkerPlugin());
+        options.Plugins = workerPlugins;
+
+        // Client plugins. ClientOptions is nullable on the worker options, so check it.
+        if (options.ClientOptions is not null)
+        {
+            var clientPlugins = options.ClientOptions.Plugins?.ToList() ?? [];
+            clientPlugins.Add(new MyClientPlugin());
+            options.ClientOptions.Plugins = clientPlugins;
+        }
+    });
+```
+
+**Temporal's plugin surface is experimental.** `ITemporalWorkerPlugin` and `ITemporalClientPlugin`
+both carry an explicit "may change in the future" warning from the SDK. Neither library is built
+on it, so that instability stays confined to code you own.
+
+**Registration order does not matter, and your collection is never replaced.** Both libraries read
+any existing plugin collection, append to it, and write it back — before or after your own
+registration. Integration tests pin this in both orders, including that two of your plugins
+sharing a `Name` are both kept: deduplicating your plugins is your decision, not the library's.
+
+**The data-converter plugin is installed for you.** Each library adds its own internal converter
+plugin automatically and refuses to add a second copy of it. Registering both libraries selects
+the MAF converter, which is a superset. A data converter you set yourself is left alone.
+
+---
+
 ## Which Combination Should I Use?
 
 ```
