@@ -115,14 +115,17 @@ public sealed class WorkingSetEchoProvider : Microsoft.Agents.AI.AIContextProvid
         InvokingContext context,
         CancellationToken cancellationToken = default)
     {
-        if (context.Session is TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession session
-            && session.StateBag.TryGetValue(
+        // AgentSession already exposes StateBag, so no cast to TemporalAgentSession is needed —
+        // only a null check, since InvokingContext.Session is nullable.
+        var stateBag = context.Session?.StateBag;
+        if (stateBag is not null
+            && stateBag.TryGetValue(
                 TemporalCommunity.Extensions.Agents.WorkingSetContextProvider.StateBagKey,
-                out string? csv,
+                out string[]? paths,
                 System.Text.Json.JsonSerializerOptions.Default)
-            && !string.IsNullOrEmpty(csv))
+            && paths is { Length: > 0 })
         {
-            Console.WriteLine($"[WorkingSet] {csv}");
+            Console.WriteLine($"[WorkingSet] {string.Join(", ", paths)}");
         }
 
         return new ValueTask<Microsoft.Agents.AI.AIContext>(new Microsoft.Agents.AI.AIContext());

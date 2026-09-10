@@ -36,13 +36,18 @@ Within those messages it looks at three content types:
 For the two function content types, a value is scanned **only when it is a string or a JSON string**.
 A path buried inside a structured JSON object is not found.
 
-Two heuristics identify a path in text:
+Two heuristics find candidates in text:
 
-1. **The first line inside a code fence** — the common ```` ```lang ```` / path convention.
-2. **Path-shaped tokens** — a token containing `/` or `\` **and** ending in a recognized extension.
+1. **The line immediately after a code fence opens** — the common ```` ```lang ```` / path
+   convention.
+2. **Tokens on any other line**, split on whitespace and on punctuation a path would not contain
+   (including `,` — see below).
 
-Both conditions are required for the second heuristic, so `Program.cs` alone is not picked up but
-`src/Program.cs` is. Recognized extensions cover mainstream languages (`cs`, `py`, `ts`, `js`, `go`,
+A candidate from **either** heuristic then has to look like a path: it must contain `/` or `\` **and**
+end in a recognized extension. So `Program.cs` alone is never picked up — from a code fence or
+anywhere else — but `src/Program.cs` is.
+
+Recognized extensions cover mainstream languages (`cs`, `py`, `ts`, `js`, `go`,
 `rs`, `java`, `kt`, `rb`, `php`, `c`/`cpp`/`h`, `swift`, `dart`, `ex`, `hs`, `lua`, `r`, `sql`,
 shell), config and data (`yaml`, `json`, `xml`, `toml`, `ini`, `env`), docs (`md`, `txt`), and
 MSBuild files (`csproj`, `sln`, `slnx`, `props`, `targets`).
@@ -79,34 +84,41 @@ and no tokens are added, while the `StateBag` entry is still published.
 ## Reading the working set elsewhere
 
 The provider publishes to `AgentSessionStateBag["temporal.working_set"]`, exposed as the public
-constant `WorkingSetContextProvider.StateBagKey`, as **comma-separated text**.
+constant `WorkingSetContextProvider.StateBagKey`, as a **`string[]`** — a JSON array on the wire.
 
 This is the supported way for another provider or a tool to consume the working set. It matters
 because a provider cannot see the messages another provider injected — the `StateBag` is the channel
 that works, and the only one that survives a worker restart.
 
 ```csharp
-if (context.Session is TemporalAgentSession session
-    && session.StateBag.TryGetValue(
+var stateBag = context.Session?.StateBag;
+
+if (stateBag is not null
+    && stateBag.TryGetValue(
         WorkingSetContextProvider.StateBagKey,
-        out string? csv,
+        out string[]? paths,
         JsonSerializerOptions.Default)
-    && !string.IsNullOrEmpty(csv))
+    && paths is { Length: > 0 })
 {
-    var paths = csv.Split(',');
     // ...
 }
 ```
 
-`StateBag` values are reference types only, which is why this is a string rather than a list.
+No cast to `TemporalAgentSession` is needed — `StateBag` is on `AgentSession` itself. The null check
+is, because `InvokingContext.Session` is nullable.
+
+Read it as an array rather than parsing text: a path may legally contain a comma or a semicolon, and
+the code-fence heuristic takes a whole line — so a path holding either does reach the working set,
+and any delimiter this could have been joined on is one that a real path would have split in half.
 
 **Treat the key as a recomputed mirror, not a persistence contract.** It holds whatever paths appear
 in the currently retained history — recomputed from scratch on every step, not accumulated. It is
 not a judgement that a file is still relevant. When a step extracts nothing the key is **removed**
 rather than left holding a stale list, so a reader can trust that what is there is in scope.
 
-If the session is not a `TemporalAgentSession`, or the write fails, the provider logs at Debug and
-continues — the injected note still works. It never fails the step.
+If the session is not a `TemporalAgentSession` the provider skips the write silently — no log line.
+If the write itself fails it logs at Debug, and only when an activity execution context is present.
+Either way it continues and the injected note still works; it never fails the step.
 
 ---
 

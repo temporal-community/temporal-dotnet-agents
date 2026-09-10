@@ -16,13 +16,15 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <para>
 /// <b>Design.</b> The working-set is computed as a pure function over the session history:
 /// file paths mentioned in assistant/tool messages (code-fence language hints and bare
-/// paths matching common extensions) are extracted, deduplicated, and sorted. A compact
-/// summary note listing the most-recently-referenced files is injected into the LLM
-/// context as a system <see cref="ChatMessage"/> before each LLM call.
+/// paths matching common extensions) are extracted and deduplicated case-insensitively,
+/// keeping most-recently-seen order — not sorted. A compact summary note listing those
+/// files is injected into the LLM context as a system <see cref="ChatMessage"/> before
+/// each LLM call.
 /// </para>
 /// <para>
-/// <b>StateBag key.</b> The serialized working-set is stored under
-/// <see cref="StateBagKey"/> so downstream providers and tools can read it.
+/// <b>StateBag key.</b> The working-set is stored under <see cref="StateBagKey"/> as a
+/// <see cref="string"/> array so downstream providers and tools can read it back with
+/// <c>TryGetValue&lt;string[]&gt;</c> — no parsing, and no path shape it cannot represent.
 /// </para>
 /// <para>
 /// <b>Determinism.</b> This provider is a pure function over the message list supplied by
@@ -33,7 +35,8 @@ namespace TemporalCommunity.Extensions.Agents;
 public sealed class WorkingSetContextProvider : AIContextProvider
 {
     /// <summary>
-    /// The key under which the working-set JSON is stored in the session StateBag.
+    /// The key under which the working-set is stored in the session StateBag, as a JSON array
+    /// of paths. Read it with <c>TryGetValue&lt;string[]&gt;</c>.
     /// </summary>
     public const string StateBagKey = "temporal.working_set";
 
@@ -101,9 +104,13 @@ public sealed class WorkingSetContextProvider : AIContextProvider
                 {
                     if (paths.Count > 0)
                     {
+                        // A JSON array, not delimited text: a path may legally contain any
+                        // delimiter worth choosing, so publishing one would hand readers a parse
+                        // that silently splits such a path in two.
+                        string[] pathArray = [.. paths];
                         agentSession.StateBag.SetValue(
                             StateBagKey,
-                            string.Join(",", paths),
+                            pathArray,
                             System.Text.Json.JsonSerializerOptions.Default);
                     }
                     else
@@ -118,9 +125,11 @@ public sealed class WorkingSetContextProvider : AIContextProvider
             }
             catch (Exception ex)
             {
-                // Session not a TemporalAgentSession (e.g. in tests) or StateBag.SetValue
-                // failed — continue without persisting the working-set. The injected note
-                // still provides value. Log at Debug for diagnosability without noise.
+                // Reached only when the StateBag write itself fails — a session that is not a
+                // TemporalAgentSession is skipped by the type check above without throwing, and
+                // so is never logged here. Continue without persisting the working-set; the
+                // injected note still provides value. Log at Debug for diagnosability
+                // without noise.
                 if (Temporalio.Activities.ActivityExecutionContext.HasCurrent)
                 {
                     Temporalio.Activities.ActivityExecutionContext.Current.Logger.LogDebug(

@@ -88,7 +88,7 @@ this worker, their callers must use the same compatible converter too. See
 - [Durable tool contract](../../docs/how-to/MEAI/tool-functions.md)
 - [Managed-session tool rules](../../docs/how-to/MEAI/managed-session-tool-rules.md)
 - [Pipeline architecture](../../docs/architecture/MEAI/durable-chat-pipeline.md)
-- [Sample Catalog](../../samples/catalog.md#temporalcommunityextensionsai-meai) — choose a sample by intent and see current canary coverage
+- [Sample Catalog](../../samples/catalog.md) — choose a sample by intent (the `Library` column marks the MEAI ones) and see current canary coverage
 
 ## What the managed session does
 

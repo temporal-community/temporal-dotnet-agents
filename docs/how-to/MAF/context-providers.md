@@ -75,23 +75,31 @@ So if a tenant provider adds "Acme Corp, enterprise plan" as a message, a later 
 it in `context.AIContext.Messages` will not find it. **The model sees it. Your other provider does
 not.**
 
-The practical reframing: providers do not compose into a pipeline. They run over the same input and
-their outputs are concatenated.
+The practical reframing: **messages** do not compose into a pipeline. The aggregate the library
+threads from provider to provider really does accumulate — and `Instructions` are not filtered, so a
+later provider *does* see an earlier one's instructions. It is the message view that is narrowed, by
+the default filter, before your override is called.
 
 **When providers must share, share through the `StateBag`** — one writes a key, the other reads it.
 That is what `WorkingSetContextProvider` does, and it is also the only channel that survives a
 worker restart.
 
-> If you genuinely need the unfiltered view, MAF lets you override `InvokingCoreAsync` instead of
-> `ProvideAIContextAsync`, or pass `provideInputMessageFilter: m => m` to the base constructor. Both
-> make you responsible for the merging and source-stamping the default does for you.
+> Two different escape hatches, often confused:
+>
+> - `provideInputMessageFilter: m => m` on the base constructor **only widens the view**.
+>   `ProvideAIContextAsync` still returns just your addition, and MAF still merges and
+>   source-stamps it. This is the one you usually want.
+> - Overriding `InvokingCoreAsync` replaces the merge step, so you must return the **full merged
+>   context** and stamp your own messages yourself.
 
 ### It does not see the agent's registered tools
 
 The context handed to a provider carries `Messages` and `Instructions` only. The agent's durable
-tools are attached to the model call separately and never appear in `AIContext`. A provider cannot
-check whether `send_email` is registered before mentioning it. `Tools` on the incoming context is
-simply always empty.
+tools are attached to the model call separately and are never seeded into `AIContext`. A provider
+cannot check whether `send_email` is registered before mentioning it.
+
+So `Tools` on the incoming context starts empty, and anything you ever find in it was put there by
+an earlier provider in the chain — which is the misconfiguration below, not a registered tool.
 
 ### Reach session state through `context.Session`
 
@@ -99,31 +107,49 @@ simply always empty.
 step, and in the tool activity — not when providers run. Use the session you are handed:
 
 ```csharp
-if (context.Session is not TemporalAgentSession session)
-{
-    return new ValueTask<AIContext>(new AIContext());
-}
-
-session.StateBag.SetValue("app.tenant", "acme", JsonSerializerOptions.Default);
+context.Session?.StateBag.SetValue("app.tenant", "acme", JsonSerializerOptions.Default);
 ```
 
+`StateBag` is declared on `AgentSession`, so **no cast to `TemporalAgentSession` is needed** to read
+or write it. Cast only when you want something Temporal-specific — the session id, or the durable
+history. When you do, do not quietly return an empty context if the cast fails: that is a silent
+no-op you will not notice in production. Either fall back to the uncast `StateBag` or throw.
+
 `StateBag` values are **reference types only** — `SetValue<T>`/`TryGetValue<T>` are constrained
-`where T : class`, so a counter is stored as a string, not an `int`.
+`where T : class`. That excludes `int` (store a counter as a string), not collections: `string[]`
+and `List<string>` are classes and round-trip as JSON arrays.
 
 ---
 
 ## Choosing how to register
 
-**Default: `agent.AddContextProvider(sp => sp.GetRequiredService<MyProvider>())`.** The factory runs
-in each step attempt's DI scope, so you get a fresh provider, constructor injection, and
-scope-managed disposal.
+**Default: `agent.AddContextProvider(sp => sp.GetRequiredService<MyProvider>())`, with the provider
+registered `AddScoped`.** The library opens a fresh DI scope per `RunDurableAgentStep` attempt and
+runs your factory in it. Both halves matter — the factory does not decide the lifetime, your DI
+registration does:
 
-| You need | Register with | Lifetime | Cost |
+```csharp
+services.AddScoped<MyProvider>();   // ← without this the resolve throws at the first LLM step
+
+// ...
+agent.AddContextProvider(sp => sp.GetRequiredService<MyProvider>());
+```
+
+Registering it `AddSingleton` instead is legal and gives you the shared-instance semantics described
+below — including the concurrency hazard — from a call that reads as if it were per-attempt. If you
+did not mean that, use `AddScoped`.
+
+| You need | Register with | Instances | Cost |
 |---|---|---|---|
-| The common case | `AddContextProvider(sp => sp.GetRequiredService<T>())` | New per activity attempt | None |
-| No DI dependencies | `AddContextProvider(sp => new T(...))` | New per activity attempt | The library does not dispose what your factory `new`s |
+| The common case | `AddContextProvider(sp => sp.GetRequiredService<T>())` + `AddScoped<T>()` | One per activity attempt | None |
+| No DI dependencies | `AddContextProvider(sp => new T(...))` | One per activity attempt | Not disposed — the container did not create it |
 | The provider declares tools via `IDurableToolSource` | `AddContextProvider(instance)` | **One shared object** | Must be thread-safe; experimental API |
 | It contributes tools but you don't own the type | `AddContextProvider(instance, durableTools: [...])` | **One shared object** | Must be thread-safe |
+
+**Disposal follows the same rule.** The scope disposes what the *container* created — so an
+`IDisposable` resolved via `AddScoped`/`AddTransient` is cleaned up at the end of the attempt. It
+does not dispose an instance you `new`ed inside your own factory, or one you handed to the instance
+overload; neither does the library.
 
 ### A factory cannot carry tool declarations
 
@@ -141,7 +167,7 @@ throw — it will occasionally serve one customer's context to another, under lo
 cannot reproduce locally.
 
 Treat it as immutable configuration: no mutable fields, no session state, and nothing needing
-disposal (the library disposes neither a supplied instance nor one your factory creates).
+disposal.
 
 ### `IDurableToolSource` requires suppressing TA001
 
@@ -160,7 +186,12 @@ The `durableTools:` parameter has no such requirement and reaches the same place
 ## Providers run once per LLM step
 
 One turn can involve several LLM calls — one per iteration of the tool-call loop — and every
-provider fires on each. A turn that calls three tools runs every provider four times.
+provider fires on each.
+
+Count the **steps**, not the tools. All tool calls the model asks for in a single response are
+dispatched as one batch, and only then does the next LLM call happen. So three tools requested at
+once is two steps — providers run twice. Three tools requested one at a time, across three
+responses, is four steps.
 
 **`StateBag` caching is not deduplication.** A `StateBag` write becomes durable only when the whole
 step succeeds. If your provider calls an external service, writes the result, and the step then
@@ -187,9 +218,15 @@ message. That is usually right for a "current state" note and usually wrong for 
 
 **`Tools` are ignored** — see below.
 
-**`InvokedAsync` fires on failure too.** `InvokedContext` carries an `InvokeException` and has a
-dedicated failure shape, so code that records results must handle the failed-invocation case rather
-than assuming response messages exist.
+**`InvokedAsync` fires on failure too — but by default nothing of yours runs.** The library notifies
+every provider with an `InvokedContext` carrying the `InvokeException`. MAF's default
+`InvokedCoreAsync` then returns immediately when that exception is non-null, so an override of
+`StoreAIContextAsync` — the usual place to record results — is **skipped**. That default is the
+right one for most providers. To actually observe failures, override `InvokedCoreAsync`; you then
+own the filtering and the success path too.
+
+One gap to know about: a provider that throws from `InvokingAsync` fails the step *before* the
+protected block, so no `InvokedAsync` notification follows for any provider that turn.
 
 ---
 

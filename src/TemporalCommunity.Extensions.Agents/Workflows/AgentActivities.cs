@@ -201,11 +201,17 @@ internal sealed class AgentActivities(
         if (contextProviders.Length > 0)
         {
             // Seed the aggregated context with the current chatOptions state so providers see the
-            // agent's registered instructions and tools as the starting point — matching
+            // agent's registered instructions as the starting point — matching
             // ChatClientAgent.cs:774-779 (MAF's PrepareSessionAndMessagesAsync).
-            // Each provider receives the PREVIOUS provider's output via InvokingContext, so provider
-            // N+1 sees provider N's contributions to Messages, Instructions, and Tools. This is the
-            // chaining pattern from ChatClientAgent.cs:784 (`aiContext = await provider.InvokingAsync(...)`).
+            // Tools are deliberately NOT seeded: durable tools are attached to the model call
+            // separately, so aggregated.Tools starts null and anything non-null in it came from a
+            // provider — which is what makes the sentinel below able to name the offender.
+            // Each provider receives the PREVIOUS provider's aggregate via InvokingContext, so
+            // provider N+1's *aggregate* carries provider N's contributions. What provider N+1's
+            // own ProvideAIContextAsync override SEES is narrower: MAF's InvokingCoreAsync applies
+            // ProvideInputMessageFilter first, which defaults to external-only and hides messages
+            // earlier providers injected. Instructions are not filtered and do accumulate.
+            // Chaining pattern from ChatClientAgent.cs:784 (`aiContext = await provider.InvokingAsync(...)`).
             var aggregated = new Microsoft.Agents.AI.AIContext
             {
                 Messages = messagesForLlm,
@@ -235,7 +241,7 @@ internal sealed class AgentActivities(
                         Tools = null,
                     };
 
-                // Capture the first non-IDurableToolSource provider that returned tools for the per-turn warning below.
+                // Capture the first non-IDurableToolSource provider that returned tools for the warning below.
                 if (firstToolProviderType is null && provider is not IDurableToolSource
                     && aggregated.Tools is { } tools)
                 {
@@ -255,9 +261,12 @@ internal sealed class AgentActivities(
                 : messagesForLlm;
 
             // Apply the final aggregated instructions to chatOptions so the LLM call sees them.
-            // Provider instructions replace (not append to) the agent's registered instructions,
-            // matching ChatClientAgent.cs:797-801 (MAF pattern). The agent's own instructions are
-            // already in aggregated.Instructions via the seed above — providers may extend them.
+            // This assignment overwrites chatOptions.Instructions, matching
+            // ChatClientAgent.cs:797-801 (MAF pattern) — but it is not a replacement of the
+            // agent's own instructions: those were the seed, and MAF's InvokingCoreAsync
+            // concatenates each provider's addition onto the input with "\n". So the effective
+            // value is "registered\nprovider-1\nprovider-2"; a provider appends, it cannot
+            // override, through the default path.
             if (aggregated.Instructions is not null)
             {
                 chatOptions.Instructions = aggregated.Instructions;
@@ -266,9 +275,12 @@ internal sealed class AgentActivities(
             // Provider-contributed tools are NOT dispatched as durable activities and are ignored,
             // unless the provider implements IDurableToolSource (in which case tools were stripped
             // above and are already registered as durable activities).
-            // Emit one LogError per turn (not per provider, not per tool) when any non-IDurableToolSource
-            // provider returned tools — this is a misconfiguration: a registered feature is completely
-            // non-functional until the provider is updated. IDurableToolSource providers are excluded.
+            // Emit one LogError per LLM step (not per provider, not per tool) when any
+            // non-IDurableToolSource provider returned tools — this is a misconfiguration: a
+            // registered feature is completely non-functional until the provider is updated.
+            // firstToolProviderType is a local, so a turn that takes several steps logs once per
+            // step; that repetition is intentional — the condition is still true each time.
+            // IDurableToolSource providers are excluded.
             if (firstToolProviderType is not null)
             {
                 _logger.LogError(

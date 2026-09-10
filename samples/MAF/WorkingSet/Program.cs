@@ -75,7 +75,8 @@ builder.Services
             //   - src/Data/UserRepository.cs
             //
             // SilentMode defaults to false so the note is visible to the LLM.
-            // State is persisted in AgentSessionStateBag under "temporal.working_set".
+            // State is persisted in AgentSessionStateBag under "temporal.working_set",
+            // as a string[] — read it with TryGetValue<string[]>.
             agent.AddContextProvider(new WorkingSetContextProvider());
 
             // Sample-only. Demonstrates the documented capability that downstream consumers can

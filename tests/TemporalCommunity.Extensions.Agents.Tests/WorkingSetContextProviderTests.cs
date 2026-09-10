@@ -299,8 +299,9 @@ public class WorkingSetContextProviderTests
             new ChatMessage(ChatRole.Assistant, "opened src/Auth/AuthService.cs"));
 
         Assert.True(session.StateBag.TryGetValue(
-            WorkingSetContextProvider.StateBagKey, out string? csv, JsonSerializerOptions.Default));
-        Assert.Equal("src/Auth/AuthService.cs", csv);
+            WorkingSetContextProvider.StateBagKey, out string[]? paths, JsonSerializerOptions.Default));
+        Assert.NotNull(paths);
+        Assert.Equal(["src/Auth/AuthService.cs"], paths);
     }
 
     [Fact]
@@ -311,12 +312,14 @@ public class WorkingSetContextProviderTests
         // cannot tell stale from current.
         var session = new TemporalAgentSession(new TemporalAgentSessionId("WS", "k"));
         session.StateBag.SetValue(
-            WorkingSetContextProvider.StateBagKey, "src/Old/Stale.cs", JsonSerializerOptions.Default);
+            WorkingSetContextProvider.StateBagKey,
+            new[] { "src/Old/Stale.cs" },
+            JsonSerializerOptions.Default);
 
         await RunProviderAsync(new WorkingSetContextProvider(), session);
 
         Assert.False(session.StateBag.TryGetValue(
-            WorkingSetContextProvider.StateBagKey, out string? _, JsonSerializerOptions.Default));
+            WorkingSetContextProvider.StateBagKey, out string[]? _, JsonSerializerOptions.Default));
     }
 
     [Fact]
@@ -324,7 +327,9 @@ public class WorkingSetContextProviderTests
     {
         var session = new TemporalAgentSession(new TemporalAgentSessionId("WS", "k"));
         session.StateBag.SetValue(
-            WorkingSetContextProvider.StateBagKey, "src/Old/Stale.cs", JsonSerializerOptions.Default);
+            WorkingSetContextProvider.StateBagKey,
+            new[] { "src/Old/Stale.cs" },
+            JsonSerializerOptions.Default);
 
         await RunProviderAsync(
             new WorkingSetContextProvider(),
@@ -332,7 +337,7 @@ public class WorkingSetContextProviderTests
             new ChatMessage(ChatRole.Assistant, "no file references at all here"));
 
         Assert.False(session.StateBag.TryGetValue(
-            WorkingSetContextProvider.StateBagKey, out string? _, JsonSerializerOptions.Default));
+            WorkingSetContextProvider.StateBagKey, out string[]? _, JsonSerializerOptions.Default));
     }
 
     [Fact]
@@ -354,8 +359,49 @@ public class WorkingSetContextProviderTests
 
         // ...but downstream consumers can still read the working set.
         Assert.True(session.StateBag.TryGetValue(
-            WorkingSetContextProvider.StateBagKey, out string? csv, JsonSerializerOptions.Default));
-        Assert.Equal("src/Auth/AuthService.cs", csv);
+            WorkingSetContextProvider.StateBagKey, out string[]? paths, JsonSerializerOptions.Default));
+        Assert.NotNull(paths);
+        Assert.Equal(["src/Auth/AuthService.cs"], paths);
+    }
+
+    [Fact]
+    public async Task Provider_PathContainingAComma_SurvivesTheStateBagIntact()
+    {
+        // A comma is legal in a path on every platform this runs on. The token scan splits on
+        // commas so it can never produce one, but the code-fence heuristic takes the whole line —
+        // so this path does reach the working set, and any delimited-text encoding would hand a
+        // reader two fragments instead of one file.
+        var session = new TemporalAgentSession(new TemporalAgentSessionId("WS", "k"));
+
+        await RunProviderAsync(
+            new WorkingSetContextProvider(),
+            session,
+            new ChatMessage(ChatRole.Assistant, "```csharp\nsrc/Reports/Q1,Q2.cs\n```"));
+
+        Assert.True(session.StateBag.TryGetValue(
+            WorkingSetContextProvider.StateBagKey, out string[]? paths, JsonSerializerOptions.Default));
+        Assert.NotNull(paths);
+        Assert.Equal(["src/Reports/Q1,Q2.cs"], paths);
+    }
+
+    [Fact]
+    public async Task Provider_WorkingSet_RoundTripsThroughSessionSerialization()
+    {
+        // The StateBag crosses continue-as-new as a serialized snapshot. An array value has to
+        // survive that boundary, not just the in-memory bag.
+        var session = new TemporalAgentSession(new TemporalAgentSessionId("WS", "k"));
+
+        await RunProviderAsync(
+            new WorkingSetContextProvider(),
+            session,
+            new ChatMessage(ChatRole.Assistant, "opened src/Auth/AuthService.cs and src/Data/Repo.cs"));
+
+        var restored = TemporalAgentSession.Deserialize(session.Serialize());
+
+        Assert.True(restored.StateBag.TryGetValue(
+            WorkingSetContextProvider.StateBagKey, out string[]? paths, JsonSerializerOptions.Default));
+        Assert.NotNull(paths);
+        Assert.Equal(["src/Auth/AuthService.cs", "src/Data/Repo.cs"], paths);
     }
 
 }
