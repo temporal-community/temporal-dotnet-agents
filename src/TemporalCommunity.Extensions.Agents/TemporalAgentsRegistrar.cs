@@ -91,7 +91,8 @@ internal static class TemporalAgentsRegistrar
             services.AddSingleton(sp => new ScheduleActivities(
                 sp.GetRequiredService<ITemporalClient>(),
                 taskQueue,
-                agentsOptions));
+                agentsOptions,
+                sp.GetService<ILogger<ScheduleActivities>>()));
             builder.AddSingletonActivities<ScheduleActivities>();
 
             // ScheduleRegistrationService: creates configured schedules at worker startup.

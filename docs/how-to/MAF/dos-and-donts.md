@@ -511,11 +511,14 @@ await handle.DeleteAsync();
 ### Don't assume config-time schedule changes take effect on restart
 
 ```csharp
-// This change is SILENTLY SKIPPED if the schedule already exists
+// This change is not applied if the schedule already exists
 opts.AddScheduledAgentRun("Agent", "my-schedule", request, updatedSpec);
 ```
 
-**Why:** `ScheduleRegistrationService` catches `ScheduleAlreadyRunningException` and logs a warning. To apply updated specs, delete the schedule first. See [Scheduling](./scheduling.md#pitfalls-and-gotchas) for details.
+**Why:** config-time registration is create-only. `ScheduleRegistrationService` catches
+`ScheduleAlreadyRunningException`, logs a warning, and leaves the existing schedule unchanged.
+Use `ScheduleHandle.UpdateAsync`, or delete the schedule and restart the worker. See
+[Scheduling](./scheduling.md#update-an-existing-schedule) for details.
 
 ---
 

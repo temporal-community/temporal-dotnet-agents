@@ -1,8 +1,11 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using Temporalio.Common;
+using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.Agents.Workflows;
 
 namespace TemporalCommunity.Extensions.Agents.Scheduling;
@@ -34,6 +37,22 @@ namespace TemporalCommunity.Extensions.Agents.Scheduling;
 /// </remarks>
 public sealed class ScheduleActivities(ITemporalClient client, string taskQueue, TemporalAgentsOptions options)
 {
+    private readonly ILogger<ScheduleActivities> _logger = NullLogger<ScheduleActivities>.Instance;
+
+    /// <summary>
+    /// Logger-aware overload used by the worker registrar. The public three-argument constructor
+    /// stays available for direct construction and gets a <see cref="NullLogger{T}"/>.
+    /// </summary>
+    internal ScheduleActivities(
+        ITemporalClient client,
+        string taskQueue,
+        TemporalAgentsOptions options,
+        ILogger<ScheduleActivities>? logger)
+        : this(client, taskQueue, options)
+    {
+        _logger = logger ?? NullLogger<ScheduleActivities>.Instance;
+    }
+
     /// <summary>
     /// Schedules a one-time, deferred <see cref="AgentJobWorkflow"/> run.
     /// </summary>
@@ -41,8 +60,9 @@ public sealed class ScheduleActivities(ITemporalClient client, string taskQueue,
     /// <remarks>
     /// <para>
     /// The resulting workflow ID is <c>ta-{agentName}-scheduled-{runId}</c>. If the activity
-    /// retries after a crash-before-ack, <c>UseExisting</c> conflict policy ensures idempotency —
-    /// a second <c>StartWorkflowAsync</c> call finds the already-scheduled workflow and returns normally.
+    /// retries after a crash-before-ack, the workflow ID is protected by both
+    /// <c>UseExisting</c> conflict policy for a running execution and <c>RejectDuplicate</c>
+    /// reuse policy for a closed execution. A duplicate start is treated as success.
     /// </para>
     /// <para>
     /// If <see cref="OneTimeAgentRun.RunAt"/> is in the past when this activity executes,
@@ -83,7 +103,20 @@ public sealed class ScheduleActivities(ITemporalClient client, string taskQueue,
                 {
                     StartDelay = delay,
                     IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+                    IdReusePolicy = WorkflowIdReusePolicy.RejectDuplicate,
                 }).ConfigureAwait(false);
+        }
+        catch (WorkflowAlreadyStartedException)
+        {
+            // The workflow ID is the idempotency key. A prior activity attempt may have started
+            // and even completed the job before its completion was recorded by the caller.
+            // RejectDuplicate closes that post-completion retry window; seeing the rejection means
+            // the requested one-time run already exists and this activity has succeeded.
+            //
+            // Identifiers only. The RunRequest (prompt, messages, tool payloads) must never be
+            // logged here — this line exists so an operator can tell a deduplicated retry apart
+            // from a run that never started, and that needs nothing but the idempotency key.
+            _logger.LogScheduleOneTimeDuplicateIgnored(run.AgentName, run.RunId, workflowId);
         }
         catch (Exception ex)
         {

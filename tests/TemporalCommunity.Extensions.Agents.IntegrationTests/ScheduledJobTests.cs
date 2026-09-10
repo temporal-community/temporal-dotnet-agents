@@ -1,6 +1,8 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using TemporalCommunity.Extensions.Tests.Shared;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode; // shared scaffolding (linked via .csproj)
@@ -329,13 +331,155 @@ public class ScheduledJobTests : IClassFixture<ScheduledJobEnvironmentFixture>
         }
     }
 
+    /// <summary>
+    /// A retry after the one-time job has completed must not create another execution with the
+    /// same workflow ID. This is the crash-after-server-acceptance window: conflict policy alone
+    /// only protects a still-running execution, while the reuse policy protects the closed one.
+    /// </summary>
+    [Fact]
+    public async Task ScheduleOneTime_RetryAfterJobCompletes_DoesNotRunAgentTwice()
+    {
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Done.")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "This must never run.")),
+        ]);
+        var taskQueue = $"scheduled-job-idempotency-{Guid.NewGuid():N}";
+
+        using var workerHost = BuildWorkerHost(scripted, taskQueue);
+        await workerHost.StartAsync();
+
+        try
+        {
+            var runId = $"idempotency-{Guid.NewGuid():N}";
+            var activities = new ScheduleActivities(
+                _env.Client,
+                taskQueue,
+                workerHost.Services.GetRequiredService<TemporalAgentsOptions>());
+            var run = new OneTimeAgentRun
+            {
+                AgentName = "DurableAgent",
+                RunId = runId,
+                Request = new RunRequest("Run once."),
+                RunAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(1),
+            };
+
+            await activities.ScheduleOneTimeAgentRunAsync(run);
+            await _env.Client
+                .GetWorkflowHandle($"ta-durableagent-scheduled-{runId}")
+                .GetResultAsync();
+
+            await activities.ScheduleOneTimeAgentRunAsync(run);
+
+            // Await the latest execution again. With the old AllowDuplicate reuse policy, the
+            // second activity call creates a new run and this wait makes the regression
+            // deterministic instead of racing its model activity.
+            await _env.Client
+                .GetWorkflowHandle($"ta-durableagent-scheduled-{runId}")
+                .GetResultAsync();
+
+            Assert.Equal(1, scripted.CallCount);
+        }
+        finally
+        {
+            await workerHost.StopAsync();
+        }
+    }
+
+    /// <summary>
+    /// The idempotent duplicate start is silent: an operator watching a retried schedule activity
+    /// cannot tell a deduplicated retry from a run that never started. This asserts the debug
+    /// breadcrumb exists, fires exactly once, and — because the log sits next to a full
+    /// <c>RunRequest</c> — that it carries identifiers only and no prompt content.
+    /// </summary>
+    [Fact]
+    public async Task ScheduleOneTime_DuplicateStart_LogsIdentifiersOnlyExactlyOnce()
+    {
+        // Distinctive so a substring assertion cannot pass by accident on a common word.
+        const string PromptSentinel = "SENTINEL-PROMPT-a3f19c-do-not-log-me";
+
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Done.")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "This must never run.")),
+        ]);
+        var taskQueue = $"scheduled-job-dup-log-{Guid.NewGuid():N}";
+        var capturing = new CapturingLoggerProvider();
+
+        using var workerHost = BuildWorkerHost(scripted, taskQueue, logging: capturing);
+        await workerHost.StartAsync();
+
+        try
+        {
+            var runId = $"dup-log-{Guid.NewGuid():N}";
+            var workflowId = $"ta-durableagent-scheduled-{runId}";
+
+            // Resolved from DI on purpose: the registrar owns the logger wiring, and constructing
+            // ScheduleActivities directly here would silently pass with an unwired registration.
+            var activities = workerHost.Services.GetRequiredService<ScheduleActivities>();
+            var run = new OneTimeAgentRun
+            {
+                AgentName = "DurableAgent",
+                RunId = runId,
+                Request = new RunRequest(PromptSentinel),
+                RunAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(1),
+            };
+
+            await activities.ScheduleOneTimeAgentRunAsync(run);
+            await _env.Client.GetWorkflowHandle(workflowId).GetResultAsync();
+
+            // Post-completion retry: RejectDuplicate rejects it and the activity swallows that.
+            await activities.ScheduleOneTimeAgentRunAsync(run);
+            await _env.Client.GetWorkflowHandle(workflowId).GetResultAsync();
+
+            // (a) the agent ran exactly once
+            Assert.Equal(1, scripted.CallCount);
+
+            // (b) exactly one duplicate-success debug event
+            var duplicateLogs = capturing.Logs
+                .Where(l => l.Category == typeof(ScheduleActivities).FullName &&
+                            l.Level == LogLevel.Debug &&
+                            l.Message.Contains("already exists", StringComparison.Ordinal))
+                .ToList();
+
+            Assert.Single(duplicateLogs);
+            var entry = duplicateLogs[0];
+            Assert.Equal(34, entry.EventId.Id);
+            Assert.Null(entry.Exception);
+
+            // It has to be useful: agent, run, and the workflow ID that acted as idempotency key.
+            Assert.Contains("DurableAgent", entry.Message, StringComparison.Ordinal);
+            Assert.Contains(runId, entry.Message, StringComparison.Ordinal);
+            Assert.Contains(workflowId, entry.Message, StringComparison.Ordinal);
+            Assert.Contains("idempotency key", entry.Message, StringComparison.Ordinal);
+
+            // (c) no request/prompt content — checked on the entry and across every captured log,
+            // so a future refactor that moves the prompt into any log line here also fails.
+            Assert.DoesNotContain(PromptSentinel, entry.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                capturing.Logs,
+                l => l.Message.Contains(PromptSentinel, StringComparison.Ordinal));
+        }
+        finally
+        {
+            await workerHost.StopAsync();
+        }
+    }
+
     private IHost BuildWorkerHost(
         ScriptedChatClient scripted,
         string taskQueue,
         Action<DurableAgentBuilder>? registerToolsViaBuilder = null,
-        string agentName = "DurableAgent")
+        string agentName = "DurableAgent",
+        CapturingLoggerProvider? logging = null)
     {
         var builder = Host.CreateApplicationBuilder();
+        if (logging is not null)
+        {
+            builder.Logging.SetMinimumLevel(LogLevel.Debug);
+            builder.Logging.AddProvider(logging);
+        }
+
         builder.Services.AddSingleton<ITemporalClient>(_env.Client);
         builder.Services.AddSingleton<IChatClient>(scripted);
 

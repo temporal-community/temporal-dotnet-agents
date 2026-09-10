@@ -152,6 +152,14 @@ internal static partial class Logs
     public static partial void LogProxyDispatchingDelayedRequest(
         this ILogger logger, string agentName, string workflowId, TimeSpan delay);
 
+    // Emitted when a one-time run start is rejected because the workflow ID already exists.
+    // Deliberately carries identifiers only — never the RunRequest, prompt, or any tool payload.
+    [LoggerMessage(EventId = 34, Level = LogLevel.Debug,
+        Message = "[{AgentName}/{WorkflowId}] One-time agent run '{RunId}' already exists; " +
+                  "duplicate start treated as successful (the workflow ID is the idempotency key)")]
+    public static partial void LogScheduleOneTimeDuplicateIgnored(
+        this ILogger logger, string agentName, string runId, string workflowId);
+
     // ── Durable agent per-tool invocation logs ─────────────────────
 
     [LoggerMessage(EventId = 26, Level = LogLevel.Information,

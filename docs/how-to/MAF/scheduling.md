@@ -1,586 +1,312 @@
 # Scheduling Agent Runs
 
-How to schedule recurring and one-time agent runs — from config-time registration to programmatic schedule management and deferred workflows.
+Use a Temporal Schedule for recurring stateless work, `ScheduleOneTimeAgentRunAsync` for a
+one-time stateless job created by a workflow, and `RunAgentDelayedAsync` when the delayed work
+needs a durable conversation session.
 
----
+| Need | API | Execution model | Human approval |
+|---|---|---|---|
+| Recurring schedule declared with the worker | `AddScheduledAgentRun` | Stateless `AgentJobWorkflow` | Tool call is blocked |
+| Recurring schedule created by the worker process | `ScheduleAgentAsync` | Stateless `AgentJobWorkflow` | Tool call is blocked |
+| One-time job created inside a workflow | `ScheduleOneTimeAgentRunAsync` | Stateless `AgentJobWorkflow` | Tool call is blocked |
+| One-time delayed conversation | `RunAgentDelayedAsync` | Stateful `AgentWorkflow` | Supported |
 
-## Table of Contents
+`AgentJobWorkflow` has no conversation history, persistent StateBag, approval wait, or typed
+result. Each occurrence starts fresh. `AgentWorkflow` retains session history and StateBag and can
+receive later messages.
 
-1. [Overview](#overview)
-2. [Why scheduling is different here](#why-scheduling-is-different-here)
-3. [Two Workflow Types](#two-workflow-types)
-4. [Recurring Schedules](#recurring-schedules)
-5. [One-Time Deferred Runs](#one-time-deferred-runs)
-6. [Schedule Lifecycle Management](#schedule-lifecycle-management)
-7. [Graceful Shutdown](#graceful-shutdown)
-8. [Workflow ID Conventions](#workflow-id-conventions)
-9. [Observability](#observability)
-10. [Pitfalls and Gotchas](#pitfalls-and-gotchas)
-11. [Choosing the Right Primitive](#choosing-the-right-primitive)
+## Register a recurring run
 
----
-
-## Overview
-
-TemporalAgents provides four scheduling primitives, each suited to a different context:
-
-| Primitive | Context | Recurrence | Workflow Type | Approval |
-|-----------|---------|------------|---------------|----------|
-| `AddScheduledAgentRun` | Config time | Recurring | `AgentJobWorkflow` | ❌ blocked |
-| `ITemporalAgentClient.ScheduleAgentAsync` | Runtime (external) | Recurring | `AgentJobWorkflow` | ❌ blocked |
-| `ScheduleActivities.ScheduleOneTimeAgentRunAsync` | Inside a workflow | One-time | `AgentJobWorkflow` | ❌ blocked |
-| `ITemporalAgentClient.RunAgentDelayedAsync` | Runtime (external) | One-time | `AgentWorkflow` | ✅ supported |
-
-The first three use `AgentJobWorkflow` — a lightweight, fire-and-forget workflow. The fourth uses the full `AgentWorkflow` with conversation history and StateBag.
-
-**The approval column is load-bearing.** A tool registered `RequireApproval()` does not park on the first three — it is blocked and never runs. See [Approval does not work in scheduled runs](#approval-does-not-work-in-scheduled-runs).
-
----
-
-## Why scheduling is different here
-
-Building recurring or deferred agent runs on a non-durable substrate means assembling several pieces yourself: a cron system (Celery beat, AWS EventBridge, a Kubernetes `CronJob`) to trigger execution on schedule, a queue to absorb runs and hand them off to workers, idempotency keys in a database to prevent double-execution when a worker retries, and manual crash-recovery logic for runs that die mid-execution. Each piece is manageable in isolation. The combination — keeping them consistent, handling missed fires during downtime, making a failed run observable after the fact — is where things quietly break.
-
-Here, none of that is hand-wired. Temporal Schedules store their state in the server, not in your infrastructure: they survive worker restarts, catch up on missed fires according to the policy you set, and appear in the Web UI without any extra instrumentation. Workflow timers handle one-time deferral with the same guarantee — the timer fires exactly once and requires no polling loop on your side. Because each scheduled run is a full Temporal workflow, activities retry automatically, the run is visible in the UI, and a worker crash mid-run resumes from where it left off rather than silently dropping the job.
-
-What you would otherwise spread across three or four systems is a single method call. The payoff is not just fewer moving parts — it is that scheduling and agent execution share the same durability contract.
-
----
-
-## Two Workflow Types
-
-Understanding the distinction between these two workflows is key to choosing the right scheduling approach.
-
-### AgentJobWorkflow (Scheduled/Deferred)
-
-A minimal workflow that drives the same durable-agent dispatch loop as `AgentWorkflow`, but without long-lived session state:
-
-```csharp
-// Internal — you don't instantiate this directly.
-// Summarized for documentation; see AgentJobWorkflow.cs for the full source.
-[Workflow("TemporalCommunity.Extensions.Agents.AgentJobWorkflow")]
-internal sealed class AgentJobWorkflow
-{
-    [WorkflowRun]
-    public async Task RunAsync(AgentJobInput input)
-    {
-        var stepActivityOptions = new ActivityOptions
-        {
-            StartToCloseTimeout = input.ActivityTimeout,
-            HeartbeatTimeout    = input.HeartbeatTimeout,
-            RetryPolicy         = input.RetryPolicy,
-        };
-
-        var accumulated = new List<ChatMessage>(input.Request.Messages);
-
-        for (var iteration = 0; iteration < input.MaxToolCallsPerTurn; iteration++)
-        {
-            var stepResult = await Workflow.ExecuteActivityAsync(
-                (AgentActivities a) => a.RunDurableAgentStepAsync(...),
-                stepActivityOptions);
-
-            accumulated.Add(stepResult.AssistantMessage);
-
-            if (stepResult.IsFinal || stepResult.ToolCalls is null or { Count: 0 })
-                return;
-
-            // Each tool call is fanned out in parallel as InvokeAgentTool activities
-            // via Workflow.WhenAllAsync. Per-tool DurableToolOptions apply identically
-            // to interactive sessions.
-        }
-    }
-}
-```
-
-**Properties:**
-- No conversation history — each scheduled run starts fresh
-- No StateBag persistence (`SerializedStateBag` is always `null`)
-- No TTL loop or `[WorkflowUpdate]` handlers
-- No continue-as-new
-- Result is visible in the Temporal Web UI event history
-- Same per-step / per-tool activity dispatch as the long-lived `AgentWorkflow`, so retries, timeouts, and per-tool activity options apply identically — **with one exception: approval.** See [Approval does not work in scheduled runs](#approval-does-not-work-in-scheduled-runs)
-- `TemporalAgentContext.Current` is **not** available to tools on this path
-
-> **`MaxToolCallsPerTurn` propagation:** The iteration cap set on `DurableAgentBuilder.MaxToolCallsPerTurn` is read by `ScheduleAgentAsync` and stored in `AgentJobInput.MaxToolCallsPerTurn` before the workflow starts. You do not need to configure it separately for scheduled runs — if you set `agent.MaxToolCallsPerTurn = 5` on the agent definition, that cap applies in both session-based and scheduled runs. The default is `20` when not set.
-
-### AgentWorkflow (Full Session)
-
-The standard long-lived workflow with conversation history, StateBag, HITL, and continue-as-new. Only `RunAgentDelayedAsync` uses this for scheduling, because it creates a full session that can receive follow-up messages after the initial delayed run.
-
----
-
-## Recurring Schedules
-
-### Config-Time Registration
-
-Declare scheduled runs inside `AddTemporalAgents`. The `ScheduleRegistrationService` (a `BackgroundService`) creates them automatically when the worker starts.
-
-The following example sets up a `DigestAgent` that summarizes new customer feedback every day at 08:00:
+This is the canonical worker setup. Register the Temporal client explicitly, then add the worker,
+the durable agent, and its schedule in one configuration block:
 
 ```csharp
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Temporalio.Api.Enums.V1;
 using Temporalio.Client.Schedules;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Scheduling;
 
+builder.Services.AddTemporalClient("localhost:7233", "default");
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient()).Build();
 
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents-worker")
-    .AddTemporalAgents(opts =>
+    .AddHostedTemporalWorker("agents-worker")
+    .AddTemporalAgents(options =>
     {
-        opts.AddDurableAgent("DigestAgent", agent =>
+        options.AddDurableAgent("DigestAgent", agent =>
         {
-            agent.Instructions = "You summarize new customer feedback into a concise daily digest.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
+            agent.Instructions = "Summarize new customer feedback.";
+            agent.ChatClient = services => services.GetRequiredService<IChatClient>();
         });
 
-        opts.AddScheduledAgentRun(
-            agentName:  "DigestAgent",
+        options.AddScheduledAgentRun(
+            agentName: "DigestAgent",
             scheduleId: "daily-digest",
-            request:    new RunRequest("Summarize all new customer feedback since yesterday."),
+            request: new RunRequest("Summarize feedback received since the previous digest."),
             spec: new ScheduleSpec
             {
                 Calendars =
                 [
                     new ScheduleCalendarSpec
                     {
-                        Hour      = [new ScheduleRange(8)],
-                        Minute    = [new ScheduleRange(0)],
-                    }
-                ]
+                        Hour = [new ScheduleRange(8)],
+                        Minute = [new ScheduleRange(0)],
+                    },
+                ],
+                TimeZoneName = "America/New_York",
+            },
+            policy: new SchedulePolicy
+            {
+                Overlap = ScheduleOverlapPolicy.Skip,
+                CatchupWindow = TimeSpan.FromMinutes(10),
             });
     });
 ```
 
-**What happens on worker restart:** If the schedule already exists (e.g., from a previous startup), a `ScheduleAlreadyRunningException` is caught, a warning is logged, and the existing schedule is left untouched. The worker does **not** overwrite or update the schedule.
+Calendar schedules use UTC unless `TimeZoneName` is set. Choose an IANA time-zone name when the
+schedule represents local wall-clock time and needs daylight-saving-time behavior.
 
-### Programmatic Scheduling
+At startup, configuration validation rejects an unknown agent name or a duplicate schedule ID.
+If the schedule already exists in Temporal, the registration service logs a warning and leaves the
+existing schedule unchanged. It does not reconcile code changes with server state.
 
-Call `ScheduleAgentAsync` at any time to create a Temporal Schedule. Resolve `ITemporalAgentClient` from DI and pass a `ScheduleSpec`. The example below creates a weekly report that fires every Monday at 09:00:
+### Overlap and catchup
+
+`SchedulePolicy.Overlap` controls what Temporal does when the preceding occurrence is still
+running. `Skip` is the SDK default and is usually safest for agents whose work should not overlap.
+
+`CatchupWindow` applies when the Temporal Service could not create scheduled actions. Worker
+downtime is different: the service can still start workflow executions, and their tasks wait until
+a compatible worker is available.
+
+Activities may execute more than once. Temporal makes the scheduling and workflow history durable,
+but it cannot make an external side effect exactly once. Tools that send email, charge a card, or
+write to another system still need an application idempotency key; configure a write tool with
+`NoRetry()` when retrying it is unsafe.
+
+## Create a recurring schedule at runtime
+
+Resolve `ITemporalAgentClient` from the same process that registers the durable agent. The job input
+contains the worker's per-agent tool, timeout, retry, and interceptor settings; a proxy-only client
+does not have that configuration and is rejected instead of creating a partially configured job.
 
 ```csharp
-using Temporalio.Client.Schedules;
-using TemporalCommunity.Extensions.Agents;
-using Microsoft.Extensions.DependencyInjection;
-
-// ITemporalAgentClient is registered automatically when using AddTemporalAgents.
 var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
 
-var handle = await agentClient.ScheduleAgentAsync(
-    agentName:  "ReportAgent",
-    scheduleId: "weekly-metrics-report",
-    request:    new RunRequest("Generate the weekly metrics report and post it to #reports."),
+ScheduleHandle handle = await agentClient.ScheduleAgentAsync(
+    agentName: "ReportAgent",
+    scheduleId: "weekly-report",
+    request: new RunRequest("Generate the weekly metrics report."),
     spec: new ScheduleSpec
     {
         Calendars =
         [
             new ScheduleCalendarSpec
             {
-                Hour      = [new ScheduleRange(9)],
-                DayOfWeek = [new ScheduleRange(1)],  // 1 = Monday
-            }
-        ]
-    });
-
-Console.WriteLine($"Schedule created. Use handle to pause/trigger/delete.");
-```
-
-### Schedule Policy
-
-Both registration methods accept an optional `SchedulePolicy` for overlap and catchup behavior. This is useful when a run may still be executing when the next tick fires, or when a worker was down and you need to control how many missed runs are caught up:
-
-```csharp
-opts.AddScheduledAgentRun(
-    agentName:  "InventoryAgent",
-    scheduleId: "hourly-inventory-sync",
-    request:    new RunRequest("Sync inventory levels from the warehouse API."),
-    spec: new ScheduleSpec
-    {
-        Intervals = [new ScheduleIntervalSpec(Every: TimeSpan.FromHours(1))]
-    },
-    policy: new SchedulePolicy
-    {
-        Overlap        = ScheduleOverlapPolicy.Skip,         // skip if previous run is still active
-        CatchupWindow  = TimeSpan.FromMinutes(10)            // catch up missed runs within 10 min
+                Hour = [new ScheduleRange(9)],
+                DayOfWeek = [new ScheduleRange(1)],
+            },
+        ],
+        TimeZoneName = "America/New_York",
     });
 ```
 
----
-
-## One-Time Deferred Runs
-
-### From Inside a Workflow
-
-Use `ScheduleActivities.ScheduleOneTimeAgentRunAsync` to schedule a future run from inside an orchestrating workflow. This uses Temporal's `StartDelay` — a single workflow execution is created with a delayed start, leaving no persistent schedule entity behind once it completes.
-
-The example below runs an analysis immediately, then schedules a follow-up comparison in 7 days:
+The handle controls the schedule entity, not the individual workflow result:
 
 ```csharp
-using Temporalio.Activities;
+await handle.TriggerAsync();
+await handle.PauseAsync("Paused during maintenance.");
+await handle.UnpauseAsync();
+
+ScheduleHandle existing = agentClient.GetAgentScheduleHandle("weekly-report");
+await existing.DeleteAsync();
+```
+
+### Update an existing schedule
+
+Temporal schedules are mutable. `ScheduleHandle.UpdateAsync` receives the current description and
+may invoke its callback more than once when updates conflict, so keep the callback deterministic
+and free of side effects:
+
+```csharp
+var updatedSpec = new ScheduleSpec
+{
+    Intervals = [new ScheduleIntervalSpec(Every: TimeSpan.FromHours(6))],
+};
+
+await handle.UpdateAsync(input =>
+    new ScheduleUpdate(input.Description.Schedule with { Spec = updatedSpec }));
+```
+
+Config-time registration is create-only. Changing `AddScheduledAgentRun` does not update the
+existing server schedule; a warning is logged. Apply the change with `UpdateAsync`, or delete the
+schedule and restart the worker so startup registration creates it again.
+
+The schedule action captures more than its timing. It also contains the request and resolved agent
+execution settings. Changes to the prompt, tool policy, retry settings, timeouts, or iteration cap
+do not alter an already-created schedule action. Update or recreate the schedule when those values
+must change.
+
+Schedules outlive workers and code registrations. Delete a schedule before decommissioning its
+agent, or it will continue creating runs that cannot be serviced correctly.
+
+## Schedule a one-time stateless job from a workflow
+
+`ScheduleActivities.ScheduleOneTimeAgentRunAsync` starts one `AgentJobWorkflow` with Temporal's
+`StartDelay`; it does not create a persistent Schedule entity. Invoke it as an activity because it
+uses the Temporal client and wall-clock time.
+
+Carry the baseline into the future request (or persist it under a stable application key). A
+stateless job cannot read the originating agent session:
+
+```csharp
+using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.Scheduling;
-using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 [Workflow]
 public class ResearchWorkflow
 {
     [WorkflowRun]
-    public async Task RunAsync(string topic)
+    public async Task RunAsync(string topic, string followupId)
     {
-        // Run the initial analysis now.
-        var analyst = GetTemporalAgent("AnalystAgent");
+        var analyst = WorkflowAgents.GetTemporalAgent("AnalystAgent");
         var session = await analyst.CreateSessionAsync();
-        await analyst.RunAsync($"Analyze the current state of: {topic}", session);
+        var baseline = await analyst.RunAsync($"Analyze: {topic}", session);
 
-        // Schedule a follow-up in 7 days — dispatched as an activity so it
-        // uses the Temporal client from DI and is idempotent on activity retry.
         await Workflow.ExecuteActivityAsync(
-            (ScheduleActivities a) => a.ScheduleOneTimeAgentRunAsync(
+            (ScheduleActivities activities) => activities.ScheduleOneTimeAgentRunAsync(
                 new OneTimeAgentRun
                 {
                     AgentName = "AnalystAgent",
-                    RunId     = $"followup-{topic.ToLowerInvariant().Replace(" ", "-")}",
-                    Request   = new RunRequest(
-                        $"Compare today's findings on '{topic}' against the baseline from 7 days ago."),
-                    RunAt     = Workflow.UtcNow + TimeSpan.FromDays(7),
+                    RunId = followupId,
+                    Request = new RunRequest(
+                        $"Re-evaluate '{topic}' and compare it with this baseline:\n{baseline.Text}"),
+                    RunAt = Workflow.UtcNow + TimeSpan.FromDays(7),
                 }),
             new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(30) });
     }
 }
 ```
 
-**Idempotency:** If the activity retries after a crash-before-ack, `WorkflowIdConflictPolicy.UseExisting` ensures the second `StartWorkflowAsync` call finds the already-scheduled workflow and returns normally.
+`RunId` is the idempotency key within the agent name. The library uses `UseExisting` while the
+workflow is running and `RejectDuplicate` after it closes, so an activity retry cannot create a
+second execution even if the first job completed before the activity result was recorded. Reusing
+the same ID intentionally schedules nothing new.
 
-**Past `RunAt`:** If `RunAt` is in the past when the activity executes, the delay is clamped to zero and the run starts immediately.
+If `RunAt` is in the past, the delay is clamped to zero. A per-run `RetryPolicy` overrides the
+per-agent policy, then the worker policy; when all are absent, the library applies its bounded
+five-attempt default.
 
-**Per-run retry policy:** `OneTimeAgentRun.RetryPolicy` overrides the per-agent and worker retry
-policies for this run alone. It is the only per-schedule policy override — timeouts have no
-equivalent (see [Activity Timeouts for Scheduled Runs](#activity-timeouts-for-scheduled-runs)).
+## Start a delayed conversation
 
-```csharp
-new OneTimeAgentRun
-{
-    AgentName  = "AnalystAgent",
-    RunId      = "quarterly-close",
-    Request    = new RunRequest("Reconcile the quarterly ledger."),
-    RunAt      = Workflow.UtcNow + TimeSpan.FromDays(1),
-    RetryPolicy = new RetryPolicy { MaximumAttempts = 1 },   // no retry for this run
-}
-```
-
-Precedence is `OneTimeAgentRun.RetryPolicy` → per-agent `RetryPolicy` → `DefaultRetryPolicy` → a
-bounded five-attempt backstop.
-
-### From an External Caller
-
-`RunAgentDelayedAsync` defers the start of a **full `AgentWorkflow` session** — with conversation history and StateBag. Use this when you need a delayed session that can still receive follow-up messages after the initial run.
-
-Internally, this uses signal-with-start: the workflow is created and the initial request signal are delivered to Temporal in a single atomic RPC. This prevents a crash window between workflow creation and message delivery.
-
-The example below creates a trial-welcome session that fires 24 hours after signup:
+`RunAgentDelayedAsync` creates a full agent session now and defers its first workflow task. It
+returns after Temporal accepts the request; it does **not** wait for, or return, the first agent
+response.
 
 ```csharp
-using TemporalCommunity.Extensions.Agents;
-using TemporalCommunity.Extensions.Agents.Session;
-using Microsoft.Extensions.DependencyInjection;
-
-var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
-
-// Session is created immediately but starts executing after 24 hours.
 var sessionId = new TemporalAgentSessionId("OnboardingAgent", userId);
 
 await agentClient.RunAgentDelayedAsync(
     sessionId,
-    new RunRequest("Welcome! Your trial period has started. How can I help you get set up?"),
+    new RunRequest("Send the customer's scheduled onboarding check-in."),
     delay: TimeSpan.FromHours(24));
-
-// Once the delay elapses and the agent responds, you can send follow-up messages
-// to the same session using the same session ID:
-//
-//   await agentClient.SendAsync(
-//       sessionId,
-//       new RunRequest("How is the setup going? Do you need help with anything?"));
 ```
 
-> **Duplicate-call behavior within the delay window:** If `RunAgentDelayedAsync` is called a second time with the same session ID before the delay elapses, the second `SignalWithStart` call delivers the signal to the not-yet-started workflow — causing it to start immediately, ahead of its scheduled delay. Do not call this method twice for the same session before the delay expires.
-
-> **Already-running session:** If a workflow with the same session ID is already running (`UseExisting` conflict policy), the new request signal is delivered to the running workflow. No new workflow is started and no delay is applied.
-
----
-
-## Schedule Lifecycle Management
-
-The `ScheduleHandle` returned by `ScheduleAgentAsync` (or retrieved via `GetAgentScheduleHandle`) provides full lifecycle control:
+Use an idempotent tool or another application-owned completion channel to store or publish the
+result. There is currently no high-level API that waits for the initial delayed response. Once your
+application knows the work is finished and no follow-up messages are needed, release the session:
 
 ```csharp
-using Temporalio.Client.Schedules;
-using TemporalCommunity.Extensions.Agents;
-using Microsoft.Extensions.DependencyInjection;
-
-var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
-
-// Create a recurring schedule.
-var handle = await agentClient.ScheduleAgentAsync(
-    agentName:  "ReportAgent",
-    scheduleId: "weekly-metrics-report",
-    request:    new RunRequest("Generate the weekly metrics report."),
-    spec: new ScheduleSpec
-    {
-        Calendars =
-        [
-            new ScheduleCalendarSpec
-            {
-                Hour      = [new ScheduleRange(9)],
-                DayOfWeek = [new ScheduleRange(1)],
-            }
-        ]
-    });
-
-// Trigger immediately outside the normal cadence (e.g., to validate the agent).
-await handle.TriggerAsync();
-
-// Pause for a planned maintenance window.
-await handle.PauseAsync(note: "Pausing during data migration.");
-
-// Resume when the window closes.
-await handle.UnpauseAsync();
-
-// Retrieve an existing handle from a different service or process.
-var existing = agentClient.GetAgentScheduleHandle("weekly-metrics-report");
-
-// Delete when decommissioning the schedule.
-await existing.DeleteAsync();
-```
-
-### Updating a Schedule's Spec
-
-Temporal schedules are immutable once created via `ScheduleRegistrationService`. To apply a changed spec:
-
-1. Delete the existing schedule
-2. Either restart the worker (so `ScheduleRegistrationService` recreates it) or call `ScheduleAgentAsync` with the new spec directly
-
-```csharp
-// Step 1: Delete the old schedule.
-var handle = agentClient.GetAgentScheduleHandle("daily-digest");
-await handle.DeleteAsync();
-
-// Step 2: Create with the updated spec.
-await agentClient.ScheduleAgentAsync(
-    agentName:  "DigestAgent",
-    scheduleId: "daily-digest",
-    request:    new RunRequest("Summarize all new customer feedback since yesterday."),
-    spec: new ScheduleSpec
-    {
-        // Changed: twice daily instead of once.
-        Calendars =
-        [
-            new ScheduleCalendarSpec { Hour = [new ScheduleRange(8)] },
-            new ScheduleCalendarSpec { Hour = [new ScheduleRange(20)] },
-        ]
-    });
-```
-
-Alternatively, delete via the Temporal CLI before restarting the worker:
-
-```bash
-temporal schedule delete --schedule-id daily-digest
-```
-
----
-
-## Graceful Shutdown
-
-`ITemporalAgentClient.ShutdownAsync` sends a graceful shutdown signal to a running `AgentWorkflow` session, causing it to exit the session loop rather than sitting parked until its `TimeToLive` expires. This does not affect `AgentJobWorkflow` runs — those complete naturally when the agent's response is final.
-
-The primary use case for scheduled work is a delayed full session: call `ShutdownAsync` after the agent has finished its work and you have no further messages to send.
-
-```csharp
-using TemporalCommunity.Extensions.Agents;
-using TemporalCommunity.Extensions.Agents.Session;
-using Microsoft.Extensions.DependencyInjection;
-
-var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
-var sessionId   = new TemporalAgentSessionId("OnboardingAgent", userId);
-
-// Wait for the delayed session to complete its first turn.
-var response = await agentClient.SendAsync(
-    sessionId,
-    new RunRequest("Trial check-in: what features have you tried so far?"));
-
-Console.WriteLine(response.Text);
-
-// No more messages expected — shut the session down immediately rather than
-// waiting for the 14-day TimeToLive to expire.
 await agentClient.ShutdownAsync(sessionId);
 ```
 
----
+Do not call `RunAgentDelayedAsync` twice with the same session ID before its delay expires. A second
+signal-with-start can dispatch the workflow early. If the session is already running, the request
+is delivered to it and no new delay is applied.
 
-## Workflow ID Conventions
+## Output, approval, and data boundaries
 
-Scheduled and deferred runs use a distinct naming convention to avoid collisions with interactive sessions:
+### Capturing output
 
-| Context | Workflow ID Format | Example |
-|---------|-------------------|---------|
-| Interactive session | `ta-{agent}-{key}` | `ta-onboardingagent-user-42` |
-| Scheduled/deferred run | `ta-{agent}-scheduled-{id}` | `ta-reportagent-scheduled-weekly-metrics-report` |
+`AgentJobWorkflow` returns `Task`, not an agent response. Temporal Web shows operational execution
+history, but it is not an application result API. Give the scheduled agent a durable tool or
+activity that writes its output to an application store, keyed by the schedule occurrence or a
+business identifier. That write must tolerate activity re-execution.
 
-The `-scheduled-` infix ensures that a recurring schedule never accidentally targets an existing interactive session, and vice versa. Temporal appends a timestamp automatically for recurring schedules (e.g., `ta-reportagent-scheduled-weekly-metrics-report-2026-06-04T09:00:00Z`).
+### Human approval
 
----
+Stateless job workflows cannot park for review. `RequireApproval()` and interceptor decisions that
+request approval are converted to blocked tool results; in-tool approval has no session context.
+Use `RunAgentDelayedAsync` when the run must participate in the full approval protocol. See
+[Human-in-the-loop patterns](./hitl-patterns.md) for the workflow-parked and in-tool models.
 
-## Observability
+### Payloads and secrets
 
-Three OTel spans cover scheduling operations:
+The schedule action stores the `RunRequest` and resolved execution settings in Temporal. One-time
+workflow inputs are also recorded in workflow history. Do not place secrets in prompts or options,
+and account for these payloads in retention, encryption, and access-control decisions.
 
-| Span | Emitted By | Key Attributes |
-|------|-----------|---------------|
-| `temporal.agent.schedule.create` | `ScheduleAgentAsync` | `gen_ai.agent.name`, `schedule.id` |
-| `temporal.agent.schedule.delayed` | `RunAgentDelayedAsync` | `gen_ai.agent.name`, `gen_ai.conversation.id`, `schedule.delay` |
-| `temporal.agent.schedule.one_time` | `ScheduleOneTimeAgentRunAsync` | `gen_ai.agent.name`, `schedule.job_id`, `schedule.delay` |
+## Operational reference
 
-Once the scheduled workflow executes, the standard `agent.turn` span fires inside `AgentActivities.RunDurableAgentStepAsync` — the same code path as interactive sessions, with one span per LLM call. This means scheduled runs are fully visible in your tracing backend alongside interactive sessions.
+| Item | Behavior |
+|---|---|
+| Recurring workflow ID | `ta-{agent}-scheduled-{scheduleId}` is the configured base ID; each occurrence gets a distinct ID derived from it — read the real one from the schedule (see below) |
+| One-time job workflow ID | `ta-{agent}-scheduled-{runId}` |
+| `MaxToolCallsPerTurn` | Captured from the local durable-agent registration when the job is created |
+| Activity timeout | Per-agent value, then worker default |
+| One-time retry policy | Per-run value, then per-agent, then worker, then bounded default |
+| `TemporalAgentContext.Current` | Unavailable to tools in `AgentJobWorkflow` |
+| Schedule removal | Explicit; removing code registration does not delete server state |
 
-For full OTel setup instructions, see [Observability](./observability.md).
+### Getting a recurring occurrence's workflow ID
 
----
-
-## Pitfalls and Gotchas
-
-### Approval does not work in scheduled runs
-
-`AgentJobWorkflow` has no approval mixin, so it cannot park for external review. Any tool that
-would pause is **blocked instead** — it never executes, and the model receives a synthetic result:
-
-```
-[Blocked] Tool 'delete_inventory' requires approval but approval is not supported in job workflows.
-```
-
-This applies to all three `AgentJobWorkflow` primitives — `AddScheduledAgentRun`,
-`ScheduleAgentAsync`, and `ScheduleOneTimeAgentRunAsync` — and covers every route to a pause:
-
-| Configuration | In an interactive session | In a scheduled run |
-|---|---|---|
-| `agent.AddTool(t, o => o.RequireApproval())` | Parks for review | **Blocked** |
-| An interceptor returning `PauseForApproval()` | Parks for review | **Blocked** (logged at Warning) |
-| In-tool `RequestApprovalAsync` | Parks for review | Unsupported — no `TemporalAgentContext` |
-
-The `RequireApproval().ScopeAware()` combination is the one case that warns you at **startup**
-rather than at dispatch. Plain `RequireApproval()` gives no startup signal: the run simply blocks
-the first time the model asks for the tool.
-
-**If a scheduled agent needs a tool that requires approval, it needs a session.** Use
-`RunAgentDelayedAsync`, which runs on the full `AgentWorkflow` and supports approval normally.
-
-### Tools cannot reach `TemporalAgentContext`
-
-On the `AgentJobWorkflow` path a scheduled workflow ID (`ta-{agent}-scheduled-{runId}`) parses to
-an agent name with a `-scheduled` suffix, which does not match the tool's registered agent. Rather
-than attach a session that would target the wrong workflow, the library leaves
-`TemporalAgentContext.Current` unset and records why — a tool that reaches for it gets told which
-path it is on, not a bare "no context".
-
-Tools that read session state or call `RequestApprovalAsync` need to tolerate this, or the agent
-needs a session instead of a job.
-
-### Schedule Orphaning
-
-Temporal Schedules are **independent of workers**. Removing an agent from `TemporalAgentsOptions` does **not** delete its schedule — it will keep firing. The scheduled workflow will fail with `AgentNotRegisteredException` on each trigger.
-
-**Always** delete the schedule before decommissioning an agent:
+`ta-{agent}-scheduled-{scheduleId}` is the workflow ID the library configures on the schedule's
+action. It is not the ID of any individual execution: the server derives a distinct per-occurrence
+ID from that base so occurrences do not collide. How it derives that ID is a server implementation
+detail, not a documented contract, so ask the schedule instead of building the string yourself:
 
 ```csharp
-var handle = agentClient.GetAgentScheduleHandle("daily-digest");
-await handle.DeleteAsync();
-```
+var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
+var temporalClient = host.Services.GetRequiredService<ITemporalClient>();
 
-### Config Drift
+ScheduleHandle handle = agentClient.GetAgentScheduleHandle("weekly-report");
+ScheduleDescription description = await handle.DescribeAsync();
 
-If you change a schedule's spec in code (e.g., from daily to hourly), the change is **silently skipped** on restart — `ScheduleRegistrationService` catches the `ScheduleAlreadyRunningException` and logs a warning. The old spec remains active.
-
-**Fix:** Delete the schedule first, then restart:
-
-```bash
-# Via Temporal CLI
-temporal schedule delete --schedule-id daily-digest
-```
-
-Or programmatically:
-
-```csharp
-await agentClient.GetAgentScheduleHandle("daily-digest").DeleteAsync();
-```
-
-### Duplicate Delayed Sessions
-
-`RunAgentDelayedAsync` uses `WorkflowIdConflictPolicy.UseExisting`. If the session workflow is already running, the request is delivered to the running workflow as a signal — no new workflow is started and no delay is applied. This is by design, but it can be surprising if you expect the delay to apply unconditionally.
-
-Additionally, a second `RunAgentDelayedAsync` call for the same session ID _before_ the delay window expires will cause the workflow to start immediately, bypassing the original delay. Avoid scheduling the same session twice before the delay expires.
-
-### Activity Timeouts for Scheduled Runs
-
-`AgentJobWorkflow` inherits `ActivityTimeout` and `HeartbeatTimeout` from `TemporalAgentsOptions` (via the per-agent override, then the worker default). If your scheduled agent makes long-running tool calls, ensure the timeout is sufficient:
-
-```csharp
-builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents-worker")
-    .AddTemporalAgents(opts =>
+foreach (ScheduleActionResult action in description.Info.RecentActions)
+{
+    if (action.Action is ScheduleActionExecutionStartWorkflow started)
     {
-        opts.DefaultActivityTimeout = TimeSpan.FromMinutes(60);
-
-        opts.AddDurableAgent("ReportAgent", agent =>
-        {
-            agent.ActivityTimeout = TimeSpan.FromMinutes(90); // per-agent override
-            agent.ChatClient      = sp => sp.GetRequiredService<IChatClient>();
-        });
-    });
+        // started.WorkflowId is the real workflow ID for this occurrence.
+        WorkflowHandle occurrence = temporalClient.GetWorkflowHandle(
+            started.WorkflowId,
+            firstExecutionRunId: started.FirstExecutionRunId);
+    }
+}
 ```
 
-There is no per-schedule timeout override — the effective per-agent timeout (or worker default) is used. Retry policy is the exception: `ScheduleOneTimeAgentRunAsync` accepts a per-run `RetryPolicy` on `OneTimeAgentRun`.
+Reconstructing the ID from `ScheduledAt` looks like it should work and does not. `ScheduledAt` is a
+`DateTime` that carries sub-second precision (`...:08.6801730Z`), while the ID the server produced
+for the same occurrence was truncated to whole seconds
+(`ta-probeagent-scheduled-probe-wfid-schedule-2026-09-10T16:45:08Z`). A reconstructed string is off
+by the fractional part and addresses a workflow that does not exist. Use
+`ScheduleActionExecutionStartWorkflow.WorkflowId`; it is the ID the server actually used.
 
-When nothing is configured anywhere, activities get a bounded backstop of five attempts rather than Temporal's server default of unlimited retries.
+`Info.RunningActions` exposes in-flight occurrences the same way, as
+`ScheduleActionExecution` values.
 
----
-
-## Choosing the Right Primitive
-
-**Is the schedule known at deploy time?**
-- **Yes** → Use `AddScheduledAgentRun` for zero-code schedule management
-
-**Does the schedule need to be created dynamically (e.g., user-triggered)?**
-- **Yes, recurring** → Use `ScheduleAgentAsync`
-- **Yes, one-time from outside a workflow** → Use `RunAgentDelayedAsync`
-- **Yes, one-time from inside a workflow** → Use `ScheduleOneTimeAgentRunAsync`
-
-**Does any tool the agent may call require approval?**
-- **Yes** → You must use `RunAgentDelayedAsync`. The other three block the call instead of parking for review.
-
-**Does the scheduled run need conversation history?**
-- **Yes** → Use `RunAgentDelayedAsync` (creates a full `AgentWorkflow` session)
-- **No** → Use any of the other three (all use the stateless `AgentJobWorkflow`)
-
-**Do you need to send follow-up messages after the delayed run?**
-- **Yes** → Use `RunAgentDelayedAsync` — the session persists and accepts further messages
-- **No** → Use `ScheduleOneTimeAgentRunAsync` or `AddScheduledAgentRun`
-
-**Do you want to release session resources immediately after the run?**
-- **Yes** → Call `ShutdownAsync` after the final message exchange rather than waiting for `TimeToLive` to expire
-
----
+Scheduling emits `temporal.agent.schedule.create`, `temporal.agent.schedule.delayed`, and
+`temporal.agent.schedule.one_time` spans. Once a run starts, `agent.turn` is emitted per model step.
+See [Observability](./observability.md) for setup.
 
 ## References
 
-- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentJobWorkflow.cs` — fire-and-forget workflow for scheduled runs
-- `src/TemporalCommunity.Extensions.Agents/Scheduling/ScheduleActivities.cs` — one-time scheduling from inside workflows
-- `src/TemporalCommunity.Extensions.Agents/Scheduling/ScheduleRegistrationService.cs` — config-time schedule creation
-- `src/TemporalCommunity.Extensions.Agents/Workflows/DefaultTemporalAgentClient.cs` — `ScheduleAgentAsync` and `RunAgentDelayedAsync`
-- `src/TemporalCommunity.Extensions.Agents/ITemporalAgentClient.cs` — `ShutdownAsync` and full interface surface
-- `src/TemporalCommunity.Extensions.Agents/Scheduling/ScheduleAgentRegistration.cs` — internal registration record
-- [Usage Guide](./usage.md) — `AddDurableAgent` registration patterns
-- [Observability](./observability.md) — scheduling OTel spans
-- [Temporal Schedules Documentation](https://docs.temporal.io/workflows#schedule)
+- [Temporal Schedules](https://docs.temporal.io/schedule)
+- [Temporal Activities and idempotency](https://docs.temporal.io/activities)
+- [Human-in-the-loop patterns](./hitl-patterns.md)
+- [Observability](./observability.md)
+- [Do's and Don'ts](./dos-and-donts.md)
 
----
-
-_Last updated: 2026-09-09_
+_Last updated: 2026-09-10_
