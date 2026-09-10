@@ -62,7 +62,7 @@ public class TemporalAgentSessionSnapshotTests
         };
 
         var typedBag = new AgentSessionStateBag();
-        typedBag.SetValue("temporal.working_set", "src/a.cs");
+        typedBag.SetValue("temporal.working_set", new[] { "src/a.cs" });
         var stateBag = typedBag.Serialize();
 
         var snapshot = new TemporalAgentSessionSnapshot
@@ -104,8 +104,9 @@ public class TemporalAgentSessionSnapshotTests
         // enough — it has to still be a bag.
         Assert.NotNull(restored.StateBag);
         var restoredBag = AgentSessionStateBag.Deserialize(restored.StateBag!.Value);
-        Assert.True(restoredBag.TryGetValue<string>("temporal.working_set", out var workingSet));
-        Assert.Equal("src/a.cs", workingSet);
+        Assert.True(restoredBag.TryGetValue<string[]>("temporal.working_set", out var workingSet));
+        Assert.NotNull(workingSet);
+        Assert.Equal(["src/a.cs"], workingSet);
     }
 
     // Gate 3: legacy payload compatibility — a snapshot persisted before session-owned history

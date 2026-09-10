@@ -76,7 +76,7 @@ public class SessionOwnedStateBenchmarks
         _sessionId = new TemporalAgentSessionId("Bench", "key");
 
         var providerBag = new AgentSessionStateBag();
-        providerBag.SetValue("temporal.working_set", "src/a.cs, src/b.cs, src/c.cs");
+        providerBag.SetValue("temporal.working_set", new[] { "src/a.cs", "src/b.cs", "src/c.cs" });
         providerBag.SetValue("test.step_counter", "1");
         _llmStepBag = providerBag.Serialize();
 

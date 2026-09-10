@@ -296,7 +296,10 @@ verify-sample-catalog:
     bash scripts/verify-sample-catalog.sh
 
 # Verify repository-local Markdown links without requiring network access.
+# The self-test runs first: a gate that has silently stopped rejecting things reports
+# "links are valid" forever, and nothing else in the build would catch it.
 verify-doc-links:
+    bash scripts/verify-markdown-links.selftest.sh
     bash scripts/verify-markdown-links.sh
 
 # Full local CI pipeline: clean → build → test-unit-all → documentation checks → pack

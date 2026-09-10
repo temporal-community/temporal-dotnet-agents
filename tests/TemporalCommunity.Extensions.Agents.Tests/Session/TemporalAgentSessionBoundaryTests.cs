@@ -42,7 +42,7 @@ public class TemporalAgentSessionBoundaryTests
     {
         var agent = CreateAgent();
         var session = new TemporalAgentSession(new TemporalAgentSessionId("Assistant", "abc123"));
-        session.StateBag.SetValue("temporal.working_set", "src/a.cs");
+        session.StateBag.SetValue("temporal.working_set", new[] { "src/a.cs" });
         session.AppendHistoryEntry(Request("c1", "first"));
         session.AppendHistoryEntry(Response("c1", "first reply"));
         session.AppendHistoryEntry(Request("c2", "second"));
@@ -51,7 +51,9 @@ public class TemporalAgentSessionBoundaryTests
         var restored = Assert.IsType<TemporalAgentSession>(await agent.DeserializeSessionAsync(serialized));
 
         Assert.Equal(session.SessionId, restored.SessionId);
-        Assert.Equal("src/a.cs", restored.StateBag.GetValue<string>("temporal.working_set"));
+        var restoredWorkingSet = restored.StateBag.GetValue<string[]>("temporal.working_set");
+        Assert.NotNull(restoredWorkingSet);
+        Assert.Equal(["src/a.cs"], restoredWorkingSet);
 
         Assert.Equal(3, restored.History.Count);
         Assert.IsType<AgentSessionRequest>(restored.History[0]);
@@ -83,7 +85,9 @@ public class TemporalAgentSessionBoundaryTests
     [Fact]
     public async Task Gate5_LegacySnapshotWithoutHistory_RestoresWithEmptyHistory()
     {
-        // Byte-for-byte the shape the pre-change direct-session serializer emitted.
+        // Byte-for-byte the shape the pre-change direct-session serializer emitted. The scalar
+        // temporal.working_set is deliberate: this is the 0.14.2-era value, and it must still
+        // restore. See WorkingSetContextProviderTests for what a current reader makes of it.
         var legacy = JsonDocument.Parse(
             """{"sessionId":"ta-assistant-abc123","stateBag":{"temporal.working_set":"src/a.cs"}}""")
             .RootElement;

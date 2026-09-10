@@ -342,17 +342,22 @@ turns without serializing an external data store:
 
 ```
 Turn 1: Activity starts → empty StateBag
-        Provider writes: bag["temporal.working_set"] = "src/App.cs"
+        Provider writes: bag["app.tenant"] = "acme"
         Activity ends → bag serialized → workflow stores it
 
 Turn 2: Activity starts → bag restored from workflow state
-        Provider reads: bag["temporal.working_set"] → "src/App.cs"
+        Provider reads: bag["app.tenant"] → "acme"
         Activity ends → bag re-serialized
 
 Continue-as-New:
         carriedStateBag = _currentStateBag  → new workflow run
         Bag restored seamlessly in the next turn
 ```
+
+`WorkingSetContextProvider` is a deliberate exception to that read-then-write shape: it recomputes
+its list from the retained history on every step and overwrites `temporal.working_set` (a
+`string[]`) rather than reading its own previous value. See
+[working-set.md](./working-set.md#reading-the-working-set-elsewhere).
 
 **Optimization detail:** Empty bags serialize to `null` (checked via `StateBag.Count == 0`), so sessions without providers incur zero serialization overhead.
 

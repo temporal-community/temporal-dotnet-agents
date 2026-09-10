@@ -404,4 +404,33 @@ public class WorkingSetContextProviderTests
         Assert.Equal(["src/Auth/AuthService.cs", "src/Data/Repo.cs"], paths);
     }
 
+    [Fact]
+    public async Task Provider_SessionCarryingTheScalarEraValue_ReplacesItOnTheNextStep()
+    {
+        // Upgrade path. A session serialized by 0.14.2 carries temporal.working_set as a comma-
+        // joined string. Reading it as string[] yields false rather than throwing, and the
+        // provider overwrites the key on its first step — so a live session self-heals and never
+        // observes a mixed state. What does NOT survive is a downstream consumer still calling
+        // TryGetValue<string>: it now gets false, silently. That is the whole blast radius.
+        var session = new TemporalAgentSession(new TemporalAgentSessionId("WS", "k"));
+        session.StateBag.SetValue(
+            WorkingSetContextProvider.StateBagKey,
+            "src/Old/One.cs,src/Old/Two.cs",
+            JsonSerializerOptions.Default);
+
+        Assert.False(session.StateBag.TryGetValue(
+            WorkingSetContextProvider.StateBagKey, out string[]? before, JsonSerializerOptions.Default));
+        Assert.Null(before);
+
+        await RunProviderAsync(
+            new WorkingSetContextProvider(),
+            session,
+            new ChatMessage(ChatRole.Assistant, "opened src/New/Current.cs"));
+
+        Assert.True(session.StateBag.TryGetValue(
+            WorkingSetContextProvider.StateBagKey, out string[]? paths, JsonSerializerOptions.Default));
+        Assert.NotNull(paths);
+        Assert.Equal(["src/New/Current.cs"], paths);
+    }
+
 }

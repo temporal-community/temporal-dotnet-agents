@@ -10,7 +10,10 @@ namespace TemporalCommunity.Extensions.Agents;
 /// An <see cref="AIContextProvider"/> that computes a working-set summary from the
 /// accumulated <see cref="ChatMessage"/> history and injects it as a compact context note
 /// into each LLM call. Stores the computed working-set in the session's
-/// <see cref="Microsoft.Agents.AI.AgentSessionStateBag"/> so it survives continue-as-new.
+/// <see cref="Microsoft.Agents.AI.AgentSessionStateBag"/>, which the managed
+/// <c>AgentWorkflow</c> carries across its own continue-as-new. A custom orchestrating
+/// workflow driving <c>TemporalAIAgent</c> gets no such guarantee — it must serialize and
+/// carry the session itself.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -279,7 +282,8 @@ public sealed class WorkingSetContextProvider : AIContextProvider
                 else
                 {
                     inCodeFence = true;
-                    // The first non-empty line inside a code fence is often a file path hint.
+                    // The line immediately after the opening fence is often a file path hint. It is
+                    // consumed whether or not it is blank — a blank one simply fails the path test.
                     nextLineIsPath = true;
                 }
 
