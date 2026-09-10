@@ -158,7 +158,7 @@ When a worker crashes:
 - `IAgentToolInterceptor` — `TemporalCommunity.Extensions.Agents.Tools` — convenience alias for `IDurableToolInterceptor<AgentToolContext>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`. Returns `DurableToolDecision` from the AI library.
 - `AgentToolContext` — `TemporalCommunity.Extensions.Agents.Tools` — extends `DurableToolContext`. Adds `AgentName` (required) and `StateBag?` (read-only snapshot). The inherited `SessionId` is populated from `ActivityExecutionContext.Current.Info.WorkflowId` in the interceptor activity.
 - `TemporalAgentSessionSnapshot` — `TemporalCommunity.Extensions.Agents.Session` (internal sealed) — the wire contract for a serialized `TemporalAgentSession`. Registered in `AgentSessionJsonContext`. Members: `sessionId` (lossless `ta-{agent}-{key}` string), `stateBag`, `history` — the last two omitted when null via member-level `JsonIgnore`. A snapshot without `history` is the supported legacy shape and restores as empty history.
-- `WorkingSetContextProvider` — `TemporalCommunity.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Stores result in `AgentSessionStateBag["temporal.working_set"]`.
+- `WorkingSetContextProvider` — `TemporalCommunity.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Stores result in `AgentSessionStateBag["temporal.working_set"]` as a `string[]` (read with `TryGetValue<string[]>`), recomputed and overwritten every step rather than accumulated.
 
 ### DI Patterns
 - `TemporalAgentsOptions` has an **internal constructor** — always access via the `AddTemporalAgents(opts => ...)` delegate.
@@ -221,6 +221,8 @@ just test-unit-all      # All unit tests — no server required
 just test-integration   # Agents integration — embedded server
 just test-integration-ai # AI integration — embedded server
 just pack               # clean → build → pack → artifacts/packages/*.nupkg
+just verify-doc-links   # Markdown link + #anchor checker; runs its own self-test first
+just ci                 # clean → build → test-unit-all → doc checks → pack
 ```
 
 ### Diagnostic + hang recovery (Tank + Trinity, reviewed by Cypher)
@@ -253,6 +255,12 @@ just verify-sample-coverage # drift detector — fails if a new sample dir isn't
 just clean-test-artifacts  # remove artifacts/{test-individual,sample-runs}/
 ```
 
+**Exit code is not the assertion.** All 26 entries carry application-owned output markers
+(`name:dir:cap:marker1|marker2`), checked with `grep -qF` against the sample's log; a sample that
+exits 0 without printing them is a FAIL, not a PASS. Should an entry ever lose its markers it is
+listed under "Exit-code only" instead of being silently counted as covered. Three samples once
+shipped broken while passing on exit code alone.
+
 **Skipped from sample-canary** (must run manually):
 - `samples/MAF/HumanInTheLoop` — interactive (Console.ReadLine). Note `samples/MEAI/HumanInTheLoop` **is** covered — it drives its approval non-interactively.
 - `samples/MAF/ApprovalScopes` — interactive (Console.ReadLine)
@@ -266,7 +274,9 @@ the CLI binary's own version.
 
 ### Versioning
 
-**Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release with `git tag -a X.Y.Z -m "..."` then `just pack`. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention (`0.1.0`, `0.1.1`, ..., `0.3.0`).
+**Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release with `git tag -a X.Y.Z -m "..."` then `just pack`. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention — `0.1.0` through `0.14.2` (`git tag` for the full list; the stray `v0.1.0` predates the convention and MinVer ignores it).
+
+**Both packages are published on NuGet.org**, currently through `0.14.2` — do not assume this is an undeployed library. Breaking changes are still fine (the whole public surface sits in `PublicAPI.Unshipped.txt`, and no migration guides or changelogs are wanted), but a behaviour change under an existing key or signature is a real break for consumers: state the new contract in the docs rather than narrating the old one.
 
 **Publish**: to NuGet.org, either `just publish-nuget` (local — needs `NUGET_API_KEY` env var) or the `.github/workflows/publish.yml` workflow (`workflow_dispatch`, OIDC Trusted Publishing — no stored API key/secret; the `nuget-publish` GitHub environment must be configured). Remember: tags carry no `v` prefix.
 
@@ -337,34 +347,42 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 
 ### TemporalCommunity.Extensions.Agents (MAF)
 
-- **Quickstart**: `docs/how-to/MAF/quickstart.md`
-- **Usage Reference**: `docs/how-to/MAF/usage.md`
-- **Routing Patterns**: `docs/how-to/MAF/routing.md`
-- **Testing Agents**: `docs/how-to/MAF/testing-agents.md`
-- **Observability**: `docs/how-to/MAF/observability.md`
-- **LLM-Call Interception**: `docs/how-to/MAF/llm-call-interception.md`
-- **Scheduling**: `docs/how-to/MAF/scheduling.md`
-- **Structured Output**: `docs/how-to/MAF/structured-output.md`
-- **HITL Patterns**: `docs/how-to/MAF/hitl-patterns.md`
-- **History & Token Optimization**: `docs/how-to/MAF/prompt-caching.md`
-- **Durable Agents (per-tool activities)**: `docs/how-to/MAF/durable-agents.md`
-- **Tool Interceptor**: `docs/how-to/MAF/tool-interceptor.md`
-- **Do's and Don'ts**: `docs/how-to/MAF/dos-and-donts.md`
-- **Durability Guarantees**: `docs/architecture/MAF/durability-and-determinism.md`
-- **Sessions and Workflow Loop**: `docs/architecture/MAF/agent-sessions-and-workflow-loop.md`
-- **Pub/Sub Equivalents**: `docs/architecture/MAF/pub-sub-and-event-driven.md`
-- **StateBag and AIContextProvider**: `docs/architecture/MAF/session-statebag-and-context-providers.md`
-- **Agent-to-Agent Communication**: `docs/architecture/MAF/agent-to-agent-communication.md`
+- **Quickstart**: [`docs/how-to/MAF/quickstart.md`](./docs/how-to/MAF/quickstart.md)
+- **Usage Reference**: [`docs/how-to/MAF/usage.md`](./docs/how-to/MAF/usage.md)
+- **Routing Patterns**: [`docs/how-to/MAF/routing.md`](./docs/how-to/MAF/routing.md)
+- **Testing Agents**: [`docs/how-to/MAF/testing-agents.md`](./docs/how-to/MAF/testing-agents.md)
+- **Observability**: [`docs/how-to/MAF/observability.md`](./docs/how-to/MAF/observability.md)
+- **LLM-Call Interception**: [`docs/how-to/MAF/llm-call-interception.md`](./docs/how-to/MAF/llm-call-interception.md)
+- **Scheduling**: [`docs/how-to/MAF/scheduling.md`](./docs/how-to/MAF/scheduling.md)
+- **Structured Output**: [`docs/how-to/MAF/structured-output.md`](./docs/how-to/MAF/structured-output.md)
+- **HITL Patterns**: [`docs/how-to/MAF/hitl-patterns.md`](./docs/how-to/MAF/hitl-patterns.md)
+- **History & Token Optimization**: [`docs/how-to/MAF/prompt-caching.md`](./docs/how-to/MAF/prompt-caching.md)
+- **Durable Agents (per-tool activities)**: [`docs/how-to/MAF/durable-agents.md`](./docs/how-to/MAF/durable-agents.md)
+- **Tool Interceptor**: [`docs/how-to/MAF/tool-interceptor.md`](./docs/how-to/MAF/tool-interceptor.md)
+- **Context Providers**: [`docs/how-to/MAF/context-providers.md`](./docs/how-to/MAF/context-providers.md)
+- **Working Set Provider**: [`docs/how-to/MAF/working-set.md`](./docs/how-to/MAF/working-set.md)
+- **Skills**: [`docs/how-to/MAF/skills.md`](./docs/how-to/MAF/skills.md)
+- **MCP Tools**: [`docs/how-to/MAF/mcp-tools.md`](./docs/how-to/MAF/mcp-tools.md)
+- **Harness Agent Compatibility**: [`docs/how-to/MAF/harness-agent-compatibility.md`](./docs/how-to/MAF/harness-agent-compatibility.md)
+- **Do's and Don'ts**: [`docs/how-to/MAF/dos-and-donts.md`](./docs/how-to/MAF/dos-and-donts.md)
+- **Durability Guarantees**: [`docs/architecture/MAF/durability-and-determinism.md`](./docs/architecture/MAF/durability-and-determinism.md)
+- **Sessions and Workflow Loop**: [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](./docs/architecture/MAF/agent-sessions-and-workflow-loop.md)
+- **Pub/Sub Equivalents**: [`docs/architecture/MAF/pub-sub-and-event-driven.md`](./docs/architecture/MAF/pub-sub-and-event-driven.md)
+- **StateBag and AIContextProvider**: [`docs/architecture/MAF/session-statebag-and-context-providers.md`](./docs/architecture/MAF/session-statebag-and-context-providers.md)
+- **Agent-to-Agent Communication**: [`docs/architecture/MAF/agent-to-agent-communication.md`](./docs/architecture/MAF/agent-to-agent-communication.md)
 
 ### TemporalCommunity.Extensions.AI (MEAI)
 
-- **Usage Guide**: `docs/how-to/MEAI/usage.md`
-- **Tool Functions**: `docs/how-to/MEAI/tool-functions.md` (direct durable calls, managed sessions, worker-owned toolsets, and invocation-scoped factories)
-- **Embeddings**: `docs/how-to/MEAI/embeddings.md`
-- **Testing**: `docs/how-to/MEAI/testing.md`
-- **Observability**: `docs/how-to/MEAI/observability.md`
-- **HITL Patterns**: `docs/how-to/MEAI/hitl-patterns.md`
-- **Custom Workflow Output**: `docs/how-to/MEAI/custom-workflow-output.md`
-- **Durable Chat Pipeline**: `docs/architecture/MEAI/durable-chat-pipeline.md`
-- **Direct-Adapter Anti-Pattern**: `docs/architecture/MEAI/direct-adapter-anti-pattern.md`
-- **Cross-Library Integration**: `docs/architecture/MEAI/cross-library-integration.md`
+- **Usage Guide**: [`docs/how-to/MEAI/usage.md`](./docs/how-to/MEAI/usage.md)
+- **Tool Functions**: [`docs/how-to/MEAI/tool-functions.md`](./docs/how-to/MEAI/tool-functions.md) (direct durable calls, managed sessions, worker-owned toolsets, and invocation-scoped factories)
+- **Embeddings**: [`docs/how-to/MEAI/embeddings.md`](./docs/how-to/MEAI/embeddings.md)
+- **Managed-Session Tool Rules**: [`docs/how-to/MEAI/managed-session-tool-rules.md`](./docs/how-to/MEAI/managed-session-tool-rules.md)
+- **MCP Tools**: [`docs/how-to/MEAI/mcp-tools.md`](./docs/how-to/MEAI/mcp-tools.md)
+- **Payload Codecs**: [`docs/how-to/MEAI/payload-codecs.md`](./docs/how-to/MEAI/payload-codecs.md)
+- **Testing**: [`docs/how-to/MEAI/testing.md`](./docs/how-to/MEAI/testing.md)
+- **Observability**: [`docs/how-to/MEAI/observability.md`](./docs/how-to/MEAI/observability.md)
+- **HITL Patterns**: [`docs/how-to/MEAI/hitl-patterns.md`](./docs/how-to/MEAI/hitl-patterns.md)
+- **Custom Workflow Output**: [`docs/how-to/MEAI/custom-workflow-output.md`](./docs/how-to/MEAI/custom-workflow-output.md)
+- **Durable Chat Pipeline**: [`docs/architecture/MEAI/durable-chat-pipeline.md`](./docs/architecture/MEAI/durable-chat-pipeline.md)
+- **Direct-Adapter Anti-Pattern**: [`docs/architecture/MEAI/direct-adapter-anti-pattern.md`](./docs/architecture/MEAI/direct-adapter-anti-pattern.md)
+- **Cross-Library Integration**: [`docs/architecture/MEAI/cross-library-integration.md`](./docs/architecture/MEAI/cross-library-integration.md)
