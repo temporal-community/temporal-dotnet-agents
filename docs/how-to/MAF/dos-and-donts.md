@@ -122,8 +122,10 @@ var agent = WorkflowAgents.GetTemporalAgent(agentName);
 
 ```csharp
 // GOOD
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("Agent", a => a.ChatClient = sp => sp.GetRequiredService<IChatClient>());

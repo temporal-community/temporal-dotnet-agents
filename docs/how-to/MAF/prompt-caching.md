@@ -275,8 +275,10 @@ Or use `AgentJobWorkflow` via scheduling, which always starts with empty history
 `TemporalAgentsOptions.DefaultMaxEntryCount` sets a hard cap on the number of history entries kept in the workflow. When the cap is reached, the workflow triggers continue-as-new, discarding the oldest entries:
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("Agent", a => a.ChatClient = sp => sp.GetRequiredService<IChatClient>());

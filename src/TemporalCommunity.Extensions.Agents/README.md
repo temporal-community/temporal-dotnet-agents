@@ -113,7 +113,7 @@ topology. It is validated against tracked sample projects.
 - [Observability](../../docs/how-to/MAF/observability.md) — OpenTelemetry spans, search attributes, and operational queries
 - [Intercepting LLM Calls](../../docs/how-to/MAF/llm-call-interception.md) — per-LLM-call observability via a decorated `agent.ChatClient`
 - [Scheduling](../../docs/how-to/MAF/scheduling.md) — recurring and one-time agent runs, lifecycle management
-- [Structured Output](../../docs/how-to/MAF/structured-output.md) — typed responses with `RunAsync<T>`, fence stripping, and retry
+- [Structured Output](../../docs/how-to/MAF/structured-output.md) — typed responses with `RunStructuredAsync<T>`, fence stripping, and retry
 - [Human-in-the-Loop](../../docs/how-to/MAF/hitl-patterns.md) — approval gates, dashboards, timeouts, and testing
 - [History & Token Optimization](../../docs/how-to/MAF/prompt-caching.md) — managing conversation history and reducing costs
 - [Do's and Don'ts](../../docs/how-to/MAF/dos-and-donts.md) — common mistakes and best practices
@@ -152,7 +152,7 @@ Key benefits over in-memory agent frameworks:
 - Workflow-based routing — durable, observable, and fully under your control
 - Parallel agent execution inside workflows (`ExecuteAgentsInParallelAsync`)
 - Human-in-the-loop approval gates via `[WorkflowUpdate]`
-- Typed structured output with `RunAsync<T>` (markdown fence stripping + retry)
+- Typed structured output with `RunStructuredAsync<T>` (markdown fence stripping + retry)
 - Recurring and one-time scheduled agent runs
 - MCP tool integration through ordinary `AddTool`/`AddTools` registration; see the
   [MCP guide](../../docs/how-to/MAF/mcp-tools.md)
@@ -231,7 +231,7 @@ An empty bag reports zero because durable agent workflows omit it from the paylo
 - **`TemporalAIAgentProxy`** — For external callers (via `GetTemporalAgentProxy`)
 - **`ITemporalAgentClient`** — Update-based client with routing, scheduling, and HITL support
 - **`TemporalAgentContext`** — Async-local context for agent tools running inside activities
-- **`StructuredOutputExtensions`** — `RunAsync<T>` with markdown fence stripping and retry
+- **`StructuredOutputExtensions`** — `RunStructuredAsync<T>` with markdown fence stripping and retry
 - **`IAgentToolInterceptor`** (`TemporalCommunity.Extensions.Agents.Tools`) — pre-tool lifecycle hook; extends `IDurableToolInterceptor<AgentToolContext>` from `TemporalCommunity.Extensions.AI.Tools`; return `DurableToolDecision.Proceed/PauseForApproval/Skip/Block`
 - **`WorkingSetContextProvider`** — `AIContextProvider` that injects a compact file-reference note before each LLM call
 

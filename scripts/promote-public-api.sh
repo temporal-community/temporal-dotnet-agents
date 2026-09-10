@@ -1,22 +1,47 @@
 #!/usr/bin/env bash
 # Promotes PublicAPI.Unshipped.txt into PublicAPI.Shipped.txt for both libraries.
 #
-# Run this immediately AFTER a release is published. Until it runs, Shipped.txt does not describe
-# what consumers actually have, and the RS0016/RS0017 analyzer gate silently protects nothing —
-# every public member reads as "not yet shipped", so removing one raises no error.
+# Run this while PREPARING a release, before tagging: promote, commit the result, tag that commit,
+# then publish it. publish.yml enforces the order — an official release fails if Unshipped.txt is
+# still non-empty. Preview releases are exempt, since pending entries are their normal state.
+#
+# Until promotion runs, Shipped.txt does not describe what consumers actually have, and the
+# RS0016/RS0017 analyzer gate silently protects nothing — every public member reads as "not yet
+# shipped", so removing one raises no error.
 #
 # That is not hypothetical. Both Shipped.txt files sat empty through releases 0.8.0 to 0.14.2
 # while 40+ public types shipped, so the gate was inert across that whole range and two breaking
 # removals landed without being recorded.
 #
-# `--check` verifies promotion is not pending without modifying anything; use it in CI.
+# `--check` verifies promotion is not pending without modifying anything; publish.yml uses it.
 #
 # Written for bash 3.2 (macOS default): no mapfile, no associative arrays.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 check_only=0
-[ "${1:-}" = "--check" ] && check_only=1
+
+# Promotion rewrites both API files, so an unrecognised argument must NOT fall through to it.
+# A typo like `--chek` previously performed the destructive promotion silently.
+case "$#" in
+    0) ;;
+    1)
+        if [ "$1" = "--check" ]; then
+            check_only=1
+        else
+            echo "ERROR: unknown argument '$1'" >&2
+            echo "Usage: promote-public-api.sh [--check]" >&2
+            echo "  (no arguments)  promote Unshipped into Shipped — rewrites both files" >&2
+            echo "  --check         report whether promotion is pending; changes nothing" >&2
+            exit 2
+        fi
+        ;;
+    *)
+        echo "ERROR: expected at most one argument, got $#" >&2
+        echo "Usage: promote-public-api.sh [--check]" >&2
+        exit 2
+        ;;
+esac
 
 projects="src/TemporalCommunity.Extensions.Agents src/TemporalCommunity.Extensions.AI"
 pending=0

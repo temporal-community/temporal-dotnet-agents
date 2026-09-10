@@ -104,8 +104,10 @@ Conversations are identified by an opaque string ID. There are no named agents, 
 ```csharp
 builder.Services.AddChatClient(chatClient);
 
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("WeatherAgent", agent =>
@@ -195,42 +197,61 @@ Incremental adoption paths:
 
 Advanced, and not a registration path. Start from whichever canonical call your combination
 above prescribes — `AddDurableAI()` or `AddTemporalAgents()`. Neither library exposes plugin
-wrappers; if your application has its own Temporal plugin, register it through the SDK's own
-options.
+wrappers; register your own plugins through the SDK's own options.
+
+**Worker plugins** go on the worker options:
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
     .AddHostedTemporalWorker("orders-worker")
     .AddDurableAI()                                  // or .AddTemporalAgents(...)
     .ConfigureOptions(options =>
     {
-        // Worker plugins.
-        var workerPlugins = options.Plugins?.ToList() ?? [];
-        workerPlugins.Add(new MyWorkerPlugin());
-        options.Plugins = workerPlugins;
-
-        // Client plugins. ClientOptions is nullable on the worker options, so check it.
-        if (options.ClientOptions is not null)
-        {
-            var clientPlugins = options.ClientOptions.Plugins?.ToList() ?? [];
-            clientPlugins.Add(new MyClientPlugin());
-            options.ClientOptions.Plugins = clientPlugins;
-        }
+        var plugins = options.Plugins?.ToList() ?? [];
+        plugins.Add(new MyWorkerPlugin());
+        options.Plugins = plugins;
     });
 ```
+
+**Client plugins go somewhere else, and where depends on who owns the client.** With the
+canonical setup above the client comes from `AddTemporalClient(...)`, so configure its options
+directly — `TemporalWorkerServiceOptions.ClientOptions` is null on that topology, and a client
+plugin added there would be silently dropped:
+
+```csharp
+builder.Services
+    .AddTemporalClient("localhost:7233", "default")
+    .Configure(options =>
+    {
+        var plugins = options.Plugins?.ToList() ?? [];
+        plugins.Add(new MyClientPlugin());
+        options.Plugins = plugins;
+    });
+```
+
+Only when the worker creates its own client — the three-argument
+`AddHostedTemporalWorker(address, namespace, taskQueue)` overload — is `ClientOptions` populated,
+and client plugins belong on `options.ClientOptions.Plugins` instead.
 
 **Temporal's plugin surface is experimental.** `ITemporalWorkerPlugin` and `ITemporalClientPlugin`
 both carry an explicit "may change in the future" warning from the SDK. Neither library is built
 on it, so that instability stays confined to code you own.
 
-**Registration order does not matter, and your collection is never replaced.** Both libraries read
-any existing plugin collection, append to it, and write it back — before or after your own
-registration. Integration tests pin this in both orders, including that two of your plugins
-sharing a `Name` are both kept: deduplicating your plugins is your decision, not the library's.
+**Your collection is never replaced, in either registration order.** Both libraries read an
+existing plugin collection, append to it, and write it back, whether you register before or after
+them. Integration tests pin both orders, including that two of your plugins sharing a `Name` are
+both kept — deduplicating your plugins is your decision, not the library's. What order does *not*
+guarantee is callback order: plugins run in list order, which can matter if two of them touch the
+same option.
 
-**The data-converter plugin is installed for you.** Each library adds its own internal converter
-plugin automatically and refuses to add a second copy of it. Registering both libraries selects
-the MAF converter, which is a superset. A data converter you set yourself is left alone.
+**The data converter is applied for you, by one of two mechanisms.** On the canonical
+`AddTemporalClient` topology each library configures the converter directly through
+`IConfigureOptions<TemporalClientConnectOptions>` — no plugin is involved. Only when the worker
+owns its client does the library add its converter as a plugin, and it refuses to add a second
+copy of it. Either way, registering both libraries selects the MAF converter, which is a superset,
+and a data converter you set yourself is left alone.
 
 ---
 

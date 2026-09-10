@@ -244,8 +244,10 @@ The two `TemporalAgentTelemetry` spans bookend the trace — `agent.client.send`
 Search attribute upserts are enabled by default. Set `EnableSearchAttributes = false` only when your cluster cannot register the required custom attributes:
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("Agent", a => a.ChatClient = sp => sp.GetRequiredService<IChatClient>());

@@ -271,11 +271,13 @@ publish-nuget: pack
     @echo "RS0016/RS0017 gate protects nothing — that is how 0.8.0-0.14.2 shipped 40+ public"
     @echo "types against an empty baseline."
 
-# Fold PublicAPI.Unshipped.txt into PublicAPI.Shipped.txt. Run AFTER publishing a release.
+# publish.yml rejects an official release whose Unshipped.txt is still non-empty, so the order is:
+# promote, commit, tag that commit, then publish.
+# Fold PublicAPI.Unshipped.txt into PublicAPI.Shipped.txt while PREPARING a release.
 promote-public-api:
     bash scripts/promote-public-api.sh
 
-# Post-release gate: fails if a published surface has not been promoted yet (not part of `ci`).
+# Release-prep gate: fails while promotion is still pending. Mirrors the publish.yml check.
 verify-public-api:
     bash scripts/promote-public-api.sh --check
 

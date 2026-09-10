@@ -281,8 +281,10 @@ When `ApprovalScopePattern.Parameter` is set, the pattern is matched against the
 Register an interceptor per agent or set a worker-level default.
 
 ```csharp
+builder.Services.AddTemporalClient("localhost:7233", "default");
+
 builder.Services
-    .AddHostedTemporalWorker("localhost:7233", "default", "agents")
+    .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
         // Worker-level default — applies to every agent that does not register its own.
