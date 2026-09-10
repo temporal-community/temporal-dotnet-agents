@@ -265,6 +265,19 @@ publish-nuget: pack
         --source "https://api.nuget.org/v3/index.json" \
         --api-key "$NUGET_API_KEY" \
         --skip-duplicate
+    @echo ""
+    @echo "NEXT: run 'just promote-public-api' and commit the result."
+    @echo "Until you do, PublicAPI.Shipped.txt does not describe what consumers have and the"
+    @echo "RS0016/RS0017 gate protects nothing — that is how 0.8.0-0.14.2 shipped 40+ public"
+    @echo "types against an empty baseline."
+
+# Fold PublicAPI.Unshipped.txt into PublicAPI.Shipped.txt. Run AFTER publishing a release.
+promote-public-api:
+    bash scripts/promote-public-api.sh
+
+# Post-release gate: fails if a published surface has not been promoted yet (not part of `ci`).
+verify-public-api:
+    bash scripts/promote-public-api.sh --check
 
 # Push main branch and all tags to origin (our only remote).
 # Refuses to run if the current branch is not main.
