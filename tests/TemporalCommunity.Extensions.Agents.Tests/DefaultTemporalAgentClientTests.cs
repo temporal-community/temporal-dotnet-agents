@@ -1,5 +1,6 @@
 using FakeItEasy;
 using System.Linq.Expressions;
+using Microsoft.Extensions.AI;
 using Temporalio.Client;
 using Temporalio.Client.Schedules;
 using TemporalCommunity.Extensions.Agents.Scheduling;
@@ -147,6 +148,54 @@ public class DefaultTemporalAgentClientTests
         await Assert.ThrowsAsync<ArgumentNullException>(() =>
             client.ScheduleAgentAsync("Agent", "schedule-1", new RunRequest("test"),
                 null!));
+    }
+
+    [Fact]
+    public async Task ScheduleAgentAsync_ProxyOnlyAgent_ThrowsBeforeCreatingIncompleteJob()
+    {
+        _options.AddAgentProxy("RemoteAgent");
+        var client = CreateClient();
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.ScheduleAgentAsync(
+                "RemoteAgent",
+                "schedule-1",
+                new RunRequest("Run."),
+                new ScheduleSpec()));
+
+        Assert.Contains("proxy-only", exception.Message);
+        Assert.Contains("RunAgentDelayedAsync", exception.Message);
+        A.CallTo(() => _fakeClient.CreateScheduleAsync(
+                A<string>._,
+                A<Schedule>._,
+                A<ScheduleOptions>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task ScheduleAgentAsync_DurableAgent_CreatesSchedule()
+    {
+        _options.AddDurableAgent("Agent", agent => agent.ChatClient = _ => A.Fake<IChatClient>());
+        var expected = new ScheduleHandle(_fakeClient, "schedule-1");
+        A.CallTo(() => _fakeClient.CreateScheduleAsync(
+                "schedule-1",
+                A<Schedule>._,
+                A<ScheduleOptions>._))
+            .Returns(expected);
+        var client = CreateClient();
+
+        var actual = await client.ScheduleAgentAsync(
+            "Agent",
+            "schedule-1",
+            new RunRequest("Run."),
+            new ScheduleSpec());
+
+        Assert.Same(expected, actual);
+        A.CallTo(() => _fakeClient.CreateScheduleAsync(
+                "schedule-1",
+                A<Schedule>._,
+                A<ScheduleOptions>._))
+            .MustHaveHappenedOnceExactly();
     }
 
     // ─── GetAgentScheduleHandle ──────────────────────────────────────────────

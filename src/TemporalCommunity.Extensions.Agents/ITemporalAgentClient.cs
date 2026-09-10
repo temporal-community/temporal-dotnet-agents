@@ -121,7 +121,8 @@ public interface ITemporalAgentClient
     
     /// <summary>
     /// Creates a Temporal Schedule that fires <see cref="AgentJobWorkflow"/> on the given spec.
-    /// Each scheduled run is fire-and-forget — results are visible in the Temporal Web UI.
+    /// Each scheduled run is fire-and-forget. Temporal Web exposes operational history, but the
+    /// workflow does not return a typed agent response; persist application output from a durable tool.
     /// </summary>
     /// <param name="agentName">Name of the agent to invoke on each schedule tick.</param>
     /// <param name="scheduleId">
@@ -133,7 +134,17 @@ public interface ITemporalAgentClient
     /// <param name="policy">Overlap and catchup policy. Defaults to <see cref="SchedulePolicy"/> defaults.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A <see cref="ScheduleHandle"/> for pausing, triggering, updating, or deleting the schedule.</returns>
+    /// <exception cref="AgentNotRegisteredException">
+    /// No durable agent is registered with <paramref name="agentName"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The agent is declared only as a proxy. Stateless schedule creation requires the full local
+    /// durable-agent registration so its execution settings can be captured.
+    /// </exception>
     /// <remarks>
+    /// The calling process must contain the full durable-agent registration. A proxy-only client
+    /// does not own the tool and execution settings required to build a correct job input.
+    ///
     /// <b>Schedule orphaning:</b> schedules are independent of workers. Removing an agent from
     /// <see cref="TemporalAgentsOptions"/> does <em>not</em> delete its schedule — it will keep
     /// firing. Use <see cref="GetAgentScheduleHandle"/> to retrieve the handle and call

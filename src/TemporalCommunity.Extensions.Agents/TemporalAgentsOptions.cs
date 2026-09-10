@@ -110,6 +110,27 @@ public sealed class TemporalAgentsOptions
             throw new InvalidOperationException(
                 $"{nameof(DefaultMaxEntryCount)} must be at least 4 in {nameof(TemporalAgentsOptions)} to retain a complete request/response turn.");
         }
+
+        var duplicateScheduleId = _scheduledRuns
+            .GroupBy(registration => registration.ScheduleId, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Count() > 1)?.Key;
+        if (duplicateScheduleId is not null)
+        {
+            throw new InvalidOperationException(
+                $"Schedule ID '{duplicateScheduleId}' was registered more than once. " +
+                "Schedule IDs must be unique within TemporalAgentsOptions.");
+        }
+
+        foreach (var scheduledRun in _scheduledRuns)
+        {
+            if (!_durableAgentRegistrations.ContainsKey(scheduledRun.AgentName))
+            {
+                throw new InvalidOperationException(
+                    $"Scheduled run '{scheduledRun.ScheduleId}' references agent '{scheduledRun.AgentName}', " +
+                    "but that agent is not registered with AddDurableAgent. Register the durable agent " +
+                    "in the same AddTemporalAgents configuration as the schedule.");
+            }
+        }
     }
 
     /// <summary>
@@ -301,6 +322,11 @@ public sealed class TemporalAgentsOptions
     /// <param name="request">The request to send to the agent on each scheduled run.</param>
     /// <param name="spec">When and how often the schedule fires.</param>
     /// <param name="policy">Overlap and catchup policy. Defaults to <see cref="SchedulePolicy"/> defaults.</param>
+    /// <remarks>
+    /// At the end of <c>AddTemporalAgents</c> configuration, validation requires
+    /// <paramref name="agentName"/> to identify a durable agent in the same options instance and
+    /// requires every schedule ID to be unique.
+    /// </remarks>
     public TemporalAgentsOptions AddScheduledAgentRun(
         string agentName,
         string scheduleId,

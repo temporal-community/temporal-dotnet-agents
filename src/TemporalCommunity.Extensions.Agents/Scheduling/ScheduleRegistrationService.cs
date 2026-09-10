@@ -16,7 +16,7 @@ namespace TemporalCommunity.Extensions.Agents.Scheduling;
 /// </para>
 /// <para>
 /// <b>Config drift:</b> if you change a schedule's spec in code (e.g. from daily to twice-daily),
-/// the change is silently ignored because the existing schedule is skipped. To apply the updated
+/// the existing schedule is skipped and a warning is logged. To apply the updated
 /// spec, delete the schedule first via <see cref="ITemporalAgentClient.GetAgentScheduleHandle"/>
 /// and then restart the worker.
 /// </para>

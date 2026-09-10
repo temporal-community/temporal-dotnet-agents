@@ -1,5 +1,7 @@
 using FakeItEasy;
 using Microsoft.Extensions.AI;
+using Temporalio.Client.Schedules;
+using TemporalCommunity.Extensions.Agents.Scheduling;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.Tests;
@@ -56,6 +58,47 @@ public class TemporalAgentsOptionsTests
 
         var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
         Assert.Contains("DefaultMaxEntryCount", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_ScheduledRunReferencesUnknownAgent_ThrowsActionableError()
+    {
+        var options = new TemporalAgentsOptions();
+        options.AddScheduledAgentRun(
+            "MissingAgent",
+            "daily-report",
+            new RunRequest("Generate the report."),
+            new ScheduleSpec());
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains("daily-report", exception.Message);
+        Assert.Contains("MissingAgent", exception.Message);
+        Assert.Contains("AddDurableAgent", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_DuplicateScheduleIds_ThrowsActionableError()
+    {
+        var options = new TemporalAgentsOptions();
+        options.AddDurableAgent("Agent", agent => agent.ChatClient = NewChatClient());
+        options.AddScheduledAgentRun("Agent", "duplicate", new RunRequest("First."), new ScheduleSpec());
+        options.AddScheduledAgentRun("Agent", "duplicate", new RunRequest("Second."), new ScheduleSpec());
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains("duplicate", exception.Message);
+        Assert.Contains("unique", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_ScheduledRunReferencesDurableAgent_Succeeds()
+    {
+        var options = new TemporalAgentsOptions();
+        options.AddDurableAgent("Agent", agent => agent.ChatClient = NewChatClient());
+        options.AddScheduledAgentRun("Agent", "daily-report", new RunRequest("Run."), new ScheduleSpec());
+
+        options.Validate();
     }
 
     [Fact]

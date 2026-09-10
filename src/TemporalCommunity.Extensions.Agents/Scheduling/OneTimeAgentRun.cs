@@ -9,8 +9,9 @@ namespace TemporalCommunity.Extensions.Agents.Scheduling;
 /// <remarks>
 /// The resulting workflow ID is <c>ta-{agentName}-scheduled-{runId}</c>, which is disjoint
 /// from interactive session IDs. If the scheduling activity retries after a crash-before-ack,
-/// <see cref="Temporalio.Api.Enums.V1.WorkflowIdConflictPolicy.UseExisting"/> ensures the
-/// second call finds the already-scheduled workflow and returns without error.
+/// <see cref="Temporalio.Api.Enums.V1.WorkflowIdConflictPolicy.UseExisting"/> protects a running
+/// execution and <see cref="Temporalio.Api.Enums.V1.WorkflowIdReusePolicy.RejectDuplicate"/>
+/// protects a closed execution. A duplicate start is treated as success.
 /// </remarks>
 public sealed record OneTimeAgentRun
 {
@@ -35,7 +36,8 @@ public sealed record OneTimeAgentRun
 
     /// <summary>
     /// Gets the retry policy applied to the agent activity invocation.
-    /// When <see langword="null"/>, Temporal SDK defaults apply (unbounded retries).
+    /// When <see langword="null"/>, the per-agent policy, worker policy, or bounded five-attempt
+    /// library default is used, in that order.
     /// </summary>
     public RetryPolicy? RetryPolicy { get; init; }
 }

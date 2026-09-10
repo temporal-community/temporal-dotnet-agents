@@ -457,6 +457,13 @@ internal sealed class DefaultTemporalAgentClient(
     /// Shared by <see cref="ScheduleAgentAsync"/> and <see cref="ScheduleActivities"/> so both paths
     /// honour per-agent timeouts, per-tool options, and interceptor config.
     /// </summary>
+    /// <exception cref="AgentNotRegisteredException">
+    /// No durable agent or proxy is registered with <paramref name="agentName"/>.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// The name identifies only a proxy, which does not provide the execution settings needed by
+    /// a stateless agent job.
+    /// </exception>
     internal static AgentJobInput BuildAgentJobInput(
         string agentName,
         RunRequest request,
@@ -464,6 +471,20 @@ internal sealed class DefaultTemporalAgentClient(
         string taskQueue,
         RetryPolicy? retryPolicyOverride = null)
     {
+        if (!options.DurableAgentRegistrations.ContainsKey(agentName))
+        {
+            if (options.ProxyDeclarations.ContainsKey(agentName))
+            {
+                throw new InvalidOperationException(
+                    $"Cannot schedule stateless agent job '{agentName}' from a proxy-only client. " +
+                    "ScheduleAgentAsync must run in the process that registers the agent with " +
+                    "AddDurableAgent because the schedule action captures its tool and execution settings. " +
+                    "Use RunAgentDelayedAsync for a delayed full session from a split client process.");
+            }
+
+            throw new AgentNotRegisteredException(agentName);
+        }
+
         var effectiveActivityTimeout = options.DefaultActivityTimeout;
         var effectiveHeartbeatTimeout = options.DefaultHeartbeatTimeout;
         // Bounded backstop (MaximumAttempts = 5) when unset — see DefaultRetryPolicy.
