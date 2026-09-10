@@ -95,9 +95,9 @@ internal sealed class DurableAIWorkerClientConfigurator
         if (options.ClientOptions is null) return;
         var list = options.ClientOptions.Plugins?.ToList() ?? [];
 
-        // Dedupe by Name — never push a second DurableAIDataConverterPlugin if one
-        // is already present (e.g., the user manually added it via .AddClientPlugin
-        // or another registration path already wired one in).
+        // Dedupe by Name — never push a second DurableAIDataConverterPlugin if one is
+        // already present. The options pipeline can re-run post-configuration, and a consumer
+        // may have populated ClientOptions.Plugins directly through Temporal's own surface.
         if (list.Any(p => string.Equals(
                 p.Name,
                 DurableAIDataConverterPlugin.PluginName,

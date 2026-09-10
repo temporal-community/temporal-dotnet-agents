@@ -41,9 +41,10 @@ Use `Glob` / `ls` to discover specific files. Notable types and their locations 
 
 ## TemporalCommunity.Extensions.AI — Key Concepts
 
-**Entry points** (any of these is sufficient — they produce identical DI state):
-- `services.AddHostedTemporalWorker(...).AddDurableAI(opts => ...)` — DI extension (primary)
-- `services.AddHostedTemporalWorker(...).AddWorkerPlugin(new DurableAIPlugin(opts => ...))` — `[Experimental("TAI001")]`
+**Entry point**:
+- `services.AddHostedTemporalWorker(...).AddDurableAI(opts => ...)` — the only registration path.
+  The package ships no plugin-registration wrappers; add your own plugins through Temporal's own
+  surface (`TemporalWorkerOptions.Plugins` / `TemporalClientConnectOptions.Plugins`).
 
 **External usage**: `host.Services.GetRequiredService<DurableChatSessionClient>().SendAsync(...)` returns `Task<DurableSessionResponse>` (post-Layer-2). `GetHistoryAsync` returns `Task<IReadOnlyList<DurableSessionEntry>>`.
 
@@ -75,9 +76,8 @@ For full API surface, see `docs/how-to/MEAI/usage.md`.
 
 ## TemporalCommunity.Extensions.Agents — Key Concepts
 
-**Entry points**:
-- `services.AddHostedTemporalWorker(...).AddTemporalAgents(opts => opts.AddDurableAgent("Name", a => { a.ChatClient = sp => ...; a.AddTool(...); }))`
-- `services.AddHostedTemporalWorker(...).AddWorkerPlugin(new TemporalAgentsPlugin(opts => ...))` — `[Experimental("TA001")]`. Idempotent if mixed with `AddTemporalAgents()`.
+**Entry point**:
+- `services.AddHostedTemporalWorker(...).AddTemporalAgents(opts => opts.AddDurableAgent("Name", a => { a.ChatClient = sp => ...; a.AddTool(...); }))` — the only registration path.
 
 **`AddDurableAgent` is the only registration path.** A single fluent `DurableAgentBuilder` consolidates `ChatClient`, tools (with per-tool retry overrides via `DurableToolOptions`), context providers, per-agent timeouts, and external history. DI access happens via per-slot factories on the builder — no `BuildServiceProvider` bootstrap, no string-keyed dictionaries. Each LLM call dispatches a separate `RunDurableAgentStep` activity; each tool call dispatches a separately named `InvokeAgentTool` activity (per-agent local registry, distinct from MEAI's flat `InvokeFunction`). The library composes the chat pipeline with `UseProvidedChatClientAsIs = true` so users do NOT call `.UseFunctionInvocation` on their `IChatClient`.
 

@@ -5,9 +5,7 @@
 This sample demonstrates OpenTelemetry tracing and metrics for a durable MEAI chat session. It
 produces a complete span hierarchy from the external `SendAsync` call, through the Temporal
 protocol layers, down to the LLM inference span emitted by `DurableChatActivities`. It also shows
-how to subscribe to the library's stable `Meter` name and the
-`DurableAIPlugin` registration path — the plugin-based entry point — as an alternative to
-`AddDurableAI()`.
+how to subscribe to the library's stable `Meter` name.
 
 - Full span hierarchy from `durable_chat.send` down through the Temporal protocol spans to the
   `chat {modelId}` inference span
@@ -17,8 +15,6 @@ how to subscribe to the library's stable `Meter` name and the
 - `DurableChatTelemetry.MeterName` must be registered with the meter provider to collect durable
   toolset resolver and validation measurements
 - `TracingInterceptor` propagates the W3C `traceparent` header across gRPC boundaries
-- Plugin registration path: `AddDurableAIPlugin(new DurableAIPlugin(...))` as an alternative to
-  `AddDurableAI()`
 
 ## Span Hierarchy
 
@@ -106,9 +102,9 @@ the full list.
 - **`conversation.id` makes session filtering practical.** Both the client-side `durable_chat.send`
   span and the worker-side `chat {modelId}` span carry `conversation.id`, so a single attribute
   filter surfaces every span for a session across all service instances.
-- **`DurableAIPlugin` is the plugin entry point.** Gated by `[Experimental("TAI001")]`, it is
-  equivalent to `AddDurableAI()` and follows the canonical Temporal AI Partner Ecosystem
-  integration pattern. Suppress `TAI001` with `#pragma warning disable TAI001`.
+- **`AddDurableAI()` is the registration entry point.** The package ships no plugin-registration
+  wrappers; to add your own Temporal plugins, populate `TemporalWorkerOptions.Plugins` or
+  `TemporalClientConnectOptions.Plugins` directly.
 
 ## Getting Started
 

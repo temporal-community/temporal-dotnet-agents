@@ -81,8 +81,7 @@ var response = await proxy.RunAsync("Hello, agent!", session);
 Console.WriteLine(response.Text);
 ```
 
-For the experimental plugin alternative, see `TemporalAgentsPlugin` and
-`AddWorkerPlugin()` in the API documentation; keep it out of the first-run path.
+`AddTemporalAgents()` is the only registration path for agent infrastructure.
 
 ### 3. Run a Sample
 
@@ -163,7 +162,7 @@ Key benefits over in-memory agent frameworks:
 - `WorkingSetContextProvider` — `AIContextProvider` subclass that extracts recently-referenced file paths and injects a working-set note before each LLM call
 - OpenTelemetry distributed tracing with a stable Temporal `agent.turn` parent and optional
   canonical MAF/MEAI child spans; search attributes enabled by default via `EnableSearchAttributes`
-- Plugin composition — `.AddWorkerPlugin()` / `.AddClientPlugin()` available via the `TemporalCommunity.Extensions.AI` dependency (same worker builder, chains after `.AddTemporalAgents()`)
+- Plugin composition — add your own plugins through Temporal's own surface: `TemporalWorkerOptions.Plugins` and `TemporalClientConnectOptions.Plugins`
 
 ## How It Works
 

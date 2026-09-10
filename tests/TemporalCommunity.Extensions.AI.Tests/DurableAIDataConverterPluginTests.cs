@@ -1,34 +1,41 @@
-#pragma warning disable TAI001
-
 using FakeItEasy;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Temporalio.Client;
 using Temporalio.Converters;
 using Temporalio.Extensions.Hosting;
-using Temporalio.Worker;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
 
-public class TemporalPluginBuilderExtensionsTests
+/// <summary>
+/// Covers the internal, automatic <see cref="DurableAIDataConverterPlugin"/> and the
+/// options configurators that <c>AddDurableAI</c> registers to install it.
+/// </summary>
+/// <remarks>
+/// The package no longer exposes any plugin-registration wrappers. Consumers that need to
+/// add their own plugins use Temporal's own surface —
+/// <see cref="Temporalio.Worker.TemporalWorkerOptions.Plugins"/> and
+/// <see cref="TemporalClientConnectOptions.Plugins"/> — so the only plugin behaviour this
+/// package owns is the converter plugin exercised below.
+/// </remarks>
+public class DurableAIDataConverterPluginTests
 {
     // ── Helpers ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Fires all registered IConfigureOptions for TemporalWorkerServiceOptions on a fresh instance.
-    /// Named configurators are fired with their own registered name (obtained via reflection) so
-    /// the action runs regardless of the internal options-name format used by the Hosting library.
+    /// Fires all registered configurators for <see cref="TemporalWorkerServiceOptions"/> on a
+    /// fresh instance. Named configurators are fired with their own registered name (obtained via
+    /// reflection) so the action runs regardless of the internal options-name format used by the
+    /// Hosting library. Post-configurators run afterwards, matching the options pipeline order.
     /// </summary>
-    private static TemporalWorkerServiceOptions BuildWorkerOptions(IServiceProvider provider)
+    private static TemporalWorkerServiceOptions BuildWorkerServiceOptions(IServiceProvider provider)
     {
         var opts = new TemporalWorkerServiceOptions();
         foreach (var svc in provider.GetServices<IConfigureOptions<TemporalWorkerServiceOptions>>())
         {
             if (svc is IConfigureNamedOptions<TemporalWorkerServiceOptions> named)
             {
-                // ConfigureNamedOptions<T> has a public Name property; use it to fire the action
-                // for its registered name rather than Options.DefaultName ("").
                 var name = svc.GetType().GetProperty("Name")?.GetValue(svc) as string;
                 named.Configure(name, opts);
             }
@@ -37,134 +44,24 @@ public class TemporalPluginBuilderExtensionsTests
                 svc.Configure(opts);
             }
         }
+        foreach (var svc in provider.GetServices<IPostConfigureOptions<TemporalWorkerServiceOptions>>())
+        {
+            svc.PostConfigure(string.Empty, opts);
+        }
         return opts;
     }
 
-    // ── AddWorkerPlugin ───────────────────────────────────────────────────
-
-    [Fact]
-    public void AddWorkerPlugin_SinglePlugin_AppearsInOptions()
+    private static ITemporalClient CreateDurableClient()
     {
-        var services = new ServiceCollection();
-        var plugin = A.Fake<ITemporalWorkerPlugin>();
-        A.CallTo(() => plugin.Name).Returns("test-worker-plugin");
-
-        services.AddHostedTemporalWorker("my-queue").AddWorkerPlugin(plugin);
-
-        var opts = BuildWorkerOptions(services.BuildServiceProvider());
-
-        Assert.NotNull(opts.Plugins);
-        Assert.Contains(plugin, opts.Plugins);
+        var client = A.Fake<ITemporalClient>();
+        A.CallTo(() => client.Options).Returns(new TemporalClientOptions
+        {
+            DataConverter = DurableAIDataConverter.Instance,
+        });
+        return client;
     }
 
-    [Fact]
-    public void AddWorkerPlugin_MultiplePlugins_PreservesOrder()
-    {
-        var services = new ServiceCollection();
-        var plugin1 = A.Fake<ITemporalWorkerPlugin>();
-        var plugin2 = A.Fake<ITemporalWorkerPlugin>();
-        A.CallTo(() => plugin1.Name).Returns("plugin-1");
-        A.CallTo(() => plugin2.Name).Returns("plugin-2");
-
-        services.AddHostedTemporalWorker("my-queue")
-            .AddWorkerPlugin(plugin1)
-            .AddWorkerPlugin(plugin2);
-
-        var opts = BuildWorkerOptions(services.BuildServiceProvider());
-        var plugins = opts.Plugins!.ToList();
-
-        Assert.Equal(2, plugins.Count);
-        Assert.Same(plugin1, plugins[0]);
-        Assert.Same(plugin2, plugins[1]);
-    }
-
-    [Fact]
-    public void AddWorkerPlugin_NullPlugin_Throws()
-    {
-        var services = new ServiceCollection();
-        var builder = services.AddHostedTemporalWorker("my-queue");
-        Assert.Throws<ArgumentNullException>(() => builder.AddWorkerPlugin(null!));
-    }
-
-    // ── AddClientPlugin (worker builder) ─────────────────────────────────
-
-    [Fact]
-    public void AddClientPlugin_WorkerBuilder_ClientOptionsNull_DoesNotThrow()
-    {
-        var services = new ServiceCollection();
-        var plugin = A.Fake<ITemporalClientPlugin>();
-        A.CallTo(() => plugin.Name).Returns("test-client-plugin");
-
-        // 1-arg overload — no ClientOptions; action should be a no-op
-        var builder = services.AddHostedTemporalWorker("my-queue");
-        var ex = Record.Exception(() => builder.AddClientPlugin(plugin));
-        Assert.Null(ex);
-
-        // Firing configurators on an options instance with null ClientOptions should not throw
-        var opts = BuildWorkerOptions(services.BuildServiceProvider());
-        Assert.Null(opts.ClientOptions);
-    }
-
-    [Fact]
-    public void AddClientPlugin_WorkerBuilder_ClientOptionsSet_AppendsPlugin()
-    {
-        var services = new ServiceCollection();
-        var plugin = A.Fake<ITemporalClientPlugin>();
-        A.CallTo(() => plugin.Name).Returns("test-client-plugin");
-
-        // 3-arg overload sets ClientOptions
-        services.AddHostedTemporalWorker("localhost:7233", "default", "my-queue")
-            .AddClientPlugin(plugin);
-
-        var opts = BuildWorkerOptions(services.BuildServiceProvider());
-
-        Assert.NotNull(opts.ClientOptions);
-        Assert.NotNull(opts.ClientOptions.Plugins);
-        Assert.Contains(plugin, opts.ClientOptions.Plugins);
-    }
-
-    // ── AddClientPlugin (OptionsBuilder<TemporalClientConnectOptions>) ───
-
-    [Fact]
-    public void AddClientPlugin_OptionsBuilder_AppendsPlugin()
-    {
-        var services = new ServiceCollection();
-        var plugin = A.Fake<ITemporalClientPlugin>();
-        A.CallTo(() => plugin.Name).Returns("test-client-plugin");
-
-        services.AddOptions<TemporalClientConnectOptions>()
-            .AddClientPlugin(plugin);
-
-        var opts = services.BuildServiceProvider()
-            .GetRequiredService<IOptions<TemporalClientConnectOptions>>().Value;
-
-        Assert.NotNull(opts.Plugins);
-        Assert.Contains(plugin, opts.Plugins);
-    }
-
-    [Fact]
-    public void AddClientPlugin_OptionsBuilder_MultiplePlugins_PreservesOrder()
-    {
-        var services = new ServiceCollection();
-        var plugin1 = A.Fake<ITemporalClientPlugin>();
-        var plugin2 = A.Fake<ITemporalClientPlugin>();
-        A.CallTo(() => plugin1.Name).Returns("plugin-1");
-        A.CallTo(() => plugin2.Name).Returns("plugin-2");
-
-        services.AddOptions<TemporalClientConnectOptions>()
-            .AddClientPlugin(plugin1)
-            .AddClientPlugin(plugin2);
-
-        var opts = services.BuildServiceProvider()
-            .GetRequiredService<IOptions<TemporalClientConnectOptions>>().Value;
-
-        var plugins = opts.Plugins!.ToList();
-        Assert.Equal(2, plugins.Count);
-        Assert.Same(plugin1, plugins[0]);
-        Assert.Same(plugin2, plugins[1]);
-    }
-
-    // ── DurableAIDataConverterPlugin ─────────────────────────────────────
+    // ── DurableAIDataConverterPlugin.ConfigureClient ─────────────────────
 
     [Fact]
     public void DurableAIDataConverterPlugin_DefaultConverter_SetsInstance()
@@ -194,8 +91,9 @@ public class TemporalPluginBuilderExtensionsTests
     [Fact]
     public void DurableAIDataConverterPlugin_ConfigureClient_IsIdempotent_WhenCalledTwice()
     {
-        // Pins the contract that calling AddDurableAI() AND .AddClientPlugin(new DurableAIDataConverterPlugin())
-        // is safe — a future refactor cannot silently regress this.
+        // The plugin is installed automatically by AddDurableAI's configurators, and the
+        // options pipeline can fire those more than once. A second application must be a
+        // no-op — a future refactor cannot silently regress this.
         var plugin = new DurableAIDataConverterPlugin();
         var options = new TemporalClientOptions();
 
@@ -291,5 +189,32 @@ public class TemporalPluginBuilderExtensionsTests
 
         Assert.Contains("No ITemporalClient registered in DI", ex.Message);
         Assert.Contains("AddDurableAI", ex.Message);
+    }
+
+    // ── DataConverter dedupe in PostConfigure ────────────────────────────
+
+    [Fact]
+    public void DurableAIWorkerClientConfigurator_DoesNotPushDuplicate()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(CreateDurableClient());
+        services.AddHostedTemporalWorker("localhost:7233", "default", "my-queue")
+            .AddDurableAI();
+
+        var opts = BuildWorkerServiceOptions(services.BuildServiceProvider());
+
+        // Fire the IPostConfigureOptions a second time on the same options to
+        // simulate a double-application path. The dedupe must hold.
+        var provider = services.BuildServiceProvider();
+        foreach (var svc in provider.GetServices<IPostConfigureOptions<TemporalWorkerServiceOptions>>())
+        {
+            svc.PostConfigure(string.Empty, opts);
+        }
+
+        Assert.NotNull(opts.ClientOptions);
+        var converterPluginCount = opts.ClientOptions!.Plugins?
+            .Count(p => string.Equals(p.Name, DurableAIDataConverterPlugin.PluginName, StringComparison.Ordinal)) ?? 0;
+        Assert.Equal(1, converterPluginCount);
     }
 }

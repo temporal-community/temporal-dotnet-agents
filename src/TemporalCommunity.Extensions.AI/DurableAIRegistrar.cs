@@ -10,9 +10,8 @@ namespace TemporalCommunity.Extensions.AI;
 
 /// <summary>
 /// Internal helper that performs the DI side of registering durable AI services.
-/// Shared by <see cref="DurableAIServiceCollectionExtensions.AddDurableAI"/> and
-/// the <c>DurableAIPlugin</c> entry point so the two paths converge on
-/// byte-equivalent DI state. Idempotent — safe to call more than once thanks to
+/// Invoked by <see cref="DurableAIServiceCollectionExtensions.AddDurableAI"/>, the single
+/// registration path for durable AI. Idempotent — safe to call more than once thanks to
 /// <see cref="ServiceCollectionDescriptorExtensions.TryAddEnumerable(IServiceCollection, ServiceDescriptor)"/>
 /// and <see cref="ServiceCollectionDescriptorExtensions.TryAddSingleton{TService}(IServiceCollection)"/>.
 /// </summary>

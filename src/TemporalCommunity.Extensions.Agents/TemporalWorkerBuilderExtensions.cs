@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using Temporalio.Extensions.Hosting;
 
 namespace TemporalCommunity.Extensions.Agents;
@@ -43,37 +42,6 @@ public static class TemporalWorkerBuilderExtensions
 
         TemporalAgentsRegistrar.Register(builder.Services, builder, agentsOptions);
 
-        return builder;
-    }
-
-    /// <summary>
-    /// Registers a <see cref="TemporalAgentsPlugin"/> on the worker and its associated DI services.
-    /// </summary>
-    /// <param name="builder">The worker options builder returned by AddHostedTemporalWorker.</param>
-    /// <param name="plugin">The agents plugin to add.</param>
-    /// <returns>The same builder for further chaining.</returns>
-    /// <remarks>
-    /// Deliberately not named <c>AddWorkerPlugin</c>. The Temporal SDK owns
-    /// <see cref="ITemporalWorkerServiceOptionsBuilder"/> and does not ship a plugin-registration
-    /// extension today; if it adds one, an overload of ours sharing that name would be shadowed
-    /// with no signature change and no diagnostic — the DI half of this registration would
-    /// silently stop happening. A distinct name cannot be shadowed.
-    /// </remarks>
-    [Experimental("TA001")]
-    public static ITemporalWorkerServiceOptionsBuilder AddTemporalAgentsPlugin(
-        this ITemporalWorkerServiceOptionsBuilder builder,
-        TemporalAgentsPlugin plugin)
-    {
-        ArgumentNullException.ThrowIfNull(builder);
-        ArgumentNullException.ThrowIfNull(plugin);
-
-        TemporalAgentsRegistrar.Register(builder.Services, builder, plugin.Options);
-        builder.ConfigureOptions(opts =>
-        {
-            var list = opts.Plugins?.ToList() ?? [];
-            list.Add(plugin);
-            opts.Plugins = list;
-        });
         return builder;
     }
 }

@@ -192,31 +192,6 @@ public class TemporalWorkerBuilderExtensionsTests
         Assert.NotNull(workerOptions);
     }
 
-#pragma warning disable TA001
-    [Fact]
-    public void TemporalAgentsPlugin_NameMatchesPluginNameConstant()
-    {
-        var plugin = new TemporalAgentsPlugin();
-        Assert.Equal(TemporalAgentsPlugin.PluginName, plugin.Name);
-    }
-
-    [Fact]
-    public void AddWorkerPlugin_RegistersEquivalentServicesToAddTemporalAgents()
-    {
-        var services = new ServiceCollection();
-        services.AddSingleton(A.Fake<ITemporalClient>());
-        var builder = services.AddHostedTemporalWorker("test-task-queue");
-        var plugin = new TemporalAgentsPlugin(opts => opts.AddDurableAgent("plugin-agent", ConfigureWithChatClient));
-
-        builder.AddTemporalAgentsPlugin(plugin);
-
-        var provider = services.BuildServiceProvider();
-        var client = provider.GetService<ITemporalAgentClient>();
-        Assert.NotNull(client);
-        Assert.IsType<DefaultTemporalAgentClient>(client);
-    }
-#pragma warning restore TA001
-
     [Fact]
     public void AddTemporalAgents_WithoutITemporalClient_ThrowsInvalidOperationException()
     {

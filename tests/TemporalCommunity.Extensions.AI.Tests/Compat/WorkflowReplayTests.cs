@@ -1,5 +1,3 @@
-#pragma warning disable TAI001 // DurableAIPlugin is [Experimental("TAI001")]; deliberate use in tests
-
 using Temporalio.Common;
 using Temporalio.Exceptions;
 using Temporalio.Worker;
@@ -60,8 +58,8 @@ public class WorkflowReplayTests
     }
 
     /// <summary>
-    /// Build a <see cref="WorkflowReplayer"/> wired with <see cref="DurableChatWorkflow"/>
-    /// via the same plugin hook that production workers use.
+    /// Build a <see cref="WorkflowReplayer"/> wired with <see cref="DurableChatWorkflow"/> —
+    /// the same workflow <c>AddDurableAI</c> registers on a production worker.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -82,8 +80,7 @@ public class WorkflowReplayTests
         {
             DataConverter = DurableAIDataConverter.CreateDataConverter(codec),
         };
-        var plugin = new DurableAIPlugin();
-        plugin.ConfigureReplayer(opts);
+        opts.AddWorkflow<DurableChatWorkflow>();
         opts.AddWorkflow<DurableChatClientWorkflow>();
         opts.AddWorkflow<TypedDurableTurnWorkflow>();
         return new WorkflowReplayer(opts);

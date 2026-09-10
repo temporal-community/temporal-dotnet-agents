@@ -13,8 +13,8 @@ namespace TemporalCommunity.Extensions.Agents;
 
 /// <summary>
 /// Internal helper that performs the DI side of registering agent services.
-/// Shared by <see cref="TemporalWorkerBuilderExtensions.AddTemporalAgents"/> and
-/// <see cref="TemporalAgentsPlugin"/> so both paths converge on identical DI state.
+/// Invoked by <see cref="TemporalWorkerBuilderExtensions.AddTemporalAgents"/>, the single
+/// registration path for agent infrastructure.
 /// </summary>
 internal static class TemporalAgentsRegistrar
 {

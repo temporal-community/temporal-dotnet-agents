@@ -3,8 +3,6 @@
 // durable chat session.
 // Run:  dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
 
-#pragma warning disable TAI001 // Opt in to the experimental plugin surface (DurableAIPlugin, AddDurableAIPlugin)
-
 using System.ClientModel;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -109,16 +107,14 @@ IChatClient openAiChatClient = new OpenAIClient(
 // To see per-tool spans, look at samples/MEAI/DurableTools or samples/MEAI/DurableChat.
 builder.Services.AddChatClient(openAiChatClient);
 
-// ── Setup: Register worker + durable AI via the plugin path ─────────────────
-// AddDurableAIPlugin is the canonical pattern for AI integrations. It is named distinctly
-// from the generic AddWorkerPlugin so a future SDK method cannot shadow the DI half.
-// It registers DurableChatWorkflow, DurableChatActivities,
-// DurableFunctionActivities, DurableEmbeddingActivities, the function registry,
-// DurableChatSessionClient, the DurableExecutionOptions singleton, and queues
-// DurableAIPlugin in the worker plugin chain — equivalent to AddDurableAI().
+// ── Setup: Register worker + durable AI ────────────────────────────────────
+// AddDurableAI is the registration path for AI integrations. It registers
+// DurableChatWorkflow, DurableChatActivities, DurableFunctionActivities,
+// DurableEmbeddingActivities, the function registry, DurableChatSessionClient,
+// the DurableExecutionOptions singleton, and the DurableAIDataConverter wiring.
 builder.Services
     .AddHostedTemporalWorker("durable-chat-otel")
-    .AddDurableAIPlugin(new DurableAIPlugin(opts =>
+    .AddDurableAI(opts =>
     {
         opts.ActivityTimeout = TimeSpan.FromMinutes(5);
         // Demo-friendly TTL (default is 14 days). The sample finishes in seconds;
@@ -128,7 +124,7 @@ builder.Services
         // "retry forever" default — a footgun for transient failures. LLM
         // activities are generally idempotent, so 3 attempts is a sensible cap.
         opts.RetryPolicy = new RetryPolicy { MaximumAttempts = 3 };
-    }));
+    });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 var host = builder.Build();
