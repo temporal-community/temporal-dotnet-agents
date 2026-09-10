@@ -17,7 +17,7 @@ how to subscribe to the library's stable `Meter` name and the
 - `DurableChatTelemetry.MeterName` must be registered with the meter provider to collect durable
   toolset resolver and validation measurements
 - `TracingInterceptor` propagates the W3C `traceparent` header across gRPC boundaries
-- Plugin registration path: `AddWorkerPlugin(new DurableAIPlugin(...))` as an alternative to
+- Plugin registration path: `AddDurableAIPlugin(new DurableAIPlugin(...))` as an alternative to
   `AddDurableAI()`
 
 ## Span Hierarchy

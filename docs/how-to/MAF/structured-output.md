@@ -1,324 +1,213 @@
-# Structured Output
+# Structured output
 
-How to get typed, deserialized responses from agents using `RunAsync<T>` — including markdown fence stripping, retry-on-failure with LLM self-correction, and the `ChatResponseFormat` alternative.
+Three ways to get typed data out of an agent. They are ordered by how much the library does for
+you, and the first one that fits is the right one.
 
----
+| Use | When |
+|---|---|
+| MAF's `RunAsync<T>` | Default. The provider honours JSON-schema decoding and a malformed reply should fail loudly. |
+| `RunStructuredAsync<T>` | The model wraps JSON in code fences or adds prose, or you want an automatic corrective retry. |
+| `ChatResponseFormat` + manual parse | You need the raw text, or your own parsing and error handling. |
 
-## Table of Contents
-
-1. [Overview](#overview)
-2. [RunAsync\<T\> — Recommended Approach](#runasynct--recommended-approach)
-3. [How the Retry Loop Works](#how-the-retry-loop-works)
-4. [Markdown Code Fence Stripping](#markdown-code-fence-stripping)
-5. [StructuredOutputOptions](#structuredoutputoptions)
-6. [ChatResponseFormat — Format Hint Only](#chatresponseformat--format-hint-only)
-7. [RunAsync\<T\> vs ChatResponseFormat](#runasynct-vs-chatresponseformat)
-8. [Available Overloads](#available-overloads)
-9. [Common Pitfalls](#common-pitfalls)
-10. [ResponseFormat in Workflow State](#responseformat-in-workflow-state)
+All three send a schema to the model. The difference is what happens to the reply afterwards.
 
 ---
 
-## Overview
+## 1. MAF's `RunAsync<T>` — the default
 
-LLMs naturally return free-form text. When you need structured data — a typed object, a list of items, a decision enum — you have two options in TemporalAgents:
-
-1. **`RunAsync<T>`** (recommended) — sends a normal prompt, strips markdown fences from the response, deserializes to `T`, and retries with error context if deserialization fails
-2. **`ChatResponseFormat`** — tells the LLM to output JSON matching a schema, but does not automatically deserialize or retry
-
-`RunAsync<T>` is the higher-level API that handles the messy reality of LLM output: code fences, trailing text, formatting inconsistencies, and occasional schema violations.
-
----
-
-## RunAsync\<T\> — Recommended Approach
+`AIAgent.RunAsync<T>` comes from Microsoft Agent Framework, not from this library. It generates a
+JSON Schema from `T`, sets it as the response format, and returns a lazily-deserialized result.
 
 ```csharp
 public record WeatherReport(string City, double TemperatureC, string Summary);
 
 var session = await agentProxy.CreateSessionAsync();
 
-WeatherReport report = await agentProxy.RunAsync<WeatherReport>(
-    new List<ChatMessage> { new(ChatRole.User, "What's the weather in Seattle?") },
+AgentResponse<WeatherReport> response = await agentProxy.RunAsync<WeatherReport>(
+    [new ChatMessage(ChatRole.User, "What's the weather in Seattle?")],
     session);
 
-Console.WriteLine($"{report.City}: {report.TemperatureC}°C — {report.Summary}");
+WeatherReport report = response.Result;
 ```
 
-What happens under the hood:
+Note the shape: it returns `AgentResponse<T>`, and `.Result` performs the deserialization — so a
+malformed reply throws at the property access, not at the `await`.
 
-1. The agent runs normally, producing a text response
-2. `MarkdownCodeFenceHelper.StripMarkdownCodeFences` removes any `` ```json ... ``` `` wrapping
-3. `JsonSerializer.Deserialize<T>` attempts to parse the cleaned text
-4. If deserialization fails and retries remain, the error is appended to the conversation and the agent is called again
-5. The LLM sees its previous (failed) output plus the error, and self-corrects
+This works through the durable pipeline unchanged. The response format is carried on `RunRequest`,
+persisted into the session history, and reapplied on replay.
+
+**It does not tolerate a fenced reply.** If the model answers with ```` ```json ```` around the
+object, `.Result` throws. That is the entire reason the next option exists.
 
 ---
 
-## How the Retry Loop Works
+## 2. `RunStructuredAsync<T>` — fence-tolerant, with corrective retries
+
+This library's addition. It calls MAF's typed run underneath — so you keep the generated schema —
+then adds two things: markdown-fence stripping, and a retry that shows the model its own parse
+error.
 
 ```csharp
-for (int attempt = 0; attempt <= options.MaxRetries; attempt++)
+WeatherReport report = await agentProxy.RunStructuredAsync<WeatherReport>(
+    [new ChatMessage(ChatRole.User, "What's the weather in Seattle?")],
+    session);
+```
+
+It returns `T` directly, and throws at the `await` if every attempt fails.
+
+**Order of operations per attempt:**
+
+1. Run the agent with the schema from `T` attached.
+2. Try to read the result exactly as MAF would — this also unwraps the object MAF wraps around
+   non-object `T` such as `List<Report>` or `int`.
+3. If that fails, strip markdown fences and try again.
+4. If that fails and a retry remains, append the failed reply plus the parse error to the
+   conversation and go back to step 1.
+
+### Why the name is not `RunAsync<T>`
+
+MAF declares `RunAsync<T>` as an *instance* method on `AIAgent`, and an instance method always wins
+over an extension method. An extension with that name is unreachable from the call shape most
+people write, and the only symptom is a quietly different return type. `RunStructuredAsync<T>`
+cannot be shadowed, and the call site says which behaviour is in play.
+
+### Available on all three receivers
+
+```csharp
+// Inside a workflow
+var agent = WorkflowAgents.GetTemporalAgent("AnalystAgent");
+var analysis = await agent.RunStructuredAsync<AnalysisResult>(messages, session);
+
+// External caller
+var proxy = services.GetTemporalAgentProxy("AnalystAgent");
+var analysis = await proxy.RunStructuredAsync<AnalysisResult>(messages, session);
+
+// Via the client
+var analysis = await client.RunStructuredAsync<AnalysisResult>(sessionId, new RunRequest(messages));
+```
+
+---
+
+## 3. `ChatResponseFormat` — manual control
+
+Set the response format yourself and parse the text however you like. Nothing is stripped,
+deserialized, or retried.
+
+```csharp
+var options = new TemporalAgentRunOptions
 {
-    var response = await agent.RunAsync(workingMessages, session);
-    var stripped = MarkdownCodeFenceHelper.StripMarkdownCodeFences(response.Text);
+    ResponseFormat = ChatResponseFormat.ForJsonSchema<WeatherReport>()
+};
 
-    try
-    {
-        return JsonSerializer.Deserialize<T>(stripped, options.JsonSerializerOptions)
-            ?? throw new JsonException($"Deserialization returned null for type '{typeof(T).Name}'.");
-    }
-    catch (JsonException ex) when (attempt < options.MaxRetries)
-    {
-        if (options.IncludeErrorContext)
-        {
-            // Append the failed output and error so the LLM can self-correct
-            workingMessages.Add(new ChatMessage(ChatRole.Assistant, response.Text));
-            workingMessages.Add(new ChatMessage(ChatRole.User,
-                $"Your response could not be parsed as valid JSON. Error: {ex.Message}\n" +
-                $"Please respond with ONLY valid JSON matching the expected schema " +
-                $"for type '{typeof(T).Name}'. Do not wrap it in markdown code fences."));
-        }
-    }
-}
+var response = await agentProxy.RunAsync("What's the weather?", session, options);
+var report = JsonSerializer.Deserialize<WeatherReport>(response.Text!);
 ```
 
-**Key behaviors:**
+Reach for this when you need the raw text — to log it, to inspect it before parsing, or because
+your error handling differs from the retry loop above.
 
-- **Default: 3 total attempts** (1 initial + 2 retries)
-- **Error context injection** — the LLM sees the `JsonException` message and a reminder of the target type
-- **History accumulates** — each retry adds 2 messages (failed assistant response + user correction), so the agent's context grows. This is why `MaxRetries` defaults to 2, not 10
-- **Final attempt throws** — if the last attempt fails, the `JsonException` propagates to the caller
-- **Empty responses throw immediately** — no retry for blank output
+`ResponseFormat` is **per request**. Setting it on one call does not carry to the next call in the
+same session.
 
 ---
 
-## Markdown Code Fence Stripping
-
-Many LLMs wrap JSON in markdown code fences even when instructed not to:
-
-```markdown
-```json
-{"city": "Seattle", "temperatureC": 12.5, "summary": "Cloudy"}
-`` `
-```
-
-`MarkdownCodeFenceHelper` handles this transparently:
-
-1. **Fence detection** — recognizes `` ```json ``, `` ```JSON ``, and plain `` ``` ``
-2. **Fence stripping** — extracts content between opening and closing fences
-3. **Balanced JSON extraction** — finds the first balanced `{}` or `[]` structure, respecting string escaping and nested braces
-
-This means it also handles responses like:
-
-```
-Here's the weather data:
-
-```json
-{"city": "Seattle", "temperatureC": 12.5}
-`` `
-
-I hope this helps!
-```
-
-The helper extracts only `{"city": "Seattle", "temperatureC": 12.5}`.
-
----
-
-## StructuredOutputOptions
+## Configuration
 
 ```csharp
-var report = await agentProxy.RunAsync<WeatherReport>(
+var report = await agentProxy.RunStructuredAsync<WeatherReport>(
     messages,
     session,
     new StructuredOutputOptions
     {
-        MaxRetries = 3,                    // default: 2
-        IncludeErrorContext = true,         // default: true
-        JsonSerializerOptions = myOptions   // default: null (uses JsonSerializerOptions.Default)
+        MaxRetries = 3,
+        IncludeErrorContext = true,
+        JsonSerializerOptions = myOptions,
     });
 ```
 
-| Property | Default | Description |
-|----------|---------|-------------|
-| `MaxRetries` | 2 | Number of retry attempts after the initial call |
-| `IncludeErrorContext` | true | Whether to append the error message and schema reminder on retry |
-| `JsonSerializerOptions` | null | Custom serializer options (e.g., for `camelCase` property naming) |
-
-**When to increase `MaxRetries`:** Complex schemas with nested objects, enums, or strict validation constraints. Each retry adds ~2 messages to the context.
-
-**When to disable `IncludeErrorContext`:** If you're using a model that performs worse with verbose error feedback. In practice, this is rare — most models benefit from seeing their mistakes.
-
-**When to set `JsonSerializerOptions`:** When your target type uses `[JsonPropertyName]` attributes or non-default naming policies:
-
-```csharp
-var opts = new JsonSerializerOptions
-{
-    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    PropertyNameCaseInsensitive = true
-};
-
-var result = await agent.RunAsync<MyType>(messages, session,
-    new StructuredOutputOptions { JsonSerializerOptions = opts });
-```
-
----
-
-## ChatResponseFormat — Format Hint Only
-
-`ChatResponseFormat` tells the LLM to output JSON matching a schema, but does **not** strip fences, deserialize, or retry:
-
-```csharp
-var options = new TemporalAgentRunOptions
-{
-    ResponseFormat = ChatResponseFormat.ForJsonSchema<WeatherReport>()
-};
-
-var session = await agentProxy.CreateSessionAsync();
-var response = await agentProxy.RunAsync("What's the weather?", session, options);
-
-// Manual deserialization — no fence stripping, no retry
-var report = JsonSerializer.Deserialize<WeatherReport>(response.Text!);
-```
-
-This is useful when:
-- You want fine-grained control over deserialization
-- You need to inspect the raw text before parsing
-- The model supports native JSON mode (e.g., OpenAI's `response_format`)
-
----
-
-## RunAsync\<T\> vs ChatResponseFormat
-
-| | `RunAsync<T>` | `ChatResponseFormat` |
+| Property | Default | Behaviour |
 |---|---|---|
-| **Fence stripping** | Automatic | Manual |
-| **Deserialization** | Automatic | Manual |
-| **Retry on failure** | Yes, with error context | No |
-| **LLM self-correction** | Yes | No |
-| **Per-request scope** | Yes | Yes |
-| **Works with all models** | Yes | Requires model JSON mode support |
-| **Token overhead** | Retry adds ~2 messages per attempt | None (single attempt) |
+| `MaxRetries` | `2` | Retries after the initial call, so 3 attempts total. Each retry adds two messages to the conversation. |
+| `IncludeErrorContext` | `true` | Appends the failed reply and the parse error so the model can self-correct. Turning it off makes retries blind repeats. |
+| `JsonSerializerOptions` | `null` → web defaults | camelCase, case-insensitive. |
 
-**Recommendation:** Use `RunAsync<T>` unless you have a specific reason to handle deserialization yourself. The retry mechanism is what makes it resilient in production — LLMs occasionally produce invalid JSON, and self-correction succeeds on the second attempt in most cases.
+### The JSON defaults are deliberate
 
----
+The default is `JsonSerializerDefaults.Web` because that is what models emit.
 
-## Available Overloads
-
-`RunAsync<T>` is available on all three agent types:
-
-### Inside a Workflow (TemporalAIAgent)
-
-```csharp
-var agent = WorkflowAgents.GetTemporalAgent("AnalystAgent");
-var session = await agent.CreateSessionAsync();
-
-var analysis = await agent.RunAsync<AnalysisResult>(
-    [new ChatMessage(ChatRole.User, "Analyze this data...")],
-    session);
-```
-
-### External Caller (AIAgent Proxy)
-
-```csharp
-var proxy = services.GetTemporalAgentProxy("AnalystAgent");
-var session = await proxy.CreateSessionAsync();
-
-var analysis = await proxy.RunAsync<AnalysisResult>(
-    [new ChatMessage(ChatRole.User, "Analyze this data...")],
-    session);
-```
-
-### Via ITemporalAgentClient
-
-```csharp
-ITemporalAgentClient client = // resolved from DI
-var sessionId = new TemporalAgentSessionId("AnalystAgent", userId);
-
-var analysis = await client.RunAgentAsync<AnalysisResult>(
-    sessionId,
-    new RunRequest([new ChatMessage(ChatRole.User, "Analyze this data...")]));
-```
+Do not substitute `JsonSerializerOptions.Default` here. It is PascalCase and case-**sensitive**,
+and against `{"city":"Seattle"}` it does not throw — it returns a `WeatherReport` with every
+member defaulted. No exception means no retry, so the caller gets a silently empty object rather
+than an error. Caller-supplied options replace the default entirely, so this is a real hazard if
+you pass `JsonSerializerOptions.Default` explicitly.
 
 ---
 
-## Common Pitfalls
+## Pitfalls
 
-### Nullable root types
+### Prose containing a brace before the JSON
 
-```csharp
-// RISKY — if the LLM returns "null", deserialization succeeds but returns null
-WeatherReport? report = await agent.RunAsync<WeatherReport?>(messages, session);
+Fence stripping falls back to finding the first balanced `{` or `[`, so a brace earlier in the
+reply wins over the payload:
 
-// BETTER — use non-nullable T so null results throw JsonException
-WeatherReport report = await agent.RunAsync<WeatherReport>(messages, session);
+```text
+Use the {city} placeholder.
+```json
+{"city": "Seattle"}
+```
 ```
 
-`RunAsync<T>` explicitly throws when deserialization returns `null` to prevent silent null propagation.
+That extracts `{city}`, fails to deserialize, and costs a retry. Telling the agent to answer with
+JSON and nothing else is cheaper than paying for the recovery.
 
-### Union types and polymorphism
+### Non-object `T`
 
-System.Text.Json does not natively deserialize polymorphic types without a discriminator. If your target type has abstract base classes or interfaces, configure a custom `JsonSerializerOptions` with a `JsonDerivedType` attribute or converter.
+For `List<Report>`, `int`, and other non-object types, MAF wraps the schema in an envelope so the
+payload satisfies providers that require a root object. Both `RunAsync<T>` and
+`RunStructuredAsync<T>` unwrap it for you. Hand-parsing the raw text with option 3 does not.
 
-### Large schemas
+### Large or polymorphic schemas
 
-Very complex schemas (deeply nested objects, many optional fields) increase the chance of the LLM producing invalid JSON on the first attempt. Consider:
-- Increasing `MaxRetries` to 3
-- Simplifying the target type (flatten nested structures)
-- Adding `[JsonPropertyName]` attributes with short, clear names
-
-### ResponseFormat is per-request, not per-session
-
-Setting `ResponseFormat` on one `RunAsync` call does **not** carry over to subsequent calls in the same session:
-
-```csharp
-// Only this call uses JSON format — the next RunAsync returns text
-var options = new TemporalAgentRunOptions
-{
-    ResponseFormat = ChatResponseFormat.ForJsonSchema<WeatherReport>()
-};
-await proxy.RunAsync("Weather?", session, options);
-
-// This call returns normal text
-await proxy.RunAsync("Tell me more", session);
-```
+`System.Text.Json` will not deserialize an abstract base or interface without a discriminator —
+configure `[JsonDerivedType]` or a converter. Deeply nested schemas raise the odds of a malformed
+first attempt; flattening the type usually beats raising `MaxRetries`.
 
 ---
 
-## ResponseFormat in Workflow State
+## How the response format is stored
 
-When `ChatResponseFormat` is used, it's serialized into the conversation history as part of `AgentSessionRequest` (the MAF-specific subclass of `DurableSessionRequest` from `TemporalCommunity.Extensions.AI`):
+`ChatResponseFormat` is serialized into the conversation history on `AgentSessionRequest`, the
+MAF-specific subclass of `DurableSessionRequest`:
 
-- `ResponseType`: `"json"` or `"text"`
-- `ResponseSchema`: the JSON schema as a `JsonElement` (for `ChatResponseFormatJson`)
-- `Messages`: the request messages as `ChatMessage[]` (MEAI type, stored directly on the shared `DurableSessionEntry` base)
+- `ResponseType` — `"json"` or `"text"`
+- `ResponseSchema` — the schema as a `JsonElement`, for `ChatResponseFormatJson`
 
-These two response-format fields are MAF-specific — they live on `AgentSessionRequest`, not on the shared base type, since the AI library has no analog for structured output today. On replay the same format hint and messages are sent to the LLM, preserving determinism. `ChatMessage`/`AIContent` polymorphism is preserved end-to-end via `DurableAIDataConverter`.
+Both fields are MAF-side only; the AI library has no structured-output analogue today. On replay
+the same format and messages are sent to the model, so the run stays deterministic.
+`ChatMessage`/`AIContent` polymorphism survives via `DurableAIDataConverter`.
 
-### Threading a correlation ID through structured-output runs
+### Correlation IDs
 
-`StructuredOutputExtensions.RunAsync<T>` accepts an optional `correlationId` parameter directly (it's an extension surface owned by this library, so the correlation ID is a first-class parameter rather than going through `TemporalAgentRunOptions`):
+`RunStructuredAsync<T>` takes `correlationId` as a first-class parameter rather than routing it
+through `TemporalAgentRunOptions`:
 
 ```csharp
-var report = await proxy.RunAsync<WeatherReport>(
-    messages,
-    session,
-    correlationId: "request-abc-123");  // appears on the AgentSessionRequest entry
+var report = await proxy.RunStructuredAsync<WeatherReport>(
+    messages, session, correlationId: "request-abc-123");
 ```
 
-When omitted, the workflow auto-generates one via `Workflow.NewGuid()` (or `Guid.NewGuid()` outside workflow context).
+Omit it and one is generated — `Workflow.NewGuid()` inside a workflow, `Guid.NewGuid()` outside.
+Each retry attempt gets a fresh ID on the client overload.
 
 ---
 
 ## References
 
-- `src/TemporalCommunity.Extensions.Agents/StructuredOutputExtensions.cs` — `RunAsync<T>` implementation
-- `src/TemporalCommunity.Extensions.Agents/StructuredOutputOptions.cs` — configuration options
-- `src/TemporalCommunity.Extensions.Agents/MarkdownCodeFenceHelper.cs` — fence stripping logic
-- `tests/TemporalCommunity.Extensions.Agents.Tests/MarkdownCodeFenceHelperTests.cs` — 11 edge-case tests
-- `tests/TemporalCommunity.Extensions.Agents.Tests/StructuredOutputOptionsTests.cs` — option validation tests
-- [Usage Guide — Structured Output](./usage.md#structured-output) — quick-start examples
+- `src/TemporalCommunity.Extensions.Agents/StructuredOutputExtensions.cs`
+- `src/TemporalCommunity.Extensions.Agents/StructuredOutputOptions.cs`
+- `src/TemporalCommunity.Extensions.Agents/MarkdownCodeFenceHelper.cs`
+- `tests/TemporalCommunity.Extensions.Agents.Tests/StructuredOutputExtensionsTests.cs`
+- `tests/TemporalCommunity.Extensions.Agents.Tests/MarkdownCodeFenceHelperTests.cs` — 13 edge cases
+- [Usage guide](./usage.md)
 
----
-
-_Last updated: 2026-04-30_
+_Last updated: 2026-09-10_

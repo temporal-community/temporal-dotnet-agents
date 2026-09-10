@@ -19,7 +19,7 @@ namespace TemporalCommunity.Extensions.AI;
 /// <para>
 /// Activities cannot be registered from <see cref="ConfigureWorker"/> directly
 /// (they need DI and there is no <see cref="IServiceProvider"/> available at
-/// this hook). Use <see cref="TemporalPluginBuilderExtensions.AddWorkerPlugin(Hosting.ITemporalWorkerServiceOptionsBuilder, DurableAIPlugin)"/>
+/// this hook). Use <see cref="TemporalPluginBuilderExtensions.AddDurableAIPlugin(Hosting.ITemporalWorkerServiceOptionsBuilder, DurableAIPlugin)"/>
 /// to register both the plugin and the DI side in one call.
 /// </para>
 /// <para>
@@ -68,7 +68,7 @@ public sealed class DurableAIPlugin : ITemporalWorkerPlugin
 
     /// <summary>
     /// Gets the options carried by this plugin. Used by the
-    /// <see cref="TemporalPluginBuilderExtensions.AddWorkerPlugin(Hosting.ITemporalWorkerServiceOptionsBuilder, DurableAIPlugin)"/>
+    /// <see cref="TemporalPluginBuilderExtensions.AddDurableAIPlugin(Hosting.ITemporalWorkerServiceOptionsBuilder, DurableAIPlugin)"/>
     /// overload to drive DI registration.
     /// </summary>
     internal DurableExecutionOptions Options { get; }
@@ -91,7 +91,7 @@ public sealed class DurableAIPlugin : ITemporalWorkerPlugin
         // Note: TemporalWorkerOptions has no ClientOptions. The client (and the
         // DurableAIDataConverter applied to it) is configured separately via the
         // IPostConfigureOptions<TemporalWorkerServiceOptions> path registered by
-        // DurableAIRegistrar. The AddWorkerPlugin(DurableAIPlugin) overload wires
+        // DurableAIRegistrar. The AddDurableAIPlugin overload wires
         // those configurators alongside this plugin so both halves agree.
     }
 

@@ -4,8 +4,8 @@ namespace TemporalCommunity.Extensions.Agents;
 
 /// <summary>
 /// Options for controlling structured output deserialization when using
-/// <see cref="TemporalAIAgentExtensions.RunAsync{T}"/> or
-/// <see cref="TemporalAIAgentProxyExtensions.RunAsync{T}"/>.
+/// <see cref="StructuredOutputExtensions.RunStructuredAsync{T}(TemporalAIAgent, System.Collections.Generic.IList{Microsoft.Extensions.AI.ChatMessage}, Microsoft.Agents.AI.AgentSession, StructuredOutputOptions, string, System.Threading.CancellationToken)"/>
+/// and its <see cref="Microsoft.Agents.AI.AIAgent"/> and <see cref="ITemporalAgentClient"/> overloads.
 /// </summary>
 public sealed class StructuredOutputOptions
 {
@@ -25,7 +25,14 @@ public sealed class StructuredOutputOptions
 
     /// <summary>
     /// Gets or sets custom <see cref="JsonSerializerOptions"/> for deserialization.
-    /// When <see langword="null"/>, <see cref="JsonSerializerOptions.Default"/> is used.
+    /// When <see langword="null"/>, web defaults are used — camelCase and case-insensitive,
+    /// matching what models emit and what MAF's own structured output expects.
     /// </summary>
+    /// <remarks>
+    /// Setting this replaces the default entirely. Beware
+    /// <see cref="JsonSerializerOptions.Default"/> here: it is PascalCase and case-sensitive, and
+    /// against camelCase model output it does not throw — it returns an instance with every member
+    /// defaulted, which the retry loop cannot detect because no exception is raised.
+    /// </remarks>
     public JsonSerializerOptions? JsonSerializerOptions { get; set; }
 }

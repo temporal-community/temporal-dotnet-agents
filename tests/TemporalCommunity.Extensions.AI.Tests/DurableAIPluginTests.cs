@@ -142,7 +142,7 @@ public class DurableAIPluginTests
         var builder = services.AddHostedTemporalWorker("activity-only");
         var plugin = new DurableAIPlugin(options => options.RegisterDefaultWorkflow = false);
 
-        var returned = builder.AddWorkerPlugin(plugin);
+        var returned = builder.AddDurableAIPlugin(plugin);
 
         Assert.Same(builder, returned);
         Assert.DoesNotContain(
@@ -247,7 +247,7 @@ public class DurableAIPluginTests
         services.AddLogging();
         services.AddSingleton(CreateDurableClient());
         services.AddHostedTemporalWorker("my-queue")
-            .AddWorkerPlugin(new DurableAIPlugin());
+            .AddDurableAIPlugin(new DurableAIPlugin());
 
         Assert.Contains(services, sd => sd.ServiceType == typeof(DurableExecutionOptions));
     }
@@ -259,7 +259,7 @@ public class DurableAIPluginTests
         services.AddLogging();
         services.AddSingleton(CreateDurableClient());
         services.AddHostedTemporalWorker("my-queue")
-            .AddWorkerPlugin(new DurableAIPlugin());
+            .AddDurableAIPlugin(new DurableAIPlugin());
 
         Assert.Contains(services, sd => sd.ServiceType == typeof(DurableFunctionRegistry));
     }
@@ -271,7 +271,7 @@ public class DurableAIPluginTests
         services.AddLogging();
         services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddHostedTemporalWorker("my-queue")
-            .AddWorkerPlugin(new DurableAIPlugin());
+            .AddDurableAIPlugin(new DurableAIPlugin());
 
         Assert.Contains(services, sd => sd.ServiceType == typeof(DurableChatSessionClient));
         Assert.Contains(services, sd => sd.ServiceType == typeof(IDurableChatSessionClient));
@@ -284,7 +284,7 @@ public class DurableAIPluginTests
         services.AddLogging();
         services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddHostedTemporalWorker("my-queue")
-            .AddWorkerPlugin(new DurableAIPlugin());
+            .AddDurableAIPlugin(new DurableAIPlugin());
 
         Assert.Contains(services, sd =>
             sd.ServiceType == typeof(IConfigureOptions<TemporalClientConnectOptions>) &&
@@ -296,13 +296,13 @@ public class DurableAIPluginTests
     }
 
     [Fact]
-    public void AddWorkerPlugin_DurableAIPlugin_AppendsPluginToWorkerPluginChain()
+    public void AddDurableAIPlugin_AppendsPluginToWorkerPluginChain()
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(CreateDurableClient());
         var plugin = new DurableAIPlugin();
-        services.AddHostedTemporalWorker("my-queue").AddWorkerPlugin(plugin);
+        services.AddHostedTemporalWorker("my-queue").AddDurableAIPlugin(plugin);
 
         var opts = BuildWorkerServiceOptions(services.BuildServiceProvider());
 
@@ -334,7 +334,7 @@ public class DurableAIPluginTests
         var servicesB = new ServiceCollection();
         servicesB.AddLogging();
         servicesB.AddSingleton(A.Fake<ITemporalClient>());
-        servicesB.AddHostedTemporalWorker("my-queue").AddWorkerPlugin(new DurableAIPlugin());
+        servicesB.AddHostedTemporalWorker("my-queue").AddDurableAIPlugin(new DurableAIPlugin());
 
         // Compare the relevant ServiceDescriptors by service type.
         var relevantTypes = new[]
@@ -382,4 +382,25 @@ public class DurableAIPluginTests
             .Count(p => string.Equals(p.Name, "TemporalCommunity.Extensions.AI.DataConverter", StringComparison.Ordinal)) ?? 0;
         Assert.Equal(1, converterPluginCount);
     }
+    /// <summary>
+    /// The rename from <c>AddWorkerPlugin(DurableAIPlugin)</c> to <c>AddDurableAIPlugin</c> would
+    /// otherwise be a SILENT break: the old call still compiles, binds to the generic
+    /// <c>AddWorkerPlugin(ITemporalWorkerPlugin)</c> overload, and drops the DI half. That is what
+    /// happened to this very test file during the rename — no compile error, five failures far
+    /// from the cause. The guard converts it into an actionable exception.
+    /// </summary>
+    [Fact]
+    public void AddWorkerPlugin_GenericOverloadWithDurableAIPlugin_ThrowsPointingAtTheDedicatedMethod()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(CreateDurableClient());
+        var builder = services.AddHostedTemporalWorker("my-queue");
+
+        var ex = Assert.Throws<InvalidOperationException>(
+            () => builder.AddWorkerPlugin((ITemporalWorkerPlugin)new DurableAIPlugin()));
+
+        Assert.Contains("AddDurableAIPlugin", ex.Message, StringComparison.Ordinal);
+    }
+
 }

@@ -208,7 +208,7 @@ public class TemporalWorkerBuilderExtensionsTests
         var builder = services.AddHostedTemporalWorker("test-task-queue");
         var plugin = new TemporalAgentsPlugin(opts => opts.AddDurableAgent("plugin-agent", ConfigureWithChatClient));
 
-        builder.AddWorkerPlugin(plugin);
+        builder.AddTemporalAgentsPlugin(plugin);
 
         var provider = services.BuildServiceProvider();
         var client = provider.GetService<ITemporalAgentClient>();

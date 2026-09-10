@@ -52,8 +52,15 @@ public static class TemporalWorkerBuilderExtensions
     /// <param name="builder">The worker options builder returned by AddHostedTemporalWorker.</param>
     /// <param name="plugin">The agents plugin to add.</param>
     /// <returns>The same builder for further chaining.</returns>
+    /// <remarks>
+    /// Deliberately not named <c>AddWorkerPlugin</c>. The Temporal SDK owns
+    /// <see cref="ITemporalWorkerServiceOptionsBuilder"/> and does not ship a plugin-registration
+    /// extension today; if it adds one, an overload of ours sharing that name would be shadowed
+    /// with no signature change and no diagnostic — the DI half of this registration would
+    /// silently stop happening. A distinct name cannot be shadowed.
+    /// </remarks>
     [Experimental("TA001")]
-    public static ITemporalWorkerServiceOptionsBuilder AddWorkerPlugin(
+    public static ITemporalWorkerServiceOptionsBuilder AddTemporalAgentsPlugin(
         this ITemporalWorkerServiceOptionsBuilder builder,
         TemporalAgentsPlugin plugin)
     {

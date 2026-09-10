@@ -28,19 +28,60 @@ public static class TemporalPluginBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(plugin);
-        return builder.ConfigureOptions(opts =>
+
+        // This overload adds the plugin to the worker chain and nothing else. Two of our plugins
+        // also need DI registration that a plugin's ConfigureWorker hook cannot perform, and each
+        // has a dedicated method for it. Reaching this overload with one of those means the DI
+        // half would be skipped — silently, since the call compiles and the worker still starts.
+        // Fail loudly instead: a wrong plugin registration surfaces much later, as activities that
+        // are simply never found.
+        var dedicated = plugin.GetType().FullName switch
+        {
+            "TemporalCommunity.Extensions.AI.DurableAIPlugin" => "AddDurableAIPlugin",
+            // Named rather than typed: the Agents library references this one, not the reverse.
+            "TemporalCommunity.Extensions.Agents.TemporalAgentsPlugin" => "AddTemporalAgentsPlugin",
+            _ => null,
+        };
+
+        if (dedicated is not null)
+        {
+            throw new InvalidOperationException(
+                $"{plugin.GetType().Name} must be registered with {dedicated}(), not AddWorkerPlugin(). " +
+                "AddWorkerPlugin only adds the plugin to the worker chain; it does not register the " +
+                "DI services this plugin needs, and a worker configured that way starts successfully " +
+                "and then fails to resolve its activities.");
+        }
+
+        return AppendToPluginChain(builder, plugin);
+    }
+
+    /// <summary>
+    /// Appends a plugin to the worker's plugin chain without the dedicated-registration guard.
+    /// The guard belongs on the public entry point, not on the library's own delegation from
+    /// <see cref="AddDurableAIPlugin"/>, which has already done the DI half by the time it lands here.
+    /// </summary>
+    internal static ITemporalWorkerServiceOptionsBuilder AppendToPluginChain(
+        ITemporalWorkerServiceOptionsBuilder builder,
+        ITemporalWorkerPlugin plugin) =>
+        builder.ConfigureOptions(opts =>
         {
             var list = opts.Plugins?.ToList() ?? [];
             list.Add(plugin);
             opts.Plugins = list;
         });
-    }
 
     /// <summary>
     /// Adds a <see cref="DurableAIPlugin"/> to the worker AND registers the
     /// matching DI services (workflow, activities, function registry, session
     /// client, options, and DurableAIDataConverter auto-wiring) in one call.
     /// </summary>
+    /// <remarks>
+    /// Deliberately not named <c>AddWorkerPlugin</c>. The Temporal SDK owns
+    /// <see cref="ITemporalWorkerServiceOptionsBuilder"/> and does not ship a plugin-registration
+    /// extension today; if it adds one, an overload of ours sharing that name would be shadowed
+    /// with no signature change and no diagnostic — the DI half of this registration would
+    /// silently stop happening. A distinct name cannot be shadowed.
+    /// </remarks>
     /// <param name="builder">The worker options builder.</param>
     /// <param name="plugin">The durable AI plugin to add.</param>
     /// <returns>The same builder for further chaining.</returns>
@@ -65,7 +106,7 @@ public static class TemporalPluginBuilderExtensions
     /// </para>
     /// </remarks>
     [Experimental("TAI001")]
-    public static ITemporalWorkerServiceOptionsBuilder AddWorkerPlugin(
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableAIPlugin(
         this ITemporalWorkerServiceOptionsBuilder builder,
         DurableAIPlugin plugin)
     {
@@ -86,7 +127,7 @@ public static class TemporalPluginBuilderExtensions
         DurableAIRegistrar.Register(builder.Services, builder, plugin.Options);
 
         // 2. Add the plugin to the worker plugin chain via the generic overload.
-        return AddWorkerPlugin(builder, (ITemporalWorkerPlugin)plugin);
+        return AppendToPluginChain(builder, plugin);
     }
 
     /// <summary>

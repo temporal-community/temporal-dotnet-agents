@@ -3,7 +3,7 @@
 // durable chat session.
 // Run:  dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
 
-#pragma warning disable TAI001 // Opt in to the experimental plugin surface (DurableAIPlugin, AddWorkerPlugin)
+#pragma warning disable TAI001 // Opt in to the experimental plugin surface (DurableAIPlugin, AddDurableAIPlugin)
 
 using System.ClientModel;
 using Microsoft.Extensions.AI;
@@ -110,14 +110,15 @@ IChatClient openAiChatClient = new OpenAIClient(
 builder.Services.AddChatClient(openAiChatClient);
 
 // ── Setup: Register worker + durable AI via the plugin path ─────────────────
-// AddWorkerPlugin(DurableAIPlugin) is the canonical pattern for AI integrations.
+// AddDurableAIPlugin is the canonical pattern for AI integrations. It is named distinctly
+// from the generic AddWorkerPlugin so a future SDK method cannot shadow the DI half.
 // It registers DurableChatWorkflow, DurableChatActivities,
 // DurableFunctionActivities, DurableEmbeddingActivities, the function registry,
 // DurableChatSessionClient, the DurableExecutionOptions singleton, and queues
 // DurableAIPlugin in the worker plugin chain — equivalent to AddDurableAI().
 builder.Services
     .AddHostedTemporalWorker("durable-chat-otel")
-    .AddWorkerPlugin(new DurableAIPlugin(opts =>
+    .AddDurableAIPlugin(new DurableAIPlugin(opts =>
     {
         opts.ActivityTimeout = TimeSpan.FromMinutes(5);
         // Demo-friendly TTL (default is 14 days). The sample finishes in seconds;

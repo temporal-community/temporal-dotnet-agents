@@ -152,7 +152,7 @@ On top of everything in Combination 1:
 - **Temporal UI search attributes** — `AgentWorkflow` upserts `AgentName`, `SessionCreatedAt`, and `TurnCount` on every run by default, enabling queries like `AgentName = "BillingAgent" AND TurnCount > 10` in the Web UI.
 - **StateBag / `AIContextProvider`** — `AgentSessionStateBag` state is serialized and carried across turns, restarts, and `ContinueAsNew` transitions.
 - **`TemporalAgentContext.Current`** inside tools — direct access to the current session and HITL helpers without building a workflow handle manually.
-- **Structured output** — `RunAsync<T>` deserializes the agent's response into a typed object, with retry-on-failure.
+- **Structured output** — `RunStructuredAsync<T>` deserializes the agent's response into a typed object, tolerating code fences and retrying on failure.
 - **Scheduling** — built-in primitives for recurring and deferred agent runs.
 - **Completed responses** — `RunAsync` is supported; `RunStreamingAsync` is intentionally rejected.
 

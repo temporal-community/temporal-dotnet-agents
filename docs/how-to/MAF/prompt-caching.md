@@ -305,7 +305,7 @@ recorded in workflow history. Without a configured key, the library applies its 
 Structured output (JSON) is typically more token-efficient than natural language:
 
 ```csharp
-var report = await agent.RunAsync<WeatherReport>(messages, session);
+var report = await agent.RunStructuredAsync<WeatherReport>(messages, session);
 ```
 
 The LLM generates compact JSON instead of verbose prose, reducing output tokens.

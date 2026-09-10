@@ -17,7 +17,7 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <para>
 /// Activities cannot be registered from <see cref="ConfigureWorker"/> directly
 /// (they need DI and there is no <see cref="IServiceProvider"/> available at
-/// this hook). Use <see cref="TemporalWorkerBuilderExtensions.AddWorkerPlugin(Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, TemporalAgentsPlugin)"/>
+/// this hook). Use <see cref="TemporalWorkerBuilderExtensions.AddTemporalAgentsPlugin(Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, TemporalAgentsPlugin)"/>
 /// to register both the plugin and the DI side in one call.
 /// </para>
 /// <para>
@@ -66,7 +66,7 @@ public sealed class TemporalAgentsPlugin : ITemporalWorkerPlugin
 
     /// <summary>
     /// Gets the options carried by this plugin. Used by the
-    /// <see cref="TemporalWorkerBuilderExtensions.AddWorkerPlugin(Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, TemporalAgentsPlugin)"/>
+    /// <see cref="TemporalWorkerBuilderExtensions.AddTemporalAgentsPlugin(Temporalio.Extensions.Hosting.ITemporalWorkerServiceOptionsBuilder, TemporalAgentsPlugin)"/>
     /// overload to drive DI registration.
     /// </summary>
     internal TemporalAgentsOptions Options { get; }
