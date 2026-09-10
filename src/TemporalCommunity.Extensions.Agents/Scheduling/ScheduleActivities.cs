@@ -72,7 +72,8 @@ public sealed class ScheduleActivities(ITemporalClient client, string taskQueue,
 
         // Build the full AgentJobInput the same way ScheduleAgentAsync does, so per-agent
         // timeouts, per-tool options, and interceptor config are respected (P2 fix).
-        var jobInput = DefaultTemporalAgentClient.BuildAgentJobInput(run.AgentName, run.Request, options, taskQueue);
+        var jobInput = DefaultTemporalAgentClient.BuildAgentJobInput(
+            run.AgentName, run.Request, options, taskQueue, run.RetryPolicy);
 
         try
         {

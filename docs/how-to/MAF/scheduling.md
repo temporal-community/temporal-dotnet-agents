@@ -24,14 +24,16 @@ How to schedule recurring and one-time agent runs — from config-time registrat
 
 TemporalAgents provides four scheduling primitives, each suited to a different context:
 
-| Primitive | Context | Recurrence | Workflow Type |
-|-----------|---------|------------|---------------|
-| `AddScheduledAgentRun` | Config time | Recurring | `AgentJobWorkflow` |
-| `ITemporalAgentClient.ScheduleAgentAsync` | Runtime (external) | Recurring | `AgentJobWorkflow` |
-| `ScheduleActivities.ScheduleOneTimeAgentRunAsync` | Inside a workflow | One-time | `AgentJobWorkflow` |
-| `ITemporalAgentClient.RunAgentDelayedAsync` | Runtime (external) | One-time | `AgentWorkflow` |
+| Primitive | Context | Recurrence | Workflow Type | Approval |
+|-----------|---------|------------|---------------|----------|
+| `AddScheduledAgentRun` | Config time | Recurring | `AgentJobWorkflow` | ❌ blocked |
+| `ITemporalAgentClient.ScheduleAgentAsync` | Runtime (external) | Recurring | `AgentJobWorkflow` | ❌ blocked |
+| `ScheduleActivities.ScheduleOneTimeAgentRunAsync` | Inside a workflow | One-time | `AgentJobWorkflow` | ❌ blocked |
+| `ITemporalAgentClient.RunAgentDelayedAsync` | Runtime (external) | One-time | `AgentWorkflow` | ✅ supported |
 
 The first three use `AgentJobWorkflow` — a lightweight, fire-and-forget workflow. The fourth uses the full `AgentWorkflow` with conversation history and StateBag.
+
+**The approval column is load-bearing.** A tool registered `RequireApproval()` does not park on the first three — it is blocked and never runs. See [Approval does not work in scheduled runs](#approval-does-not-work-in-scheduled-runs).
 
 ---
 
@@ -96,7 +98,8 @@ internal sealed class AgentJobWorkflow
 - No TTL loop or `[WorkflowUpdate]` handlers
 - No continue-as-new
 - Result is visible in the Temporal Web UI event history
-- Same per-step / per-tool activity dispatch as the long-lived `AgentWorkflow`, so retries, timeouts, and per-tool `DurableToolOptions` apply identically
+- Same per-step / per-tool activity dispatch as the long-lived `AgentWorkflow`, so retries, timeouts, and per-tool activity options apply identically — **with one exception: approval.** See [Approval does not work in scheduled runs](#approval-does-not-work-in-scheduled-runs)
+- `TemporalAgentContext.Current` is **not** available to tools on this path
 
 > **`MaxToolCallsPerTurn` propagation:** The iteration cap set on `DurableAgentBuilder.MaxToolCallsPerTurn` is read by `ScheduleAgentAsync` and stored in `AgentJobInput.MaxToolCallsPerTurn` before the workflow starts. You do not need to configure it separately for scheduled runs — if you set `agent.MaxToolCallsPerTurn = 5` on the agent definition, that cap applies in both session-based and scheduled runs. The default is `20` when not set.
 
@@ -250,6 +253,24 @@ public class ResearchWorkflow
 **Idempotency:** If the activity retries after a crash-before-ack, `WorkflowIdConflictPolicy.UseExisting` ensures the second `StartWorkflowAsync` call finds the already-scheduled workflow and returns normally.
 
 **Past `RunAt`:** If `RunAt` is in the past when the activity executes, the delay is clamped to zero and the run starts immediately.
+
+**Per-run retry policy:** `OneTimeAgentRun.RetryPolicy` overrides the per-agent and worker retry
+policies for this run alone. It is the only per-schedule policy override — timeouts have no
+equivalent (see [Activity Timeouts for Scheduled Runs](#activity-timeouts-for-scheduled-runs)).
+
+```csharp
+new OneTimeAgentRun
+{
+    AgentName  = "AnalystAgent",
+    RunId      = "quarterly-close",
+    Request    = new RunRequest("Reconcile the quarterly ledger."),
+    RunAt      = Workflow.UtcNow + TimeSpan.FromDays(1),
+    RetryPolicy = new RetryPolicy { MaximumAttempts = 1 },   // no retry for this run
+}
+```
+
+Precedence is `OneTimeAgentRun.RetryPolicy` → per-agent `RetryPolicy` → `DefaultRetryPolicy` → a
+bounded five-attempt backstop.
 
 ### From an External Caller
 
@@ -415,9 +436,9 @@ Three OTel spans cover scheduling operations:
 
 | Span | Emitted By | Key Attributes |
 |------|-----------|---------------|
-| `temporal.agent.schedule.create` | `ScheduleAgentAsync` | `agent.name`, `schedule.id` |
-| `temporal.agent.schedule.delayed` | `RunAgentDelayedAsync` | `agent.name`, `agent.session_id`, `schedule.delay` |
-| `temporal.agent.schedule.one_time` | `ScheduleOneTimeAgentRunAsync` | `agent.name`, `schedule.job_id`, `schedule.delay` |
+| `temporal.agent.schedule.create` | `ScheduleAgentAsync` | `gen_ai.agent.name`, `schedule.id` |
+| `temporal.agent.schedule.delayed` | `RunAgentDelayedAsync` | `gen_ai.agent.name`, `gen_ai.conversation.id`, `schedule.delay` |
+| `temporal.agent.schedule.one_time` | `ScheduleOneTimeAgentRunAsync` | `gen_ai.agent.name`, `schedule.job_id`, `schedule.delay` |
 
 Once the scheduled workflow executes, the standard `agent.turn` span fires inside `AgentActivities.RunDurableAgentStepAsync` — the same code path as interactive sessions, with one span per LLM call. This means scheduled runs are fully visible in your tracing backend alongside interactive sessions.
 
@@ -426,6 +447,42 @@ For full OTel setup instructions, see [Observability](./observability.md).
 ---
 
 ## Pitfalls and Gotchas
+
+### Approval does not work in scheduled runs
+
+`AgentJobWorkflow` has no approval mixin, so it cannot park for external review. Any tool that
+would pause is **blocked instead** — it never executes, and the model receives a synthetic result:
+
+```
+[Blocked] Tool 'delete_inventory' requires approval but approval is not supported in job workflows.
+```
+
+This applies to all three `AgentJobWorkflow` primitives — `AddScheduledAgentRun`,
+`ScheduleAgentAsync`, and `ScheduleOneTimeAgentRunAsync` — and covers every route to a pause:
+
+| Configuration | In an interactive session | In a scheduled run |
+|---|---|---|
+| `agent.AddTool(t, o => o.RequireApproval())` | Parks for review | **Blocked** |
+| An interceptor returning `PauseForApproval()` | Parks for review | **Blocked** (logged at Warning) |
+| In-tool `RequestApprovalAsync` | Parks for review | Unsupported — no `TemporalAgentContext` |
+
+The `RequireApproval().ScopeAware()` combination is the one case that warns you at **startup**
+rather than at dispatch. Plain `RequireApproval()` gives no startup signal: the run simply blocks
+the first time the model asks for the tool.
+
+**If a scheduled agent needs a tool that requires approval, it needs a session.** Use
+`RunAgentDelayedAsync`, which runs on the full `AgentWorkflow` and supports approval normally.
+
+### Tools cannot reach `TemporalAgentContext`
+
+On the `AgentJobWorkflow` path a scheduled workflow ID (`ta-{agent}-scheduled-{runId}`) parses to
+an agent name with a `-scheduled` suffix, which does not match the tool's registered agent. Rather
+than attach a session that would target the wrong workflow, the library leaves
+`TemporalAgentContext.Current` unset and records why — a tool that reaches for it gets told which
+path it is on, not a bare "no context".
+
+Tools that read session state or call `RequestApprovalAsync` need to tolerate this, or the agent
+needs a session instead of a job.
 
 ### Schedule Orphaning
 
@@ -480,7 +537,9 @@ builder.Services
     });
 ```
 
-There is no per-schedule timeout override — the effective per-agent timeout (or worker default) is used.
+There is no per-schedule timeout override — the effective per-agent timeout (or worker default) is used. Retry policy is the exception: `ScheduleOneTimeAgentRunAsync` accepts a per-run `RetryPolicy` on `OneTimeAgentRun`.
+
+When nothing is configured anywhere, activities get a bounded backstop of five attempts rather than Temporal's server default of unlimited retries.
 
 ---
 
@@ -493,6 +552,9 @@ There is no per-schedule timeout override — the effective per-agent timeout (o
 - **Yes, recurring** → Use `ScheduleAgentAsync`
 - **Yes, one-time from outside a workflow** → Use `RunAgentDelayedAsync`
 - **Yes, one-time from inside a workflow** → Use `ScheduleOneTimeAgentRunAsync`
+
+**Does any tool the agent may call require approval?**
+- **Yes** → You must use `RunAgentDelayedAsync`. The other three block the call instead of parking for review.
 
 **Does the scheduled run need conversation history?**
 - **Yes** → Use `RunAgentDelayedAsync` (creates a full `AgentWorkflow` session)
@@ -521,4 +583,4 @@ There is no per-schedule timeout override — the effective per-agent timeout (o
 
 ---
 
-_Last updated: 2026-06-04_
+_Last updated: 2026-09-09_

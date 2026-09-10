@@ -22,6 +22,7 @@ public class ScheduledJobTests : IClassFixture<ScheduledJobEnvironmentFixture>
     private WorkflowEnvironment _env => _fixture.Environment;
 
     private const string InvokeAgentToolActivity = "TemporalCommunity.Extensions.Agents.InvokeAgentTool";
+    private const string RunDurableAgentStepActivity = "TemporalCommunity.Extensions.Agents.RunDurableAgentStep";
 
     public ScheduledJobTests(ScheduledJobEnvironmentFixture fixture)
     {
@@ -265,6 +266,68 @@ public class ScheduledJobTests : IClassFixture<ScheduledJobEnvironmentFixture>
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <c>OneTimeAgentRun.RetryPolicy</c> must reach the started job. It was a public property
+    /// nothing read — <c>ScheduleActivities</c> built its job input without passing it, so a caller
+    /// who set it silently got the worker default.
+    ///
+    /// <para>
+    /// This asserts through <c>ScheduleActivities</c> rather than <c>BuildAgentJobInput</c>, because
+    /// the defect was in the wiring between them: a unit test on the builder alone passes even with
+    /// the argument removed again.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public async Task ScheduleOneTime_PerRunRetryPolicy_ReachesTheModelStepActivity()
+    {
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal([], "Done.");
+        var taskQueue = $"scheduled-job-perrun-retry-{Guid.NewGuid():N}";
+
+        using var workerHost = BuildWorkerHost(scripted, taskQueue);
+        await workerHost.StartAsync();
+
+        try
+        {
+            var runId = $"perrun-retry-{Guid.NewGuid():N}";
+            var activities = new ScheduleActivities(
+                _env.Client,
+                taskQueue,
+                workerHost.Services.GetRequiredService<TemporalAgentsOptions>());
+
+            await activities.ScheduleOneTimeAgentRunAsync(new OneTimeAgentRun
+            {
+                AgentName = "DurableAgent",
+                RunId = runId,
+                Request = new RunRequest("Run the job."),
+                // In the past on purpose: the delay clamps to zero and the run starts now.
+                RunAt = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(1),
+                RetryPolicy = new Temporalio.Common.RetryPolicy { MaximumAttempts = 3 },
+            });
+
+            var handle = _env.Client.GetWorkflowHandle($"ta-durableagent-scheduled-{runId}");
+            await handle.GetResultAsync();
+
+            int? observed = null;
+            await foreach (var ev in handle.FetchHistoryEventsAsync())
+            {
+                var scheduled = ev.ActivityTaskScheduledEventAttributes;
+                if (scheduled?.ActivityType.Name == RunDurableAgentStepActivity)
+                {
+                    observed = scheduled.RetryPolicy?.MaximumAttempts;
+                    break;
+                }
+            }
+
+            // 3 is the per-run value. 5 would mean the bounded backstop was used instead — i.e. the
+            // per-run policy was dropped on the way in.
+            Assert.Equal(3, observed);
+        }
+        finally
+        {
+            await workerHost.StopAsync();
+        }
+    }
 
     private IHost BuildWorkerHost(
         ScriptedChatClient scripted,

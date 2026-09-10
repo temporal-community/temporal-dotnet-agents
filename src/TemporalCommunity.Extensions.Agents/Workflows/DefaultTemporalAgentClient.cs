@@ -461,12 +461,15 @@ internal sealed class DefaultTemporalAgentClient(
         string agentName,
         RunRequest request,
         TemporalAgentsOptions options,
-        string taskQueue)
+        string taskQueue,
+        RetryPolicy? retryPolicyOverride = null)
     {
         var effectiveActivityTimeout = options.DefaultActivityTimeout;
         var effectiveHeartbeatTimeout = options.DefaultHeartbeatTimeout;
         // Bounded backstop (MaximumAttempts = 5) when unset — see DefaultRetryPolicy.
-        var configuredRetryPolicy = options.DefaultRetryPolicy;
+        // retryPolicyOverride is the per-run value from OneTimeAgentRun.RetryPolicy and outranks
+        // both the per-agent and worker defaults; it is null on the ScheduleAgentAsync path.
+        var configuredRetryPolicy = retryPolicyOverride ?? options.DefaultRetryPolicy;
         var effectiveModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
             configuredRetryPolicy);
         var effectiveToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
@@ -483,7 +486,7 @@ internal sealed class DefaultTemporalAgentClient(
         {
             effectiveActivityTimeout = registration.ActivityTimeout ?? options.DefaultActivityTimeout;
             effectiveHeartbeatTimeout = registration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
-            configuredRetryPolicy = registration.RetryPolicy ?? options.DefaultRetryPolicy;
+            configuredRetryPolicy = retryPolicyOverride ?? registration.RetryPolicy ?? options.DefaultRetryPolicy;
             effectiveModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
                 configuredRetryPolicy);
             effectiveToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
