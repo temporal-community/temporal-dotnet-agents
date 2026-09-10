@@ -395,6 +395,88 @@ public sealed class PluginCoexistenceIntegrationTests : IClassFixture<AgentsPlug
             agent.ChatClient = _ => new EchoChatClient();
         });
 
+
+    // ---------------------------------------------------------------------------------------
+    // The DOCUMENTED canonical topology: AddTemporalClient(...) owns the client, the worker
+    // takes only a task queue. Every other case here uses the three-argument worker, where the
+    // worker owns its client — a different code path that these assertions do not reach.
+    // ---------------------------------------------------------------------------------------
+    [Theory]
+    [InlineData(true)]   // consumer plugin registered BEFORE canonical registration
+    [InlineData(false)]  // ... and after
+    public async Task ClientPluginOnAddTemporalClient_ExecutesAndSurvivesAddTemporalAgents(bool pluginFirst)
+    {
+        var log = new PluginCallLog();
+        var consumerPlugin = new RecordingClientPlugin($"maf-di-client-{pluginFirst}", log);
+        var taskQueue = $"maf-di-client-{Guid.NewGuid():N}";
+
+        // Deliberately NOT CreateHostBuilder(): that pre-registers ITemporalClient from the
+        // fixture, so AddTemporalClient's TryAddSingleton would be a no-op and the plugin would
+        // never see a client it owns. This topology only exists when AddTemporalClient builds it.
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<IChatClient>(new EchoChatClient());
+
+        // AddTemporalAgents requires ITemporalClient to already be in DI and says so, so the
+        // client registration itself cannot move. What varies is whether the consumer appends
+        // its plugin to those options before or after canonical registration.
+        var clientOptions = builder.Services.AddTemporalClient(fixture.TargetHost, fixture.Namespace);
+
+        void AddConsumerPlugin() =>
+            clientOptions.Configure(options =>
+            {
+                var plugins = options.Plugins?.ToList() ?? [];
+                plugins.Add(consumerPlugin);
+                options.Plugins = plugins;
+            });
+
+        if (pluginFirst)
+        {
+            AddConsumerPlugin();
+        }
+
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(ConfigureAgents);
+
+        if (!pluginFirst)
+        {
+            AddConsumerPlugin();
+        }
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            await AssertCallbackExecutedAsync(
+                consumerPlugin.ConfigureClientCalled, "Consumer client plugin ConfigureClient", log);
+
+            Assert.Equal(1, consumerPlugin.ConfigureClientCalls);
+
+            // The MAF converter must still be in force. On this topology the library applies it
+            // through IConfigureOptions<TemporalClientConnectOptions> rather than as a plugin, so
+            // a regression would not show up in the plugin list at all.
+            Assert.NotNull(consumerPlugin.ConverterSeenByConfigureClient);
+            Assert.Same(
+                TemporalAgentDataConverter.Instance.PayloadConverter,
+                consumerPlugin.ConverterSeenByConfigureClient!.PayloadConverter);
+
+            // ConnectAsync does NOT fire here, even after a real RPC: AddTemporalClient builds
+            // the client with TemporalClient.CreateLazy, which bypasses the plugin connect chain.
+            // Confirmed upstream SDK behaviour — the same probe against a bare AddTemporalClient
+            // with no library registration reports ConfigureClient=1, ConnectAsync=0. Pinned so
+            // that if the SDK starts invoking it, this fails and the documented caveat is revisited.
+            await host.Services.GetRequiredService<ITemporalClient>()
+                .Connection.WorkflowService.GetSystemInfoAsync(
+                    new Temporalio.Api.WorkflowService.V1.GetSystemInfoRequest());
+
+            Assert.Equal(0, consumerPlugin.ConnectCalls);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     private HostApplicationBuilder CreateHostBuilder()
     {
         var builder = Host.CreateApplicationBuilder();

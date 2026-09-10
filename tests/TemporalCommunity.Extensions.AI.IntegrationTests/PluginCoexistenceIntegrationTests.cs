@@ -457,4 +457,83 @@ public sealed class PluginCoexistenceIntegrationTests : IClassFixture<AiPluginCo
             earlierIndex < laterIndex,
             $"Expected '{earlier}' before '{later}'. Log: {log}");
     }
+    // ---------------------------------------------------------------------------------------
+    // The DOCUMENTED canonical topology: AddTemporalClient(...) owns the client and the worker
+    // takes only a task queue. Every other case here uses the three-argument worker, where the
+    // worker owns its client — a different code path. library-combinations.md tells readers to
+    // put client plugins on the OptionsBuilder from AddTemporalClient, and nothing pinned that.
+    // ---------------------------------------------------------------------------------------
+    [Theory]
+    [InlineData(true)]   // consumer plugin registered BEFORE canonical registration
+    [InlineData(false)]  // ... and after
+    public async Task ClientPluginOnAddTemporalClient_ExecutesAndSurvivesAddDurableAI(bool pluginFirst)
+    {
+        var log = new PluginCallLog();
+        var consumerPlugin = new RecordingClientPlugin($"ai-di-client-{pluginFirst}", log);
+        var taskQueue = $"ai-di-client-{Guid.NewGuid():N}";
+
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<IChatClient>(new TestChatClient());
+
+        void AddConsumerPlugin() =>
+            builder.Services
+                .AddTemporalClient(fixture.TargetHost, fixture.Namespace)
+                .Configure(options =>
+                {
+                    var plugins = options.Plugins?.ToList() ?? [];
+                    plugins.Add(consumerPlugin);
+                    options.Plugins = plugins;
+                });
+
+        if (pluginFirst)
+        {
+            AddConsumerPlugin();
+        }
+
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options => options.RegisterDefaultWorkflow = false);
+
+        if (!pluginFirst)
+        {
+            AddConsumerPlugin();
+        }
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            await AssertCallbackExecutedAsync(
+                consumerPlugin.ConfigureClientCalled, "Consumer client plugin ConfigureClient", log);
+
+            Assert.Equal(1, consumerPlugin.ConfigureClientCalls);
+
+            // ConnectAsync does NOT fire on this topology, even after a real RPC.
+            // AddTemporalClient builds the client with TemporalClient.CreateLazy, which bypasses
+            // the plugin connect chain. Verified to be upstream SDK behaviour, not ours: the same
+            // probe against a bare AddTemporalClient with no library registration at all also
+            // reports ConfigureClient=1, ConnectAsync=0. Pinned here so that if the SDK ever
+            // starts invoking it, this assertion fails and the documented caveat gets revisited.
+            await host.Services.GetRequiredService<ITemporalClient>()
+                .Connection.WorkflowService.GetSystemInfoAsync(
+                    new Temporalio.Api.WorkflowService.V1.GetSystemInfoRequest());
+
+            Assert.Equal(0, consumerPlugin.ConnectCalls);
+
+            // The AI converter must still be the one in force. On this topology the library
+            // applies it through IConfigureOptions<TemporalClientConnectOptions> rather than as
+            // a plugin, so a regression here would not show up in the plugin list at all.
+            Assert.NotNull(consumerPlugin.ConverterSeenByConfigureClient);
+            Assert.Same(
+                DurableAIDataConverter.Instance.PayloadConverter,
+                consumerPlugin.ConverterSeenByConfigureClient!.PayloadConverter);
+
+            Assert.NotNull(host.Services.GetRequiredService<DurableExecutionOptions>());
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
 }

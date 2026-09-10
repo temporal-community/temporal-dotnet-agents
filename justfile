@@ -259,26 +259,34 @@ smoke-extensible-turns: pack smoke-extensible-turns-packed
 smoke-extensible-turns-packed:
     tests/smoke/ExtensibleDurableTurnsPackageSmokeTest/run-smoke.sh "{{version}}" "{{artifacts_dir}}"
 
-# Push to NuGet.org (NUGET_API_KEY required for local; CI uses OIDC Trusted Publishing in publish.yml)
-publish-nuget: pack
+# Gated on verify-public-api, mirroring publish.yml: an official release must ship a baseline that
+# already describes it. Promote, commit, tag that commit, then publish. Previews use
+# publish-nuget-preview, which is exempt by design.
+# Push an OFFICIAL release to NuGet.org (NUGET_API_KEY required; CI uses OIDC in publish.yml).
+publish-nuget: verify-public-api pack
     dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
         --source "https://api.nuget.org/v3/index.json" \
         --api-key "$NUGET_API_KEY" \
         --skip-duplicate
-    @echo ""
-    @echo "NEXT: run 'just promote-public-api' and commit the result."
-    @echo "Until you do, PublicAPI.Shipped.txt does not describe what consumers have and the"
-    @echo "RS0016/RS0017 gate protects nothing — that is how 0.8.0-0.14.2 shipped 40+ public"
-    @echo "types against an empty baseline."
+
+# Not gated: pending Unshipped entries are the normal state for a preview, as in publish.yml.
+# Push a PREVIEW release to NuGet.org (NUGET_API_KEY required).
+publish-nuget-preview: pack
+    dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
+        --source "https://api.nuget.org/v3/index.json" \
+        --api-key "$NUGET_API_KEY" \
+        --skip-duplicate
 
 # publish.yml rejects an official release whose Unshipped.txt is still non-empty, so the order is:
 # promote, commit, tag that commit, then publish.
 # Fold PublicAPI.Unshipped.txt into PublicAPI.Shipped.txt while PREPARING a release.
 promote-public-api:
+    bash scripts/promote-public-api.selftest.sh
     bash scripts/promote-public-api.sh
 
 # Release-prep gate: fails while promotion is still pending. Mirrors the publish.yml check.
 verify-public-api:
+    bash scripts/promote-public-api.selftest.sh
     bash scripts/promote-public-api.sh --check
 
 # Push main branch and all tags to origin (our only remote).

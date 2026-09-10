@@ -100,6 +100,6 @@ done
 
 if [ "$check_only" -eq 1 ] && [ "$pending" -eq 1 ]; then
     echo "" >&2
-    echo "Run 'just promote-public-api' after publishing, then commit the result." >&2
+    echo "Run 'just promote-public-api', commit the result, then tag that commit and publish." >&2
     exit 1
 fi

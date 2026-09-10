@@ -131,6 +131,9 @@ internal sealed class RecordingClientPlugin : ITemporalClientPlugin
     private readonly TaskCompletionSource configureClientCalled =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private readonly TaskCompletionSource connectCalled =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private int configureClientCalls;
     private int connectCalls;
     private DataConverter? converterSeenByConfigureClient;
@@ -160,6 +163,13 @@ internal sealed class RecordingClientPlugin : ITemporalClientPlugin
     /// <summary>Completes the first time <see cref="ConfigureClient"/> is invoked.</summary>
     public Task ConfigureClientCalled => configureClientCalled.Task;
 
+    /// <summary>
+    /// Completes the first time <see cref="ConnectAsync"/> is entered. A counter alone races:
+    /// the client is lazy on the AddTemporalClient topology, so the connection can still be in
+    /// flight when the host has finished starting.
+    /// </summary>
+    public Task ConnectCalled => connectCalled.Task;
+
     /// <summary>The converter this plugin observed when its turn in the chain came up.</summary>
     public DataConverter? ConverterSeenByConfigureClient =>
         Volatile.Read(ref converterSeenByConfigureClient);
@@ -179,6 +189,7 @@ internal sealed class RecordingClientPlugin : ITemporalClientPlugin
         Func<TemporalClientConnectOptions, Task<TemporalConnection>> continuation)
     {
         Interlocked.Increment(ref connectCalls);
+        connectCalled.TrySetResult();
         log.Record($"{Label}:Connect:enter");
         var connection = await continuation(options).ConfigureAwait(false);
         log.Record($"{Label}:Connect:exit");

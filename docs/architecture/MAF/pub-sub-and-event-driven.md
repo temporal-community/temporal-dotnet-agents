@@ -45,9 +45,9 @@ public class EventDrivenFanOutWorkflow
     public async Task<string> RunAsync(string topic, string payload)
     {
         // Simulate a "NewArticlePublished" event fan-out to three independent agents.
-        var summarySession  = await GetTemporalAgent("Summarizer").CreateSessionAsync();
-        var taggingSession  = await GetTemporalAgent("Tagger").CreateSessionAsync();
-        var moderationSession = await GetTemporalAgent("Moderator").CreateSessionAsync();
+        var summarySession  = await GetTemporalAgent("SummarizerAgent").CreateSessionAsync();
+        var taggingSession  = await GetTemporalAgent("TaggerAgent").CreateSessionAsync();
+        var moderationSession = await GetTemporalAgent("ModeratorAgent").CreateSessionAsync();
 
         var prompt = new List<ChatMessage> { new(ChatRole.User, payload) };
 
@@ -55,9 +55,9 @@ public class EventDrivenFanOutWorkflow
         // each independently processing the same event.
         var results = await ExecuteAgentsInParallelAsync(new[]
         {
-            (GetTemporalAgent("Summarizer"),  prompt, summarySession),
-            (GetTemporalAgent("Tagger"),      prompt, taggingSession),
-            (GetTemporalAgent("Moderator"),   prompt, moderationSession),
+            (GetTemporalAgent("SummarizerAgent"),  prompt, summarySession),
+            (GetTemporalAgent("TaggerAgent"),      prompt, taggingSession),
+            (GetTemporalAgent("ModeratorAgent"),   prompt, moderationSession),
         });
 
         // Aggregate results (fan-in)

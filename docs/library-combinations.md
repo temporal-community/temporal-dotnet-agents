@@ -235,16 +235,27 @@ Only when the worker creates its own client — the three-argument
 `AddHostedTemporalWorker(address, namespace, taskQueue)` overload — is `ClientOptions` populated,
 and client plugins belong on `options.ClientOptions.Plugins` instead.
 
-**Temporal's plugin surface is experimental.** `ITemporalWorkerPlugin` and `ITemporalClientPlugin`
-both carry an explicit "may change in the future" warning from the SDK. Neither library is built
-on it, so that instability stays confined to code you own.
+**One caveat on this topology: `ITemporalClientPlugin.ConnectAsync` never runs.** `AddTemporalClient`
+builds the client with `TemporalClient.CreateLazy`, which bypasses the plugin connect chain — so
+`ConfigureClient` fires and `ConnectAsync` does not, even after the first real RPC. This is Temporal
+SDK behaviour, not something these libraries introduce; it reproduces against a bare
+`AddTemporalClient` with no library registration at all. If your plugin needs to wrap the
+connection itself rather than configure the client, register it where the worker owns the client,
+or construct the client yourself. Integration tests pin the current behaviour, so a future SDK
+change here will surface as a test failure rather than a surprise.
 
-**Your collection is never replaced, in either registration order.** Both libraries read an
-existing plugin collection, append to it, and write it back, whether you register before or after
-them. Integration tests pin both orders, including that two of your plugins sharing a `Name` are
-both kept — deduplicating your plugins is your decision, not the library's. What order does *not*
-guarantee is callback order: plugins run in list order, which can matter if two of them touch the
-same option.
+**Temporal's plugin surface is experimental.** `ITemporalWorkerPlugin` and `ITemporalClientPlugin`
+both carry an explicit "may change in the future" warning from the SDK. Neither library exposes it
+in its public API, so nothing you write against these packages depends on it — but both do
+implement `ITemporalClientPlugin` internally, for the worker-owned-client topology only. If the
+SDK changes that interface, the libraries change with it; your code does not have to.
+
+**Your plugins are never dropped, in either registration order.** Worker plugin collections the
+libraries never touch at all. Client plugin collections they read, append to, and write back,
+whether you register before or after them. Integration tests pin both orders, including that two
+of your plugins sharing a `Name` are both kept — deduplicating your plugins is your decision, not
+the library's. What order does *not* guarantee is callback order: plugins run in list order, which
+can matter if two of them touch the same option.
 
 **The data converter is applied for you, by one of two mechanisms.** On the canonical
 `AddTemporalClient` topology each library configures the converter directly through
