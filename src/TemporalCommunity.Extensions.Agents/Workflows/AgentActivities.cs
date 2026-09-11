@@ -642,8 +642,19 @@ internal sealed class AgentActivities(
             var resolved = tool.Factory(providerServices);
             if (resolved is null)
             {
-                throw new InvalidOperationException(
+                // Same class of defect as the name-mismatch guard immediately below, and it must
+                // get the same treatment: a factory that returns null returns null on every
+                // attempt, so a retryable failure here only burns the bounded default budget
+                // before surfacing the identical error. Non-retryable, with the shared
+                // DurableConfigurationException error type TemporalFailureInspector matches on.
+                var nullTool = new DurableConfigurationException(
                     $"Tool factory for '{tool.Name}' on agent '{name}' returned null.");
+
+                throw new ApplicationFailureException(
+                    nullTool.Message,
+                    nullTool,
+                    errorType: nameof(DurableConfigurationException),
+                    nonRetryable: true);
             }
 
             if (!string.Equals(resolved.Name, tool.Name, StringComparison.OrdinalIgnoreCase))

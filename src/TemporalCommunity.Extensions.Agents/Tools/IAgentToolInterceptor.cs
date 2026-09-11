@@ -31,9 +31,9 @@ namespace TemporalCommunity.Extensions.Agents.Tools;
 /// The H1 rule applies: per-agent registration wins over worker default.
 /// </para>
 /// <para>
-/// <b>AfterToolCallAsync</b> is named and reserved for a follow-on release. When it ships,
-/// the interface will gain a default-interface-method implementation so existing interceptors
-/// are not broken.
+/// <b>Pre-dispatch only.</b> The interface has exactly one method,
+/// <c>BeforeToolCallAsync</c>; there is no post-tool hook, so a tool's result cannot be
+/// inspected or rewritten here. Wrap the <c>AIFunction</c> itself to act on a result.
 /// </para>
 /// </remarks>
 public interface IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContext>

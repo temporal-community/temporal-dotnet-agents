@@ -278,8 +278,9 @@ public sealed class DurableAgentBuilder
     /// <see cref="IServiceProvider"/> — any service you resolve inside this factory is held for
     /// the worker's lifetime (singleton semantics), regardless of how it was registered in DI.
     /// If you need per-call scoped resolution inside the tool body itself, resolve services via
-    /// <c>TemporalAgentContext.Current?.Services</c> at invocation time rather than capturing
-    /// them in the factory.
+    /// <c>TemporalAgentContext.Current.GetService&lt;T&gt;()</c> at invocation time rather than
+    /// capturing them in the factory. That reads from the scope the <c>InvokeAgentTool</c> activity
+    /// opens for the call, so a scoped registration behaves as scoped.
     /// </param>
     /// <param name="configure">Optional configuration callback for per-tool activity overrides.</param>
     /// <returns>This builder, for fluent chaining.</returns>
