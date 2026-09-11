@@ -272,9 +272,12 @@ injects — especially as a system message — is a prompt-injection surface. Va
 
 ## The built-in provider
 
-The library ships one provider, `WorkingSetContextProvider`, which keeps a coding-style agent
+`WorkingSetContextProvider` is the built-in you register yourself. It keeps a coding-style agent
 oriented on which files are in play by deriving them from the conversation and publishing the list
 to `AgentSessionStateBag["temporal.working_set"]`.
+
+The package ships a second `AIContextProvider`, `SkillsContextProvider`, but its constructor is
+internal — `agent.UseSkills(...)` builds and registers it for you. See [skills.md](./skills.md).
 
 ```csharp
 agent.AddContextProvider(new WorkingSetContextProvider());

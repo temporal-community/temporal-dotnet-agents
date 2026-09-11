@@ -1,7 +1,9 @@
 # Working set provider
 
-`WorkingSetContextProvider` is the one `AIContextProvider` that ships with
-`TemporalCommunity.Extensions.Agents` — no extra package reference.
+`WorkingSetContextProvider` ships with `TemporalCommunity.Extensions.Agents` — no extra package
+reference. It is the only built-in provider you construct and register yourself; the package also
+ships `SkillsContextProvider`, but that one has an internal constructor and is wired for you by
+[`agent.UseSkills(...)`](./skills.md).
 
 It keeps a coding-style agent oriented on which files are currently in play, without the user
 re-stating them. On every LLM step it derives the file paths from the conversation itself, injects a
@@ -55,6 +57,9 @@ MSBuild files (`csproj`, `sln`, `slnx`, `props`, `targets`).
 Paths are deduplicated case-insensitively and kept in **most-recently-seen order** — seeing a path
 again moves it to the end rather than adding a duplicate. When the list exceeds `MaxPaths`, the
 oldest entries are dropped.
+
+The most recent **spelling** wins too: after `src/A.cs` and then `SRC/a.CS`, the list holds
+`SRC/a.CS`. If you match these strings against your own records, compare case-insensitively.
 
 ---
 
