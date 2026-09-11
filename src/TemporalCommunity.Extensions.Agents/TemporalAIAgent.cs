@@ -55,10 +55,20 @@ public sealed class TemporalAIAgent : AIAgent
     internal TemporalAIAgent(string agentName, ActivityOptions? activityOptions = null)
     {
         _agentName = agentName;
+
+        // A caller-supplied ActivityOptions is used verbatim — including a null RetryPolicy, which
+        // is then the caller's own choice. The library-built default must NOT leave RetryPolicy
+        // null: the server reads null as "use the server default", which is MaximumAttempts = 0,
+        // i.e. UNLIMITED retries. A sub-agent LLM step that fails deterministically (an exhausted
+        // scripted client, a provider error the classifier cannot positively identify) would then
+        // retry forever and hang the orchestrating workflow. ResolveForModel applies the same
+        // bounded backstop DefaultTemporalAgentClient already applies to the AgentWorkflow path,
+        // so the idiomatic sub-agent path is no longer the one unbounded LLM dispatch.
         _activityOptions = activityOptions ?? new ActivityOptions
         {
             StartToCloseTimeout = TimeSpan.FromMinutes(30),
             HeartbeatTimeout = TimeSpan.FromMinutes(5),
+            RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(null),
             Summary = AgentActivities.BuildActivitySummary(_agentName),
         };
     }
@@ -426,6 +436,21 @@ public sealed class TemporalAIAgent : AIAgent
                         };
                         // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)
                         // falling back to the shared _activityOptions (P1-2 fix).
+                        //
+                        // The fallback is unreachable on this branch and is kept only as a
+                        // structural guard. Reaching here requires enabledToolCalls[i], and
+                        // AgentRunToolSelectionPolicy.IsCallEnabled only returns true when the tool
+                        // name is present in registeredToolNames — which is exactly
+                        // _toolActivityOptions.Keys. TryGetToolValue then compares with the same
+                        // OrdinalIgnoreCase semantics, so a name that passed the gate always has an
+                        // entry. A null _toolActivityOptions yields an empty registeredToolNames,
+                        // which disables every call before dispatch. Every entry the resolution step
+                        // produces already carries a bounded policy (see
+                        // DefaultTemporalAgentClient.BuildDurableAgentToolActivityOptions, which
+                        // runs each one through DefaultRetryPolicy.ResolveForTool), so tool dispatch
+                        // was never the unbounded path — only the LLM step above was. The fallback
+                        // now inherits the bounded model policy rather than a null one, so even a
+                        // future change that does reach it cannot retry forever.
                         var toolDispatchOpts = DurableToolDecisionPolicy.TryGetToolValue(
                             _toolActivityOptions,
                             tc.Name,

@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
+using Temporalio.Exceptions;
 using Temporalio.Testing;
 using Xunit;
 
@@ -161,11 +162,15 @@ public class InvokeAgentToolActivityTests
     }
 
     [Fact]
-    public async Task InvokeAgentTool_FactoryReturningWrongName_ThrowsInvalidOperationException()
+    public async Task InvokeAgentTool_FactoryReturningWrongName_ThrowsNonRetryableApplicationFailure()
     {
         // The factory returns an AIFunction whose Name doesn't match the AddTool-declared name.
         // Without this guard the tool would be invisible to dispatch (lookup happens by string
-        // key against the AddTool-declared name). Pin the eager validation.
+        // key against the AddTool-declared name). Pin the eager validation — and pin that it is
+        // NON-RETRYABLE: a factory cannot resolve a different name on a retry, so a retryable
+        // failure only burns the attempt budget before reaching the same outcome. Same shape as
+        // the other configuration guards on this path (errorType carries
+        // DurableConfigurationException because TemporalFailureInspector matches on that string).
         var (activities, _, _) = BuildHarness(opts =>
         {
             opts.AddDurableAgent("Mismatched", agent =>
@@ -182,10 +187,16 @@ public class InvokeAgentToolActivityTests
         };
 
         var env = new ActivityEnvironment();
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var ex = await Assert.ThrowsAsync<ApplicationFailureException>(() =>
             env.RunAsync(() => activities.InvokeAgentToolAsync(input)));
+        Assert.True(ex.NonRetryable);
+        Assert.Equal(
+            nameof(TemporalCommunity.Extensions.AI.Exceptions.DurableConfigurationException),
+            ex.ErrorType);
         Assert.Contains("declared_name", ex.Message);
         Assert.Contains("actual_name", ex.Message);
+        Assert.IsType<TemporalCommunity.Extensions.AI.Exceptions.DurableConfigurationException>(
+            ex.InnerException);
     }
 
     [Fact]

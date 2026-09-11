@@ -84,12 +84,28 @@ public sealed class TemporalAgentsOptions
     public RetryPolicy? DefaultRetryPolicy { get; set; }
 
     /// <summary>
-    /// Default <c>true</c>. Upserts AgentName / SessionCreatedAt / TurnCount search
-    /// attributes on the workflow, enabling operational queries in the Temporal Web UI.
-    /// Requires server-side pre-registration of the attribute keys — automatic with
-    /// <c>temporal server start-dev</c>; on production clusters use the Temporal CLI to
-    /// register them once before starting the worker. Set to <c>false</c> to disable.
+    /// Default <c>true</c>. Upserts the AgentName / SessionCreatedAt / TurnCount search
+    /// attributes on the agent workflow, enabling operational queries in the Temporal Web UI.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Upserting a search attribute does not create it. The three attribute keys must already be
+    /// registered on the namespace before the worker starts, otherwise the workflow task fails
+    /// with "no mapping defined for search attribute". This is <b>not</b> automatic on any server,
+    /// including a local <c>temporal server start-dev</c> — a freshly started dev server has none
+    /// of the three.
+    /// </para>
+    /// <para>
+    /// Register them once per namespace. Locally, start the dev server with the keys:
+    /// <c>temporal server start-dev --search-attribute AgentName=Keyword
+    /// --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int</c>.
+    /// On an existing cluster use the equivalent
+    /// <c>temporal operator search-attribute create</c> commands.
+    /// </para>
+    /// <para>
+    /// Set to <c>false</c> to skip the upserts entirely when the keys cannot be registered.
+    /// </para>
+    /// </remarks>
     public bool EnableSearchAttributes { get; set; } = true;
 
     /// <summary>

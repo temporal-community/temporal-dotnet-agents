@@ -648,10 +648,22 @@ internal sealed class AgentActivities(
 
             if (!string.Equals(resolved.Name, tool.Name, StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidOperationException(
+                // A factory that resolves the wrong name is a misconfiguration: no number of
+                // retries turns it into a matching name, so retrying only burns the bounded
+                // default budget (measured: the failure surfaced on attempt 5 of 5) or, when the
+                // user set MaximumAttempts = 0, retries forever. Same treatment and same error
+                // type as the other configuration guards on this path — TemporalFailureInspector
+                // matches on the DurableConfigurationException name.
+                var mismatch = new DurableConfigurationException(
                     $"Tool factory for '{tool.Name}' on agent '{name}' returned an AIFunction with " +
                     $"name '{resolved.Name}'. The factory's resolved name must match the name declared " +
                     "on AddTool.");
+
+                throw new ApplicationFailureException(
+                    mismatch.Message,
+                    mismatch,
+                    errorType: nameof(DurableConfigurationException),
+                    nonRetryable: true);
             }
 
             resolvedTools[tool.Name] = resolved;
