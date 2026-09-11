@@ -4,7 +4,7 @@
 // in a fenced block, which is why the marker below is SNIPPET-PROSE: the coverage checker holds it
 // to the heading still existing, not to a fenced block existing.
 //
-// DOC DEFECT (as of this file's commit): item 1 of that list reads
+// FORMER DOC DEFECT (fixed in the doc; kept as a regression note): item 1 of that list read
 //     agent.AddTool(t, opts => opts.DefaultRetryPolicy = ...)
 // DurableToolOptions has no DefaultRetryPolicy — the per-tool property is RetryPolicy. The
 // Default* prefix belongs to TemporalAgentsOptions, which the table four lines above uses

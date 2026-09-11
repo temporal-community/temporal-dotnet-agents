@@ -41,7 +41,13 @@ trap 'rm -rf "$work"' EXIT
 ratchet_allowed() {
     local file="$1" path="$2"
     [[ -f "$file" ]] || { echo 0; return; }
-    grep -v '^[[:space:]]*#' "$file" | awk -v p="$path" 'NF && $1 == p { print $2; found = 1 } END { if (!found) print 0 }' | head -1
+    # `|| true` is load-bearing. A fully-drained ratchet file is all comments, so grep selects
+    # nothing and exits 1; under `set -euo pipefail` that propagates out of the command
+    # substitution at the call site and kills the script BEFORE fail() can print. The gate then
+    # exits non-zero with an empty log — right answer, no reason, and indistinguishable from a
+    # crash. Draining a ratchet to zero must not disarm the check it guards.
+    { grep -v '^[[:space:]]*#' "$file" || true; } \
+        | awk -v p="$path" 'NF && $1 == p { print $2; found = 1 } END { if (!found) print 0 }' | head -1
 }
 
 # Emits a NOTICE for every ratchet entry now looser than reality, so the lists shrink instead of

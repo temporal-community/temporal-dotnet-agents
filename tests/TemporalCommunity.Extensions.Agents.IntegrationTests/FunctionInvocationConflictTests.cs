@@ -100,13 +100,20 @@ public class FunctionInvocationConflictTests
 
             // Exactly one attempt, despite MaximumAttempts = 5. This is the whole point of the
             // non-retryable conversion: a misconfiguration cannot be fixed by trying again.
-            var attempts = 0;
+            //
+            // Read the ATTEMPT NUMBER, not the number of ActivityTaskStarted events. Temporal does
+            // not persist a Started event per retry — intermediate attempts of a retrying activity
+            // are transient, so an event COUNT reads 1 whether the activity ran once or five times.
+            // Counting would therefore pass even if the non-retryable conversion regressed, which
+            // is precisely the failure this test exists to catch. `Attempt` is 1-based and is the
+            // only field in history that distinguishes the two.
+            var maxAttempt = 0;
             var toolActivities = 0;
             await foreach (var ev in handle.FetchHistoryEventsAsync())
             {
-                if (ev.ActivityTaskStartedEventAttributes is not null)
+                if (ev.ActivityTaskStartedEventAttributes is { } started)
                 {
-                    attempts++;
+                    maxAttempt = Math.Max(maxAttempt, started.Attempt);
                 }
 
                 if (ev.ActivityTaskScheduledEventAttributes?.ActivityType.Name
@@ -116,7 +123,7 @@ public class FunctionInvocationConflictTests
                 }
             }
 
-            Assert.Equal(1, attempts);
+            Assert.Equal(1, maxAttempt);
 
             // And no tool ran in-process or otherwise.
             Assert.Equal(0, toolActivities);

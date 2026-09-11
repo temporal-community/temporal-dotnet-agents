@@ -1,0 +1,16 @@
+# Harness lines that cannot be verbatim copies of the doc, as `<key><TAB><exact stripped line>`.
+#
+# Every entry is re-checked: one that becomes unnecessary fails the gate rather than lingering, so
+# this list cannot quietly grow into a blanket opt-out. Only two kinds of entry belong here —
+# a prose snippet whose doc form is not valid C#, and a harness wrapper the doc does not show.
+
+# usage.md states this rule in prose, with `...` standing in for the policy value. `...` does not
+# compile, so the harness substitutes a real argument.
+docs/how-to/MAF/usage.md#inheritance--per-agent-vs-worker-level	agent.AddTool(t, opts => opts.RetryPolicy = policy);
+
+# testing-agents.md shows a [Fact] that closes over `fixture` and `myChatClient` from the
+# surrounding text. A compile-only harness has no such scope, so they become parameters — which is
+# also why xUnit1001 is in this project's NoWarn.
+docs/how-to/MAF/testing-agents.md#custom-host-per-test	public static async Task AgentFactory_ResolvesServiceDependencies_AtActivityTime(
+docs/how-to/MAF/testing-agents.md#custom-host-per-test	IntegrationTestFixture fixture,
+docs/how-to/MAF/testing-agents.md#custom-host-per-test	IChatClient myChatClient)

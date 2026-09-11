@@ -3,9 +3,8 @@
 // The snippet's own `using` lines are hoisted above the file-scoped namespace (statements cannot
 // precede it); nothing else is altered.
 //
-// DOC GAP: the three `using` lines the snippet shows are not sufficient — `pipeline.UseOpenTelemetry`
-// is an AIAgentBuilder extension in `Microsoft.Agents.AI`, and `Sdk` is in `OpenTelemetry`. Both are
-// added below. Real apps usually already have them, so this is a completeness gap, not a defect.
+// The doc now lists all five `using` lines the snippet needs, including `Microsoft.Agents.AI` for
+// the `pipeline.UseOpenTelemetry` AIAgentBuilder extension and `OpenTelemetry` for `Sdk`.
 using Microsoft.Agents.AI;
 using OpenTelemetry;
 using OpenTelemetry.Trace;

@@ -26,7 +26,8 @@ internal static class PerToolActivityConfiguration
                     agent.Instructions = "You help customers with support requests.";
                     agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
 
-                    // Read tool — inherits the worker default retry policy.
+                    // Read tool — no per-tool policy, so it falls through to agent.RetryPolicy,
+                    // then opts.DefaultRetryPolicy, then the bounded five-attempt backstop.
                     agent.AddTool(lookupOrderTool);
 
                     // Write tool — bind NoRetry() to the AIFunction reference. Cannot mistype the name.

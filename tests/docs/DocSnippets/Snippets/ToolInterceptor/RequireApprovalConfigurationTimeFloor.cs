@@ -1,7 +1,7 @@
 // HARNESS for docs/how-to/MAF/tool-interceptor.md § "RequireApproval — the configuration-time floor".
 //
-// DOC DEFECT (as of this file's commit): the doc passes the factory lambda as AddTool's first
-// argument. The factory overload takes the name first. Corrected below.
+// FORMER DOC DEFECT (fixed in the doc; kept as a regression note): the doc passed the factory lambda as AddTool's first
+// argument. The factory overload takes the name first. The doc now matches this snippet verbatim.
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using TemporalCommunity.Extensions.Agents;

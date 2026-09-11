@@ -1,21 +1,15 @@
 # Known-pending factory-first `AddTool` defect sites, as `<doc-path> <count>`.
 #
-# WHAT THESE ARE
+# THIS LIST IS EMPTY, AND THAT IS THE POINT.
 #   `AddTool` has two overloads: AddTool(AIFunction tool, ...) and
 #   AddTool(string name, Func<IServiceProvider, AIFunction> factory, ...). The factory overload
 #   takes the NAME FIRST. Passing the factory lambda as the first argument —
 #   `AddTool(sp => AIFunctionFactory.Create(...))` — binds to neither and does not compile.
 #
-# WHY A COUNT RATCHET INSTEAD OF A CLEAN FAIL
-#   These nine sites are real, known, and owned by the docs-correction pass. Line numbers churn
-#   under every unrelated doc edit, so pinning them by line would break daily. Counts do not churn.
-#   verify-maf-doc-api-contracts.sh fails if a file exceeds its number or if an unlisted file has
-#   any, so a NEW defect cannot hide behind this list. When a fix lands, the count only becomes
-#   slack — the script prints a notice telling you to lower it. Numbers here may only go DOWN.
+#   All nine original sites (quickstart 1, usage 3, tool-interceptor 5) are fixed, so
+#   verify-maf-doc-api-contracts.sh now fails on ANY occurrence in ANY MAF doc. Keep it that way.
 #
-#   The compiled harness in tests/docs/DocSnippets/ already carries the corrected form of every one
-#   of these sites, so the real check is green; this list only keeps the fast pre-filter quiet.
-
-docs/how-to/MAF/quickstart.md 1
-docs/how-to/MAF/usage.md 3
-docs/how-to/MAF/tool-interceptor.md 5
+# IF YOU ARE ABOUT TO ADD A LINE HERE
+#   Don't. Fix the doc instead — the corrected form is two characters of thought and the compiled
+#   harness in tests/docs/DocSnippets/ will confirm it. This file exists only so the mechanism
+#   survives; numbers may only go DOWN, and there is nowhere below zero.

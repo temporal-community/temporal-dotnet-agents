@@ -1,6 +1,6 @@
 // HARNESS for docs/how-to/MAF/tool-interceptor.md § "Per-tool opt-out".
 //
-// DOC DEFECT (as of this file's commit): factory lambda passed first. Corrected below.
+// FORMER DOC DEFECT (fixed in the doc; kept as a regression note): factory lambda passed first. The doc now matches this snippet verbatim.
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using TemporalCommunity.Extensions.Agents;

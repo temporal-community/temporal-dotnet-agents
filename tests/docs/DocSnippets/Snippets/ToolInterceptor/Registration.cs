@@ -1,7 +1,7 @@
 // HARNESS for docs/how-to/MAF/tool-interceptor.md § "Registration".
 //
-// DOC DEFECT (as of this file's commit): both tool registrations pass the factory lambda first.
-// The factory overload takes the name first. Corrected below.
+// FORMER DOC DEFECT (fixed in the doc; kept as a regression note): both tool registrations passed the factory lambda first.
+// The factory overload takes the name first. The doc now matches this snippet verbatim.
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

@@ -42,6 +42,12 @@ run_case() {
         echo "FAIL: $name should have been rejected but passed" >&2
         sed 's/^/    /' "$repo/out.txt" >&2
         failures=$((failures + 1))
+    elif [[ "$expectation" == "reject" ]] && ! grep -q . "$repo/out.txt"; then
+        # A non-zero exit with an empty log is NOT a passing reject case. `set -euo pipefail` can
+        # abort this gate mid-flight — a drained ratchet file did exactly that — and the result is
+        # indistinguishable from a detection except that CI shows no reason. Demand the reason.
+        echo "FAIL: $name exited $status but printed nothing — it crashed, it did not detect" >&2
+        failures=$((failures + 1))
     else
         echo "ok: $name ($expectation)"
     fi
@@ -107,6 +113,18 @@ agent.AddToolInterceptor(sp => new OrderPolicyInterceptor(sp.GetRequiredService<
 run_case factory-first-within-ratchet pass '```csharp
 agent.AddTool(sp => AIFunctionFactory.Create(svc.Read, "read"));
 ```' '' 'docs/how-to/MAF/example.md 1'
+
+# A ratchet drained to zero is a file of nothing but comments. `grep -v '^#'` then selects no
+# lines and exits 1, which under `set -euo pipefail` aborted the whole gate before it could report
+# anything. Finishing the cleanup must not disarm the check that guards it.
+run_case drained-ratchet-still-rejects reject '```csharp
+agent.AddTool(sp => AIFunctionFactory.Create(svc.Read, "read"));
+```' '' '# every site fixed; this list is intentionally empty
+# numbers may only go down'
+
+run_case drained-ratchet-passes-clean-docs pass '```csharp
+agent.AddTool("read", sp => AIFunctionFactory.Create(svc.Read, name: "read"));
+```' '' '# every site fixed; this list is intentionally empty'
 
 run_case factory-first-exceeds-ratchet reject '```csharp
 agent.AddTool(sp => AIFunctionFactory.Create(svc.Read, "read"));

@@ -1,11 +1,11 @@
 // HARNESS for docs/how-to/MAF/usage.md § "Worker-hosted example".
 //
-// DOC DEFECT (as of this file's commit): all three tool registrations in the doc pass the factory
+// FORMER DOC DEFECT (fixed in the doc; kept as a regression note): all three tool registrations in the doc passed the factory
 // lambda as the FIRST argument —
 //     agent.AddTool(sp => AIFunctionFactory.Create(..., "lookup_order"));
 // — which binds to no overload. The factory overload is
 // AddTool(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>?).
-// Corrected below; the doc-side fix is tracked in README.md next to this project.
+// The doc now uses the name-first form and matches this snippet verbatim.
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;

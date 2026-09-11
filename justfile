@@ -335,6 +335,7 @@ verify-doc-links:
 verify-doc-snippets:
     bash scripts/verify-doc-snippets.selftest.sh
     bash scripts/verify-doc-snippet-coverage.sh
+    bash scripts/verify-doc-snippet-fidelity.sh
 
 # Fast regex pre-filter for two MAF doc defects the compiler cannot reach: renamed internals still
 # named in prose, and factory-first AddTool calls. Narrow on purpose — see the header of the script

@@ -105,12 +105,12 @@ internal sealed class EchoChatClient : HarnessChatClient;
 
 /// <summary>
 /// The decorator the docs use to show per-LLM-call visibility. Only the constructor shape is
-/// load-bearing: <c>(IChatClient inner, ILogger&lt;LoggingChatClient&gt; logger)</c>.
+/// load-bearing: <c>(IChatClient inner, ILogger&lt;AuditingChatClient&gt; logger)</c>.
 /// </summary>
-internal sealed class LoggingChatClient(IChatClient inner, ILogger<LoggingChatClient> logger)
+internal sealed class AuditingChatClient(IChatClient inner, ILogger<AuditingChatClient> logger)
     : DelegatingChatClient(inner)
 {
-    private readonly ILogger<LoggingChatClient> _logger = logger;
+    private readonly ILogger<AuditingChatClient> _logger = logger;
 
     public override Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
@@ -206,4 +206,13 @@ internal static class TestEnvironmentHelper
 {
     public static Task<WorkflowEnvironment> StartLocalAsync() =>
         WorkflowEnvironment.StartLocalAsync();
+}
+
+/// <summary>
+/// Stand-in for the scoped dependency in the dos-and-donts "factory slots share a lifetime"
+/// section — the case the doc warns must NOT be captured in a tool factory.
+/// </summary>
+internal sealed class MyDbContext
+{
+    public Task<string> LookupAsync(string id) => Task.FromResult(id);
 }

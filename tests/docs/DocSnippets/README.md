@@ -14,8 +14,9 @@ A regex cannot tell these two apart:
 ```
 
 Same token, four lines apart, different lambda binding. The compiler separates them; nothing else
-in the repository does. Zero factory-first defects exist under `samples/` and nine exist under
-`docs/` — the difference is that samples are compiled.
+in the repository does. When this harness was written, zero factory-first defects existed under
+`samples/` and nine existed under `docs/` — the only structural difference being that samples are
+compiled. This project closes that gap for the docs.
 
 ## Layout
 
@@ -38,15 +39,27 @@ is a human convenience and is **not** checked — line numbers churn on every un
 `BEGIN SNIPPET-PROSE` marks a snippet lifted from prose rather than a fenced block; it is held to
 the heading still existing, not to a fenced block existing.
 
-Text between the markers stays verbatim. Anything the harness has to add — a `using`, a `#pragma`,
-a type alias — goes outside them, with a comment saying why.
+Text between the markers stays verbatim, and `scripts/verify-doc-snippet-fidelity.sh` enforces it:
+every non-blank line between the markers must appear in the doc the key names (indentation and line
+order ignored, since the harness wraps doc text in a class and a method). Adaptations that genuinely
+cannot be verbatim — a prose snippet whose doc form is not valid C#, a `[Fact]` that needs injected
+parameters — go in `scripts/doc-snippet-fidelity-allowlist.txt` with a reason, and an entry that
+stops being necessary fails the gate rather than lingering.
+
+Anything else the harness has to add — a `using`, a `#pragma`, a type alias — goes outside the
+markers, with a comment saying why.
+
+Without this check, compilation only proves the *snippet* is valid, not that the *doc* is: a doc
+line that grows a trailing comment while the harness copy does not leaves the harness quietly
+asserting something the reader never sees. That exact drift happened once and is why the gate
+exists.
 
 ## Gates
 
 | Command | What it proves |
 |---|---|
 | `just build` | every snippet compiles |
-| `just verify-doc-snippets` | self-test, then: every qualifying doc block has a compiled counterpart |
+| `just verify-doc-snippets` | self-test, then: every qualifying doc block has a compiled counterpart, **and** every snippet still matches the doc text it quotes |
 | `just verify-maf-doc-api-contracts` | self-test, then: fast regex pre-filter (stale names, factory-first `AddTool`) |
 
 `just verify-doc-snippets` runs `scripts/verify-doc-snippets.selftest.sh` first. That self-test
@@ -56,19 +69,20 @@ forever — the failure mode `verify-markdown-links.selftest.sh` exists to preve
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 
-## Doc defects this harness currently carries corrections for
+## Doc defects this harness carries corrections for
 
-The snippets below are written in the **correct** form, so this project is green, while the docs
-are not yet. Each file names its defect in a header comment. Removing an entry here is the signal
-that a doc fix landed.
+**None — the list is empty.** Every snippet below the markers now matches its doc verbatim.
 
-| Doc | Defect |
-|---|---|
-| `quickstart.md` §1 | `AddTool(sp => …)` — the factory overload takes the **name first** |
-| `usage.md` §Worker-hosted example | same, three sites |
-| `tool-interceptor.md` §RequireApproval / §Registration / §Per-tool opt-out / §Interceptor activity timeout | same, five sites |
-| `usage.md` §Inheritance (prose) | `opts.DefaultRetryPolicy` on `DurableToolOptions`; the property is `RetryPolicy` |
-| `usage.md` §Reducing the LLM Context Window | `GetChatClient(…).AsBuilder()` — `AsBuilder` is an `IChatClient` extension, so `.AsIChatClient()` is missing |
-| `usage.md` §Reducing the LLM Context Window | `MessageCountingChatReducer` is `[Experimental("MEAI001")]`; the doc never says the reader must suppress it |
-| `observability.md` §Setup, `usage.md` §Setup | the shown `using` list omits `Microsoft.Agents.AI` (for `pipeline.UseOpenTelemetry`) and `OpenTelemetry` (for `Sdk`) |
-| `dos-and-donts.md`, `llm-call-interception.md` | the example decorator is named `LoggingChatClient`, which collides with `Microsoft.Extensions.AI.LoggingChatClient` — worth renaming in the docs |
+That is the steady state, not the finished state. When this harness first ran it carried corrections
+for nine factory-first `AddTool` sites, a `DurableToolOptions.DefaultRetryPolicy` that never existed,
+a missing `.AsIChatClient()`, an unmentioned `[Experimental("MEAI001")]` suppression, two absent
+`using` directives, and an example type colliding with `Microsoft.Extensions.AI.LoggingChatClient`.
+All of those are fixed in the docs.
+
+When a new one appears, write the snippet in the **correct** form so this project stays green, name
+the defect in the file's header comment, and add a row here. Removing the row is the signal that the
+doc fix landed.
+
+Also worth knowing: the older defects were found by *compiling*, not by reading. Three of them —
+the missing `using` in the `TemporalAgentContext` example, the absent `.AsIChatClient()`, and the
+`MEAI001` suppression — are invisible to any regex and were only ever going to surface here.

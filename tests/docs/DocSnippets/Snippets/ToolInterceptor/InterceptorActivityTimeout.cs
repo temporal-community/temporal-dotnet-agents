@@ -1,6 +1,6 @@
 // HARNESS for docs/how-to/MAF/tool-interceptor.md § "Interceptor activity timeout".
 //
-// DOC DEFECT (as of this file's commit): factory lambda passed first. Corrected below.
+// FORMER DOC DEFECT (fixed in the doc; kept as a regression note): factory lambda passed first. The doc now matches this snippet verbatim.
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using TemporalCommunity.Extensions.Agents;
@@ -20,7 +20,8 @@ internal static class InterceptorActivityTimeout
             opts => opts
                 .NoRetry()
                 .WithInterceptorTimeout(TimeSpan.FromSeconds(10)));  // interceptor gets 10s
-                // tool's own StartToCloseTimeout still inherits the worker default
+                // tool's own StartToCloseTimeout still falls through agent.ActivityTimeout
+                // to opts.DefaultActivityTimeout
         // END SNIPPET docs/how-to/MAF/tool-interceptor.md#interceptor-activity-timeout
     }
 }
