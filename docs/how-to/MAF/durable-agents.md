@@ -81,19 +81,34 @@ opts => opts.ScopeAware()                           // opt in to expiring-grant 
 
 `RequireApproval()` and `PauseForApproval` are the two workflow-parked HITL triggers — the turn loop parks (no activity pinned) and retry-safe `ResolveApprovalAsync` unblocks it. This differs from the in-tool path (`TemporalAgentContext.Current.RequestApprovalAsync`), which keeps the activity running and heartbeating while waiting. See [HITL Patterns](./hitl-patterns.md) for a full comparison and the `IAgentToolInterceptor` registration pattern.
 
-## Per-tool retry policy hierarchy
+## Retry policy hierarchy
 
-For every tool dispatched as a Temporal activity (`InvokeAgentTool`), the effective retry policy is:
+This is the canonical statement of retry inheritance for MAF agents; other pages link here rather
+than restating it.
 
-1. The tool's `DurableToolOptions.RetryPolicy` if set (via the `configure` callback on `AddTool`)
-2. Else the agent's `DurableAgentBuilder.RetryPolicy`
-3. Else the worker's `TemporalAgentsOptions.DefaultRetryPolicy`
-4. Else the library's bounded backstop: `MaximumAttempts = 5`, with a 30-second maximum interval
-   for tools and 2 seconds for model calls. This is applied deliberately in place of Temporal's
-   server default of `MaximumAttempts = 0`, which is unlimited — an unbounded retry on a failing
-   tool or model call would otherwise never surface as a failure.
+Three activity types resolve a retry policy, and they share most of the chain. First match wins:
 
-The per-LLM-call activity (`RunDurableAgentStep`) uses the same chain starting at step 2 (agent → worker → bounded backstop), since the per-tool override in step 1 only applies to tool dispatch.
+| Rung | Tool call (`InvokeAgentTool`) | LLM call (`RunDurableAgentStep`) | Interceptor (`RunToolInterceptor`) |
+|---|---|---|---|
+| 1 | `DurableToolOptions.RetryPolicy` — the `configure` callback on `AddTool` | `OneTimeAgentRun.RetryPolicy` — scheduled and one-time runs only | *(no per-tool rung)* |
+| 2 | `agent.RetryPolicy` | `agent.RetryPolicy` | `agent.RetryPolicy` |
+| 3 | `opts.DefaultRetryPolicy` | `opts.DefaultRetryPolicy` | `opts.DefaultRetryPolicy` |
+| 4 | bounded backstop — 5 attempts, 30s max interval | bounded backstop — 5 attempts, 2s max interval | bounded backstop — 5 attempts, 30s max interval |
+
+Two consequences people get wrong:
+
+- **`agent.RetryPolicy` is not LLM-only.** Rung 2 is shared. An agent-level policy set to tune model
+  retries also becomes the default for every tool on that agent and for the interceptor activity.
+  Only `DurableToolOptions.RetryPolicy` is tool-specific.
+- **The backstop is not a worker default you can read back.** Rung 4 exists precisely *because*
+  rungs 1–3 are all unset. Leaving `opts.DefaultRetryPolicy` null does not mean "no retry policy" —
+  it means the library substitutes `MaximumAttempts = 5` in place of Temporal's server default of
+  `MaximumAttempts = 0`, which is **unlimited**. An unbounded retry on a permanently failing tool or
+  model call would otherwise never surface as a failure.
+
+The model backstop caps backoff at 2 seconds rather than 30 because an interactive `RunAsync` should
+return its terminal failure promptly; tool work gets the longer window so a transient dependency has
+a meaningful chance to recover.
 
 Setting `DefaultRetryPolicy` or a per-agent `RetryPolicy` **replaces** the backstop rather than
 layering on it, so an explicit policy with `MaximumAttempts = 0` does restore unlimited retries.

@@ -53,7 +53,7 @@ public interface IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContex
 > defined in `TemporalCommunity.Extensions.AI.Tools`. `IAgentToolInterceptor` and `AgentToolContext` live in
 > `TemporalCommunity.Extensions.Agents.Tools`. Implementors need `using TemporalCommunity.Extensions.AI.Tools;` for the decision type.
 
-`AfterToolCallAsync` is named and reserved for a follow-on release. When it ships, the interface will add a default implementation so existing interceptors are not broken.
+The interface has exactly one method, `BeforeToolCallAsync`. Interception is a pre-dispatch gate: there is no post-tool hook, so a tool's *result* cannot be inspected or rewritten here. To act on a result, wrap the `AIFunction` itself before registering it.
 
 ---
 
@@ -67,7 +67,13 @@ public class DurableToolContext
     public required IReadOnlyDictionary<string, object?> Arguments { get; init; }
     public string? CallId { get; init; }
     public string? SessionId { get; init; }
-    // + ConversationId, CorrelationId, TurnNumber, Metadata (Phase 2)
+
+    // Declared on the type, but NOT populated by either library's interception path today.
+    // They read null in an interceptor; do not branch on them.
+    public string? ConversationId { get; init; }
+    public string? CorrelationId { get; init; }
+    public int? TurnNumber { get; init; }
+    public IReadOnlyDictionary<string, string>? Metadata { get; init; }
 }
 
 // AgentToolContext (TemporalCommunity.Extensions.Agents.Tools) — MAF-specific extension
@@ -159,9 +165,10 @@ Use this for guardrail violations, compliance policy failures, or any case where
 
 ```csharp
 agent.AddTool(
+    "delete_records",
     sp => AIFunctionFactory.Create(
         sp.GetRequiredService<DataService>().DeleteRecords,
-        "delete_records"),
+        name: "delete_records"),
     opts => opts.RequireApproval());
 ```
 
@@ -299,12 +306,13 @@ builder.Services
             agent.AddToolInterceptor(sp => new OrderPolicyInterceptor(
                 sp.GetRequiredService<OrderPolicyService>()));
 
-            agent.AddTool(sp => AIFunctionFactory.Create(
-                sp.GetRequiredService<OrderService>().LookupOrder, "lookup_order"));
+            agent.AddTool("lookup_order", sp => AIFunctionFactory.Create(
+                sp.GetRequiredService<OrderService>().LookupOrder, name: "lookup_order"));
 
             agent.AddTool(
+                "cancel_order",
                 sp => AIFunctionFactory.Create(
-                    sp.GetRequiredService<OrderService>().CancelOrder, "cancel_order"),
+                    sp.GetRequiredService<OrderService>().CancelOrder, name: "cancel_order"),
                 opts => opts.NoRetry());
         });
     });
@@ -320,8 +328,9 @@ Opt a specific tool out of the interceptor with `SkipInterceptor()`:
 
 ```csharp
 agent.AddTool(
+    "search_products",
     sp => AIFunctionFactory.Create(
-        sp.GetRequiredService<CatalogService>().SearchProducts, "search_products"),
+        sp.GetRequiredService<CatalogService>().SearchProducts, name: "search_products"),
     opts => opts.SkipInterceptor());
 ```
 
@@ -337,12 +346,14 @@ By default, the `RunToolInterceptor` activity uses the per-agent `ActivityTimeou
 
 ```csharp
 agent.AddTool(
+    "write_record",
     sp => AIFunctionFactory.Create(
-        sp.GetRequiredService<DataService>().WriteRecord, "write_record"),
+        sp.GetRequiredService<DataService>().WriteRecord, name: "write_record"),
     opts => opts
         .NoRetry()
         .WithInterceptorTimeout(TimeSpan.FromSeconds(10)));  // interceptor gets 10s
-        // tool's own StartToCloseTimeout still inherits the worker default
+        // tool's own StartToCloseTimeout still falls through agent.ActivityTimeout
+        // to opts.DefaultActivityTimeout
 ```
 
 `WithInterceptorTimeout` sets only the `RunToolInterceptor` activity's `StartToCloseTimeout`. It is independent of `WithTimeout`, which governs the `InvokeAgentTool` activity.

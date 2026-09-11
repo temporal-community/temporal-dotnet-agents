@@ -75,7 +75,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 
-internal sealed class LoggingChatClient(IChatClient inner, ILogger<LoggingChatClient> logger)
+internal sealed class AuditingChatClient(IChatClient inner, ILogger<AuditingChatClient> logger)
     : DelegatingChatClient(inner)
 {
     public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -187,9 +187,9 @@ it:
 opts.AddDurableAgent("Assistant", agent =>
 {
     agent.Instructions = "You are a helpful assistant.";
-    agent.ChatClient = sp => new LoggingChatClient(
+    agent.ChatClient = sp => new AuditingChatClient(
         sp.GetRequiredService<OpenAIClient>().GetChatClient("gpt-4o-mini").AsIChatClient(),
-        sp.GetRequiredService<ILogger<LoggingChatClient>>());
+        sp.GetRequiredService<ILogger<AuditingChatClient>>());
     agent.AddTool(weatherTool);
 });
 ```

@@ -50,21 +50,23 @@ builder.Services
             agent.Instructions = "You are a refund specialist.";
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
 
-            agent.AddTool(sp => AIFunctionFactory.Create(
+            agent.AddTool("lookup_order", sp => AIFunctionFactory.Create(
                 sp.GetRequiredService<OrderService>().LookupOrder,
-                "lookup_order"));
+                name: "lookup_order"));
 
             // Write tools must opt out of retry — non-idempotent re-execution is the foot-gun.
             agent.AddTool(
+                "apply_refund",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<RefundService>().ApplyRefund,
-                    "apply_refund"),
+                    name: "apply_refund"),
                 opts => opts.NoRetry());
 
             agent.AddTool(
+                "send_email",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<EmailService>().SendEmail,
-                    "send_email"),
+                    name: "send_email"),
                 opts => opts.NoRetry());
 
             agent.MaxToolCallsPerTurn = 10;
@@ -159,8 +161,14 @@ as `TemporalCommunity.Extensions.AI`: register a stateless reducer such as
 `AIAgent`. The reducer applies a sliding window at the LLM-call boundary —
 inside `AgentActivities.RunDurableAgentStepAsync` — so it does not need to be replay-safe.
 
+`MessageCountingChatReducer` is annotated `[Experimental("MEAI001")]`, so it needs a suppression
+until MEAI stabilizes the type — the pragma below, or `<NoWarn>$(NoWarn);MEAI001</NoWarn>` in the
+project file.
+
 ```csharp
+#pragma warning disable MEAI001
 var chatClient = openAiClient.GetChatClient("gpt-4o-mini")
+    .AsIChatClient()                                     // OpenAI's ChatClient is not an IChatClient
     .AsBuilder()
     .UseChatReducer(new MessageCountingChatReducer(20))   // 20-message window to the LLM
     .Build();
@@ -181,6 +189,7 @@ builder.Services
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
         });
     });
+#pragma warning restore MEAI001
 ```
 
 With this configuration:
@@ -865,7 +874,7 @@ with `IDurableToolSource` or the `durableTools` overload.
 
 ## Per-Tool Activity Configuration
 
-Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity (`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). An explicit worker-level `opts.DefaultRetryPolicy` is inherited exactly. When it is null, tools use the library's bounded five-attempt default with exponential backoff capped at 30 seconds. Override per tool via the `configure` callback on `AddTool` — see the [`DurableToolOptions` reference](#durabletooloptions-reference) below for the full property list.
+Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity (`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). Its retry policy resolves through four rungs — the tool's own `DurableToolOptions.RetryPolicy`, then `agent.RetryPolicy`, then `opts.DefaultRetryPolicy`, then the library's bounded five-attempt backstop with backoff capped at 30 seconds. [Durable Agents](./durable-agents.md#retry-policy-hierarchy) is the canonical reference for all three activity types. Override per tool via the `configure` callback on `AddTool` — see the [`DurableToolOptions` reference](#durabletooloptions-reference) below for the full property list.
 
 `agent.MaxToolCallsPerTurn` (default `20` when not set) caps step-loop iterations per single agent turn. The value propagates from the agent's registration into session-based workflows, scheduled jobs, and sub-agent calls via `GetTemporalAgent()` — you configure it once on the builder and it takes effect everywhere. When exceeded, the workflow returns a structured "iteration cap exceeded" assistant message rather than letting workflow history grow unbounded.
 
@@ -881,7 +890,8 @@ builder.Services
             agent.Instructions = "You help customers with support requests.";
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
 
-            // Read tool — inherits the worker default retry policy.
+            // Read tool — no per-tool policy, so it falls through to agent.RetryPolicy,
+            // then opts.DefaultRetryPolicy, then the bounded five-attempt backstop.
             agent.AddTool(lookupOrderTool);
 
             // Write tool — bind NoRetry() to the AIFunction reference. Cannot mistype the name.
@@ -909,6 +919,8 @@ Install `Temporalio.Extensions.OpenTelemetry` alongside your preferred OTel expo
 tracing interceptor and the agent activity source:
 
 ```csharp
+using Microsoft.Agents.AI;          // pipeline.UseOpenTelemetry — an AIAgentBuilder extension
+using OpenTelemetry;                // Sdk.CreateTracerProviderBuilder
 using OpenTelemetry.Trace;
 using Temporalio.Extensions.OpenTelemetry;
 using TemporalCommunity.Extensions.Agents;
@@ -1024,7 +1036,7 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 | `AddTools(params AIFunction[] tools)` | Bulk registration of concrete tools. |
 | `AddContextProvider(AIContextProvider provider, IEnumerable<DurableToolRegistrationSpec>? durableTools = null)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the chat pipeline. `Invoking/InvokedAsync` fire once per LLM call. Concrete providers can also contribute durable tools through specs or `IDurableToolSource`. |
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
-| `RetryPolicy` | Retry policy for the agent's `RunAgentStep` activity (the LLM call). Per-tool retry is configured separately via `DurableToolOptions`. |
+| `RetryPolicy` | Agent-level retry policy. Applies to the `RunDurableAgentStep` (LLM) activity **and** to every tool and interceptor activity on this agent that does not override it — not LLM-only. A tool overrides it via `DurableToolOptions.RetryPolicy`. |
 | `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
 | `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached on the `TemporalAIAgent` instance for its lifetime — it describes the agent, not the conversation, so every session that instance drives shares the resolved value. Changes to the builder value after worker startup do not affect agents already resolved. |
 | `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
@@ -1057,13 +1069,22 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
 | `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
 
-The retry-policy hierarchy adds one more layer specifically for tools. From most to least specific:
+Retry adds one rung above this table for tools, and one below it for everything:
 
-1. `agent.AddTool(t, opts => opts.DefaultRetryPolicy = ...)` — the per-tool override (use `opts.NoRetry()` on write tools).
-2. `agent.RetryPolicy` — the agent-level default for any tool that doesn't override.
-3. `opts.DefaultRetryPolicy` — the worker-level default used by agents that don't override.
+1. `agent.AddTool(t, opts => opts.RetryPolicy = ...)` — the per-tool override. The property is
+   `RetryPolicy`; `opts.NoRetry()` is the shorthand write tools want.
+2. `agent.RetryPolicy` — the agent-level default, shared by the LLM step, the tools, and the
+   interceptor activity.
+3. `opts.DefaultRetryPolicy` — the worker-level default for agents that do not override.
+4. The library's bounded backstop — 5 attempts, capped at 30s backoff for tools and 2s for model
+   calls. This applies when rungs 1–3 are all unset, in place of Temporal's server default of
+   unlimited retries.
 
-There is **no per-agent "default for all my tools" cascade beyond `agent.RetryPolicy`** — set policies per tool when the per-tool default is genuinely different.
+Rung 2 is the one people mis-set: `agent.RetryPolicy` is a default for *all* of the agent's
+activities, not a model-call-only knob. When a tool genuinely needs different behavior from the rest
+of the agent, set it on that tool. Full table, including the scheduled-run rung that sits above
+`agent.RetryPolicy` for one-time runs, in
+[Durable Agents](./durable-agents.md#retry-policy-hierarchy).
 
 ### Custom agent middleware
 

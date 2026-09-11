@@ -87,10 +87,13 @@ catalogs fails loudly rather than silently shadowing a tool.
 
 This is the part worth reading before `AddTools(discovered)`.
 
-A tool registered with no policy inherits the worker default: **five attempts**, with a 30-second
-maximum backoff. That is a deliberate bounded backstop — the library applies
+A tool registered with no policy of its own falls through `agent.RetryPolicy` and
+`opts.DefaultRetryPolicy` to the library's bounded backstop: **five attempts**, with a 30-second
+maximum backoff. The backstop is not the worker default — it is what applies when no worker,
+agent, or per-tool policy was set at all, and the library substitutes
 `new RetryPolicy { MaximumAttempts = 5 }` rather than letting Temporal's server default
-(`MaximumAttempts = 0`, unlimited) apply.
+(`MaximumAttempts = 0`, unlimited) apply. Setting `opts.DefaultRetryPolicy` replaces it; see
+[Durable Agents](./durable-agents.md#retry-policy-hierarchy).
 
 Five attempts is right for a read. It is wrong for anything that has an effect: a `delete_inventory`
 that times out after doing the delete will be called again. Write-style MCP tools need `NoRetry()`,

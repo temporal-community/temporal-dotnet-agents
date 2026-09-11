@@ -146,7 +146,7 @@ var host = builder.Build();
 await host.StartAsync();
 ```
 
-### Do use DI factories on `AddDurableAgent` for agents that need scoped services
+### Do use DI factories on `AddDurableAgent` instead of `BuildServiceProvider()`
 
 ```csharp
 opts.AddDurableAgent("MyAgent", agent =>
@@ -155,11 +155,49 @@ opts.AddDurableAgent("MyAgent", agent =>
     agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
     agent.AddTool("do_thing", sp => AIFunctionFactory.Create(
         sp.GetRequiredService<IMyService>().DoThingAsync,
-        "do_thing"));
+        name: "do_thing"));
 });
 ```
 
-The `ChatClient`, `AddTool(name, factory)`, and `AddContextProvider(factory)` builder slots accept a `Func<IServiceProvider, T>` evaluated lazily at activity dispatch. There is no need to call `BuildServiceProvider()` from inside the configure delegate.
+**Why:** every builder slot that needs a dependency takes a `Func<IServiceProvider, T>` evaluated
+after the container is built, so calling `BuildServiceProvider()` inside the configure delegate is
+never necessary — and doing it would fork the container, giving you a second set of singletons.
+
+### Don't assume the builder's factory slots share a lifetime
+
+They do not, and the difference decides where a scoped service such as a `DbContext` may safely go:
+
+| Slot | Provider the factory receives | How often it runs |
+|---|---|---|
+| `agent.ChatClient` | the activity attempt's **scope** | once per `RunDurableAgentStep` attempt |
+| `agent.AddContextProvider(factory)` | the activity attempt's **scope** | once per `RunDurableAgentStep` attempt |
+| `agent.ConfigureAgentPipeline` | the activity attempt's **scope** | once per attempt, plus one dry build at worker startup |
+| `agent.AddTool(name, factory)` | the worker's **root** provider | **once per worker lifetime** — the result is cached on the agent blueprint |
+
+**Why:** the tool row is the trap. A tool is an `AIFunction` — a stateless delegate wrapper — so the
+library resolves it once and reuses it, which means anything you resolve inside a tool factory is
+held for the worker's life with singleton semantics *regardless of how it was registered in DI*.
+Resolving a `DbContext` there creates a captive dependency that outlives every scope it was meant
+to belong to.
+
+Resolve per-invocation state inside the tool body instead, where `InvokeAgentTool` has opened a
+scope for that specific call:
+
+```csharp
+agent.AddTool("do_thing", _ => AIFunctionFactory.Create(
+    async (string id) =>
+    {
+        // Scoped to this one tool invocation, not to the worker.
+        var db = TemporalAgentContext.Current.GetService<MyDbContext>()
+            ?? throw new InvalidOperationException("MyDbContext is not registered.");
+        return await db.LookupAsync(id);
+    },
+    name: "do_thing"));
+```
+
+`TemporalAgentContext` lives in `TemporalCommunity.Extensions.Agents.Session`. `Current` is non-null
+inside a tool body and throws outside one; `GetService<T>` returns `null` when the service is not
+registered. There is no `Services` property on the context.
 
 ---
 
@@ -333,9 +371,9 @@ builder.AddSource(
 The `agent.turn` span is emitted per LLM-step activity, not per whole turn — a turn with two tool rounds produces three of them. It carries Temporal-owned correlation, not provider-semantic request/response detail. To see token counts, finish reason, and the exact payloads for each round, decorate the `IChatClient` your agent factory returns:
 
 ```csharp
-agent.ChatClient = sp => new LoggingChatClient(
+agent.ChatClient = sp => new AuditingChatClient(
     sp.GetRequiredService<OpenAIClient>().GetChatClient("gpt-4o-mini").AsIChatClient(),
-    sp.GetRequiredService<ILogger<LoggingChatClient>>());
+    sp.GetRequiredService<ILogger<AuditingChatClient>>());
 
 opts.AddDurableAgent("Assistant", agent =>
 {
@@ -482,7 +520,7 @@ opts.AddDurableAgent("SupportAgent", agent =>
 });
 ```
 
-**Why:** Every tool in a durable agent is dispatched as a separate Temporal activity (`InvokeAgentTool`). A transient activity failure normally retries — for a non-idempotent write tool that already had a side effect, the retry would fire the side effect a second time. `opts.NoRetry()` is sugar for `RetryPolicy = new() { MaximumAttempts = 1 }`, which tells Temporal not to re-execute the activity. The retry policy binds to the `AIFunction` reference at registration time, so a typo on the tool name is a build error rather than a silent fall-through to the default retry. See [Durable Agents](./durable-agents.md).
+**Why:** Every tool in a durable agent is dispatched as a separate Temporal activity (`InvokeAgentTool`). A transient activity failure normally retries — for a non-idempotent write tool that already had a side effect, the retry would fire the side effect a second time. `opts.NoRetry()` is sugar for `RetryPolicy = new() { MaximumAttempts = 1 }`, which tells Temporal not to re-execute the activity. Per-tool options are keyed by the **registered** tool name, which is why the two `AddTool` overloads differ here: with `AddTool(AIFunction tool, ...)` the key *is* `tool.Name`, so there is no separate string to get wrong. With `AddTool(string name, Func<IServiceProvider, AIFunction> factory, ...)` the declared name and the factory's resolved `AIFunction.Name` are checked against each other at first dispatch, and a mismatch throws a non-retryable `DurableConfigurationException` — not at build time, but loudly and without burning the retry budget. What it is *not* is a silent fall-through to the default retry policy. See [Durable Agents](./durable-agents.md).
 
 ### Do use `Workflow.WhenAllAsync` for parallel activity fan-out
 

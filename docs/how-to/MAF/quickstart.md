@@ -1,6 +1,6 @@
 # MAF Quickstart
 
-One durable agent, registered and called, in about thirty lines.
+One durable agent, registered and called, in a single file.
 
 `TemporalCommunity.Extensions.Agents` makes a Microsoft Agent Framework `AIAgent` durable with
 Temporal: every LLM call is its own activity, every tool call is its own activity, and a crashed
@@ -14,6 +14,11 @@ Once this works, [usage.md](./usage.md) is the reference for everything else.
 
 - A Temporal Service on `localhost:7233` — `temporal server start-dev`
 - An `OPENAI_API_KEY`, via `dotnet user-secrets` or the environment
+- The package:
+
+```bash
+dotnet add package TemporalCommunity.Extensions.Agents
+```
 
 Search attributes are pre-registered by default (`EnableSearchAttributes`), and the dev server does
 **not** create them for you. Start it with them, or agent workflows fail to start:
@@ -34,8 +39,30 @@ all hang off one builder, and dependencies resolve through per-slot factories �
 `BuildServiceProvider()` bootstrap.
 
 ```csharp
-builder.Services.AddSingleton<WeatherService>();
-builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient());
+using System.ClientModel;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using OpenAI;
+using Temporalio.Extensions.Hosting;
+using TemporalCommunity.Extensions.Agents;
+
+var builder = Host.CreateApplicationBuilder(args);
+
+var apiKey = builder.Configuration["OPENAI_API_KEY"]
+    ?? throw new InvalidOperationException("OPENAI_API_KEY is not configured.");
+var openAiClient = new OpenAIClient(new ApiKeyCredential(apiKey));
+
+// The tool the agent may call. Each invocation the model requests becomes its own
+// InvokeAgentTool activity.
+static string GetWeather(string city) => $"It is sunny in {city}.";
+var weatherTool = AIFunctionFactory.Create(
+    GetWeather,
+    name: "get_weather",
+    description: "Returns the current weather for a city.");
+
+builder.Services.AddChatClient(openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient());
 builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
@@ -46,23 +73,32 @@ builder.Services
         {
             agent.Instructions = "You are a helpful assistant.";
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-
-            agent.AddTool(sp => AIFunctionFactory.Create(
-                sp.GetRequiredService<WeatherService>().GetWeather,
-                "get_weather"));
+            agent.AddTool(weatherTool);
         });
     });
+
+var host = builder.Build();
+await host.StartAsync();
 ```
 
-Two things that bite people here:
+Three things that bite people here:
 
 - **Register `ITemporalClient` explicitly.** The three-argument
   `AddHostedTemporalWorker(address, namespace, queue)` overload configures a worker-internal client
   but does not put `ITemporalClient` in DI, and `AddTemporalAgents` needs one.
 - **Do not call `.UseFunctionInvocation()`** on your chat client. The workflow owns tool dispatch;
   an in-process loop is rejected at runtime.
+- **A tool that needs a service from DI takes the name first.** `AddTool` has two overloads: the
+  one above, `AddTool(AIFunction tool, ...)`, for a tool you already built, and
+  `AddTool(string name, Func<IServiceProvider, AIFunction> factory, ...)` for one that must resolve
+  dependencies — for example `agent.AddTool("get_weather", sp =>
+  AIFunctionFactory.Create(sp.GetRequiredService<WeatherService>().GetWeather, name:
+  "get_weather"))`. There is no factory-only overload; passing a bare `sp => ...` lambda does not
+  compile.
 
 ## 2. Call it from outside a workflow
+
+The worker is running in the same process, so the host can talk to its own agent:
 
 ```csharp
 var proxy   = host.Services.GetTemporalAgentProxy("Assistant");
@@ -77,17 +113,33 @@ independent conversation gets its own `CreateSessionAsync()`.
 
 ## 3. Or call it from inside a workflow
 
-```csharp
-[WorkflowRun]
-public async Task<string> RunAsync(string question)
-{
-    var agent   = WorkflowAgents.GetTemporalAgent("Assistant");
-    var session = await agent.CreateSessionAsync().ConfigureAwait(true);
-    var reply   = await agent.RunAsync([new ChatMessage(ChatRole.User, question)], session)
-        .ConfigureAwait(true);
+Sub-agent calls use `WorkflowAgents.GetTemporalAgent`, which is workflow-context only — the proxy
+above is the external equivalent.
 
-    return reply.Messages[^1].Text ?? string.Empty;
+```csharp
+[Workflow]
+public class AskWorkflow
+{
+    [WorkflowRun]
+    public async Task<string> RunAsync(string question)
+    {
+        var agent   = WorkflowAgents.GetTemporalAgent("Assistant");
+        var session = await agent.CreateSessionAsync().ConfigureAwait(true);
+        var reply   = await agent.RunAsync([new ChatMessage(ChatRole.User, question)], session)
+            .ConfigureAwait(true);
+
+        return reply.Messages[^1].Text ?? string.Empty;
+    }
 }
+```
+
+A workflow only runs if the worker knows about it, so register it alongside the agent:
+
+```csharp
+builder.Services
+    .AddHostedTemporalWorker("agents")
+    .AddTemporalAgents(opts => { /* as above */ })
+    .AddWorkflow<AskWorkflow>();
 ```
 
 ---

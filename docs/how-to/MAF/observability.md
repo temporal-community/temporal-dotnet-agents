@@ -45,6 +45,8 @@ dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol  # or your prefe
 Register **all four** `ActivitySource` names plus the `TracingInterceptor`:
 
 ```csharp
+using Microsoft.Agents.AI;          // pipeline.UseOpenTelemetry — an AIAgentBuilder extension
+using OpenTelemetry;                // Sdk.CreateTracerProviderBuilder
 using OpenTelemetry.Trace;
 using Temporalio.Extensions.OpenTelemetry;
 using TemporalCommunity.Extensions.Agents;
