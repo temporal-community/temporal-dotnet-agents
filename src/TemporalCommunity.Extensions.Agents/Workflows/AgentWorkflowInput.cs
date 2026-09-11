@@ -78,10 +78,19 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
     /// <see langword="null"/> when the config has not yet been resolved.
     /// </summary>
     /// <remarks>
-    /// The dictionary is built at workflow start (not at first activity dispatch) so retry
-    /// constraints — especially <c>MaximumAttempts = 1</c> on write tools — are pinned at the
-    /// time the workflow began running. Continue-as-new carries the same dictionary forward so
-    /// retry semantics survive across CAN transitions.
+    /// <para>
+    /// Where the dictionary is built depends on how the session started. A worker-started session
+    /// gets it from <c>DefaultTemporalAgentClient</c> at workflow start. A proxy-started session
+    /// has no registration on the client, so <see cref="ResolvedWorkerConfig"/> begins
+    /// <see langword="null"/> and the worker resolves the bundle on the first activity dispatch of
+    /// the first turn via the <c>NeedsWorkerSettingsResolution</c> handshake.
+    /// </para>
+    /// <para>
+    /// Either way the bundle is pinned once and never re-read from the registration afterwards, so
+    /// retry constraints — especially <c>MaximumAttempts = 1</c> on write tools — cannot drift
+    /// while a session is running. Continue-as-new carries the same dictionary forward so retry
+    /// semantics survive across CAN transitions.
+    /// </para>
     /// </remarks>
     [JsonIgnore]
     public IReadOnlyDictionary<string, ActivityOptions>? DurableAgentToolActivityOptions =>

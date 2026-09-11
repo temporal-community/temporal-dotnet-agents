@@ -56,10 +56,10 @@ internal sealed record AgentJobInput
     /// </summary>
     public int MaxToolCallsPerTurn { get; init; } = 20;
 
-    // Feature L — interceptor plumbing for AgentJobWorkflow (resolved at runtime from
-    // CachedDurableAgent; not frozen in workflow input like AgentWorkflow's
-    // ProxyResolvedWorkerConfig approach, since AgentJobWorkflow is fire-and-forget
-    // without a resolution handshake).
+    // Feature L — interceptor plumbing for AgentJobWorkflow. Resolved at runtime from the
+    // agent's DurableAgentRegistration (reached via the cached AgentBlueprint); not frozen in
+    // workflow input like AgentWorkflow's ProxyResolvedWorkerConfig approach, since
+    // AgentJobWorkflow is fire-and-forget without a resolution handshake.
 
     /// <summary>
     /// Pre-computed <see cref="ActivityOptions"/> for <c>RunToolInterceptor</c> dispatches.
