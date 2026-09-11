@@ -63,7 +63,8 @@ internal sealed class TemporalAgentDataConverterPlugin : ITemporalClientPlugin
 
 /// <summary>
 /// Configures <see cref="TemporalClientConnectOptions"/> (used by <c>AddTemporalClient()</c>)
-/// to apply <see cref="TemporalAgentDataConverter"/> via the plugin mechanism.
+/// to apply <see cref="TemporalAgentDataConverter"/> directly. No SDK plugin is registered on this
+/// client-registration path.
 /// </summary>
 internal sealed class TemporalAgentClientOptionsConfigurator
     : IConfigureOptions<TemporalClientConnectOptions>

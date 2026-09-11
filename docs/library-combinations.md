@@ -250,12 +250,14 @@ in its public API, so nothing you write against these packages depends on it —
 implement `ITemporalClientPlugin` internally, for the worker-owned-client topology only. If the
 SDK changes that interface, the libraries change with it; your code does not have to.
 
-**Your plugins are never dropped, in either registration order.** Worker plugin collections the
-libraries never touch at all. Client plugin collections they read, append to, and write back,
-whether you register before or after them. Integration tests pin both orders, including that two
-of your plugins sharing a `Name` are both kept — deduplicating your plugins is your decision, not
-the library's. What order does *not* guarantee is callback order: plugins run in list order, which
-can matter if two of them touch the same option.
+**Your plugins are never dropped, in either registration order.** The libraries do not modify
+worker plugin collections. On the canonical `AddTemporalClient` topology they also leave the
+client plugin collection untouched and configure the data converter separately. Only the
+worker-owned-client path appends an internal converter plugin, preserving any consumer plugins
+already present. Integration tests pin both registration orders, including that two consumer
+plugins sharing a `Name` are both kept — deduplicating your plugins is your decision, not the
+library's. What order does *not* guarantee is callback order: plugins run in list order, which can
+matter if two of them touch the same option.
 
 **The data converter is applied for you, by one of two mechanisms.** On the canonical
 `AddTemporalClient` topology each library configures the converter directly through

@@ -63,7 +63,8 @@ internal sealed class DurableAIDataConverterPlugin : ITemporalClientPlugin
 
 /// <summary>
 /// Configures <see cref="TemporalClientConnectOptions"/> (used by <c>AddTemporalClient()</c>)
-/// to apply <see cref="DurableAIDataConverter"/> via the plugin mechanism.
+/// to apply <see cref="DurableAIDataConverter"/> directly. No SDK plugin is registered on this
+/// client-registration path.
 /// </summary>
 internal sealed class DurableAIClientOptionsConfigurator
     : IConfigureOptions<TemporalClientConnectOptions>
