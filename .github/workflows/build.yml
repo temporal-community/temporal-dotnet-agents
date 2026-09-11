@@ -55,7 +55,7 @@ jobs:
         run: just test-unit-all
 
       - name: Verify documentation and sample catalog
-        run: just verify-sample-catalog verify-doc-links
+        run: just verify-sample-catalog verify-doc-links verify-doc-snippets verify-maf-doc-api-contracts
 
   package:
     name: Package

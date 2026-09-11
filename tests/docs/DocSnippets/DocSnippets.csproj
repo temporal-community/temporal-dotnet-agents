@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Compile-only harness for the C# examples in docs/how-to/MAF/.
+
+    This is a LIBRARY on purpose: no OutputType=Exe, no entry point, no [Fact]s that execute.
+    Nothing here is meant to run. The compiler is the assertion — if a documented registration
+    call does not bind to a real overload, this project fails to build and `just build` (and
+    therefore CI) goes red.
+
+    TreatWarningsAsErrors stays inherited from Directory.Build.props. A doc example that only
+    compiles with a warning is still a doc example that will annoy a reader, so it is a failure.
+
+    xunit is referenced only so `[Fact]` and `IAsyncLifetime` resolve in the snippets copied out of
+    docs/how-to/MAF/testing-agents.md. Its analyzers still load transitively (via xunit.analyzers),
+    and they object to that verbatim code — a non-public class holding a [Fact], and a [Fact] with
+    parameters supplied by the harness instead of a fixture. Both objections are correct FOR A TEST
+    PROJECT and irrelevant here: nothing in this project is discovered or executed. Hence the two
+    targeted NoWarn entries rather than turning all analyzers off.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <!-- Everything here is internal; XML docs on a harness buy nothing. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>DocSnippets</RootNamespace>
+    <!-- xUnit1000: test classes must be public. xUnit1001: Fact methods cannot have parameters. -->
+    <NoWarn>$(NoWarn);xUnit1000;xUnit1001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions.Agents.csproj" />
+    <ProjectReference Include="../../../src/TemporalCommunity.Extensions.AI/TemporalCommunity.Extensions.AI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="OpenAI" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="Temporalio.Extensions.OpenTelemetry" />
+    <PackageReference Include="xunit" />
+  </ItemGroup>
+
+</Project>

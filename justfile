@@ -311,7 +311,7 @@ compile: build
 verify: test-unit
 
 # Build, unit tests, and repository-local documentation checks (no server required)
-validate: build test-unit-all verify-sample-catalog verify-doc-links
+validate: build test-unit-all verify-sample-catalog verify-doc-links verify-doc-snippets verify-maf-doc-api-contracts
 
 # Verify that the checked-in sample catalog represents every tracked sample project exactly once.
 # This is intentionally credential- and Temporal-service-free so it can run in local and CI checks.
@@ -325,8 +325,27 @@ verify-doc-links:
     bash scripts/verify-markdown-links.selftest.sh
     bash scripts/verify-markdown-links.sh
 
+# Verify every documented MAF registration example still has a COMPILED counterpart in
+# tests/docs/DocSnippets/. `just build` already compiles that project; this catches the other half —
+# a new AddDurableAgent/AddTool example landing in a doc with nothing compiling it.
+#
+# The self-test runs first, and its decisive case copies the harness, breaks one AddTool call, and
+# requires the build to FAIL. A harness whose files stopped being compiled would otherwise report
+# success forever.
+verify-doc-snippets:
+    bash scripts/verify-doc-snippets.selftest.sh
+    bash scripts/verify-doc-snippet-coverage.sh
+
+# Fast regex pre-filter for two MAF doc defects the compiler cannot reach: renamed internals still
+# named in prose, and factory-first AddTool calls. Narrow on purpose — see the header of the script
+# for the two patterns that were dropped for failing mutation testing. The compiled harness above,
+# not this, is the real gate.
+verify-maf-doc-api-contracts:
+    bash scripts/verify-maf-doc-api-contracts.selftest.sh
+    bash scripts/verify-maf-doc-api-contracts.sh
+
 # Full local CI pipeline: clean → build → test-unit-all → documentation checks → pack
-ci: clean build test-unit-all verify-sample-catalog verify-doc-links pack
+ci: clean build test-unit-all verify-sample-catalog verify-doc-links verify-doc-snippets verify-maf-doc-api-contracts pack
 
 # ---------------------------------------------------------------------------
 # Process hygiene — orphan cleanup + safe logging

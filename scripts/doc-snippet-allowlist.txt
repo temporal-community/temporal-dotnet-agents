@@ -1,0 +1,13 @@
+# Qualifying doc blocks in docs/how-to/MAF/ that tests/docs/DocSnippets/ deliberately does NOT
+# compile, one `<doc-path>#<heading-slug>` key per line. Whole-line `#` comments and blank lines are
+# ignored; the keys themselves contain a '#', so inline comments are NOT supported.
+#
+# An entry is only legitimate when the block STRUCTURALLY cannot compile in a library harness.
+# "It was fiddly" is not a reason. verify-doc-snippet-coverage.sh re-checks every entry and fails on
+# a stale one, so this list stays honest.
+
+# Asserts Assert.IsType<TemporalAIAgentProxy>(...) against a type that is internal to
+# TemporalCommunity.Extensions.Agents. Compiling it would require an InternalsVisibleTo grant naming
+# the harness assembly — a production-source change made solely to compile a doc example. The
+# equivalent assertion already runs in the Agents unit-test project, which holds that grant.
+docs/how-to/MAF/testing-agents.md#testing-temporalagentsoptions-configuration
