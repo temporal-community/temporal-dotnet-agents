@@ -1,6 +1,6 @@
 # Durable Agents
 
-Every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in a separately named `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — it is the only worker-hosted agent-definition path. Client-only processes use `AddTemporalAgentProxies` and `AddAgentProxy` to call an agent hosted elsewhere. This makes per-tool retry granularity explicit and prevents the foot-gun where write-style tools could re-fire on a transient activity retry.
+Every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in its own `InvokeAgentTool` activity, all dispatched in parallel via `Workflow.WhenAllAsync`. Every tool shares that one activity type name; what differs per tool is the activity options — retry policy and timeouts are resolved by tool name at dispatch. There is no opt-in flag — it is the only worker-hosted agent-definition path. Client-only processes use `AddTemporalAgentProxies` and `AddAgentProxy` to call an agent hosted elsewhere. This makes per-tool retry granularity explicit and prevents the foot-gun where write-style tools could re-fire on a transient activity retry.
 
 ### Activities the workflow may dispatch per turn
 
@@ -13,7 +13,7 @@ The following activities run as needed by the durable agent loop.
 
 ## When to use what
 
-- **Read tools** (lookup, query, fetch): leave the per-tool retry policy unset; they fall through to the worker default (or per-agent default), which is normally unbounded retries.
+- **Read tools** (lookup, query, fetch): leave the per-tool retry policy unset; they fall through to the per-agent, then worker, then the library's bounded default of five attempts.
 - **Write tools** (send_email, apply_refund, write_record): always pass `opts => opts.NoRetry()` (or set a small `MaximumAttempts`) so a worker crash cannot re-issue the side effect.
 
 ## Canonical example
@@ -36,22 +36,24 @@ builder.Services
             agent.Instructions = "You are a refund specialist...";
             agent.MaxToolCallsPerTurn = 10;  // caps the per-turn LLM↔tool loop; default 20 — see usage.md
 
-            // Read tool — retries on transient failure (default unbounded).
-            agent.AddTool(sp => AIFunctionFactory.Create(
+            // Read tool — retries on transient failure, bounded at five attempts by default.
+            agent.AddTool("lookup_order", sp => AIFunctionFactory.Create(
                 sp.GetRequiredService<OrderService>().LookupOrder,
-                "lookup_order"));
+                name: "lookup_order"));
 
             // Write tools — never retry, never re-fire on activity-level retry.
             agent.AddTool(
+                "apply_refund",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<RefundService>().ApplyRefund,
-                    "apply_refund"),
+                    name: "apply_refund"),
                 opts => opts.NoRetry());
 
             agent.AddTool(
+                "send_email",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<EmailService>().SendEmail,
-                    "send_email"),
+                    name: "send_email"),
                 opts => opts.NoRetry());
         });
     });
@@ -86,9 +88,15 @@ For every tool dispatched as a Temporal activity (`InvokeAgentTool`), the effect
 1. The tool's `DurableToolOptions.RetryPolicy` if set (via the `configure` callback on `AddTool`)
 2. Else the agent's `DurableAgentBuilder.RetryPolicy`
 3. Else the worker's `TemporalAgentsOptions.DefaultRetryPolicy`
-4. Else Temporal SDK defaults (unbounded retries)
+4. Else the library's bounded backstop: `MaximumAttempts = 5`, with a 30-second maximum interval
+   for tools and 2 seconds for model calls. This is applied deliberately in place of Temporal's
+   server default of `MaximumAttempts = 0`, which is unlimited — an unbounded retry on a failing
+   tool or model call would otherwise never surface as a failure.
 
-The per-LLM-call activity (`RunDurableAgentStep`) uses the same chain starting at step 2 (agent → worker → SDK defaults), since the per-tool override in step 1 only applies to tool dispatch.
+The per-LLM-call activity (`RunDurableAgentStep`) uses the same chain starting at step 2 (agent → worker → bounded backstop), since the per-tool override in step 1 only applies to tool dispatch.
+
+Setting `DefaultRetryPolicy` or a per-agent `RetryPolicy` **replaces** the backstop rather than
+layering on it, so an explicit policy with `MaximumAttempts = 0` does restore unlimited retries.
 
 ## Split-deployment behavior
 
