@@ -48,6 +48,24 @@ jobs:
       - name: Setup just
         uses: extractions/setup-just@v4.0.0
 
+      # Neither the ubuntu-latest nor the macos-latest image ships ripgrep, and the doc gates below
+      # require it: `rg -U` (multiline) is what gives the factory-first AddTool pattern its recall,
+      # and BSD grep on macOS has no portable equivalent. Idempotent so a future image that does
+      # include rg costs nothing.
+      - name: Setup ripgrep
+        shell: bash
+        run: |
+          if command -v rg >/dev/null 2>&1; then
+            echo "ripgrep already present: $(rg --version | head -1)"
+            exit 0
+          fi
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install ripgrep
+          else
+            sudo apt-get update && sudo apt-get install -y ripgrep
+          fi
+          rg --version | head -1
+
       - name: Build
         run: just build
 

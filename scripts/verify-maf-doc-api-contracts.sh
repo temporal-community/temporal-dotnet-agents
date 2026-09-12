@@ -21,6 +21,23 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
+# ---------------------------------------------------------------------------
+# Hard dependency: ripgrep.
+#
+# Without this guard a missing `rg` is SILENT. Every call site wraps it in `|| true` (so that "no
+# matches", which rg reports as exit 1, is not treated as an error), and `|| true` swallows exit 127
+# just as happily. The result is zero hits, zero failures, and a confident success message about
+# having checked nothing — this gate reported "0 repository-local targets and 0 anchors checked" on
+# both CI runners for exactly this reason. Fail loudly instead; a checker that cannot run must not
+# look like a checker that found nothing wrong.
+# ---------------------------------------------------------------------------
+if ! command -v rg >/dev/null 2>&1; then
+    echo "ERROR: ripgrep (rg) is required by $(basename "${BASH_SOURCE[0]}") and is not installed." >&2
+    echo "       macOS: brew install ripgrep    Debian/Ubuntu: sudo apt-get install -y ripgrep" >&2
+    exit 2
+fi
+
+
 ratchet_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 factory_ratchet="$ratchet_dir/maf-doc-factory-first-ratchet.txt"
 stale_ratchet="$ratchet_dir/maf-doc-stale-term-ratchet.txt"

@@ -228,6 +228,12 @@ just verify-doc-links   # Markdown link + #anchor checker; runs its own self-tes
 just ci                 # clean → build → test-unit-all → doc checks → pack
 ```
 
+**The doc gates require `ripgrep`** (`brew install ripgrep` / `apt-get install ripgrep`).
+`verify-doc-links` and `verify-maf-doc-api-contracts` both refuse to run without it rather than
+degrading: every `rg` call site is wrapped in `|| true` so that "no matches" is not an error, which
+also swallowed exit 127 and let the link checker report "0 targets checked" as a success. Neither
+GitHub runner image ships `rg`, so `build.yml` installs it explicitly.
+
 ### Diagnostic + hang recovery (Tank + Trinity, reviewed by Cypher)
 
 ```bash
