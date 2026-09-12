@@ -77,20 +77,6 @@ jobs:
 
           echo "Release type: $release_type; MinVer version: $version"
 
-      # An official release must ship a public API baseline that already describes what it
-      # publishes. Promoting afterwards is what failed before: Shipped.txt sat empty from 0.8.0
-      # through 0.14.2 while 40+ public types shipped, leaving the RS0016/RS0017 gate inert and
-      # letting two breaking removals land unrecorded. Promote in the release-preparation commit
-      # (`just promote-public-api`), commit it, then tag that exact commit.
-      # Preview releases are exempt: pending entries are their normal state.
-      - name: Verify the public API baseline is promoted
-        if: inputs.release_type == 'official'
-        run: |
-          if ! bash scripts/promote-public-api.sh --check; then
-            echo "::error::PublicAPI.Unshipped.txt is not empty. Run 'just promote-public-api', commit the result, and re-tag."
-            exit 1
-          fi
-
       # No explicit restore step: `just pack` opens with its own clean + restore + build
       # (justfile:236-238), so anything restored here is discarded moments later.
       - name: Pack

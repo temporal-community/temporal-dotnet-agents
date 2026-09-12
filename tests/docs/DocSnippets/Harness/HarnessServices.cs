@@ -236,3 +236,11 @@ internal class AskWorkflow
         return reply.Messages[^1].Text ?? string.Empty;
     }
 }
+
+/// <summary>Fan-out workflow named by the pub/sub architecture doc's registration example.</summary>
+[Workflow]
+internal class EventDrivenFanOutWorkflow
+{
+    [WorkflowRun]
+    public Task RunAsync() => Task.CompletedTask;
+}

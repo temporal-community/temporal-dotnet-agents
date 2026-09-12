@@ -72,7 +72,6 @@ exists.
 |---|---|
 | `just build` | every snippet compiles |
 | `just verify-doc-snippets` | two self-tests, then: every qualifying doc block has a compiled counterpart, and every snippet still matches the doc block it quotes |
-| `just verify-maf-doc-api-contracts` | self-test, then: fast regex pre-filter (stale names, factory-first `AddTool`) |
 
 `just verify-doc-snippets` runs `scripts/verify-doc-snippets.selftest.sh` first. That self-test
 copies this project, drops the name argument from a real `AddTool` call, and **requires the build to

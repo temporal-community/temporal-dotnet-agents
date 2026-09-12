@@ -259,35 +259,23 @@ smoke-extensible-turns: pack smoke-extensible-turns-packed
 smoke-extensible-turns-packed:
     tests/smoke/ExtensibleDurableTurnsPackageSmokeTest/run-smoke.sh "{{version}}" "{{artifacts_dir}}"
 
-# Gated on verify-public-api, mirroring publish.yml: an official release must ship a baseline that
-# already describes it. Promote, commit, tag that commit, then publish. Previews use
-# publish-nuget-preview, which is exempt by design.
+# Breaking changes vs the last published package are caught at PACK time by PackageValidation
+# (EnablePackageValidation in both library csproj files), so there is no separate baseline to
+# promote before releasing. An intentional break needs its suppression regenerated first:
+#   dotnet pack <project> -c Release -p:GenerateCompatibilitySuppressionFile=true
 # Push an OFFICIAL release to NuGet.org (NUGET_API_KEY required; CI uses OIDC in publish.yml).
-publish-nuget: verify-public-api pack
+publish-nuget: pack
     dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
         --source "https://api.nuget.org/v3/index.json" \
         --api-key "$NUGET_API_KEY" \
         --skip-duplicate
 
-# Not gated: pending Unshipped entries are the normal state for a preview, as in publish.yml.
 # Push a PREVIEW release to NuGet.org (NUGET_API_KEY required).
 publish-nuget-preview: pack
     dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
         --source "https://api.nuget.org/v3/index.json" \
         --api-key "$NUGET_API_KEY" \
         --skip-duplicate
-
-# publish.yml rejects an official release whose Unshipped.txt is still non-empty, so the order is:
-# promote, commit, tag that commit, then publish.
-# Fold PublicAPI.Unshipped.txt into PublicAPI.Shipped.txt while PREPARING a release.
-promote-public-api:
-    bash scripts/promote-public-api.selftest.sh
-    bash scripts/promote-public-api.sh
-
-# Release-prep gate: fails while promotion is still pending. Mirrors the publish.yml check.
-verify-public-api:
-    bash scripts/promote-public-api.selftest.sh
-    bash scripts/promote-public-api.sh --check
 
 # Push main branch and all tags to origin (our only remote).
 # Refuses to run if the current branch is not main.
@@ -311,7 +299,7 @@ compile: build
 verify: test-unit
 
 # Build, unit tests, and repository-local documentation checks (no server required)
-validate: build test-unit-all verify-sample-catalog verify-doc-links verify-doc-snippets verify-maf-doc-api-contracts
+validate: build test-unit-all verify-sample-catalog verify-doc-links verify-doc-snippets
 
 # Verify that the checked-in sample catalog represents every tracked sample project exactly once.
 # This is intentionally credential- and Temporal-service-free so it can run in local and CI checks.
@@ -322,7 +310,7 @@ verify-sample-catalog:
 # The self-test runs first: a gate that has silently stopped rejecting things reports
 # "links are valid" forever, and nothing else in the build would catch it.
 verify-doc-links:
-    bash scripts/verify-markdown-links.selftest.sh
+    @quiet() { out=$(bash "$1" 2>&1) || { printf '%s\n' "$out"; exit 1; }; }; quiet scripts/verify-markdown-links.selftest.sh
     bash scripts/verify-markdown-links.sh
 
 # Verify every documented MAF registration example still has a COMPILED counterpart in
@@ -333,21 +321,13 @@ verify-doc-links:
 # requires the build to FAIL. A harness whose files stopped being compiled would otherwise report
 # success forever.
 verify-doc-snippets:
-    bash scripts/verify-doc-snippets.selftest.sh
+    @quiet() { out=$(bash "$1" 2>&1) || { printf '%s\n' "$out"; exit 1; }; }; quiet scripts/verify-doc-snippets.selftest.sh
     bash scripts/verify-doc-snippet-coverage.sh
-    bash scripts/verify-doc-snippet-fidelity.selftest.sh
+    @quiet() { out=$(bash "$1" 2>&1) || { printf '%s\n' "$out"; exit 1; }; }; quiet scripts/verify-doc-snippet-fidelity.selftest.sh
     bash scripts/verify-doc-snippet-fidelity.sh
 
-# Fast regex pre-filter for two MAF doc defects the compiler cannot reach: renamed internals still
-# named in prose, and factory-first AddTool calls. Narrow on purpose — see the header of the script
-# for the two patterns that were dropped for failing mutation testing. The compiled harness above,
-# not this, is the real gate.
-verify-maf-doc-api-contracts:
-    bash scripts/verify-maf-doc-api-contracts.selftest.sh
-    bash scripts/verify-maf-doc-api-contracts.sh
-
 # Full local CI pipeline: clean → build → test-unit-all → documentation checks → pack
-ci: clean build test-unit-all verify-sample-catalog verify-doc-links verify-doc-snippets verify-maf-doc-api-contracts pack
+ci: clean build test-unit-all verify-sample-catalog verify-doc-links verify-doc-snippets pack
 
 # ---------------------------------------------------------------------------
 # Process hygiene — orphan cleanup + safe logging

@@ -411,7 +411,7 @@ public sealed class DurableAgentBuilder
                     spec.Configure,
                     sourceHint: $"DurableToolRegistrationSpec in AddContextProvider (provider: {provider.GetType().Name})");
 
-            // Record for audit logging at ComposeDurableAgent time.
+            // Record for audit logging when the agent blueprint is built.
             _providerContributedTools.AddRange(
                 specs.Select(s => (s.Tool.Name, provider.GetType().Name)));
         }

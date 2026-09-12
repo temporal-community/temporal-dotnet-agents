@@ -82,7 +82,7 @@ jobs:
       # verify scripts only check marker coverage and text fidelity.
       - name: Verify documentation and sample catalog
         if: matrix.os == 'ubuntu-latest'
-        run: just verify-sample-catalog verify-doc-links verify-doc-snippets verify-maf-doc-api-contracts
+        run: just verify-sample-catalog verify-doc-links verify-doc-snippets
 
   package:
     name: Package

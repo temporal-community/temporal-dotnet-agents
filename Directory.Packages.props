@@ -53,6 +53,5 @@
          referenced only on netstandard2.1 to supply the STJ API surface for source-gen. -->
     <PackageVersion Include="System.Text.Json" Version="10.0.10" />
     <!-- Analyzer (Item 11a) -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" />
   </ItemGroup>
 </Project>

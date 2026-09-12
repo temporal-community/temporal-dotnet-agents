@@ -237,8 +237,8 @@ which needs to see `AddTool(\n    sp => ...` — is a small awk state machine. T
 knowing:
 
 - **`grep -Eo | wc -l`, never `grep -c`.** The ratchets compare MATCH counts; `grep -c` counts
-  matching lines, so two stale names on one line would read as one. `count_matches` in
-  `verify-maf-doc-api-contracts.sh` encapsulates this along with the `|| true`.
+  matching lines. Wrap such a call in `|| true` inside the command substitution, or `set -e` kills
+  the script before it can report anything.
 - **No apostrophes in comments inside `<( ... )`.** Bash tracks quote state while scanning for the
   closing paren, comments included, so a lone `'` inside a process substitution breaks the parse.
 
@@ -291,11 +291,20 @@ the CLI binary's own version.
 
 ### Versioning
 
-**Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release with `just promote-public-api`, commit that, then `git tag -a X.Y.Z -m "..."` on the promoted commit and `just pack`. An official release fails if `PublicAPI.Unshipped.txt` is still non-empty — both `just publish-nuget` and `publish.yml` enforce it. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention — `0.1.0` through `0.14.2` (`git tag` for the full list; the stray `v0.1.0` predates the convention and MinVer ignores it).
+**Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release by tagging the commit — `git tag -a X.Y.Z -m "..."` — then `just pack`. There is no baseline to promote first. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention — `0.1.0` through `0.14.2` (`git tag` for the full list; the stray `v0.1.0` predates the convention and MinVer ignores it).
 
 **Both packages are published on NuGet.org**, currently through `0.14.2` — do not assume this is an undeployed library. Breaking changes are still fine (pre-v1 policy; no migration guides or changelogs are wanted), but a behaviour change under an existing key or signature is a real break for consumers: state the new contract in the docs rather than narrating the old one.
 
-**Public API baseline**: `PublicAPI.Shipped.txt` holds the released surface (seeded from 0.14.2 and validated against the published assemblies); `Unshipped.txt` holds only changes since. Promotion is what keeps the RS0016/RS0017 gate meaningful — it sat empty from 0.8.0 to 0.14.2, so the gate was inert and two breaking removals went unrecorded.
+**Public API compatibility**: enforced by the SDK's `PackageValidation` at pack time, not by checked-in baseline files. Both libraries set `EnablePackageValidation` and `PackageValidationBaselineVersion` (currently `0.14.2`), so `dotnet pack` diffs the packed output against the last package actually published to NuGet.org and fails on a breaking change.
+
+Breaking changes are allowed pre-v1 — record an intentional one by regenerating the suppression file, then committing it:
+
+```bash
+dotnet pack src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions.Agents.csproj \
+    -c Release -p:GenerateCompatibilitySuppressionFile=true
+```
+
+`src/*/CompatibilitySuppressions.xml` is therefore the record of what broke since the baseline (18 entries today). This replaced `PublicAPI.{Shipped,Unshipped}.txt` and the `Microsoft.CodeAnalysis.PublicApiAnalyzers` gate, which had two problems: RS0016 has no CLI autofix, so recording an addition meant hand-writing Roslyn signature syntax; and the baseline was a file, so the `WorkingSetContextProvider` removal was made by deleting lines straight out of `Shipped.txt`, silencing the analyzer and leaving no trace. A published package cannot be edited after the fact. Bump `PackageValidationBaselineVersion` when a new version ships.
 
 **Publish**: to NuGet.org, either `just publish-nuget` (local, official — gated on `verify-public-api`; needs `NUGET_API_KEY`), `just publish-nuget-preview` (local, preview — ungated by design), or the `.github/workflows/publish.yml` workflow (`workflow_dispatch`, OIDC Trusted Publishing — no stored API key/secret; the `nuget-publish` GitHub environment must be configured). Remember: tags carry no `v` prefix.
 

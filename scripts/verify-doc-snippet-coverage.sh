@@ -38,7 +38,11 @@ cd "$repo_root"
 self_name="$(basename "${BASH_SOURCE[0]}")"
 harness_dir="tests/docs/DocSnippets"
 harness_csproj="$harness_dir/DocSnippets.csproj"
-doc_glob="docs/how-to/MAF"
+# All of docs/, not just docs/how-to/MAF. The MAF how-tos were covered by the compiled harness
+# while registration examples in docs/architecture/ and docs/library-combinations.md had no
+# compile coverage at all — the gap the deleted regex pre-filter used to paper over.
+# `git ls-files 'docs/*.md'` matches recursively (git pathspec `*` crosses `/`).
+doc_glob="docs"
 
 # ---------------------------------------------------------------------------
 # Allowlist: qualifying doc blocks deliberately NOT compiled, each with the structural reason it

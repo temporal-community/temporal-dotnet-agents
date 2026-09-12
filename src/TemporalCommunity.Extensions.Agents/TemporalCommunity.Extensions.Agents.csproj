@@ -24,14 +24,23 @@
     <NoWarn>$(NoWarn);MEAI001</NoWarn>
     <!-- Analysis scoped to library projects only — test/sample projects inherit Directory.Build.props defaults. -->
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-  </PropertyGroup>
+  
+    <!-- Diffs the packed output against the last published package on NuGet.org rather than
+         against a checked-in baseline file. A file baseline only records what someone remembers
+         to record: the WorkingSetContextProvider removal in b5ccc0c was made by deleting lines
+         straight out of PublicAPI.Shipped.txt, which silenced the analyzer and left no trace.
+         The published package cannot be edited after the fact.
+         Intentional breaks are expected pre-v1 — regenerate the suppression file with:
+           dotnet pack <proj> -c Release -p:GenerateCompatibilitySuppressionFile=true -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <PackageValidationBaselineVersion>0.14.2</PackageValidationBaselineVersion>
+</PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Agents.AI" />
     <PackageReference Include="Temporalio" />
     <PackageReference Include="Temporalio.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
