@@ -27,35 +27,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  discover:
-    name: Discover integration suites
-    runs-on: ubuntu-latest
-    # A checkout plus a Python one-liner; this is a backstop, not a budget.
-    timeout-minutes: 10
-    outputs:
-      suites: ${{ steps.projects.outputs.suites }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-
-      - name: Verify discovery script
-        run: tests/ci/discover-integration-projects.test.sh
-
-      - name: Discover integration projects
-        id: projects
-        run: echo "suites=$(.github/scripts/discover-integration-projects.sh)" >> "$GITHUB_OUTPUT"
-
   integration:
     name: Integration (${{ matrix.suite.name }})
-    needs: discover
     runs-on: ubuntu-latest
     # Embedded-server suites can occasionally hang on server startup; fail fast
     # rather than burning the 6-hour default job timeout.
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # Listed literally. This set has been these two — one per library — since 2026-03-18, and
+      # the same two are already spelled out in TemporalAgents.slnx and in the justfile's
+      # integration_tests_dir / integration_tests_ai_dir. Adding a third suite means editing those
+      # anyway; this is the third line, not a new kind of work.
       matrix:
-        suite: ${{ fromJSON(needs.discover.outputs.suites) }}
+        suite:
+          # Ordered as the discovery script sorted them, so the PR checks list does not reshuffle.
+          - name: TemporalCommunity.Extensions.AI.IntegrationTests
+            project: tests/TemporalCommunity.Extensions.AI.IntegrationTests/TemporalCommunity.Extensions.AI.IntegrationTests.csproj
+          - name: TemporalCommunity.Extensions.Agents.IntegrationTests
+            project: tests/TemporalCommunity.Extensions.Agents.IntegrationTests/TemporalCommunity.Extensions.Agents.IntegrationTests.csproj
 
     steps:
       - name: Checkout
