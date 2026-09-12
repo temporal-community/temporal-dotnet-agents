@@ -75,7 +75,8 @@ builder.Services
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
             agent.AddTool(weatherTool);
         });
-    });
+    })
+    .AddWorkflow<AskWorkflow>();   // only needed for step 3; see below
 
 var host = builder.Build();
 await host.StartAsync();
@@ -133,13 +134,19 @@ public class AskWorkflow
 }
 ```
 
-A workflow only runs if the worker knows about it, so register it alongside the agent:
+A workflow only runs if the worker knows about it, which is what the `.AddWorkflow<AskWorkflow>()`
+in step 1 is for. It has to go there, chained onto the same worker builder, for two reasons: the
+service collection is closed once `builder.Build()` runs, and `AddTemporalAgents` throws if called
+a second time on the same builder rather than silently replacing your agent registrations.
+
+Start it like any other workflow:
 
 ```csharp
-builder.Services
-    .AddHostedTemporalWorker("agents")
-    .AddTemporalAgents(opts => { /* as above */ })
-    .AddWorkflow<AskWorkflow>();
+var result = await host.Services.GetRequiredService<ITemporalClient>().ExecuteWorkflowAsync(
+    (AskWorkflow wf) => wf.RunAsync("What's the weather in Kingston?"),
+    new WorkflowOptions(id: $"ask-{Guid.NewGuid():N}", taskQueue: "agents"));
+
+Console.WriteLine(result);
 ```
 
 ---

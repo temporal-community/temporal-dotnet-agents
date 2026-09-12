@@ -46,6 +46,13 @@ public static TemporalAIAgent GetTemporalAgent(
 }
 ```
 
+`activityOptions` is passed through **verbatim**. When it is `null`, `TemporalAIAgent` builds a
+default that includes a bounded `RetryPolicy` (5 attempts, 2s maximum interval) — because a null
+`RetryPolicy` reaches the Temporal server as its own default of `MaximumAttempts = 0`, which is
+unlimited, and a deterministically failing LLM step would then hang the orchestrating workflow.
+A caller who supplies `activityOptions` owns that decision: omitting `RetryPolicy` there opts out
+of the backstop rather than inheriting it.
+
 ### Basic Usage
 
 ```csharp

@@ -171,8 +171,14 @@ They do not, and the difference decides where a scoped service such as a `DbCont
 |---|---|---|
 | `agent.ChatClient` | the activity attempt's **scope** | once per `RunDurableAgentStep` attempt |
 | `agent.AddContextProvider(factory)` | the activity attempt's **scope** | once per `RunDurableAgentStep` attempt |
-| `agent.ConfigureAgentPipeline` | the activity attempt's **scope** | once per attempt, plus one dry build at worker startup |
 | `agent.AddTool(name, factory)` | the worker's **root** provider | **once per worker lifetime** — the result is cached on the agent blueprint |
+| `agent.ConfigureAgentPipeline` | **none — it is not a DI factory** | once per attempt, plus one dry build at worker startup |
+
+`ConfigureAgentPipeline` is the odd one out: its type is `Action<AIAgentBuilder>`, so the callback
+never sees an `IServiceProvider`. The attempt's scope reaches the pipeline one level down — the
+library calls `builder.Build(scopedServices)`, and MAF hands that provider to any middleware factory
+you registered that accepts one. Middleware you construct eagerly inside the callback gets nothing
+from DI.
 
 **Why:** the tool row is the trap. A tool is an `AIFunction` — a stateless delegate wrapper — so the
 library resolves it once and reuses it, which means anything you resolve inside a tool factory is
@@ -180,24 +186,45 @@ held for the worker's life with singleton semantics *regardless of how it was re
 Resolving a `DbContext` there creates a captive dependency that outlives every scope it was meant
 to belong to.
 
-Resolve per-invocation state inside the tool body instead, where `InvokeAgentTool` has opened a
-scope for that specific call:
+Resolve per-invocation state inside the tool body instead. Capture `IServiceScopeFactory` — itself
+a singleton, so capturing it is correct — and open a scope per call:
 
 ```csharp
-agent.AddTool("do_thing", _ => AIFunctionFactory.Create(
-    async (string id) =>
-    {
-        // Scoped to this one tool invocation, not to the worker.
-        var db = TemporalAgentContext.Current.GetService<MyDbContext>()
-            ?? throw new InvalidOperationException("MyDbContext is not registered.");
-        return await db.LookupAsync(id);
-    },
-    name: "do_thing"));
+agent.AddTool("do_thing", sp =>
+{
+    var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+    return AIFunctionFactory.Create(
+        async (string id) =>
+        {
+            using var scope = scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<MyDbContext>();
+            return await db.LookupAsync(id);
+        },
+        name: "do_thing");
+});
 ```
 
-`TemporalAgentContext` lives in `TemporalCommunity.Extensions.Agents.Session`. `Current` is non-null
-inside a tool body and throws outside one; `GetService<T>` returns `null` when the service is not
-registered. There is no `Services` property on the context.
+This works on every execution path, which matters more than it looks.
+
+### Don't reach for `TemporalAgentContext.Current` on every path
+
+`TemporalAgentContext.Current` (namespace `TemporalCommunity.Extensions.Agents.Session`) exposes
+`GetService<T>()` against the tool activity's scope, and on a **managed session workflow** that is a
+fine way to resolve a scoped service. But `Current` throws `InvalidOperationException` when no
+context is set, and the library deliberately sets none on two other supported paths:
+
+| Path | Context | Why |
+|---|---|---|
+| Managed session (`AgentWorkflow`) | available | the workflow ID is the agent session ID |
+| Workflow-local sub-agent (`GetTemporalAgent`) | **unavailable** | the activity runs under *your* orchestrating workflow, so there is no agent session to attach |
+| Scheduled / one-time job | **unavailable** | the workflow ID names `{agent}-scheduled`, and attaching a session would target the wrong workflow |
+
+**Why:** a tool registered once is reachable from all three. A tool body that calls
+`TemporalAgentContext.Current` works in a session test and then throws the first time the same tool
+is invoked from an orchestrating workflow or a schedule. The `IServiceScopeFactory` pattern above
+has no such dependency. Reserve `Current` for the things only it can do — `RequestApprovalAsync`,
+`CurrentSession`, `StartWorkflowAsync` — and expect it to throw off the session path. The exception
+message names which path you are on.
 
 ---
 
@@ -340,11 +367,20 @@ var agent = WorkflowAgents.GetTemporalAgent(
     activityOptions: new ActivityOptions
     {
         StartToCloseTimeout = TimeSpan.FromMinutes(5),
-        HeartbeatTimeout    = TimeSpan.FromMinutes(1)
+        HeartbeatTimeout    = TimeSpan.FromMinutes(1),
+        // REQUIRED. A caller-supplied ActivityOptions is used verbatim, so a null RetryPolicy
+        // reaches the server as its default — MaximumAttempts = 0, i.e. UNLIMITED retries — and a
+        // deterministically failing LLM step would hang the orchestrating workflow forever.
+        RetryPolicy = new RetryPolicy { MaximumAttempts = 5, MaximumInterval = TimeSpan.FromSeconds(2) },
     });
 ```
 
-The global `TemporalAgentsOptions` timeouts only apply to `AgentWorkflow`-based sessions. Workflow sub-agents use their own `ActivityOptions`.
+**Why:** the global `TemporalAgentsOptions` timeouts only apply to `AgentWorkflow`-based sessions;
+workflow sub-agents use their own `ActivityOptions`. That independence cuts both ways — the
+`ActivityOptions` you pass is used verbatim, including a null `RetryPolicy`, which the server reads
+as `MaximumAttempts = 0` (unlimited). The library's bounded backstop is applied only to the options
+it constructs for you, so passing your own without a `RetryPolicy` opts out of it and lets a
+deterministically failing LLM step retry forever.
 
 ---
 

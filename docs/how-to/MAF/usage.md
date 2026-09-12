@@ -579,7 +579,9 @@ builder.Services
 ### Activity Timeouts for In-Workflow Agents
 
 When using `WorkflowAgents.GetTemporalAgent` inside an orchestrating workflow, pass `ActivityOptions` directly at
-the call site:
+the call site. **Set `RetryPolicy` when you do.** The library only applies its bounded backstop to
+the `ActivityOptions` it builds itself; anything you pass is used as-is, so omitting `RetryPolicy`
+here opts *out* of the backstop rather than inheriting it:
 
 ```csharp
 var researcher = WorkflowAgents.GetTemporalAgent(
@@ -587,7 +589,11 @@ var researcher = WorkflowAgents.GetTemporalAgent(
     activityOptions: new ActivityOptions
     {
         StartToCloseTimeout = TimeSpan.FromMinutes(5),
-        HeartbeatTimeout    = TimeSpan.FromMinutes(1)
+        HeartbeatTimeout    = TimeSpan.FromMinutes(1),
+        // REQUIRED. A caller-supplied ActivityOptions is used verbatim, so a null RetryPolicy
+        // reaches the server as its default — MaximumAttempts = 0, i.e. UNLIMITED retries — and a
+        // deterministically failing LLM step would hang the orchestrating workflow forever.
+        RetryPolicy = new RetryPolicy { MaximumAttempts = 5, MaximumInterval = TimeSpan.FromSeconds(2) },
     });
 ```
 
@@ -1069,21 +1075,23 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
 | `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
 
-Retry adds one rung above this table for tools, and one below it for everything:
+Retry adds rungs above this table for tools and scheduled runs, and one below it for everything:
 
-1. `agent.AddTool(t, opts => opts.RetryPolicy = ...)` — the per-tool override. The property is
-   `RetryPolicy`; `opts.NoRetry()` is the shorthand write tools want.
-2. `agent.RetryPolicy` — the agent-level default, shared by the LLM step, the tools, and the
+1. `agent.AddTool(t, opts => opts.RetryPolicy = ...)` — the per-tool override, and the only
+   tool-specific rung. The property is `RetryPolicy`; `opts.NoRetry()` is the shorthand write tools
+   want.
+2. `OneTimeAgentRun.RetryPolicy` — scheduled and one-time runs only, and *not* LLM-only: it is also
+   the default for that run's tool and interceptor activities.
+3. `agent.RetryPolicy` — the agent-level default, shared by the LLM step, the tools, and the
    interceptor activity.
-3. `opts.DefaultRetryPolicy` — the worker-level default for agents that do not override.
-4. The library's bounded backstop — 5 attempts, capped at 30s backoff for tools and 2s for model
-   calls. This applies when rungs 1–3 are all unset, in place of Temporal's server default of
-   unlimited retries.
+4. `opts.DefaultRetryPolicy` — the worker-level default for agents that do not override.
+5. The library's bounded backstop — 5 attempts, capped at 2s backoff for model calls and 30s for
+   tool and interceptor calls. This applies when rungs 1–4 are all unset, in place of Temporal's
+   server default of unlimited retries.
 
-Rung 2 is the one people mis-set: `agent.RetryPolicy` is a default for *all* of the agent's
-activities, not a model-call-only knob. When a tool genuinely needs different behavior from the rest
-of the agent, set it on that tool. Full table, including the scheduled-run rung that sits above
-`agent.RetryPolicy` for one-time runs, in
+Rungs 2 and 3 are the ones people mis-set: both are defaults for *all* of the agent's activities,
+not model-call-only knobs. When a tool genuinely needs different behavior from the rest of the
+agent, set it on that tool. Full table in
 [Durable Agents](./durable-agents.md#retry-policy-hierarchy).
 
 ### Custom agent middleware

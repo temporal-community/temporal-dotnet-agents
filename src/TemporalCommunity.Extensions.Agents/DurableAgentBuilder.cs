@@ -264,9 +264,10 @@ public sealed class DurableAgentBuilder
     }
 
     /// <summary>
-    /// Registers a tool produced by a factory. The factory is invoked at first activity dispatch
-    /// (the same lifecycle as <see cref="ChatClient"/>) and the resolved <see cref="AIFunction"/>
-    /// is cached for the worker's lifetime.
+    /// Registers a tool produced by a factory. The factory is invoked once, at first activity
+    /// dispatch, and the resolved <see cref="AIFunction"/> is cached for the worker's lifetime.
+    /// This is <em>not</em> the same lifecycle as <see cref="ChatClient"/>, which is resolved
+    /// afresh from the activity attempt's scope on every LLM step.
     /// </summary>
     /// <param name="name">
     /// The tool name. Must be non-null and non-whitespace, and unique within this agent. Required as
