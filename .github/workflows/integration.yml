@@ -30,6 +30,8 @@ jobs:
   discover:
     name: Discover integration suites
     runs-on: ubuntu-latest
+    # A checkout plus a Python one-liner; this is a backstop, not a budget.
+    timeout-minutes: 10
     outputs:
       suites: ${{ steps.projects.outputs.suites }}
     steps:

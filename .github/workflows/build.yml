@@ -20,14 +20,19 @@ env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION: 1
 
+# Prefixed, like integration.yml's `integration-`. A bare `${{ github.ref }}` shares a
+# namespace with every other workflow, so two unrelated workflows on the same ref would
+# cancel each other.
 concurrency:
-  group: ${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
     name: Build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Observed ~90s. A hung dotnet test would otherwise burn the 6-hour default.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -36,11 +41,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
+        with:
+          # MinVer needs full history. justfile:12 evaluates `dotnet tool run minver` on EVERY
+          # `just` invocation, so a shallow checkout here silently produced 0.0.0-preview and
+          # this job compiled different assembly versions than Package and Integration did.
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5.2.0
         with:
           dotnet-version: "10.0.x"
+
+      # setup-dotnet's built-in `cache: true` needs a packages.lock.json, and this repo has none.
+      # Key on everything that can change the restore graph: central versions, feed config, SDK
+      # band, and the project files themselves (a new PackageReference lives in a csproj even
+      # under central package management).
+      - name: Cache NuGet packages
+        uses: actions/cache@v5.0.3
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'NuGet.config', 'global.json', '**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
 
       - name: Restore dotnet tools
         run: dotnet tool restore
@@ -54,13 +76,55 @@ jobs:
       - name: Run unit tests
         run: just test-unit-all
 
+  docs:
+    name: Documentation and sample integrity
+    runs-on: ubuntu-latest
+    # OS-independent work, so it runs once rather than on both matrix legs: one failure to read
+    # instead of two identical ones, and a doc defect no longer gates the macOS build.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0 # every `just` invocation evaluates MinVer — see the build job
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5.2.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5.0.3
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'NuGet.config', 'global.json', '**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore dotnet tools
+        run: dotnet tool restore
+
+      - name: Setup just
+        uses: extractions/setup-just@v4.0.0
+
+      # LOAD-BEARING, and easy to drop by accident when splitting this job out of the matrix.
+      # `just verify-doc-snippets` checks marker coverage and text fidelity; it never compiles the
+      # real harness. The compile guarantee — that every documented example still binds to a real
+      # overload — came from DocSnippets.csproj being part of the solution that `just build`
+      # builds. This job does not build the solution, so it must compile the harness itself.
+      - name: Compile documented snippets
+        run: dotnet build tests/docs/DocSnippets/DocSnippets.csproj --configuration Release
+
       - name: Verify documentation and sample catalog
         run: just verify-sample-catalog verify-doc-links verify-doc-snippets verify-maf-doc-api-contracts
 
   package:
     name: Package
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build, docs]
+    # Observed ~116s; `just pack` is a serialized clean/restore/build/pack.
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -72,6 +136,14 @@ jobs:
         uses: actions/setup-dotnet@v5.2.0
         with:
           dotnet-version: "10.0.x"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5.0.3
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'NuGet.config', 'global.json', '**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
 
       - name: Restore dotnet tools
         run: dotnet tool restore

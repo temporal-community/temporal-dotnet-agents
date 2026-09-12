@@ -19,18 +19,19 @@ jobs:
   publish:
     name: Pack and publish ${{ inputs.release_type }} packages to NuGet.org
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: nuget-publish   # configure this environment in GitHub repo settings
     permissions:
       contents: read
       id-token: write   # required for OIDC Trusted Publishing token exchange
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0   # MinVer needs full history
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: "10.0.x"
 
@@ -38,7 +39,7 @@ jobs:
         run: dotnet tool restore
 
       - name: Setup just
-        uses: extractions/setup-just@v4.0.0
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
 
       - name: Verify release type and version
         run: |
@@ -90,9 +91,8 @@ jobs:
             exit 1
           fi
 
-      - name: Restore packages
-        run: dotnet restore TemporalAgents.slnx
-
+      # No explicit restore step: `just pack` opens with its own clean + restore + build
+      # (justfile:236-238), so anything restored here is discarded moments later.
       - name: Pack
         run: just pack
 
@@ -102,6 +102,11 @@ jobs:
       # This must run before NuGet authentication/publishing. It consumes the freshly packed
       # local nupkgs and executes both libraries' netstandard2.1 assets on a real .NET Core 3.1
       # runtime, rather than relying on the development-machine net8 proxy.
+      #
+      # 3.1 is end-of-life, and that is the point: it is the down-level runtime the netstandard2.1
+      # assets exist for, so upgrading the image would stop testing what ships. Pinned by digest
+      # because an EOL tag is the kind that gets retagged or withdrawn — re-resolve with
+      # `docker manifest inspect mcr.microsoft.com/dotnet/sdk:3.1` if it ever needs moving.
       - name: Run down-level runtime gate
         run: |
           package=$(find artifacts/packages -maxdepth 1 -name 'TemporalCommunity.Extensions.AI.*.nupkg' -print -quit)
@@ -112,7 +117,7 @@ jobs:
             -v "$PWD/artifacts/packages:/artifacts/packages:ro" \
             -e PACKED_VERSION="$packed_version" \
             -w /src \
-            mcr.microsoft.com/dotnet/sdk:3.1 \
+            mcr.microsoft.com/dotnet/sdk:3.1@sha256:28ab344bca8209cd67d2b1478192da7b78416a8d71ed364f0c4e004f9d7fb804 \
             dotnet run --configuration Debug
 
       # Exchange the GitHub OIDC JWT for a short-lived NuGet API key.
@@ -120,7 +125,7 @@ jobs:
       # and returns a single-use key valid for ~1 hour.
       - name: NuGet login (Trusted Publishing)
         id: login
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1
         with:
           user: cecilphillip
           token-service-url: https://www.nuget.org/api/v2/token
