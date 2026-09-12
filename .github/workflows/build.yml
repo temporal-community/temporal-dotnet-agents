@@ -76,53 +76,18 @@ jobs:
       - name: Run unit tests
         run: just test-unit-all
 
-  docs:
-    name: Documentation and sample integrity
-    runs-on: ubuntu-latest
-    # OS-independent work, so it runs once rather than on both matrix legs: one failure to read
-    # instead of two identical ones, and a doc defect no longer gates the macOS build.
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6.0.2
-        with:
-          fetch-depth: 0 # every `just` invocation evaluates MinVer — see the build job
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5.2.0
-        with:
-          dotnet-version: "10.0.x"
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v5.0.3
-        with:
-          path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'NuGet.config', 'global.json', '**/*.csproj') }}
-          restore-keys: |
-            nuget-${{ runner.os }}-
-
-      - name: Restore dotnet tools
-        run: dotnet tool restore
-
-      - name: Setup just
-        uses: extractions/setup-just@v4.0.0
-
-      # LOAD-BEARING, and easy to drop by accident when splitting this job out of the matrix.
-      # `just verify-doc-snippets` checks marker coverage and text fidelity; it never compiles the
-      # real harness. The compile guarantee — that every documented example still binds to a real
-      # overload — came from DocSnippets.csproj being part of the solution that `just build`
-      # builds. This job does not build the solution, so it must compile the harness itself.
-      - name: Compile documented snippets
-        run: dotnet build tests/docs/DocSnippets/DocSnippets.csproj --configuration Release
-
+      # OS-independent, so it runs on one leg rather than both. It needs no build step of its
+      # own: DocSnippets.csproj is in the solution (TemporalAgents.slnx:14), so `just build`
+      # above already compiled every documented example. That compile IS the guarantee — the
+      # verify scripts only check marker coverage and text fidelity.
       - name: Verify documentation and sample catalog
+        if: matrix.os == 'ubuntu-latest'
         run: just verify-sample-catalog verify-doc-links verify-doc-snippets verify-maf-doc-api-contracts
 
   package:
     name: Package
     runs-on: ubuntu-latest
-    needs: [build, docs]
+    needs: [build]
     # Observed ~116s; `just pack` is a serialized clean/restore/build/pack.
     timeout-minutes: 20
 
