@@ -10,22 +10,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 failures=0
 
-# ---------------------------------------------------------------------------
-# Hard dependency: ripgrep.
-#
-# Without this guard a missing `rg` is SILENT. Every call site wraps it in `|| true` (so that "no
-# matches", which rg reports as exit 1, is not treated as an error), and `|| true` swallows exit 127
-# just as happily. The result is zero hits, zero failures, and a confident success message about
-# having checked nothing — this gate reported "0 repository-local targets and 0 anchors checked" on
-# both CI runners for exactly this reason. Fail loudly instead; a checker that cannot run must not
-# look like a checker that found nothing wrong.
-# ---------------------------------------------------------------------------
-if ! command -v rg >/dev/null 2>&1; then
-    echo "ERROR: ripgrep (rg) is required by $(basename "${BASH_SOURCE[0]}") and is not installed." >&2
-    echo "       macOS: brew install ripgrep    Debian/Ubuntu: sudo apt-get install -y ripgrep" >&2
-    exit 2
-fi
-
 checked=0
 anchors_checked=0
 
@@ -122,7 +106,14 @@ while IFS= read -r match; do
 done < <(
     cd "$repo_root"
     { git ls-files '*.md'; git ls-files --others --exclude-standard '*.md'; } | sort -u | while IFS= read -r file; do
-        rg --with-filename --no-heading -o '\]\(([^)#]*)(#[^)]*)?\)' "$file" || true
+        # Per file, `grep -H -E -o` emits exactly what the previous `rg -o` did: one
+        # `<file>:<match>` line per link. `-I` skips binary files, the way `--no-messages` did,
+        # and `|| true` absorbs the exit 1 that grep uses to mean "no links in this file".
+        #
+        # NO APOSTROPHES IN THIS BLOCK. It sits inside a `<( ... )` process substitution, and bash
+        # tracks quote state while scanning for the closing paren — including inside comments — so a
+        # lone `'"'"'` here makes the whole substitution fail to parse.
+        grep -I -H -E -o '\]\(([^)#]*)(#[^)]*)?\)' "$file" || true
     done
 )
 

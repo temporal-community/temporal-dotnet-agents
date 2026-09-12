@@ -21,22 +21,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-# ---------------------------------------------------------------------------
-# Hard dependency: ripgrep.
-#
-# Without this guard a missing `rg` is SILENT. Every call site wraps it in `|| true` (so that "no
-# matches", which rg reports as exit 1, is not treated as an error), and `|| true` swallows exit 127
-# just as happily. The result is zero hits, zero failures, and a confident success message about
-# having checked nothing — this gate reported "0 repository-local targets and 0 anchors checked" on
-# both CI runners for exactly this reason. Fail loudly instead; a checker that cannot run must not
-# look like a checker that found nothing wrong.
-# ---------------------------------------------------------------------------
-if ! command -v rg >/dev/null 2>&1; then
-    echo "ERROR: ripgrep (rg) is required by $(basename "${BASH_SOURCE[0]}") and is not installed." >&2
-    echo "       macOS: brew install ripgrep    Debian/Ubuntu: sudo apt-get install -y ripgrep" >&2
-    exit 2
-fi
-
 
 ratchet_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 factory_ratchet="$ratchet_dir/maf-doc-factory-first-ratchet.txt"
@@ -73,6 +57,21 @@ ratchet_allowed() {
 # next regression. Slack is now a build failure with the exact number to write. Malformed and
 # duplicate entries fail too — an unparseable count was previously compared as an empty string, and
 # a duplicated path silently resolved to whichever line came first.
+# Counts ERE matches of $1 in file $2, printing a bare integer (0 when there are none).
+#
+# The `|| true` is not decoration. grep reports "no matches" as exit 1, which under
+# `set -euo pipefail` propagates out of the enclosing command substitution and kills the script
+# before it can report anything — a non-zero exit with an empty log, indistinguishable from a crash.
+# That shape has now bitten this repository four times in three different scripts, so the
+# convention lives in one function rather than at each call site.
+#
+# `-o | wc -l` counts MATCHES, not matching lines: `grep -c` would read two stale names on one line
+# as one, and the ratchet compares match counts. `-I` skips binary files.
+count_matches() {
+    local pattern="$1" file="$2"
+    { grep -I -E -o -e "$pattern" "$file" 2>/dev/null || true; } | wc -l | tr -d '[:space:]'
+}
+
 # SHAPE ONLY, and it must run BEFORE anything compares these values. `[[ "$count" -gt "$allowed" ]]`
 # evaluates $allowed arithmetically, so a non-numeric count is dereferenced as a variable name and
 # blows up under `set -u` inside the very check that was supposed to catch it. The self-test case
@@ -153,11 +152,20 @@ if [[ ! -s "$work/tracked.txt" ]]; then
 fi
 
 : > "$work/stale-counts.txt"
-# xargs over the tracked list, not a recursive walk: untracked scratch files and build output are
-# not the repository's prose.
-tr '\n' '\0' < "$work/tracked.txt" \
-    | xargs -0 rg --no-messages -H --count-matches -e "$stale_terms" \
-    > "$work/stale-counts.txt" 2>/dev/null || true
+# Iterate the tracked list, not a recursive walk: untracked scratch files and build output are not
+# the repository's prose.
+#
+# `grep -Eo | wc -l` rather than `grep -c`, because the downstream ratchet compares MATCH counts and
+# `grep -c` counts matching LINES — two stale names on one line would read as one. This is what the
+# previous `rg --count-matches` reported, and the `-I` skips binaries the way `--no-messages` did.
+while IFS= read -r f; do
+    if [[ -f "$f" ]]; then
+        n="$(count_matches "$stale_terms" "$f")"
+        if [[ "$n" -gt 0 ]]; then
+            printf '%s:%s\n' "$f" "$n" >> "$work/stale-counts.txt"
+        fi
+    fi
+done < "$work/tracked.txt"
 
 while IFS= read -r line; do
     [[ -n "$line" ]] || continue
@@ -177,23 +185,50 @@ ratchet_enforce_tight "$stale_ratchet" "$work/stale-counts.txt"
 # ---------------------------------------------------------------------------
 # Check 2 — factory-first `AddTool`, as a pre-filter.
 #
-# `rg -U` (multiline) is mandatory. The single-line form of this pattern has roughly one-third
-# recall: it misses `AddTool(\n    sp => ...`, which is how the majority of the real defects are
-# actually written, and it also misses `(sp) =>` and typed parameters.
+# MULTILINE MATCHING IS MANDATORY, and that is the whole reason this is awk rather than grep. A
+# line-at-a-time pattern has roughly one-third the recall: it misses
 #
-# The alternation matches a lambda as the FIRST argument. It must NOT match the two correct forms:
-#   AddTool("name", sp => ...)   — first token is a string literal
-#   AddTool(tool, opts => ...)   — identifier is followed by a comma, not by `=>`
+#     agent.AddTool(
+#         sp => AIFunctionFactory.Create(...),
+#
+# which is how the majority of the real defects are actually written. POSIX awk gives multiline
+# matching on both runners with no dependency beyond what the workflow already installs — the
+# earlier `rg -U` form was convenience, and it cost a CI outage when neither GitHub image shipped
+# ripgrep and every `|| true` call site turned its absence into a silent pass.
+#
+# The alternation matches a lambda as the FIRST argument. It must NOT match the correct forms:
+#   AddTool("name", sp => ...)      — first token is a string literal
+#   AddTool(tool, opts => ...)      — identifier is followed by a comma, not by `=>`
+#   AddTool(map["k"], p => ...)     — identifier is followed by an indexer
+#   AddToolInterceptor(sp => ...)   — `AddTool` is not followed by `(`
+# The self-test pins every one of those, and pinned them for the rg implementation too, so the two
+# engines are held to the same cases.
+#
+# Notation differs from PCRE in exactly two ways: POSIX ERE has no `(?:...)`, so the group is
+# capturing, and no `\s`, so it is `[[:space:]]` — which matches newlines in the accumulated
+# buffer, which is what makes this multiline.
 # ---------------------------------------------------------------------------
-factory_first_pattern='AddTool\(\s*(?:\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*)\s*=>'
+count_factory_first() {
+    awk '
+        { buf = buf $0 "\n" }
+        END {
+            n = 0
+            while (match(buf, /AddTool\([[:space:]]*(\([^)]*\)|[A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=>/)) {
+                n++
+                buf = substr(buf, RSTART + RLENGTH)
+            }
+            if (n > 0) printf "%s:%d\n", FILENAME, n
+        }
+    ' "$1"
+}
 
 git ls-files 'docs/*.md' > "$work/docs.txt"
 : > "$work/factory-hits.txt"
-if [[ -s "$work/docs.txt" ]]; then
-    tr '\n' '\0' < "$work/docs.txt" \
-        | xargs -0 rg --no-messages -H -U --count-matches -e "$factory_first_pattern" \
-        > "$work/factory-hits.txt" 2>/dev/null || true
-fi
+while IFS= read -r f; do
+    if [[ -f "$f" ]]; then
+        count_factory_first "$f" >> "$work/factory-hits.txt"
+    fi
+done < "$work/docs.txt"
 
 while IFS= read -r line; do
     [[ -n "$line" ]] || continue

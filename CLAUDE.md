@@ -228,11 +228,19 @@ just verify-doc-links   # Markdown link + #anchor checker; runs its own self-tes
 just ci                 # clean → build → test-unit-all → doc checks → pack
 ```
 
-**The doc gates require `ripgrep`** (`brew install ripgrep` / `apt-get install ripgrep`).
-`verify-doc-links` and `verify-maf-doc-api-contracts` both refuse to run without it rather than
-degrading: every `rg` call site is wrapped in `|| true` so that "no matches" is not an error, which
-also swallowed exit 127 and let the link checker report "0 targets checked" as a success. Neither
-GitHub runner image ships `rg`, so `build.yml` installs it explicitly.
+**The doc gates deliberately depend on nothing beyond POSIX tools and what the workflow already
+installs.** They previously used `ripgrep`, which neither GitHub runner image ships; because every
+`rg` call site wraps it in `|| true` (grep and rg both report "no matches" as exit 1), a missing
+binary produced exit 127, zero hits, and a confident "0 targets checked" success. The link and
+stale-term scans are now `grep -E`, and the one genuinely multiline rule — factory-first `AddTool`,
+which needs to see `AddTool(\n    sp => ...` — is a small awk state machine. Two consequences worth
+knowing:
+
+- **`grep -Eo | wc -l`, never `grep -c`.** The ratchets compare MATCH counts; `grep -c` counts
+  matching lines, so two stale names on one line would read as one. `count_matches` in
+  `verify-maf-doc-api-contracts.sh` encapsulates this along with the `|| true`.
+- **No apostrophes in comments inside `<( ... )`.** Bash tracks quote state while scanning for the
+  closing paren, comments included, so a lone `'` inside a process substitution breaks the parse.
 
 ### Diagnostic + hang recovery (Tank + Trinity, reviewed by Cypher)
 
