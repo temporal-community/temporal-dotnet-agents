@@ -33,15 +33,18 @@ internal static class DoUseDiFactoriesForScopedServices
     internal static void ScopedResolutionInsideToolBody(DurableAgentBuilder agent)
     {
         // BEGIN SNIPPET docs/how-to/MAF/dos-and-donts.md#dont-assume-the-builders-factory-slots-share-a-lifetime (lines 178-188)
-        agent.AddTool("do_thing", _ => AIFunctionFactory.Create(
-            async (string id) =>
-            {
-                // Scoped to this one tool invocation, not to the worker.
-                var db = TemporalAgentContext.Current.GetService<MyDbContext>()
-                    ?? throw new InvalidOperationException("MyDbContext is not registered.");
-                return await db.LookupAsync(id);
-            },
-            name: "do_thing"));
+        agent.AddTool("do_thing", sp =>
+        {
+            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+            return AIFunctionFactory.Create(
+                async (string id) =>
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var db = scope.ServiceProvider.GetRequiredService<MyDbContext>();
+                    return await db.LookupAsync(id);
+                },
+                name: "do_thing");
+        });
         // END SNIPPET docs/how-to/MAF/dos-and-donts.md#dont-assume-the-builders-factory-slots-share-a-lifetime
     }
 }

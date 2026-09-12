@@ -93,9 +93,41 @@ scan_docs() {
     ' "$@"
 }
 
+# Every heading anchor in the docs, as `<file>#<slug>`. BEGIN SNIPPET-PROSE keys point at a heading
+# rather than a fenced block, so this is what they are validated against.
+scan_headings() {
+    awk '
+        function slug(line) {
+            sub(/^#+[[:space:]]+/, "", line)
+            sub(/[[:space:]]+#+[[:space:]]*$/, "", line)
+            gsub(/`/, "", line)
+            gsub(/\*\*|__|\*/, "", line)
+            line = tolower(line)
+            gsub(/[^a-z0-9 _-]/, "", line)
+            gsub(/ /, "-", line)
+            return line
+        }
+        FNR == 1 { infence = 0 }
+        /^[[:space:]]*(```|~~~)/ { infence = !infence; next }
+        infence { next }
+        /^#{1,6}[[:space:]]/ { print FILENAME "#" slug($0) }
+    ' "$@"
+}
+
 # `git ls-files` rather than a bare glob: an untracked scratch copy of a doc must not create
 # phantom coverage requirements, and bin/obj never enters the picture.
-git ls-files "$doc_glob/*.md" > "$work/doc-files.txt"
+# Filtered to files that still exist on disk. `git ls-files` reads the INDEX, so a doc deleted in
+# the working tree but not yet staged is still listed — and awk then dies on the missing file,
+# taking the whole gate down over someone else's half-finished edit. CI always checks out a commit,
+# where index and tree agree, so skipping absent files loses no coverage there.
+# `if` rather than `[[ -f "$f" ]] && printf`: a bare && whose test fails on the LAST iteration
+# leaves the loop's exit status at 1, and `set -e` then kills the gate with an empty log — the same
+# silent-failure shape that once disarmed the ratchet check in verify-maf-doc-api-contracts.sh.
+while IFS= read -r f; do
+    if [[ -f "$f" ]]; then
+        printf '%s\n' "$f"
+    fi
+done < <(git ls-files "$doc_glob/*.md") > "$work/doc-files.txt"
 if [[ ! -s "$work/doc-files.txt" ]]; then
     fail "no tracked Markdown files found under $doc_glob — the doc layout moved and this gate is now blind"
     exit 1
@@ -120,6 +152,7 @@ fi
     | sort -u > "$work/harness-files.txt"
 
 : > "$work/marker-keys.txt"
+: > "$work/prose-keys.txt"
 while IFS= read -r file; do
     [[ -n "$file" && -f "$file" ]] || continue
 
@@ -129,9 +162,34 @@ while IFS= read -r file; do
         fail "$file has $begins BEGIN SNIPPET marker(s) but $ends END SNIPPET marker(s)"
     fi
 
+    # Two patterns, not one. A single `BEGIN SNIPPET[[:space:]]` pattern silently skips every
+    # BEGIN SNIPPET-PROSE line (what follows "SNIPPET" there is "-PROSE", not whitespace), so prose
+    # keys were never extracted and a renamed prose heading passed unnoticed.
     sed -n 's|.*BEGIN SNIPPET[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*|\1|p' "$file" >> "$work/marker-keys.txt"
+    sed -n 's|.*BEGIN SNIPPET-PROSE[[:space:]]\{1,\}\([^[:space:]]\{1,\}\).*|\1|p' "$file" >> "$work/prose-keys.txt"
 done < "$work/harness-files.txt"
 sort -o "$work/marker-keys.txt" "$work/marker-keys.txt"
+
+sort -o "$work/prose-keys.txt" "$work/prose-keys.txt"
+
+# ---------------------------------------------------------------------------
+# Rule 7 — a BEGIN SNIPPET-PROSE key must name a heading that still exists.
+#
+# A prose snippet quotes a claim made in sentences, so there is no fenced block to hold it to. What
+# it CAN be held to is its heading: rename or delete that heading and the marker is pointing at
+# nothing, which is exactly the rot the fenced-block rules catch for everyone else.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2046  # deliberate word splitting: one path per line, no spaces in repo paths
+scan_headings $(cat "$work/doc-files.txt") | sort -u > "$work/heading-keys.txt"
+
+while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    if ! grep -qxF "$key" "$work/heading-keys.txt"; then
+        fail "prose marker '$key' names a heading that does not exist.
+       BEGIN SNIPPET-PROSE is held to its heading rather than to a fenced block, so a renamed or
+       deleted heading orphans it. Update the marker, or delete the harness file if the claim is gone."
+    fi
+done < "$work/prose-keys.txt"
 
 # Allowlist keys contain a literal '#' themselves, so only WHOLE-LINE comments are stripped.
 : > "$work/allow-keys.txt"

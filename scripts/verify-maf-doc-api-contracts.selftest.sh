@@ -132,6 +132,42 @@ agent.AddTool(sp => AIFunctionFactory.Create(svc.Write, "write"));
 ```' '' 'docs/how-to/MAF/example.md 1'
 
 # ---------------------------------------------------------------------------
+# Ratchet ENFORCEMENT. "Numbers may only go down" used to be a comment in a text file: slack
+# printed a NOTICE and the build stayed green, so a fixed defect left its allowance behind and the
+# allowance then covered the next regression. These cases pin that it is now a rule.
+# ---------------------------------------------------------------------------
+run_case ratchet-slack-fails reject '```csharp
+agent.AddTool(sp => AIFunctionFactory.Create(svc.Read, "read"));
+```' '' 'docs/how-to/MAF/example.md 2'
+
+run_case ratchet-slack-with-zero-actual-fails reject '```csharp
+agent.AddTool("read", sp => AIFunctionFactory.Create(svc.Read, name: "read"));
+```' '' 'docs/how-to/MAF/example.md 1'
+
+run_case ratchet-exact-passes pass '```csharp
+agent.AddTool(sp => AIFunctionFactory.Create(svc.Read, "read"));
+```' '' 'docs/how-to/MAF/example.md 1'
+
+run_case ratchet-non-numeric-count-fails reject '```csharp
+agent.AddTool(sp => AIFunctionFactory.Create(svc.Read, "read"));
+```' '' 'docs/how-to/MAF/example.md many'
+
+run_case ratchet-missing-count-fails reject '```csharp
+agent.AddTool(sp => AIFunctionFactory.Create(svc.Read, "read"));
+```' '' 'docs/how-to/MAF/example.md'
+
+run_case ratchet-trailing-junk-fails reject '```csharp
+agent.AddTool(sp => AIFunctionFactory.Create(svc.Read, "read"));
+```' '' 'docs/how-to/MAF/example.md 1 because reasons'
+
+# Only the first line ever took effect, so the second was silent cover for a raised allowance.
+run_case ratchet-duplicate-path-fails reject '```csharp
+agent.AddTool(sp => AIFunctionFactory.Create(svc.Read, "read"));
+agent.AddTool(sp => AIFunctionFactory.Create(svc.Write, "write"));
+```' '' 'docs/how-to/MAF/example.md 1
+docs/how-to/MAF/example.md 2'
+
+# ---------------------------------------------------------------------------
 # REJECT / PASS — stale internal names, across docs AND src.
 # ---------------------------------------------------------------------------
 run_case stale-term-in-src reject '# Doc' '// Record for audit logging at ComposeDurableAgent time.'

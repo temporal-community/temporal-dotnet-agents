@@ -15,7 +15,9 @@ internal static class Registration
 {
     internal static void Configure(HostApplicationBuilder builder)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/tool-interceptor.md#registration (lines 283-311)
+        // BEGIN SNIPPET docs/how-to/MAF/tool-interceptor.md#registration (lines 283-312)
+        builder.Services.AddTemporalClient("localhost:7233", "default");
+
         builder.Services
             .AddHostedTemporalWorker("agents")
             .AddTemporalAgents(opts =>

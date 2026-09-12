@@ -1,16 +1,9 @@
-# Harness lines that cannot be verbatim copies of the doc, as `<key><TAB><exact stripped line>`.
+# Snippets that cannot be verbatim copies of their doc block, as `<key><TAB><reason>`.
 #
-# Every entry is re-checked: one that becomes unnecessary fails the gate rather than lingering, so
-# this list cannot quietly grow into a blanket opt-out. Only two kinds of entry belong here —
-# a prose snippet whose doc form is not valid C#, and a harness wrapper the doc does not show.
+# An entry EXEMPTS that snippet from line-by-line comparison, so each one is a hole in the gate.
+# Two things keep the list honest: an entry whose key no longer exists fails, and an entry whose
+# snippet has become an exact match fails. Add one only for a structural impossibility, never to
+# silence drift — re-syncing the snippet is almost always the right fix.
 
-# usage.md states this rule in prose, with `...` standing in for the policy value. `...` does not
-# compile, so the harness substitutes a real argument.
-docs/how-to/MAF/usage.md#inheritance--per-agent-vs-worker-level	agent.AddTool(t, opts => opts.RetryPolicy = policy);
-
-# testing-agents.md shows a [Fact] that closes over `fixture` and `myChatClient` from the
-# surrounding text. A compile-only harness has no such scope, so they become parameters — which is
-# also why xUnit1001 is in this project's NoWarn.
-docs/how-to/MAF/testing-agents.md#custom-host-per-test	public static async Task AgentFactory_ResolvesServiceDependencies_AtActivityTime(
-docs/how-to/MAF/testing-agents.md#custom-host-per-test	IntegrationTestFixture fixture,
-docs/how-to/MAF/testing-agents.md#custom-host-per-test	IChatClient myChatClient)
+docs/how-to/MAF/usage.md#inheritance--per-agent-vs-worker-level	Prose claim, not a fenced block: the doc writes `opts.RetryPolicy = ...` with `...` standing in for a policy value, which does not compile. The harness substitutes a real argument.
+docs/how-to/MAF/testing-agents.md#custom-host-per-test	The doc's [Fact] closes over `fixture` and `myChatClient` from surrounding prose. A compile-only harness has no such scope, so they become method parameters — which is also why xUnit1001 is in this project's NoWarn.

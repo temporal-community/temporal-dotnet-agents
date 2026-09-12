@@ -13,6 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OpenAI;
 using Temporalio.Extensions.Hosting;
+using Temporalio.Client;
+using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
 using DocSnippets.Harness;
 
@@ -50,11 +52,24 @@ internal static class RegisterTheAgentOnAWorker
                     agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
                     agent.AddTool(weatherTool);
                 });
-            });
+            })
+            .AddWorkflow<AskWorkflow>();   // only needed for step 3; see below
 
         var host = builder.Build();
         await host.StartAsync();
         // END SNIPPET docs/how-to/MAF/quickstart.md#1-register-the-agent-on-a-worker
+    }
+
+    // Not a snippet: pins the §3 workflow-start call, which is prose-adjacent code the doc asks
+    // the reader to run. It has no AddDurableAgent/AddTool call, so it is not a qualifying block
+    // and must not carry a marker — but it is still an API claim worth compiling.
+    internal static async Task StartTheWorkflowAsync(IHost host)
+    {
+        var result = await host.Services.GetRequiredService<ITemporalClient>().ExecuteWorkflowAsync(
+            (AskWorkflow wf) => wf.RunAsync("What's the weather in Kingston?"),
+            new WorkflowOptions(id: $"ask-{Guid.NewGuid():N}", taskQueue: "agents"));
+
+        Console.WriteLine(result);
     }
 
     // Pins the inline example in the doc's "a tool that needs a service from DI" bullet.

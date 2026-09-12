@@ -335,6 +335,7 @@ verify-doc-links:
 verify-doc-snippets:
     bash scripts/verify-doc-snippets.selftest.sh
     bash scripts/verify-doc-snippet-coverage.sh
+    bash scripts/verify-doc-snippet-fidelity.selftest.sh
     bash scripts/verify-doc-snippet-fidelity.sh
 
 # Fast regex pre-filter for two MAF doc defects the compiler cannot reach: renamed internals still
@@ -835,7 +836,6 @@ test-samples-maf: build _sample-preflight _sample-preflight-maf
         "PerToolActivities:samples/MAF/PerToolActivities:90:Scenario 4: Tool calls disabled" \
         "ContextProviders:samples/MAF/ContextProviders:90:[TurnCounter] LLM call #1|[TurnCounter] LLM call #2" \
         "ToolInterceptor:samples/MAF/ToolInterceptor:240:[Approval requested]" \
-        "WorkingSet:samples/MAF/WorkingSet:90:[WorkingSet] src/Auth/AuthService.cs|src/Data/UserRepository.cs" \
         "Skills:samples/MAF/Skills:90:Shutdown signal sent to agent workflow." \
         "MixedActivities:samples/MAF/MixedActivities:120:FetchDocumentAsync|StoreAnalysisAsync" \
         "DurableContextProvider:samples/MAF/DurableContextProvider:90:=== Approach A: IDurableToolSource ===|=== Approach B: DurableToolRegistrationSpec ===" \

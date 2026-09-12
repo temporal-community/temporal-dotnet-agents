@@ -25,7 +25,6 @@ ratchet_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 factory_ratchet="$ratchet_dir/maf-doc-factory-first-ratchet.txt"
 stale_ratchet="$ratchet_dir/maf-doc-stale-term-ratchet.txt"
 failures=0
-notices=0
 
 fail() {
     echo "ERROR: $1" >&2
@@ -50,19 +49,64 @@ ratchet_allowed() {
         | awk -v p="$path" 'NF && $1 == p { print $2; found = 1 } END { if (!found) print 0 }' | head -1
 }
 
-# Emits a NOTICE for every ratchet entry now looser than reality, so the lists shrink instead of
-# quietly becoming permanent exemptions.
-ratchet_slack_notices() {
+# Validates a ratchet file's SHAPE and FAILS on any entry looser than reality.
+#
+# This used to print a NOTICE and carry on, which made "numbers may only go down" a comment rather
+# than a rule: a fixed defect left its allowance behind, and the allowance then silently covered the
+# next regression. Slack is now a build failure with the exact number to write. Malformed and
+# duplicate entries fail too — an unparseable count was previously compared as an empty string, and
+# a duplicated path silently resolved to whichever line came first.
+# SHAPE ONLY, and it must run BEFORE anything compares these values. `[[ "$count" -gt "$allowed" ]]`
+# evaluates $allowed arithmetically, so a non-numeric count is dereferenced as a variable name and
+# blows up under `set -u` inside the very check that was supposed to catch it. The self-test case
+# `ratchet-non-numeric-count-fails` pins this ordering.
+ratchet_validate_shape() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+
+    local seen="$work/ratchet-seen-$(basename "$file")"
+    : > "$seen"
+
+    while read -r path allowed extra; do
+        [[ -n "${path:-}" ]] || continue
+
+        if [[ -n "${extra:-}" ]]; then
+            fail "$(basename "$file"): entry for '$path' has trailing junk ('$extra').
+       The format is exactly '<path> <count>'."
+            continue
+        fi
+
+        if ! [[ "${allowed:-}" =~ ^[0-9]+$ ]]; then
+            fail "$(basename "$file"): entry for '$path' has a non-numeric count ('${allowed:-<missing>}').
+       The format is exactly '<path> <count>'."
+            continue
+        fi
+
+        if grep -qxF "$path" "$seen"; then
+            fail "$(basename "$file"): '$path' is listed more than once.
+       Only the first line took effect, so a later, larger allowance was silently ignored."
+            continue
+        fi
+        printf '%s\n' "$path" >> "$seen"
+    done < <(grep -v '^[[:space:]]*#' "$file" | awk 'NF')
+}
+
+# Fails on any entry looser than reality. Slack used to print a NOTICE and leave the build green,
+# which made "numbers may only go down" a comment rather than a rule: a fixed defect left its
+# allowance behind, and that allowance then silently covered the next regression.
+ratchet_enforce_tight() {
     local file="$1" counts="$2"
     [[ -f "$file" ]] || return 0
-    while read -r path allowed _rest; do
+    while read -r path allowed _extra; do
         [[ -n "${path:-}" ]] || continue
+        [[ "${allowed:-}" =~ ^[0-9]+$ ]] || continue   # shape already reported by ratchet_validate_shape
         local actual
         actual="$(awk -F: -v p="$path" '$1 == p { print $NF }' "$counts" | head -1)"
         actual="${actual:-0}"
         if [[ "$actual" -lt "$allowed" ]]; then
-            echo "NOTICE: $path is down to $actual site(s) but $(basename "$file") still allows $allowed. Lower it." >&2
-            notices=$((notices + 1))
+            fail "$(basename "$file"): '$path' is down to $actual site(s) but the ratchet still allows $allowed.
+       Lower it to $actual, or delete the line if $actual is 0. An allowance left above reality is
+       cover for the next regression — this is what 'numbers may only go down' means."
         fi
     done < <(grep -v '^[[:space:]]*#' "$file" | awk 'NF')
 }
@@ -74,6 +118,15 @@ ratchet_slack_notices() {
 # bare `grep -r` here pulls in bin/obj XML documentation output, which contains copies of every
 # comment in the source and turns this check into permanent noise.
 # ---------------------------------------------------------------------------
+# Shape first, and fail closed: every later check compares these numbers arithmetically.
+ratchet_validate_shape "$stale_ratchet"
+ratchet_validate_shape "$factory_ratchet"
+if [[ "$failures" -ne 0 ]]; then
+    echo "" >&2
+    echo "MAF doc API contracts: $failures malformed ratchet entr(y/ies); fix them before the gate can run." >&2
+    exit 1
+fi
+
 stale_terms='CachedDurableAgent|ComposeDurableAgent|ResolveDurableAgent'
 
 git ls-files 'docs/*' 'src/*' > "$work/tracked.txt"
@@ -102,7 +155,7 @@ while IFS= read -r line; do
     fi
 done < "$work/stale-counts.txt"
 
-ratchet_slack_notices "$stale_ratchet" "$work/stale-counts.txt"
+ratchet_enforce_tight "$stale_ratchet" "$work/stale-counts.txt"
 
 # ---------------------------------------------------------------------------
 # Check 2 — factory-first `AddTool`, as a pre-filter.
@@ -140,7 +193,7 @@ while IFS= read -r line; do
     fi
 done < "$work/factory-hits.txt"
 
-ratchet_slack_notices "$factory_ratchet" "$work/factory-hits.txt"
+ratchet_enforce_tight "$factory_ratchet" "$work/factory-hits.txt"
 
 if [[ "$failures" -ne 0 ]]; then
     echo "" >&2
@@ -148,4 +201,4 @@ if [[ "$failures" -ne 0 ]]; then
     exit 1
 fi
 
-echo "MAF doc API contracts OK: no stale internal names; no new factory-first AddTool sites ($notices ratchet notice(s))."
+echo "MAF doc API contracts OK: no stale internal names, no factory-first AddTool sites, and every ratchet entry is well-formed and tight."

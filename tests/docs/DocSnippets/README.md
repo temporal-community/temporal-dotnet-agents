@@ -39,12 +39,24 @@ is a human convenience and is **not** checked — line numbers churn on every un
 `BEGIN SNIPPET-PROSE` marks a snippet lifted from prose rather than a fenced block; it is held to
 the heading still existing, not to a fenced block existing.
 
-Text between the markers stays verbatim, and `scripts/verify-doc-snippet-fidelity.sh` enforces it:
-every non-blank line between the markers must appear in the doc the key names (indentation and line
-order ignored, since the harness wraps doc text in a class and a method). Adaptations that genuinely
-cannot be verbatim — a prose snippet whose doc form is not valid C#, a `[Fact]` that needs injected
-parameters — go in `scripts/doc-snippet-fidelity-allowlist.txt` with a reason, and an entry that
-stops being necessary fails the gate rather than lingering.
+Text between the markers stays verbatim, and `scripts/verify-doc-snippet-fidelity.sh` enforces it by
+comparing the marker body against the ```csharp block **under the keyed heading**, as an ordered
+sequence. Three properties matter, and an earlier, weaker version of this check had none of them:
+
+- **scoped** — a line that happens to appear elsewhere in the file is not a match
+- **ordered** — reordered lines are drift
+- **bidirectional** — a line added to the doc block and never compiled fails, which a containment
+  check cannot see at all
+
+Two normalisations are applied to both sides: common indentation is stripped (the harness wraps doc
+text in a class and a method), and *leading* `using` directives and blank lines are dropped (C#
+forbids usings inside a method body, so hoisting them is forced).
+
+Adaptations that genuinely cannot be verbatim — a prose snippet whose doc form is not valid C#, a
+`[Fact]` that needs injected parameters — go in `scripts/doc-snippet-fidelity-allowlist.txt` with a
+written reason. Each entry exempts that snippet from line comparison, so each is a hole in the gate;
+an entry whose key no longer exists, or whose snippet has become an exact match, fails the build
+rather than lingering.
 
 Anything else the harness has to add — a `using`, a `#pragma`, a type alias — goes outside the
 markers, with a comment saying why.
@@ -59,7 +71,7 @@ exists.
 | Command | What it proves |
 |---|---|
 | `just build` | every snippet compiles |
-| `just verify-doc-snippets` | self-test, then: every qualifying doc block has a compiled counterpart, **and** every snippet still matches the doc text it quotes |
+| `just verify-doc-snippets` | two self-tests, then: every qualifying doc block has a compiled counterpart, and every snippet still matches the doc block it quotes |
 | `just verify-maf-doc-api-contracts` | self-test, then: fast regex pre-filter (stale names, factory-first `AddTool`) |
 
 `just verify-doc-snippets` runs `scripts/verify-doc-snippets.selftest.sh` first. That self-test

@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Temporalio.Activities;
 using Temporalio.Testing;
 using Temporalio.Workflows;
+using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.AI.Tools;
 using TemporalCommunity.Extensions.Agents.Tools;
 
@@ -215,4 +216,23 @@ internal static class TestEnvironmentHelper
 internal sealed class MyDbContext
 {
     public Task<string> LookupAsync(string id) => Task.FromResult(id);
+}
+
+/// <summary>
+/// The orchestrating workflow from the MAF quickstart's step 3. Registered on the worker in the
+/// step 1 snippet, which is why it has to exist for that snippet to compile.
+/// </summary>
+[Workflow]
+internal class AskWorkflow
+{
+    [WorkflowRun]
+    public async Task<string> RunAsync(string question)
+    {
+        var agent = WorkflowAgents.GetTemporalAgent("Assistant");
+        var session = await agent.CreateSessionAsync().ConfigureAwait(true);
+        var reply = await agent.RunAsync([new ChatMessage(ChatRole.User, question)], session)
+            .ConfigureAwait(true);
+
+        return reply.Messages[^1].Text ?? string.Empty;
+    }
 }

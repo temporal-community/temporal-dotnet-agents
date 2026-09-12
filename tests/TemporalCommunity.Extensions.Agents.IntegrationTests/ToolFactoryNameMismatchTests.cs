@@ -140,6 +140,98 @@ public class ToolFactoryNameMismatchTests
         }
     }
 
+    /// <summary>
+    /// The sibling guard: a factory that returns <see langword="null"/>. Same reasoning as the
+    /// name mismatch — null on the first attempt is null on the fifth — and until this test was
+    /// written that branch threw a plain <see cref="InvalidOperationException"/>, which Temporal
+    /// retries. It therefore burned the whole budget before surfacing the identical error.
+    /// </summary>
+    [Fact]
+    public async Task ToolFactoryReturningNull_FailsOnFirstAttempt_WithoutCallingTheModel()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var scripted = new ScriptedChatClient(
+            [new ChatResponse(new ChatMessage(ChatRole.Assistant, "Should never be reached."))]);
+
+        var factoryCalls = 0;
+
+        var taskQueue = $"tool-null-factory-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddWorkflow<MismatchWorkflow>()
+            .AddTemporalAgents(opts =>
+            {
+                // Generous on purpose: a configuration error must not consume it.
+                opts.DefaultRetryPolicy = new RetryPolicy { MaximumAttempts = 5 };
+
+                opts.AddDurableAgent("SubAgent", agent =>
+                {
+                    agent.ChatClient = _ => scripted;
+                    agent.AddTool(DeclaredToolName, _ =>
+                    {
+                        Interlocked.Increment(ref factoryCalls);
+                        return null!;
+                    });
+                });
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var handle = await env.Client.StartWorkflowAsync(
+                (MismatchWorkflow wf) => wf.RunAsync(),
+                new WorkflowOptions($"tool-null-factory-{Guid.NewGuid():N}", taskQueue));
+
+            var failure = await Assert.ThrowsAsync<WorkflowFailedException>(
+                async () => await handle.GetResultAsync());
+
+            // Attempt NUMBER, not event count — see the note in the mismatch test above.
+            var stepScheduledEventIds = new HashSet<long>();
+            var observedAttempts = new List<int>();
+            await foreach (var ev in handle.FetchHistoryEventsAsync())
+            {
+                if (ev.ActivityTaskScheduledEventAttributes is { } scheduled
+                    && scheduled.ActivityType.Name == RunDurableAgentStepActivity)
+                {
+                    stepScheduledEventIds.Add(ev.EventId);
+                }
+
+                if (ev.ActivityTaskStartedEventAttributes is { } started
+                    && stepScheduledEventIds.Contains(started.ScheduledEventId))
+                {
+                    observedAttempts.Add(started.Attempt);
+                }
+            }
+
+            _output.WriteLine($"RunDurableAgentStep attempts: [{string.Join(", ", observedAttempts)}]");
+
+            Assert.NotEmpty(observedAttempts);
+            Assert.All(observedAttempts, attempt => Assert.Equal(1, attempt));
+
+            var activityFailure = Assert.IsType<ActivityFailureException>(failure.InnerException);
+            var appFailure = Assert.IsType<ApplicationFailureException>(activityFailure.InnerException);
+
+            _output.WriteLine($"errorType={appFailure.ErrorType}: {appFailure.Message}");
+
+            // Same error type as the mismatch guard, so TemporalFailureInspector treats both alike.
+            Assert.Equal("DurableConfigurationException", appFailure.ErrorType);
+            Assert.Contains(DeclaredToolName, appFailure.Message, StringComparison.Ordinal);
+            Assert.Contains("returned null", appFailure.Message, StringComparison.Ordinal);
+
+            Assert.Equal(0, scripted.CallCount);
+            Assert.Equal(1, Volatile.Read(ref factoryCalls));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     [Workflow("ToolFactoryNameMismatch.Mismatch")]
     internal class MismatchWorkflow
     {
