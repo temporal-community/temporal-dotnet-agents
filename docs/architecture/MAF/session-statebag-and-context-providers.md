@@ -316,9 +316,8 @@ session-backed `TemporalAIAgentProxy` when an approval scope must survive a turn
 The following registration is intentionally absent: direct registration of `Mem0Provider`,
 `ChatHistoryMemoryProvider`, or another provider that persists history or writes to an external
 store. Calling those hooks from retryable activities can duplicate or lose external effects. The
-supported examples are [ContextProviders](../../../samples/MAF/ContextProviders/) and
-[WorkingSet](../../../samples/MAF/WorkingSet/), whose session state is carried in `StateBag` and
-whose providers do not become the conversation-history owner.
+supported example, [ContextProviders](../../../samples/MAF/ContextProviders/), carries its
+session state in `StateBag` without becoming the conversation-history owner.
 
 ---
 

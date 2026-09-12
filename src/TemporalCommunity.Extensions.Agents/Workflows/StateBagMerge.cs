@@ -144,8 +144,8 @@ internal static class StateBagMerge
     /// <para>
     /// This exists specifically so that a turn ending on a hash-gated LLM step (which returns a
     /// null or subset bag) does not <em>replace</em> — and thereby wipe — cross-turn StateBag state
-    /// the workflow thread wrote between activities (e.g. approval-scope records from
-    /// <c>WriteSessionScopeToStateBag</c>, or <c>temporal.working_set</c> from a context provider).
+    /// the workflow thread wrote between activities (for example, approval-scope records from
+    /// <c>WriteSessionScopeToStateBag</c> or a custom context-provider value).
     /// </para>
     /// <para>
     /// Pure and deterministic — no I/O, no awaits, no wall-clock — safe on the workflow thread.

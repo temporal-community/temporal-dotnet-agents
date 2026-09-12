@@ -15,7 +15,6 @@ Welcome to the documentation for **Temporal .NET Agents**, providing durable exe
 - **[Routing & Agent Orchestration](how-to/MAF/routing.md)** — Multi-agent routing, workflow delegation, and sub-agents.
 - **[Human-in-the-Loop (HITL)](how-to/MAF/hitl-patterns.md)** — Workflow approval gates, session approval scopes, and interactive reviews.
 - **[Context Providers](how-to/MAF/context-providers.md)** — Writing and registering an `AIContextProvider`, session `StateBag` state, and dynamic prompt injection.
-- **[Working Set Provider](how-to/MAF/working-set.md)** — The built-in `WorkingSetContextProvider`: what it extracts, and the `StateBag` key it publishes.
 - **[Skills & Toolsets](how-to/MAF/skills.md)** — Progressive skill loading and filesystem/inline skills.
 - **[Tool Interceptors](how-to/MAF/tool-interceptor.md)** — Intercepting, auditing, and gating tool invocations.
 - **[Intercepting LLM Calls](how-to/MAF/llm-call-interception.md)** — Chat-client decorators and `ConfigureAgentPipeline` agent middleware: which layer sees what, and why decorators must use `GetStreamingResponseAsync`.

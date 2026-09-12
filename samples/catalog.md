@@ -44,7 +44,6 @@ Intermediate samples covering tool interceptors, context providers, approvals, a
 | [Skills](MAF/Skills/) | MAF | Progressive-disclosure skill catalog and durable loading | Unattended Script | Automated: `just test-samples-maf` |
 | [ToolInterceptor](MAF/ToolInterceptor/) | MAF | Proceed, pause, skip, or block before a tool executes | Unattended Script | Automated: `just test-samples-maf` |
 | [ToolInterceptor](MEAI/ToolInterceptor/) | MEAI | Intercept, pause, skip, or block tool calls | Unattended Script | Automated: `just test-samples-meai` |
-| [WorkingSet](MAF/WorkingSet/) | MAF | Stateful working-set context without provider-owned history | Unattended Script | Automated: `just test-samples-maf` |
 
 ---
 

@@ -65,8 +65,8 @@ public class TemporalAgentSessionStateBagTests
     public void OverlayTrustedStateBag_OntoEmptyBag_AdoptsActivityBag()
     {
         var session = NewSession();
-        session.OverlayTrustedStateBag(Bag(("temporal.working_set", "src/a.cs")));
-        Assert.Equal("src/a.cs", Read(session, "temporal.working_set"));
+        session.OverlayTrustedStateBag(Bag(("app.context.file", "src/a.cs")));
+        Assert.Equal("src/a.cs", Read(session, "app.context.file"));
     }
 
     // Determinism: tool activities fan out concurrently, so completion order varies between the
@@ -176,12 +176,12 @@ public class TemporalAgentSessionStateBagTests
     public void StateBag_SurvivesSerializationRoundTrip()
     {
         var session = NewSession();
-        session.OverlayTrustedStateBag(Bag(("temporal.working_set", "src/a.cs")));
+        session.OverlayTrustedStateBag(Bag(("app.context.file", "src/a.cs")));
         session.MergeToolStateBagWriteBacks([Bag(("tool.note", "written"))]);
 
         var restored = TemporalAgentSession.Deserialize(session.Serialize());
 
-        Assert.Equal("src/a.cs", Read(restored, "temporal.working_set"));
+        Assert.Equal("src/a.cs", Read(restored, "app.context.file"));
         Assert.Equal("written", Read(restored, "tool.note"));
     }
 

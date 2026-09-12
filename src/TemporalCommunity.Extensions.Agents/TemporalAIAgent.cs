@@ -232,7 +232,7 @@ public sealed class TemporalAIAgent : AIAgent
                 _activityOptions);
 
             // Persist the step's StateBag mutations on the session so context-provider state
-            // (e.g. WorkingSetContextProvider) survives across steps, turns, and continue-as-new.
+            // survives across steps, turns, and continue-as-new.
             // Context providers run inside the LLM-step activity and are trusted-tier by design,
             // so their output is overlaid unfiltered — unlike tool/interceptor write-backs below,
             // which are deny-list filtered. Overlay rather than replace: a hash-gated step returns

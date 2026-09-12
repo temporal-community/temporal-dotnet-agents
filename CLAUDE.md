@@ -162,7 +162,6 @@ When a worker crashes:
 - `IAgentToolInterceptor` — `TemporalCommunity.Extensions.Agents.Tools` — convenience alias for `IDurableToolInterceptor<AgentToolContext>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`. Returns `DurableToolDecision` from the AI library.
 - `AgentToolContext` — `TemporalCommunity.Extensions.Agents.Tools` — extends `DurableToolContext`. Adds `AgentName` (required) and `StateBag?` (read-only snapshot). The inherited `SessionId` is populated from `ActivityExecutionContext.Current.Info.WorkflowId` in the interceptor activity.
 - `TemporalAgentSessionSnapshot` — `TemporalCommunity.Extensions.Agents.Session` (internal sealed) — the wire contract for a serialized `TemporalAgentSession`. Registered in `AgentSessionJsonContext`. Members: `sessionId` (lossless `ta-{agent}-{key}` string), `stateBag`, `history` — the last two omitted when null via member-level `JsonIgnore`. A snapshot without `history` is the supported legacy shape and restores as empty history.
-- `WorkingSetContextProvider` — `TemporalCommunity.Extensions.Agents` — `AIContextProvider` subclass that extracts recently-referenced file paths from accumulated `ChatMessage` history and injects a compact working-set note before each LLM call. Stores result in `AgentSessionStateBag["temporal.working_set"]` as a `string[]` (read with `TryGetValue<string[]>`), recomputed and overwritten every step rather than accumulated.
 
 ### DI Patterns
 - `TemporalAgentsOptions` has an **internal constructor** — always access via the `AddTemporalAgents(opts => ...)` delegate.
@@ -366,7 +365,6 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 - **Durable Agents (per-tool activities)**: [`docs/how-to/MAF/durable-agents.md`](./docs/how-to/MAF/durable-agents.md)
 - **Tool Interceptor**: [`docs/how-to/MAF/tool-interceptor.md`](./docs/how-to/MAF/tool-interceptor.md)
 - **Context Providers**: [`docs/how-to/MAF/context-providers.md`](./docs/how-to/MAF/context-providers.md)
-- **Working Set Provider**: [`docs/how-to/MAF/working-set.md`](./docs/how-to/MAF/working-set.md)
 - **Skills**: [`docs/how-to/MAF/skills.md`](./docs/how-to/MAF/skills.md)
 - **MCP Tools**: [`docs/how-to/MAF/mcp-tools.md`](./docs/how-to/MAF/mcp-tools.md)
 - **Harness Agent Compatibility**: [`docs/how-to/MAF/harness-agent-compatibility.md`](./docs/how-to/MAF/harness-agent-compatibility.md)

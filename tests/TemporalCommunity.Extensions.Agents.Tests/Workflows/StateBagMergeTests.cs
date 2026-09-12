@@ -268,11 +268,11 @@ public class StateBagMergeTests
     [Fact]
     public void OverlayTrustedStateBag_NullCurrent_ReturnsUpdated()
     {
-        var updated = Bag(("temporal.working_set", "file.cs"));
+        var updated = Bag(("app.context.file", "file.cs"));
 
         var result = StateBagMerge.OverlayTrustedStateBag(current: null, updated);
 
-        Assert.Equal("file.cs", GetString(result, "temporal.working_set"));
+        Assert.Equal("file.cs", GetString(result, "app.context.file"));
     }
 
     [Fact]
@@ -292,13 +292,13 @@ public class StateBagMergeTests
         // The core durability guarantee: a subset bag from a context provider (only its key) must
         // NOT wipe the carried approval-scope record.
         var current = Bag(("temporal.approval_scopes.session", "grant"), ("carried", "keep"));
-        var updated = Bag(("temporal.working_set", "file.cs"));
+        var updated = Bag(("app.context.file", "file.cs"));
 
         var result = StateBagMerge.OverlayTrustedStateBag(current, updated);
 
         Assert.Equal("grant", GetString(result, "temporal.approval_scopes.session"));
         Assert.Equal("keep", GetString(result, "carried"));
-        Assert.Equal("file.cs", GetString(result, "temporal.working_set"));
+        Assert.Equal("file.cs", GetString(result, "app.context.file"));
     }
 
     [Fact]

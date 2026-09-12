@@ -237,19 +237,12 @@ public async Task<string> RunAsync(string question)
 
 The summarizer sees only the final output, not the full 5-turn research history.
 
-### 3. Use a Supported Auxiliary Context Projection
+### 3. Use a Compatible Custom Context Projection
 
 The workflow remains the authoritative conversation-history owner. A compatible
-`AIContextProvider` may add retry-safe instructions or messages for a specific LLM step, such as
-the library-provided `WorkingSetContextProvider`; it does not replace durable history.
-
-```csharp
-opts.AddDurableAgent("CodingAgent", agent =>
-{
-    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-    agent.AddContextProvider(new WorkingSetContextProvider());
-});
-```
+`AIContextProvider` may add retry-safe instructions or messages for a specific LLM step; it does
+not replace durable history. Implement the projection in application code and, when another
+provider or tool needs it, publish a compact namespaced value in the session `StateBag`.
 
 Provider-owned history and external writes are not supported direct durable registrations because
 the provider lifecycle runs in retryable activities without an atomic idempotent persistence
@@ -339,7 +332,7 @@ conversation-history store.
 
 ## StateBag Persistence
 
-`AgentSessionStateBag` carries compact provider state (for example, a working-set index) across
+`AgentSessionStateBag` carries compact provider state (for example, a tenant identifier) across
 turns without serializing an external data store:
 
 ```
@@ -355,11 +348,6 @@ Continue-as-New:
         carriedStateBag = _currentStateBag  → new workflow run
         Bag restored seamlessly in the next turn
 ```
-
-`WorkingSetContextProvider` is a deliberate exception to that read-then-write shape: it recomputes
-its list from the retained history on every step and overwrites `temporal.working_set` (a
-`string[]`) rather than reading its own previous value. See
-[working-set.md](./working-set.md#reading-the-working-set-elsewhere).
 
 **Optimization detail:** Empty bags serialize to `null` (checked via `StateBag.Count == 0`), so sessions without providers incur zero serialization overhead.
 

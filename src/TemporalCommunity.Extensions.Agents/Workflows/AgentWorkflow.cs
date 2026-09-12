@@ -487,7 +487,7 @@ internal class AgentWorkflow :
             // Overlay (not replace) the activity's StateBag output on top of the carried
             // _currentStateBag. A replace loses workflow-thread writes (e.g. approval-scope records
             // written by WriteSessionScopeToStateBag between activities, or a context provider's
-            // temporal.working_set) whenever a turn ends on a hash-gated LLM step that returns a
+            // custom value) whenever a turn ends on a hash-gated LLM step that returns a
             // null/subset bag. The overlay is unfiltered here because context-provider output is
             // trusted-tier — see StateBagMerge.OverlayTrustedStateBag.
             _currentStateBag = StateBagMerge.OverlayTrustedStateBag(_currentStateBag, stepResult.UpdatedStateBag);
@@ -639,8 +639,8 @@ internal class AgentWorkflow :
 
             // StateBag starvation guard (Fix 1): a user tool on the Proceed path may read ANY
             // workflow-thread-written StateBag key — approval-scope records (scope-aware tools),
-            // context-provider output (e.g. WorkingSetContextProvider's "temporal.working_set"),
-            // or any custom key. InvokeAgentToolAsync is stateless: FromStateBag(id, null) builds
+            // context-provider output, or any custom key. InvokeAgentToolAsync is stateless:
+            // FromStateBag(id, null) builds
             // an EMPTY session, so a null dispatch (F1 hash gate, unchanged bag) starves the tool
             // on step 2+ of a hash-unchanged turn. Unlike the interceptor (only scope records
             // matter → force gated on ScopeAwareTools), there is NO clean workflow-side signal for

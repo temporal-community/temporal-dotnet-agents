@@ -159,7 +159,6 @@ Key benefits over in-memory agent frameworks:
 - External memory with `AIContextProvider` and `AgentSessionStateBag` persistence
 - Completed request/response only; `RunStreamingAsync` is not supported
 - Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`)
-- `WorkingSetContextProvider` — `AIContextProvider` subclass that extracts recently-referenced file paths and injects a working-set note before each LLM call
 - OpenTelemetry distributed tracing with a stable Temporal `agent.turn` parent and optional
   canonical MAF/MEAI child spans; search attributes enabled by default via `EnableSearchAttributes`
 - Plugin composition — add your own plugins through Temporal's own surface: `TemporalWorkerOptions.Plugins` and `TemporalClientConnectOptions.Plugins`
@@ -233,7 +232,6 @@ An empty bag reports zero because durable agent workflows omit it from the paylo
 - **`TemporalAgentContext`** — Async-local context for agent tools running inside activities
 - **`StructuredOutputExtensions`** — `RunStructuredAsync<T>` with markdown fence stripping and retry
 - **`IAgentToolInterceptor`** (`TemporalCommunity.Extensions.Agents.Tools`) — pre-tool lifecycle hook; extends `IDurableToolInterceptor<AgentToolContext>` from `TemporalCommunity.Extensions.AI.Tools`; return `DurableToolDecision.Proceed/PauseForApproval/Skip/Block`
-- **`WorkingSetContextProvider`** — `AIContextProvider` that injects a compact file-reference note before each LLM call
 
 ### Dependency on TemporalCommunity.Extensions.AI
 

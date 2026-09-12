@@ -80,9 +80,8 @@ threads from provider to provider really does accumulate — and `Instructions` 
 later provider *does* see an earlier one's instructions. It is the message view that is narrowed, by
 the default filter, before your override is called.
 
-**When providers must share, share through the `StateBag`** — one writes a key, the other reads it.
-That is what `WorkingSetContextProvider` does, and it is also the only channel that survives a
-worker restart.
+**When providers must share, share through the `StateBag`** — one writes a key and another reads
+it. It is also the only provider-owned channel that survives a worker restart.
 
 > Two different escape hatches, often confused:
 >
@@ -270,29 +269,19 @@ injects — especially as a system message — is a prompt-injection surface. Va
 
 ---
 
-## The built-in provider
+## Built-in provider support
 
-`WorkingSetContextProvider` is the built-in you register yourself. It keeps a coding-style agent
-oriented on which files are in play by deriving them from the conversation and publishing the list
-to `AgentSessionStateBag["temporal.working_set"]`.
+The package's built-in `SkillsContextProvider` has an internal constructor;
+`agent.UseSkills(...)` builds and registers it for you. See [skills.md](./skills.md).
 
-The package ships a second `AIContextProvider`, `SkillsContextProvider`, but its constructor is
-internal — `agent.UseSkills(...)` builds and registers it for you. See [skills.md](./skills.md).
-
-```csharp
-agent.AddContextProvider(new WorkingSetContextProvider());
-```
-
-It is also the reference example of the `StateBag` handoff described above: a second provider reads
-`WorkingSetContextProvider.StateBagKey` rather than trying to parse the note it injected. See
-[working-set.md](./working-set.md).
+For domain-specific projections, such as file references, case IDs, or documents in scope, write
+and register your own provider. If another provider or tool needs the projection, publish a
+namespaced value in the `StateBag` rather than parsing injected text.
 
 ---
 
 ## See also
 
-- [working-set.md](./working-set.md) — the built-in `WorkingSetContextProvider`
 - [harness-agent-compatibility.md](./harness-agent-compatibility.md) — MAF's built-in providers, in detail
 - [skills.md](./skills.md) — `UseSkills`, the durable equivalent of `AgentSkillsProvider`
 - [`samples/MAF/ContextProviders`](../../../samples/MAF/ContextProviders/) — minimal `StateBag` read/write
-- [`samples/MAF/WorkingSet`](../../../samples/MAF/WorkingSet/) — two-provider `StateBag` handoff
