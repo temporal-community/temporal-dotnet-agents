@@ -228,17 +228,16 @@ just verify-doc-links   # Markdown link + #anchor checker; runs its own self-tes
 just ci                 # clean → build → test-unit-all → doc checks → pack
 ```
 
-**The doc gates deliberately depend on nothing beyond POSIX tools and what the workflow already
-installs.** They previously used `ripgrep`, which neither GitHub runner image ships; because every
-`rg` call site wraps it in `|| true` (grep and rg both report "no matches" as exit 1), a missing
-binary produced exit 127, zero hits, and a confident "0 targets checked" success. The link and
-stale-term scans are now `grep -E`, and the one genuinely multiline rule — factory-first `AddTool`,
-which needs to see `AddTool(\n    sp => ...` — is a small awk state machine. Two consequences worth
-knowing:
+**The doc gates deliberately depend on nothing beyond POSIX tools, `python3`, and what the workflow
+already installs.** They previously used `ripgrep`, which neither GitHub runner image ships; because
+every `rg` call site wrapped it in `|| true` (grep and rg both report "no matches" as exit 1), a
+missing binary produced exit 127, zero hits, and a confident "0 targets checked" success. Two
+lessons from that outage still apply to anything added here:
 
-- **`grep -Eo | wc -l`, never `grep -c`.** The ratchets compare MATCH counts; `grep -c` counts
-  matching lines. Wrap such a call in `|| true` inside the command substitution, or `set -e` kills
-  the script before it can report anything.
+- **A tool that reports "nothing found" as exit 1 needs `|| true` — and `|| true` also swallows
+  "command not found".** Prefer `grep -Eo | wc -l` over `grep -c` when counting matches rather than
+  matching lines, and make sure a missing dependency fails loudly. `doc_snippet_fidelity.py` is
+  invoked bare, so an absent `python3` exits 127 with a message rather than passing vacuously.
 - **No apostrophes in comments inside `<( ... )`.** Bash tracks quote state while scanning for the
   closing paren, comments included, so a lone `'` inside a process substitution breaks the parse.
 
@@ -304,9 +303,20 @@ dotnet pack src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions
     -c Release -p:GenerateCompatibilitySuppressionFile=true
 ```
 
+**Packing offline.** The baseline is an ordinary NuGet package, cached under `~/.nuget/packages`
+after first use, so `just pack` works with no network — verified with every remote feed disabled,
+and it still catches breaking changes from the cache. The only cold case is a machine that has
+never fetched `0.14.2` (fresh clone, container, or after `dotnet nuget locals all --clear`), which
+is the same cold-cache rule as every other dependency. If you need a package right then without
+network, skip only the compatibility check:
+
+```bash
+dotnet pack <project> -c Release -p:EnablePackageValidation=false
+```
+
 `src/*/CompatibilitySuppressions.xml` is therefore the record of what broke since the baseline (18 entries today). This replaced `PublicAPI.{Shipped,Unshipped}.txt` and the `Microsoft.CodeAnalysis.PublicApiAnalyzers` gate, which had two problems: RS0016 has no CLI autofix, so recording an addition meant hand-writing Roslyn signature syntax; and the baseline was a file, so the `WorkingSetContextProvider` removal was made by deleting lines straight out of `Shipped.txt`, silencing the analyzer and leaving no trace. A published package cannot be edited after the fact. Bump `PackageValidationBaselineVersion` when a new version ships.
 
-**Publish**: to NuGet.org, either `just publish-nuget` (local, official — gated on `verify-public-api`; needs `NUGET_API_KEY`), `just publish-nuget-preview` (local, preview — ungated by design), or the `.github/workflows/publish.yml` workflow (`workflow_dispatch`, OIDC Trusted Publishing — no stored API key/secret; the `nuget-publish` GitHub environment must be configured). Remember: tags carry no `v` prefix.
+**Publish**: to NuGet.org, either `just publish-nuget` (local, official — needs `NUGET_API_KEY`; `just pack` is the gate, via PackageValidation), `just publish-nuget-preview` (local, preview — ungated by design), or the `.github/workflows/publish.yml` workflow (`workflow_dispatch`, OIDC Trusted Publishing — no stored API key/secret; the `nuget-publish` GitHub environment must be configured). Remember: tags carry no `v` prefix.
 
 ---
 
@@ -314,7 +324,7 @@ dotnet pack src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions
 
 `.github/workflows/build.yml`. Two jobs: `build` (ubuntu+macOS matrix on push to `main`, runs `just build` + `just test-unit`) and `package` (after `build`, `just pack`, uploads artifact).
 
-`.github/workflows/integration.yml`. Runs the discovered integration suites on pull requests to `main`, pushes to `main`, and manual dispatch. Each matrix entry restores, builds, and runs its selected suite with `Category!=HistoryCapture`; history-capture tests remain excluded from that workflow.
+`.github/workflows/integration.yml`. Runs both integration suites on pull requests to `main`, pushes to `main`, and manual dispatch. The matrix lists them literally — the former `discover` job and its script were deleted, since the set has been the same two projects (one per library) since 2026-03-18 and is already spelled out in `TemporalAgents.slnx` and the justfile. **Adding a third integration project means adding two lines to that matrix**; nothing detects the omission for you. Each entry restores, builds, and runs its suite with `Category!=HistoryCapture` (those tests generate the replay fixtures the unit suites consume).
 
 `.github/workflows/publish.yml`. `workflow_dispatch`-only `publish` job (`nuget-publish` environment, `id-token: write`). Verifies MinVer resolved a real tag (fails on the `0.0.0-*` fallback), `just pack`, then publishes to NuGet.org via OIDC Trusted Publishing (`NuGet/login@v1` exchanges the GitHub OIDC token for a short-lived key — no long-lived secret stored).
 

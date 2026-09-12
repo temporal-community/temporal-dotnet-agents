@@ -126,7 +126,8 @@ scan_headings() {
 # where index and tree agree, so skipping absent files loses no coverage there.
 # `if` rather than `[[ -f "$f" ]] && printf`: a bare && whose test fails on the LAST iteration
 # leaves the loop's exit status at 1, and `set -e` then kills the gate with an empty log — the same
-# silent-failure shape that once disarmed the ratchet check in verify-maf-doc-api-contracts.sh.
+# silent-failure shape that once disarmed a sibling gate: it exited non-zero with an empty log,
+# which reads as a crash rather than a detection.
 while IFS= read -r f; do
     if [[ -f "$f" ]]; then
         printf '%s\n' "$f"

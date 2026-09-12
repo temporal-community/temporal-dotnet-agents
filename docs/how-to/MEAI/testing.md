@@ -389,13 +389,13 @@ same pinned/version-checked helper and pre-registers the `AgentName`, `SessionCr
 `TurnCount` search attributes enabled by default. Do not add bare
 `WorkflowEnvironment.StartLocalAsync()` calls, because they silently float the tested server.
 
-Pull requests run both workflows with read-only token permissions. Integration projects are
-discovered from `tests/*IntegrationTests/*.csproj`; adding a project automatically adds a matrix
-job. Each job restores and builds only that project, excludes `Category=HistoryCapture`, applies a
-four-minute per-test hang limit and a twenty-minute job limit, and always uploads TRX results.
-The workflow caches Temporal CLI v1.8.0 by OS/architecture, verifies the official release SHA-256
-before extracting it, and supplies the verified executable through `TEMPORAL_TEST_SERVER_PATH`.
-Run `tests/ci/discover-integration-projects.test.sh` locally after changing discovery behavior.
+Pull requests run both workflows with read-only token permissions. The integration matrix lists the
+two suites literally in `.github/workflows/integration.yml`, so **adding a third integration project
+means adding two lines there** — nothing discovers it for you. Each job restores and builds only
+that project, excludes `Category=HistoryCapture`, applies a four-minute per-test hang limit and a
+twenty-minute job limit, and always uploads TRX results. The workflow caches Temporal CLI v1.8.0 by
+OS/architecture, verifies the official release SHA-256 before extracting it, and supplies the
+verified executable through `TEMPORAL_TEST_SERVER_PATH`.
 
 Use `TemporalServiceTestEnvironment.StartTimeSkippingAsync()` only when the behavior under test is
 defined entirely by workflow timers. Keep transport, worker restart, activity retry, and real
