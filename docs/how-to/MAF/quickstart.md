@@ -45,7 +45,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using OpenAI;
+using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
+using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
 
 var builder = Host.CreateApplicationBuilder(args);
