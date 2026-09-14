@@ -53,14 +53,22 @@ jobs:
           dotnet-version: "10.0.x"
 
       # setup-dotnet's built-in `cache: true` needs a packages.lock.json, and this repo has none.
-      # Key on everything that can change the restore graph: central versions, feed config, SDK
-      # band, and the project files themselves (a new PackageReference lives in a csproj even
-      # under central package management).
+      #
+      # The key deliberately does NOT hash the csproj files. Under central package management they
+      # carry no versions — the only two that pin any are the smoke-test projects, and neither is
+      # in TemporalAgents.slnx, so neither takes part in this restore. Hashing all 42 of them made
+      # the key churn with every unrelated project edit (133 csproj changes in the last 50 commits
+      # against 11 for Directory.Packages.props), and each new key writes ~365MB per OS. At the
+      # 10GB repo limit that thrashing evicts other caches, including the temporal-cli one the
+      # integration workflow depends on.
+      #
+      # A package cache does not need to be exact: if a new PackageReference lands without changing
+      # the key, the stale cache restores and `dotnet restore` fetches the one missing package.
       - name: Cache NuGet packages
         uses: actions/cache@v5.0.3
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'NuGet.config', 'global.json', '**/*.csproj') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'NuGet.config', 'global.json') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
@@ -106,7 +114,7 @@ jobs:
         uses: actions/cache@v5.0.3
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'NuGet.config', 'global.json', '**/*.csproj') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'NuGet.config', 'global.json') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
