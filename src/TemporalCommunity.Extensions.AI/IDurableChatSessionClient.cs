@@ -26,10 +26,16 @@ public interface IDurableChatSessionClient
     /// Sends messages to a durable chat session and returns the response entry.
     /// Starts the session workflow if not already running.
     /// </summary>
+    /// <remarks>
+    /// Retrying after an ambiguous timeout or lost response can submit another turn (at-least-once
+    /// submission). Correlation IDs provide observability, not deduplication. Effectful tools need
+    /// downstream business idempotency to suppress repeated external effects.
+    /// </remarks>
     /// <param name="conversationId">A unique identifier for the conversation.</param>
     /// <param name="messages">The messages to send.</param>
     /// <param name="options">Optional chat options.</param>
     /// <param name="correlationId">
+    /// An observability identifier, not an idempotency key; reusing it does not deduplicate turns.
     /// Optional caller-supplied correlation ID for this turn. When null/empty, the
     /// workflow auto-generates one via <c>Workflow.NewGuid()</c>.
     /// </param>

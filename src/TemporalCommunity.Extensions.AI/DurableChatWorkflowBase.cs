@@ -30,6 +30,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private readonly DurableApprovalMixin _approvalMixin = new();
     private bool _isProcessing;
     private bool _shutdownRequested;
+    private bool _continueAsNewPending;
     private int _turnCount;
 
     /// <summary>
@@ -92,6 +93,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// Subclass update validators can use this to reject new turns after shutdown.
     /// </summary>
     protected bool IsShutdownRequested => _shutdownRequested;
+
+    /// <summary>Whether this run has stopped admitting new turns before continue-as-new.</summary>
+    protected bool IsContinueAsNewPending => _continueAsNewPending;
+
+    /// <summary>Whether a subclass has started turns outside tracked Update handlers.</summary>
+    protected virtual bool HasPendingBackgroundTurns => false;
 
     /// <summary>
     /// The current turn count, available to subclass overrides for telemetry or
@@ -321,7 +328,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             // TTL elapsed — session complete. Drain any in-flight handlers (e.g. fire-and-forget
             // turns) before completing so we don't abort them with TMPRL1102.
-            await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished).ConfigureAwait(true);
+            await Workflow.WaitConditionAsync(
+                () => Workflow.AllHandlersFinished
+                      && !_isProcessing
+                      && !HasPendingBackgroundTurns).ConfigureAwait(true);
             return;
         }
 
@@ -340,9 +350,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             //    mode (MAF only) nulls CarriedHistory in its CreateContinueAsNewException override,
             //    making this a harmless no-op there.
             List<DurableSessionEntry> carriedHistory;
+            ActivityOptions? reducerActivityOptions = null;
+            var historyCountAtReduction = _history.Count;
             if (input.HistoryReducerKey is not null)
             {
-                var reducerActivityOptions = new ActivityOptions
+                reducerActivityOptions = new ActivityOptions
                 {
                     StartToCloseTimeout = input.ActivityTimeout,
                     HeartbeatTimeout = input.HeartbeatTimeout,
@@ -355,18 +367,59 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 carriedHistory = DefaultBoundedTrim(_history, input.MaxEntryCount);
             }
 
-            var carriedInput = CreateContinueAsNewInput(
-                input,
-                carriedHistory,
-                _approvalMixin.GetResolvedApprovals(),
-                sessionCreatedAt);
-            // Drain in-flight update/signal handlers before completing-as-new. _isProcessing is a
-            // turn-serialization mutex that clears in RunTurnAsync's finally BEFORE the update handler's
-            // continuation (logging + result delivery) finishes, so gating CAN on !_isProcessing alone
-            // races the handler and aborts it with TMPRL1102 (a lost user turn). AllHandlersFinished is
-            // the SDK-sanctioned completion barrier that tracks both update and signal handlers.
-            await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished).ConfigureAwait(true);
-            throw CreateContinueAsNewException(carriedInput);
+            // The reducer can yield while another admitted turn completes. Stop accepting new
+            // turns, drain those already admitted, then reduce again until history is stable.
+            // Patching keeps the old command sequence for histories recorded before this fix.
+            var drainBeforeSnapshot = Workflow.Patched("meai-can-drain-before-snapshot");
+            DurableChatWorkflowInput? carriedInput = null;
+            if (drainBeforeSnapshot)
+            {
+                _continueAsNewPending = true;
+            }
+            else
+            {
+                // Preserve the original snapshot timing when replaying pre-patch histories.
+                carriedInput = CreateContinueAsNewInput(
+                    input, carriedHistory, _approvalMixin.GetResolvedApprovals(), sessionCreatedAt);
+            }
+            if (!drainBeforeSnapshot)
+            {
+                await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished)
+                    .ConfigureAwait(true);
+            }
+            else
+            {
+                while (true)
+                {
+                    await Workflow.WaitConditionAsync(
+                        () => Workflow.AllHandlersFinished
+                              && !_isProcessing
+                              && !HasPendingBackgroundTurns).ConfigureAwait(true);
+                    if (_shutdownRequested)
+                        return;
+                    if (_history.Count == historyCountAtReduction)
+                        break;
+
+                    historyCountAtReduction = _history.Count;
+                    carriedHistory = input.HistoryReducerKey is not null
+                        ? await ApplyKeyedHistoryReducerAsync(
+                            input.HistoryReducerKey, _history, reducerActivityOptions!).ConfigureAwait(true)
+                        : DefaultBoundedTrim(_history, input.MaxEntryCount);
+                }
+                carriedInput = CreateContinueAsNewInput(
+                    input, carriedHistory, _approvalMixin.GetResolvedApprovals(), sessionCreatedAt);
+            }
+            throw CreateContinueAsNewException(carriedInput!);
+        }
+
+        // Shutdown closes new-turn admission, but admitted handlers must finish before the
+        // workflow completes. Preserve completed histories' prior command sequence on replay.
+        if (Workflow.Patched("meai-shutdown-drain-handlers"))
+        {
+            await Workflow.WaitConditionAsync(
+                () => Workflow.AllHandlersFinished
+                      && !_isProcessing
+                      && !HasPendingBackgroundTurns).ConfigureAwait(true);
         }
     }
 

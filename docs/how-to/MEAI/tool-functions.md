@@ -87,6 +87,9 @@ The workflow executes this sequence until the model returns a final response:
   `tool.NoRetry()` when a retry would repeat an unsafe operation.
 - `MaxToolCallsPerTurn` caps a runaway model/tool loop. Set it for your cost and risk budget.
 
+The per-tool callback methods such as `.NoRetry()` configure these managed, worker-registered
+tools. They do not configure a separate `AIFunction.AsDurable()` call in custom workflow code;
+that wrapper receives its own `DurableExecutionOptions` retry policy.
 
 ## Invocation-scoped tools for typed turns
 
@@ -338,8 +341,12 @@ When `RetryPolicy` is omitted, the activity uses a bounded five-attempt tool def
 exponential backoff capped at 30 seconds. This is a termination backstop, not a total time budget
 or exactly-once guarantee. Temporal does not infer HTTP `Retry-After`; translate provider-specific
 delay behavior in the activity or configure an explicit policy. Use `MaximumAttempts = 1` for an
-effect that is not safe to repeat. An activity already scheduled before a deployment retains the
-policy recorded in its `ActivityTaskScheduled` event.
+effect that is not safe to repeat. Set this policy on the `DurableExecutionOptions` passed directly
+to `AsDurable()`; a `.NoRetry()` setting on a separate `AddDurableTool(...)` registration does not
+flow to this wrapper. `NoRetry` only prevents Temporal from retrying that activity; it does not
+guarantee exactly-once external effects if the activity completed an effect but its completion was
+not recorded. An activity already scheduled before a deployment retains the policy recorded in its
+`ActivityTaskScheduled` event.
 
 ```csharp
 [Workflow]

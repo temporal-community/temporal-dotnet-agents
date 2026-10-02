@@ -109,9 +109,8 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
         };
         // Sample-specific hardening: this activity wraps non-idempotent cart mutations
         // (add_to_cart / remove_from_cart closures inside GetShoppingResponseAsync) plus a
-        // non-deterministic LLM call. The base class leaves RetryPolicy unset, which lets the
-        // Temporal server default (retry forever) apply — that would re-invoke the LLM on any
-        // transient failure and risk duplicating cart side effects. Cap attempts at 1 so the
+        // non-deterministic LLM call. The base class uses a bounded five-attempt
+        // retry policy, which could duplicate cart side effects. Cap attempts at 1 so the
         // turn fails fast and the caller can re-issue the Shop update explicitly.
         // NOT a general rule: idempotent activities should keep the default retry behavior.
         var hardened = (ActivityOptions)activityOptions.Clone();

@@ -49,11 +49,26 @@ immediately before deletion. See the repository [security boundary](../../../doc
 - `ChatOptions.Tools` and `UseFunctionInvocation()` are not used. Managed sessions obtain both
   the model-visible schema and the worker implementation from `AddDurableTools`.
 
-## Run
+## Configure credentials
 
 ```bash
 dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MEAI/HumanInTheLoop
 dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --project samples/MEAI/HumanInTheLoop
+```
+
+## Run
+
+The Generic Host loads user secrets only in Development. Set `DOTNET_ENVIRONMENT` for this run to
+use the credentials configured above.
+
+```bash
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MEAI/HumanInTheLoop/HumanInTheLoop.csproj
+```
+
+PowerShell:
+
+```powershell
+$env:DOTNET_ENVIRONMENT = "Development"
 dotnet run --project samples/MEAI/HumanInTheLoop/HumanInTheLoop.csproj
 ```
 

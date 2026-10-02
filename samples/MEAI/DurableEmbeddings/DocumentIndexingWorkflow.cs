@@ -88,18 +88,14 @@ public sealed class DocumentIndexingWorkflow
         // a workflow — Workflow.InWorkflow == true causes GenerateAsync to dispatch
         // to DurableEmbeddingActivities instead.
         //
-        // RetryPolicy: DurableEmbeddingGenerator only forwards the policy when non-null;
-        // without it Temporal applies the server default (retry forever). Embeddings are
-        // idempotent so retries are safe, but a bounded cap of 3 attempts is appropriate
-        // — persistent failure should fail the workflow rather than spin indefinitely.
+        // The package defaults to five activity attempts. This sample uses a stricter
+        // three-attempt limit so persistent provider failures fail sooner.
         var options = new DurableExecutionOptions
         {
             TaskQueue = input.ActivityTaskQueue,
             ActivityTimeout = input.ActivityTimeout,
-            // HeartbeatTimeout defaults to 2 minutes. The activity heartbeats once before
-            // GenerateAsync (see DurableEmbeddingActivities.cs:47) — fine for short calls,
-            // but for slow self-hosted models or large batches consider raising
-            // HeartbeatTimeout or adding a background heartbeat (see HumanInTheLoop sample).
+            // HeartbeatTimeout defaults to 2 minutes; the activity heartbeats while
+            // the provider is running so valid slow calls can use the full timeout.
             RetryPolicy = new RetryPolicy { MaximumAttempts = 3 },
         };
 

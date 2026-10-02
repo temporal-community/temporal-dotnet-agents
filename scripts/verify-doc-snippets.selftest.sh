@@ -39,13 +39,14 @@ trap 'rm -rf "$work" "$build_copy_root"' EXIT
 # ---------------------------------------------------------------------------
 run_case() {
     local name="$1" expectation="$2" doc="$3" snippet="$4" allowlist="${5:-}"
+    local doc_path="${6:-docs/how-to/MAF/example.md}"
     local repo="$work/$name"
 
-    mkdir -p "$repo/scripts" "$repo/docs/how-to/MAF" "$repo/tests/docs/DocSnippets"
+    mkdir -p "$repo/scripts" "$repo/$(dirname "$doc_path")" "$repo/tests/docs/DocSnippets"
     cp "$checker" "$repo/scripts/"
     git -C "$repo" init -q
 
-    printf '%s\n' "$doc" > "$repo/docs/how-to/MAF/example.md"
+    printf '%s\n' "$doc" > "$repo/$doc_path"
     printf '%s\n' '<Project Sdk="Microsoft.NET.Sdk" />' > "$repo/tests/docs/DocSnippets/DocSnippets.csproj"
     if [[ -n "$snippet" ]]; then
         printf '%s\n' "$snippet" > "$repo/tests/docs/DocSnippets/Snippet.cs"
@@ -134,6 +135,19 @@ run_case unrelated-csharp-block pass '# Example
 ```csharp
 var x = 1;
 ```' ''
+
+# MEAI embedding blocks need coverage even without a MAF registration call.
+embedding_doc='# Embeddings
+
+## Provider
+
+```csharp
+var generator = client.GetEmbeddingClient(modelId).AsIEmbeddingGenerator();
+```'
+embedding_snippet='// BEGIN SNIPPET docs/how-to/MEAI/embeddings.md#provider
+// END SNIPPET docs/how-to/MEAI/embeddings.md#provider'
+run_case meai-embedding-uncovered reject "$embedding_doc" '' '' 'docs/how-to/MEAI/embeddings.md'
+run_case meai-embedding-covered pass "$embedding_doc" "$embedding_snippet" '' 'docs/how-to/MEAI/embeddings.md'
 
 # `AddTool(` inside a non-csharp fence (a shell transcript, say) must not demand coverage.
 run_case non-csharp-fence pass '# Example

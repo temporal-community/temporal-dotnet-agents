@@ -1,6 +1,9 @@
+using System.Net;
 using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Temporalio.Exceptions;
+using Temporalio.Testing;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -82,6 +85,148 @@ public class DurableEmbeddingGeneratorTests
         var activityOptions = generator.CreateActivityOptions(options: null);
 
         Assert.Same(retryPolicy, activityOptions.RetryPolicy);
+    }
+
+    [Fact]
+    public async Task EmbeddingActivity_HeartbeatsWhileSlowProviderIsRunning()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var repeatedHeartbeat = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var heartbeatCount = 0;
+        var generator = A.Fake<IEmbeddingGenerator<string, Embedding<float>>>();
+        A.CallTo(() => generator.GenerateAsync(
+                A<IEnumerable<string>>._, A<EmbeddingGenerationOptions?>._, A<CancellationToken>._))
+            .ReturnsLazily(async (IEnumerable<string> _, EmbeddingGenerationOptions? _, CancellationToken ct) =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(ct);
+                return new GeneratedEmbeddings<Embedding<float>>(
+                    [new Embedding<float>(new float[] { 1f })]);
+            });
+        using var services = new ServiceCollection().AddSingleton(generator).BuildServiceProvider();
+        var activity = new DurableEmbeddingActivities(services);
+        var environment = new ActivityEnvironment
+        {
+            Info = ActivityEnvironment.DefaultInfo with
+            {
+                HeartbeatTimeout = TimeSpan.FromMilliseconds(90),
+            },
+            Heartbeater = _ =>
+            {
+                if (Interlocked.Increment(ref heartbeatCount) >= 2)
+                    repeatedHeartbeat.TrySetResult();
+            },
+        };
+        var running = environment.RunAsync(() => activity.GenerateAsync(
+            new DurableEmbeddingInput { Values = ["slow"] }));
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await repeatedHeartbeat.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            release.TrySetResult();
+            Assert.Single((await running.WaitAsync(TimeSpan.FromSeconds(5))).Embeddings);
+            Assert.True(heartbeatCount >= 2);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await running.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("emb-queue", "ActivityTimeout")]
+    [InlineData("emb-queue", "HeartbeatTimeout")]
+    public void UseDurableExecution_RejectsInvalidOptions(string? queue, string? invalidDuration)
+    {
+        var builder = new EmbeddingGeneratorBuilder<string, Embedding<float>>(
+            A.Fake<IEmbeddingGenerator<string, Embedding<float>>>());
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            builder.UseDurableExecution(options =>
+            {
+                options.TaskQueue = queue;
+                if (invalidDuration == "ActivityTimeout")
+                    options.ActivityTimeout = TimeSpan.FromSeconds(-1);
+                if (invalidDuration == "HeartbeatTimeout")
+                    options.HeartbeatTimeout = TimeSpan.Zero;
+            }));
+        Assert.Contains(invalidDuration ?? "TaskQueue", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EmbeddingActivity_PropagatesCancellationToProvider()
+    {
+        var entered = new TaskCompletionSource<CancellationToken>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var generator = A.Fake<IEmbeddingGenerator<string, Embedding<float>>>();
+        A.CallTo(() => generator.GenerateAsync(
+                A<IEnumerable<string>>._, A<EmbeddingGenerationOptions?>._, A<CancellationToken>._))
+            .ReturnsLazily((IEnumerable<string> _, EmbeddingGenerationOptions? _, CancellationToken ct) =>
+            {
+                entered.TrySetResult(ct);
+                return GenerateUntilCancelled(ct);
+            });
+        static async Task<GeneratedEmbeddings<Embedding<float>>> GenerateUntilCancelled(CancellationToken ct)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            throw new InvalidOperationException("Unreachable after cancellation");
+        }
+        using var services = new ServiceCollection()
+            .AddSingleton(generator)
+            .BuildServiceProvider();
+        var activity = new DurableEmbeddingActivities(services);
+        var environment = new ActivityEnvironment();
+        var running = environment.RunAsync(() => activity.GenerateAsync(
+            new DurableEmbeddingInput { Values = ["slow"] }));
+        try
+        {
+            var providerToken = await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(providerToken.CanBeCanceled);
+            environment.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => running.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.True(providerToken.IsCancellationRequested);
+        }
+        finally
+        {
+            environment.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => running.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+    }
+
+    [Fact]
+    public async Task EmbeddingActivity_MissingGenerator_FailsWithRegistrationError()
+    {
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var activity = new DurableEmbeddingActivities(services);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new ActivityEnvironment().RunAsync(() => activity.GenerateAsync(
+                new DurableEmbeddingInput { Values = ["text"] })));
+
+        Assert.Contains("No IEmbeddingGenerator", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EmbeddingActivity_ProviderBadRequest_IsNonRetryable()
+    {
+        var generator = A.Fake<IEmbeddingGenerator<string, Embedding<float>>>();
+        A.CallTo(() => generator.GenerateAsync(
+                A<IEnumerable<string>>._, A<EmbeddingGenerationOptions?>._, A<CancellationToken>._))
+            .ThrowsAsync(new HttpRequestException("bad request", null, HttpStatusCode.BadRequest));
+        using var services = new ServiceCollection().AddSingleton(generator).BuildServiceProvider();
+
+        var error = await Assert.ThrowsAsync<ApplicationFailureException>(() =>
+            new ActivityEnvironment().RunAsync(() => new DurableEmbeddingActivities(services)
+                .GenerateAsync(new DurableEmbeddingInput { Values = ["text"] })));
+
+        Assert.True(error.NonRetryable);
+        A.CallTo(() => generator.GenerateAsync(
+                A<IEnumerable<string>>._, A<EmbeddingGenerationOptions?>._, A<CancellationToken>._))
+            .MustHaveHappenedOnceExactly();
     }
 
     [Fact]

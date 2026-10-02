@@ -38,7 +38,7 @@ if (string.IsNullOrEmpty(apiKey))
     throw new InvalidOperationException(
         "OPENAI_API_KEY is not configured. Set it as an environment variable or via " +
         "`dotnet user-secrets set OPENAI_API_KEY sk-... --project samples/MEAI/DurableChat`. " +
-        "Note: user secrets only load in the Development environment (DOTNET_ENVIRONMENT unset or set to 'Development').");
+        "User secrets load only when DOTNET_ENVIRONMENT is set to Development.");
 
 // ── Setup: Tool functions ────────────────────────────────────────────────────
 // Registering a function in a durable toolset below makes each call run as a
@@ -122,9 +122,8 @@ var durableWorker = builder.Services
         opts.DefaultToolsetIds = ["information", "operations"];
 
         // Worker-level fallback for any tool that doesn't override its RetryPolicy.
-        // Without this, RetryPolicy is null and Temporal applies its built-in
-        // "retry forever" default — a footgun for transient failures in demos and
-        // for write-style tools alike.
+        // Override the library's bounded five-attempt default with three attempts.
+        // Write-style tools must still opt out of retries individually.
         opts.RetryPolicy = new RetryPolicy { MaximumAttempts = 3 };
 
         // Cap the LLM-to-tool loop per turn.

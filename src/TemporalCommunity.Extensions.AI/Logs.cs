@@ -57,8 +57,8 @@ internal static partial class Logs
 
     // ── Tool interceptor activity logs ───────────────────────────────────────
 
-    [LoggerMessage(EventId = 9, Level = LogLevel.Warning,
-        Message = "RunToolInterceptor dispatched for tool '{ToolName}' but no IDurableToolInterceptor<DurableToolContext> is registered in DI. Defaulting to Proceed.")]
+    [LoggerMessage(EventId = 9, Level = LogLevel.Error,
+        Message = "RunToolInterceptor dispatched for tool '{ToolName}' but no IDurableToolInterceptor<DurableToolContext> is registered in DI. Failing the turn before tool dispatch.")]
     public static partial void LogToolInterceptorNotRegistered(
         this ILogger logger, string toolName);
 

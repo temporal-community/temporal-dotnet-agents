@@ -45,6 +45,17 @@ internal sealed class DurableEmbeddingActivities(
         _logger.LogEmbeddingActivityStarted(input.Values.Count);
 
         ctx.Heartbeat();   // reset heartbeat timer before blocking on the embedding call
+        // An embedding provider can run for the entire start-to-close budget without yielding
+        // chunks. Keep heartbeating until it actually exits so a valid slow request does not
+        // time out (and cancellation can be delivered by the Temporal server).
+        var heartbeatTimeout = ctx.Info.HeartbeatTimeout;
+        var interval = heartbeatTimeout is { } timeout && timeout > TimeSpan.Zero
+            ? TimeSpan.FromTicks(Math.Max(1, Math.Min(
+                timeout.Ticks / 3,
+                TimeSpan.FromSeconds(30).Ticks)))
+            : TimeSpan.FromSeconds(30);
+        using var heartbeatStop = new CancellationTokenSource();
+        var heartbeatTask = HeartbeatWhileRunningAsync(ctx, interval, heartbeatStop.Token);
         GeneratedEmbeddings<Embedding<float>> embeddings;
         try
         {
@@ -69,9 +80,34 @@ internal sealed class DurableEmbeddingActivities(
 
             throw;
         }
+        finally
+        {
+            heartbeatStop.Cancel();
+            await heartbeatTask.ConfigureAwait(false);
+        }
 
         _logger.LogEmbeddingActivityCompleted();
 
         return new DurableEmbeddingOutput { Embeddings = embeddings };
+    }
+
+    private static async Task HeartbeatWhileRunningAsync(
+        ActivityExecutionContext context,
+        TimeSpan interval,
+        CancellationToken stop)
+    {
+        while (true)
+        {
+            try
+            {
+                await Task.Delay(interval, stop).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                return;
+            }
+
+            context.Heartbeat(); // no input or vector payload in heartbeat details
+        }
     }
 }

@@ -63,7 +63,8 @@ fail() {
 }
 
 # Emits one `key` line per qualifying fenced block: a ```csharp block whose body contains
-# `AddDurableAgent(` or `AddTool(`. Headings inside fences are skipped, matching the slugger in
+# `AddDurableAgent(` or `AddTool(`, or any C# block in the MEAI embeddings guide.
+# Headings inside fences are skipped, matching the slugger in
 # verify-markdown-links.sh — `# comment` in a shell example is not a section heading.
 scan_docs() {
     awk '
@@ -87,7 +88,8 @@ scan_docs() {
                 next
             }
             infence = 0
-            if (lang ~ /^csharp/ && (body ~ /AddDurableAgent\(/ || body ~ /AddTool\(/)) {
+            if (lang ~ /^csharp/ && (body ~ /AddDurableAgent\(/ || body ~ /AddTool\(/ ||
+                FILENAME == "docs/how-to/MEAI/embeddings.md")) {
                 print FILENAME "#" (heading == "" ? "-no-heading-" : heading)
             }
             next
@@ -241,7 +243,7 @@ awk -F'\t' -v harness_dir="$harness_dir" -v self_name="$self_name" '
 while IFS=$'\t' read -r kind a b c; do
     case "$kind" in
         MISSING)
-            fail "$a registers an agent or a tool but has no harness snippet in $harness_dir/.
+            fail "$a has a qualifying C# block but no harness snippet in $harness_dir/.
        Wrap the example in a new file there:
            // BEGIN SNIPPET $a (lines N-M)
            // END SNIPPET $a

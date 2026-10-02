@@ -130,7 +130,17 @@ unset. `OPENAI_MODEL` defaults to `gpt-4o-mini` and `TEMPORAL_ADDRESS` defaults 
 
 ### Run
 
+The Generic Host loads user secrets only in Development. Set `DOTNET_ENVIRONMENT` for this run to
+use the credentials configured above.
+
 ```bash
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
+```
+
+PowerShell:
+
+```powershell
+$env:DOTNET_ENVIRONMENT = "Development"
 dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
 ```
 

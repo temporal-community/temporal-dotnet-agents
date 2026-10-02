@@ -112,6 +112,14 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
                 nonRetryable: true);
         }
 
+        if (IsContinueAsNewPending)
+        {
+            throw new ApplicationFailureException(
+                "The session is continuing as new. Retry the turn against the current run.",
+                errorType: "DurableTurnContinueAsNewPending",
+                nonRetryable: true);
+        }
+
         await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
 
         var requestEntry = DurableSessionRequest.FromMessages(

@@ -232,7 +232,10 @@ public static class DurableAIServiceCollectionExtensions
         }
 
         var registration = new DurableToolsetRegistration(toolsetId, isImplicitDefault: false);
-        var toolsetBuilder = new DurableToolsetBuilder(builder, registration);
+        // Configuration is fallible. Keep member DI descriptors private until the callback,
+        // duplicate-name checks and non-empty validation all complete successfully.
+        var staged = new ServiceCollection();
+        var toolsetBuilder = new DurableToolsetBuilder(staged, registration);
         configure(toolsetBuilder);
         if (registration.FunctionNames.Count == 0)
         {
@@ -240,6 +243,7 @@ public static class DurableAIServiceCollectionExtensions
                 $"Durable toolset '{toolsetId}' must contain at least one tool.");
         }
 
+        toolsetBuilder.CommitTo(builder.Services);
         builder.Services.AddSingleton(registration);
         return builder;
     }
@@ -263,7 +267,7 @@ public static class DurableAIServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(factory);
         EnsureDurableAIRegistered(builder);
         var toolset = GetOrAddImplicitDefaultToolset(builder.Services);
-        toolset.Add(RegisterDurableToolFactory(builder, declaration, factory, configure));
+        toolset.Add(RegisterDurableToolFactory(builder.Services, declaration, factory, configure));
         return builder;
     }
 
@@ -409,7 +413,7 @@ public static class DurableAIServiceCollectionExtensions
     }
 
     internal static DurableRegisteredTool RegisterDurableToolFactory<TRequestData, TTurnState>(
-        ITemporalWorkerServiceOptionsBuilder builder,
+        IServiceCollection services,
         AIFunctionDeclaration declaration,
         Func<IServiceProvider, DurableToolInvocationContext<TRequestData, TTurnState>, DurableToolActivation<TTurnState>> factory,
         Action<DurableChatToolOptions>? configure)
@@ -419,11 +423,11 @@ public static class DurableAIServiceCollectionExtensions
         configure?.Invoke(perToolOptions);
         var activationFactory = new DurableToolActivationFactory<TRequestData, TTurnState>(factory);
 
-        builder.Services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
+        services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
             registry => registry[snapshot.Name] = snapshot);
-        builder.Services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
+        services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
             registry => registry[snapshot.Name] = perToolOptions);
-        builder.Services.AddSingleton<Action<DurableToolFactoryRegistry>>(
+        services.AddSingleton<Action<DurableToolFactoryRegistry>>(
             registry => registry[snapshot.Name] = activationFactory);
         return new DurableRegisteredTool(snapshot, perToolOptions, null, activationFactory);
     }

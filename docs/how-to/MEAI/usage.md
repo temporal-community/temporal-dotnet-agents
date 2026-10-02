@@ -124,12 +124,36 @@ var history = await sessionClient.GetHistoryAsync("customer-42");
 ```
 
 `SendAsync` returns a `DurableSessionResponse` (per-turn `Usage`, `FinishReason`, and completion
-reason included); `GetHistoryAsync` returns the full `IReadOnlyList<DurableSessionEntry>`. Tool
+reason included); `GetHistoryAsync` returns the currently retained
+`IReadOnlyList<DurableSessionEntry>`. Tool
 calls are recorded as `TemporalCommunity.Extensions.AI.InvokeFunction` activities. Streaming is not
 supported for durable sessions — there is no `GetStreamingResponseAsync` equivalent on
 `DurableChatSessionClient`. See [tool functions](tool-functions.md) for the complete tool
 registration and dispatch contract, and [HITL patterns](hitl-patterns.md) for pausing a turn on
 tool approval.
+
+The optional `correlationId` argument groups a turn's request and response in history and can carry
+an upstream tracing/logging identifier. It is **not** a request idempotency key. If Temporal accepts
+a turn but the caller does not receive its response, submitting `SendAsync` again can run another
+turn; passing the same `correlationId` does not deduplicate that submission. Make effectful tools
+idempotent with an application-level business-operation ID when they must suppress repeated
+external effects. That does not suppress a second model call or history turn.
+
+Session history is retained workflow state, not an unlimited archive. `MaxEntryCount` defaults to
+1000 entries and triggers Continue-as-New. Without a keyed history reducer, the workflow carries
+forward a recent suffix (about half the configured entry limit, preserving complete adjacent
+turns) to leave headroom for the next run. A configured reducer controls the carried history
+instead. The limit counts session entries, not tokens or serialized bytes, and older entries may no
+longer be available from `GetHistoryAsync` after Continue-as-New.
+
+While a run is preparing to Continue-as-New, it stops admitting new turns: once the history
+reduction for that boundary has run, a new `SendAsync` can be rejected with `Session is continuing
+as new. Retry the turn.` A turn rejected with that message did not start; retry with bounded backoff
+until the transition completes and the next run accepts it. Do not treat a network timeout as this
+explicit rejection: an ambiguously completed update may already have applied its turn.
+Turns admitted before the boundary still finish, and history is reduced again if they changed it.
+`ShutdownAsync` likewise rejects new turns, but the workflow completes only after admitted turns
+finish, so expect shutdown to take as long as any in-flight turn, including one paused for approval.
 
 ## Durable tool calls with `AIFunction.AsDurable()`
 

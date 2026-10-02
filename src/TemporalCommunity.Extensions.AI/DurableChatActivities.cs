@@ -424,15 +424,13 @@ internal sealed class DurableChatActivities(
 
     /// <summary>
     /// Runs the <see cref="IDurableToolInterceptor{TContext}"/> before a durable tool is
-    /// dispatched. Resolves the interceptor from DI; if none is registered, logs a warning
-    /// and returns <see cref="DurableToolOutcome.Proceed"/> so the tool still runs.
+    /// dispatched. Resolves the interceptor from DI; if none is registered, fails the turn
+    /// with a non-retryable configuration failure before any tools are dispatched.
     /// </summary>
     /// <remarks>
-    /// When no interceptor is resolved at activity time (for example, after a worker
-    /// configuration error), this activity returns <see cref="DurableToolOutcome.Proceed"/>.
-    /// The workflow independently applies every registration-time <c>RequireApproval()</c>
-    /// floor after it receives this result, so a missing interceptor cannot bypass a tool that
-    /// was configured to require approval.
+    /// Dispatch means the session requires an interceptor. A missing registration at activity
+    /// time (for example, after worker configuration drift) must not permit unreviewed tools.
+    /// Sessions configured without an interceptor do not dispatch this activity.
     /// </remarks>
     [Activity("TemporalCommunity.Extensions.AI.RunToolInterceptor")]
     public async Task<DurableToolInterceptorResult> RunToolInterceptorAsync(
@@ -446,11 +444,13 @@ internal sealed class DurableChatActivities(
         var interceptor = services.GetService<IDurableToolInterceptor<DurableToolContext>>();
         if (interceptor is null)
         {
-            // Interceptor was removed between workflow dispatch and activity execution
-            // (e.g. worker restart without re-registration). Degrade to Proceed so the
-            // tool still runs rather than silently blocking the session.
             _logger.LogToolInterceptorNotRegistered(input.ToolName);
-            return new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed };
+            throw new ApplicationFailureException(
+                $"Tool '{input.ToolName}' requires an interceptor, but no " +
+                "IDurableToolInterceptor<DurableToolContext> is registered on this worker. " +
+                "Restore the DefaultToolInterceptor registration before retrying the turn.",
+                errorType: nameof(DurableConfigurationException),
+                nonRetryable: true);
         }
 
         ctx.Heartbeat($"intercepting tool '{input.ToolName}'");

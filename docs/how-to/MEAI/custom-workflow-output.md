@@ -380,16 +380,34 @@ replace; rebuilding it property-by-property can silently drop configuration.
 
 ## What You Inherit
 
-By extending `DurableChatWorkflowBase<TOutput>` you get the following at no cost:
+By extending `DurableChatWorkflowBase<TOutput>` you get the following shared workflow plumbing:
 
 - **Session loop** — `RunAsync` waits for shutdown or `ContinueAsNewSuggested`, then transitions or returns.
-- **Conversation history** — full `List<DurableSessionEntry>` persisted in workflow state, restored on continue-as-new. Each turn appends a `DurableSessionRequest` followed by a `DurableSessionResponse`.
+- **Conversation history** — the current run's retained `List<DurableSessionEntry>` is persisted in workflow state. Each turn appends a `DurableSessionRequest` followed by a `DurableSessionResponse`.
 - **Turn serialization** — `WaitConditionAsync(() => !_isProcessing)` prevents concurrent turns from corrupting history.
-- **HITL** — `[WorkflowUpdate("RequestApproval")]`, `[WorkflowUpdate("ResolveApproval")]`, and `[WorkflowQuery("GetPendingApproval")]` are wired to `DurableApprovalMixin` automatically.
-- **Continue-as-new** — history is carried forward when workflow history grows large; search attributes and the complete frozen session configuration are preserved.
+- **HITL handlers** — `[WorkflowUpdate("RequestApproval")]`, `[WorkflowUpdate("ResolveApproval")]`, and `[WorkflowQuery("GetPendingApproval")]` are wired to `DurableApprovalMixin`.
+- **Continue-as-new** — retained history, search attributes, and the complete frozen session configuration are carried forward when the entry limit or Temporal's history suggestion triggers a new run.
 - **Search attributes** — optional `TurnCount` and `SessionCreatedAt` upserts via `DurableSessionAttributes` when `input.EnableSearchAttributes` is `true`.
 - **`[WorkflowQuery("GetHistory")]`** — returns the current conversation history.
 - **`[WorkflowSignal("Shutdown")]`** — sets `IsShutdownRequested` and unblocks the session loop.
+
+The base's default `MaxEntryCount` is 1000 session entries. Without a keyed history reducer, a
+count-triggered Continue-as-New carries a recent complete-turn suffix of about half that limit so
+the next run has headroom; with a reducer, that reducer determines the carried entries. This is an
+entry-count bound, not a token or byte limit, and old turns are not an archival transcript. A
+custom subclass that configures a keyed reducer must implement
+`ApplyKeyedHistoryReducerAsync`.
+
+The inherited approval handlers provide request, resolution, and query endpoints; they do not
+automatically gate a custom `ExecuteTurnAsync` activity or application-owned tool invocation. A
+custom turn loop must explicitly request and await approval before the effect (the protected
+`RequestApprovalFromTurnLoopAsync` supports this workflow-side wait), or use
+`DurableToolWorkflowBase<TRequestData, TTurnState>` when the package-managed tool loop and its
+`RequireApproval()` policy are appropriate.
+
+`CorrelationId` pairs a request and response for history/log correlation; it is not a request
+idempotency key. Repeating an Update with a new Update ID can execute another turn even when the
+application reuses the same correlation value.
 
 ---
 

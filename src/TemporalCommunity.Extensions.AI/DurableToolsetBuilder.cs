@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
-using Temporalio.Extensions.Hosting;
 
 namespace TemporalCommunity.Extensions.AI;
 
@@ -13,15 +13,27 @@ namespace TemporalCommunity.Extensions.AI;
 /// </remarks>
 public sealed class DurableToolsetBuilder
 {
-    private readonly ITemporalWorkerServiceOptionsBuilder worker;
+    private IServiceCollection services;
     private readonly DurableToolsetRegistration registration;
 
     internal DurableToolsetBuilder(
-        ITemporalWorkerServiceOptionsBuilder worker,
+        IServiceCollection services,
         DurableToolsetRegistration registration)
     {
-        this.worker = worker;
+        this.services = services;
         this.registration = registration;
+    }
+
+    // A caller can retain the public builder after its configuration callback returns.
+    // Restore the original eager-after-commit behavior instead of silently staging late Add calls.
+    internal void CommitTo(IServiceCollection destination)
+    {
+        foreach (var descriptor in services)
+        {
+            destination.Add(descriptor);
+        }
+
+        services = destination;
     }
 
     /// <summary>Adds an already-created function to this toolset.</summary>
@@ -31,7 +43,7 @@ public sealed class DurableToolsetBuilder
     {
         ArgumentNullException.ThrowIfNull(function);
         registration.Add(DurableAIServiceCollectionExtensions.RegisterDurableFunction(
-            worker.Services,
+            services,
             function,
             configure));
         return this;
@@ -63,7 +75,7 @@ public sealed class DurableToolsetBuilder
         ArgumentNullException.ThrowIfNull(declaration);
         ArgumentNullException.ThrowIfNull(factory);
         registration.Add(DurableAIServiceCollectionExtensions.RegisterDurableToolFactory(
-            worker,
+            services,
             declaration,
             factory,
             configure));
@@ -104,7 +116,7 @@ public sealed class DurableToolsetBuilder
     {
         DurableAIServiceCollectionExtensions.ValidateMethod<THandler>(method);
         var registered = DurableAIServiceCollectionExtensions.RegisterMethodTool<THandler>(
-            worker.Services,
+            services,
             method,
             functionOptions,
             configure);

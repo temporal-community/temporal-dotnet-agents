@@ -35,9 +35,17 @@ dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MEAI/Durable
 dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --project samples/MEAI/DurableChat
 ```
 
-Then run:
+These samples use the Generic Host, which loads user secrets only in the Development
+environment. Set `DOTNET_ENVIRONMENT` for the run so the credentials configured above are loaded.
 
 ```bash
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MEAI/DurableChat/DurableChat.csproj
+```
+
+PowerShell:
+
+```powershell
+$env:DOTNET_ENVIRONMENT = "Development"
 dotnet run --project samples/MEAI/DurableChat/DurableChat.csproj
 ```
 

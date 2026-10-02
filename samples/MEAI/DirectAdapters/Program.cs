@@ -33,7 +33,7 @@ if (string.IsNullOrEmpty(apiKey))
     throw new InvalidOperationException(
         "OPENAI_API_KEY is not configured. Set it as an environment variable or via " +
         "`dotnet user-secrets set OPENAI_API_KEY sk-... --project samples/MEAI/DirectAdapters`. " +
-        "Note: user secrets only load in the Development environment (DOTNET_ENVIRONMENT unset or set to 'Development').");
+        "User secrets load only when DOTNET_ENVIRONMENT is set to Development.");
 
 // ── Setup: Weather tool (registered in DurableFunctionRegistry) ───────────────
 // Real implementation, resolved by name ("get_current_weather") when

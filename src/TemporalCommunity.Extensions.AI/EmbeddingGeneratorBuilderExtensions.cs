@@ -21,6 +21,7 @@ public static class EmbeddingGeneratorBuilderExtensions
 
         var options = new DurableExecutionOptions();
         configure?.Invoke(options);
+        options.Validate();
 
         return builder.Use(innerGenerator => new DurableEmbeddingGenerator(innerGenerator, options));
     }

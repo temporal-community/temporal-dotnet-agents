@@ -26,9 +26,14 @@ var model = builder.Configuration.GetValue<string>("OPENAI_MODEL") ?? "gpt-4o-mi
 var temporalAddress = builder.Configuration.GetValue<string>("TEMPORAL_ADDRESS") ?? "localhost:7233";
 
 if (string.IsNullOrEmpty(apiBaseUrl))
-    throw new InvalidOperationException("OPENAI_API_BASE_URL is not configured in appsettings.json.");
+    throw new InvalidOperationException(
+        "OPENAI_API_BASE_URL is not configured. Set it in appsettings.json, " +
+        "as an environment variable, or via user secrets in the Development environment.");
 if (string.IsNullOrEmpty(apiKey))
-    throw new InvalidOperationException("OPENAI_API_KEY is not configured. Set it with: dotnet user-secrets set \"OPENAI_API_KEY\" \"sk-...\" --project samples/MEAI/CustomWorkflow");
+    throw new InvalidOperationException(
+        "OPENAI_API_KEY is not configured. Set it as an environment variable or use " +
+        "dotnet user-secrets set \"OPENAI_API_KEY\" \"sk-...\" --project samples/MEAI/CustomWorkflow " +
+        "with DOTNET_ENVIRONMENT set to Development.");
 
 const string taskQueue = "custom-workflow";
 const string systemPrompt =

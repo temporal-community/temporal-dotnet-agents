@@ -76,6 +76,8 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
         ArgumentNullException.ThrowIfNull(input);
         if (IsShutdownRequested)
             throw new InvalidOperationException("Session has been shut down.");
+        if (IsContinueAsNewPending)
+            throw new InvalidOperationException("Session is continuing as new. Retry the turn.");
         if (input.Messages is null or { Count: 0 })
             throw new ArgumentException("At least one message is required.");
     }

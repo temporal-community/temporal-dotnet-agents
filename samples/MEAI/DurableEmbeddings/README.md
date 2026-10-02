@@ -62,7 +62,17 @@ dotnet user-secrets set "OPENAI_EMBEDDING_MODEL" "text-embedding-3-small" --proj
 
 ### Run
 
+The Generic Host loads user secrets only in Development. Set `DOTNET_ENVIRONMENT` for this run to
+use the credentials configured above.
+
 ```bash
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MEAI/DurableEmbeddings/DurableEmbeddings.csproj
+```
+
+PowerShell:
+
+```powershell
+$env:DOTNET_ENVIRONMENT = "Development"
 dotnet run --project samples/MEAI/DurableEmbeddings/DurableEmbeddings.csproj
 ```
 

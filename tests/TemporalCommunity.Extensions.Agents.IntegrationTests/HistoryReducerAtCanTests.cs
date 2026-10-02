@@ -132,22 +132,19 @@ public class HistoryReducerAtCanTests
             await proxy.RunAsync("turn 1", session);
             var initialRunId = (await handle.DescribeAsync()).RunId;
 
-            // Drive turns until the FIRST count-driven CAN fires (run id changes), pinning the
-            // exact run id created by that CAN. We check BEFORE each dispatch and stop the moment
-            // CAN is detected, so no extra turn ever lands on the new run and inflates its history.
+            await proxy.RunAsync("turn 2", session);
+            await proxy.RunAsync("turn 3", session);
+
+            // Do not submit extra turns while the reducer is running: admitted turns
+            // legitimately become part of its final snapshot.
             string? firstCanRunId = null;
-            for (var i = 2; i <= 12; i++)
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            while (DateTime.UtcNow < deadline)
             {
                 var rid = (await handle.DescribeAsync()).RunId;
                 if (rid != initialRunId) { firstCanRunId = rid; break; }
-
-                try { await proxy.RunAsync($"turn {i}", session); }
-                catch (Temporalio.Exceptions.WorkflowUpdateFailedException) { }
+                await Task.Delay(TimeSpan.FromMilliseconds(75));
             }
-            // Catch the case where CAN fired while the last RunAsync was in flight.
-            firstCanRunId ??= (await handle.DescribeAsync()).RunId is var last && last != initialRunId
-                ? last
-                : null;
 
             Assert.True(firstCanRunId is not null, "Expected count-driven CAN to fire.");
 
@@ -178,8 +175,7 @@ public class HistoryReducerAtCanTests
             // so the reduced entry is reliably "r3".
             // IsAssignableFrom (not IsType): the MAF entry is AgentSessionResponse, a subtype
             // of DurableSessionResponse.
-            Assert.NotEmpty(carried);
-            var reducedBase = Assert.IsAssignableFrom<DurableSessionResponse>(carried[0]);
+            var reducedBase = Assert.IsAssignableFrom<DurableSessionResponse>(Assert.Single(carried));
             Assert.Equal("r3", reducedBase.Text);
 
             await host.StopAsync();

@@ -299,6 +299,89 @@ public class DurableAIServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public void AddDurableToolset_CallbackThrows_DoesNotCommitMembersOrRemoveUnrelatedServices()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+        var before = services.Count;
+        var unrelated = new object();
+
+        Assert.Throws<InvalidOperationException>(() => worker.AddDurableToolset(
+            "failed",
+            tools =>
+            {
+                tools.Add(AIFunctionFactory.Create(() => "read", "orphan"));
+                services.AddSingleton(unrelated);
+                throw new InvalidOperationException("configuration failed");
+            }));
+
+        Assert.Equal(before + 1, services.Count);
+        using var provider = services.BuildServiceProvider();
+        Assert.Same(unrelated, provider.GetRequiredService<object>());
+        Assert.Empty(provider.GetServices<DurableToolsetRegistration>());
+        Assert.Empty(provider.GetRequiredService<DurableFunctionRegistry>());
+        Assert.Empty(provider.GetRequiredService<DurableFunctionDeclarationRegistry>());
+        Assert.Empty(provider.GetRequiredService<DurableChatToolOptionsRegistry>());
+
+        // A failed registration must not prevent a clean retry of the same name.
+        worker.AddDurableToolset("failed", tools =>
+            tools.Add(AIFunctionFactory.Create(() => "read", "orphan")));
+        Assert.Equal(before + 5, services.Count);
+    }
+
+    [Fact]
+    public void AddDurableToolset_DuplicateFactoryMember_DoesNotCommitAnyOfItsDescriptors()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+        worker.AddDurableToolset("good", tools =>
+            tools.Add(AIFunctionFactory.Create(() => "ok", "existing")));
+        var before = services.Count;
+        var declaration = AIFunctionFactory.Create(
+            (string value) => value, "failed_factory").AsDeclarationOnly();
+
+        Assert.Throws<InvalidOperationException>(() => worker.AddDurableToolset(
+            "failed",
+            tools =>
+            {
+                tools.AddDurableToolFactory<RequestData, TurnState>(
+                    declaration,
+                    (_, _) => throw new InvalidOperationException("not invoked at registration"));
+                tools.Add(AIFunctionFactory.Create(() => "duplicate", "failed_factory"));
+            }));
+
+        Assert.Equal(before, services.Count);
+        using var provider = services.BuildServiceProvider();
+        Assert.Equal("good", Assert.Single(provider.GetServices<DurableToolsetRegistration>()).Id);
+        Assert.Equal(["existing"], provider.GetRequiredService<DurableFunctionRegistry>().Keys);
+        Assert.Equal(["existing"], provider.GetRequiredService<DurableFunctionDeclarationRegistry>().Keys);
+        Assert.Equal(["existing"], provider.GetRequiredService<DurableChatToolOptionsRegistry>().Keys);
+        Assert.Empty(provider.GetRequiredService<DurableToolFactoryRegistry>());
+    }
+
+    [Fact]
+    public void AddDurableToolset_RetainedBuilder_StillRegistersMembersAfterCommit()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var worker = services.AddHostedTemporalWorker("my-queue").AddDurableAI();
+        DurableToolsetBuilder? retained = null;
+        worker.AddDurableToolset("retained", tools =>
+        {
+            retained = tools;
+            tools.Add(AIFunctionFactory.Create(() => "first", "first"));
+        });
+        retained!.Add(AIFunctionFactory.Create(() => "second", "second"));
+
+        using var provider = services.BuildServiceProvider();
+        Assert.Equal(["first", "second"],
+            Assert.Single(provider.GetServices<DurableToolsetRegistration>()).FunctionNames);
+        Assert.Equal(2, provider.GetRequiredService<DurableFunctionRegistry>().Count);
+    }
+
+    [Fact]
     public void ClientOnlyRegistration_FreezesDeclarationWithoutWorkerOrImplementation()
     {
         var services = new ServiceCollection();

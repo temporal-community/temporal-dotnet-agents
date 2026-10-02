@@ -1,8 +1,14 @@
-# DocSnippets — compile-only harness for the MAF how-to docs
+# DocSnippets — compile-only harness for documentation examples
 
 A `net10.0` **library**. No `OutputType=Exe`, no entry point, no tests. Nothing here runs. The
 compiler is the assertion: if a documented registration example stops binding to a real overload,
 this project fails to build and `just build` — and therefore CI — goes red.
+
+The coverage gate includes MAF registration examples and every C# block in
+[`embeddings.md`](../../../docs/how-to/MEAI/embeddings.md). The MEAI blocks compile verbatim with
+application configuration supplied as harness parameters and the guide's explicitly external
+`DocumentIndexingInput` and `NullEmbeddingGenerator` supplied outside the markers. Dependencies
+use the repository pins (MEAI 10.8.3 and Temporalio 1.17.0).
 
 ## Why not just grep the docs
 

@@ -46,7 +46,7 @@ if (string.IsNullOrEmpty(apiKey))
     throw new InvalidOperationException(
         "OPENAI_API_KEY is not configured. Set it as an environment variable or via " +
         "`dotnet user-secrets set OPENAI_API_KEY sk-... --project samples/MEAI/ToolInterceptor`. " +
-        "Note: user secrets only load in the Development environment (DOTNET_ENVIRONMENT unset or set to 'Development').");
+        "User secrets load only when DOTNET_ENVIRONMENT is set to Development.");
 
 const string TaskQueue = "tool-interceptor-meai";
 

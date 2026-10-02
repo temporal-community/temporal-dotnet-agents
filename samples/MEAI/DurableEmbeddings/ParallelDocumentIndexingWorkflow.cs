@@ -46,9 +46,8 @@ public sealed class ParallelDocumentIndexingWorkflow
     [WorkflowRun]
     public async Task<ParallelIndexingResult> RunAsync(DocumentIndexingInput input)
     {
-        // RetryPolicy: DurableEmbeddingGenerator only forwards the policy when non-null;
-        // without it Temporal applies the server default (retry forever). Cap at 3 attempts
-        // — embeddings are idempotent so retries are safe, but unbounded retries are not.
+        // Use three attempts rather than the library's bounded five-attempt default.
+        // Embeddings are idempotent, but a persistent provider failure should fail sooner.
         var durableOptions = new DurableExecutionOptions
         {
             TaskQueue = input.ActivityTaskQueue,

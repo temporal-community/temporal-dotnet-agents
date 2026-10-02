@@ -75,7 +75,17 @@ dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --proj
 
 ### Run
 
+The Generic Host loads user secrets only in Development. Set `DOTNET_ENVIRONMENT` for this run to
+use the credentials configured above.
+
 ```bash
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MEAI/DirectAdapters/DirectAdapters.csproj
+```
+
+PowerShell:
+
+```powershell
+$env:DOTNET_ENVIRONMENT = "Development"
 dotnet run --project samples/MEAI/DirectAdapters/DirectAdapters.csproj
 ```
 

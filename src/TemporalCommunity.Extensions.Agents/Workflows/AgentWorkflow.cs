@@ -73,6 +73,9 @@ internal class AgentWorkflow :
     // to receiving the unchanged bag. The merge target (_currentStateBag) is always authoritative;
     // passing null just avoids re-serializing unchanged bytes.
     private int? _lastSentStateBagHash;
+    private int _pendingFireAndForgetTurns;
+
+    protected override bool HasPendingBackgroundTurns => _pendingFireAndForgetTurns > 0;
 
     [WorkflowRun]
     public async Task RunAsync(AgentWorkflowInput input)
@@ -96,6 +99,8 @@ internal class AgentWorkflow :
     {
         if (IsShutdownRequested)
             throw new InvalidOperationException("Session has been shut down.");
+        if (IsContinueAsNewPending)
+            throw new InvalidOperationException("Session is continuing as new. Retry the turn.");
         if (request?.Messages is null || request.Messages.Count == 0)
             throw new ArgumentException("At least one message is required.");
     }
@@ -124,6 +129,7 @@ internal class AgentWorkflow :
     [WorkflowSignal("RunFireAndForget")]
     public Task RunAgentFireAndForgetAsync(RunRequest request)
     {
+        _pendingFireAndForgetTurns++;
         _ = ProcessFireAndForgetAsync(request);
         return Task.CompletedTask;
     }
@@ -1108,6 +1114,10 @@ internal class AgentWorkflow :
             Workflow.Logger.LogFireAndForgetActivityFailed(
                 _input?.AgentName ?? "unknown", Workflow.Info.WorkflowId, ex);
             // Swallow — fire-and-forget errors must not crash the session.
+        }
+        finally
+        {
+            _pendingFireAndForgetTurns--;
         }
     }
 

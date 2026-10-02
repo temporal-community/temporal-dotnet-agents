@@ -348,6 +348,30 @@ public class HistoryCaptureTests
         await host.StopAsync();
     }
 
+    /// <summary>
+    /// Captures the closing CAN run, including the patch and re-reduction after a turn
+    /// completes while the first keyed reducer holds its stale snapshot.
+    /// Uses the same gated scenario and carried-history assertions as the lifecycle regression.
+    /// </summary>
+    /// <remarks>
+    /// Regenerate only these lifecycle fixtures with the integration project's
+    /// <c>dotnet test --filter "Category=HistoryCapture&amp;FullyQualifiedName~Drain"</c>.
+    /// Both captures use the normal raw-history writer; existing corpus files are untouched.
+    /// </remarks>
+    [Fact]
+    public Task Capture_CanDrainBeforeSnapshot() =>
+        DurableChatLifecycleRegressionTests.RunContinueAsNewAsync(
+            history => SaveHistoryAsync("can-drain-before-snapshot-v1.json", history));
+
+    /// <summary>
+    /// Captures the shutdown patch while an admitted Update waits on its model activity.
+    /// The gated lifecycle regression releases the model only after shutdown is processed.
+    /// </summary>
+    [Fact]
+    public Task Capture_ShutdownDrainHandlers() =>
+        DurableChatLifecycleRegressionTests.RunShutdownAsync(
+            history => SaveHistoryAsync("shutdown-drain-handlers-v1.json", history));
+
     // ── Helpers ────────────────────────────────────────────────────────────
 
     private static async Task SaveHistoryAsync(string filename, WorkflowHistory history)

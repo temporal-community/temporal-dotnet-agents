@@ -120,9 +120,8 @@ builder.Services
         // Demo-friendly TTL (default is 14 days). The sample finishes in seconds;
         // long TTLs only matter for production sessions that may sit idle between turns.
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
-        // Without this, RetryPolicy is null and Temporal applies its built-in
-        // "retry forever" default — a footgun for transient failures. LLM
-        // activities are generally idempotent, so 3 attempts is a sensible cap.
+        // Override the library's bounded five-attempt default with a smaller
+        // three-attempt cap for this demo.
         opts.RetryPolicy = new RetryPolicy { MaximumAttempts = 3 };
     });
 

@@ -2,6 +2,7 @@ using Temporalio.Common;
 using Temporalio.Exceptions;
 using Temporalio.Worker;
 using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Session;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests.Compat;
@@ -133,6 +134,85 @@ public class WorkflowReplayTests
 
         Assert.Null(result.ReplayFailure);
     }
+
+    /// <summary>
+    /// The closing CAN run re-reduces after a turn completes against a pending reducer,
+    /// records the patch, and carries that turn instead of the first stale snapshot.
+    /// </summary>
+    [Fact]
+    public async Task CanDrainBeforeSnapshot_ReplaysWithoutError()
+    {
+        var history = LoadHistory("can-drain-before-snapshot-v1.json");
+        AssertPatchMarker(history, "meai-can-drain-before-snapshot");
+        var reducers = history.Events.Where(ev => ev.ActivityTaskScheduledEventAttributes?
+            .ActivityType.Name == "TemporalCommunity.Extensions.AI.ReduceHistoryByKey").ToList();
+        Assert.Equal(2, reducers.Count);
+        var firstCompletion = Assert.Single(history.Events, ev =>
+            ev.ActivityTaskCompletedEventAttributes?.ScheduledEventId == reducers[0].EventId);
+        var admitted = Assert.Single(history.Events, ev =>
+            ev.WorkflowExecutionUpdateAcceptedEventAttributes?.AcceptedRequest.Input.Args.Payloads_
+                .Any(payload => payload.Data.ToStringUtf8().Contains("later-successful-turn",
+                    StringComparison.Ordinal)) == true);
+        var completed = Assert.Single(history.Events, ev =>
+            ev.WorkflowExecutionUpdateCompletedEventAttributes?.AcceptedEventId == admitted.EventId);
+        Assert.True(reducers[0].EventId < admitted.EventId);
+        Assert.True(admitted.EventId < completed.EventId);
+        Assert.True(completed.EventId < firstCompletion.EventId);
+        Assert.True(firstCompletion.EventId < reducers[1].EventId);
+        var transition = Assert.Single(history.Events,
+            ev => ev.WorkflowExecutionContinuedAsNewEventAttributes is not null);
+        var input = Assert.IsType<DurableChatWorkflowInput>(
+            DurableAIDataConverter.Instance.PayloadConverter.ToValue(
+                Assert.Single(transition.WorkflowExecutionContinuedAsNewEventAttributes.Input.Payloads_),
+                typeof(DurableChatWorkflowInput)));
+        var carried = input.CarriedHistory!;
+        Assert.Equal(2, carried.Count);
+        Assert.IsType<DurableSessionRequest>(carried[0]);
+        Assert.IsType<DurableSessionResponse>(carried[1]);
+        Assert.All(carried, entry => Assert.Equal("later-successful-turn", entry.CorrelationId));
+        Assert.Equal("turn 3", Assert.Single(carried[0].Messages).Text);
+        Assert.Equal("Response: turn 3", Assert.Single(carried[1].Messages).Text);
+
+        var result = await BuildReplayer().ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
+    /// <summary>The shutdown patch waits for an admitted Update before completing.</summary>
+    [Fact]
+    public async Task ShutdownDrainHandlers_ReplaysWithoutError()
+    {
+        var history = LoadHistory("shutdown-drain-handlers-v1.json");
+        AssertPatchMarker(history, "meai-shutdown-drain-handlers");
+        var admitted = Assert.Single(history.Events,
+            ev => ev.WorkflowExecutionUpdateAcceptedEventAttributes is not null);
+        var signal = Assert.Single(history.Events,
+            ev => ev.WorkflowExecutionSignaledEventAttributes is not null);
+        var processed = history.Events.First(ev => ev.EventId > signal.EventId &&
+            ev.WorkflowTaskCompletedEventAttributes is not null);
+        var modelScheduled = Assert.Single(history.Events, ev => ev.ActivityTaskScheduledEventAttributes?
+            .ActivityType.Name == "TemporalCommunity.Extensions.AI.GetChatStep");
+        var modelCompletion = Assert.Single(history.Events,
+            ev => ev.ActivityTaskCompletedEventAttributes?.ScheduledEventId == modelScheduled.EventId);
+        var updateCompletion = Assert.Single(history.Events,
+            ev => ev.WorkflowExecutionUpdateCompletedEventAttributes is not null);
+        var workflowCompletion = Assert.Single(history.Events,
+            ev => ev.WorkflowExecutionCompletedEventAttributes is not null);
+        Assert.Equal("Shutdown", signal.WorkflowExecutionSignaledEventAttributes.SignalName);
+        Assert.True(admitted.EventId < signal.EventId);
+        Assert.True(processed.EventId < modelCompletion.EventId);
+        Assert.True(modelCompletion.EventId < updateCompletion.EventId);
+        Assert.True(updateCompletion.EventId < workflowCompletion.EventId);
+
+        var result = await BuildReplayer().ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+
+        Assert.Null(result.ReplayFailure);
+    }
+
+    private static void AssertPatchMarker(WorkflowHistory history, string patchId) =>
+        Assert.Contains(history.Events, ev => ev.MarkerRecordedEventAttributes?.MarkerName == "core_patch" &&
+            ev.MarkerRecordedEventAttributes.Details.Values.SelectMany(value => value.Payloads_)
+                .Any(payload => payload.Data.ToStringUtf8().Contains(patchId, StringComparison.Ordinal)));
 
     [Fact]
     public async Task WorkerOwnedToolsetV1_ReplaysWithoutError()

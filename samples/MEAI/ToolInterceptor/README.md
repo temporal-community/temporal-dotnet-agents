@@ -100,7 +100,17 @@ dotnet user-secrets set OPENAI_MODEL gpt-4o-mini --project samples/MEAI/ToolInte
 
 ### Run
 
+The Generic Host loads user secrets only in Development. Set `DOTNET_ENVIRONMENT` for this run to
+use the credentials configured above.
+
 ```bash
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MEAI/ToolInterceptor/ToolInterceptor.csproj
+```
+
+PowerShell:
+
+```powershell
+$env:DOTNET_ENVIRONMENT = "Development"
 dotnet run --project samples/MEAI/ToolInterceptor/ToolInterceptor.csproj
 ```
 
