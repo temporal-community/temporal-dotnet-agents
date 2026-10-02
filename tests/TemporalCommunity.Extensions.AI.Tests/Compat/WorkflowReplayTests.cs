@@ -12,7 +12,7 @@ namespace TemporalCommunity.Extensions.AI.Tests.Compat;
 /// </summary>
 /// <remarks>
 /// <para>
-/// These tests run in the <c>just test-unit-all</c> fast lane — no embedded Temporal
+/// These tests run in the <c>just test-unit</c> fast lane — no embedded Temporal
 /// server required. <see cref="WorkflowReplayer"/> is a pure in-process unit-test
 /// primitive that replays a captured event-history JSON against the current workflow code.
 /// </para>

@@ -17,12 +17,12 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// Captures workflow history JSON files for use by the replay unit-test suite.
 /// These tests run against the embedded Temporal server; the resulting JSON files
 /// are checked in under <c>tests/TemporalCommunity.Extensions.AI.Tests/Compat/Histories/</c>
-/// and replayed in <c>WorkflowReplayTests</c> — which runs in the <c>just test-unit-all</c>
+/// and replayed in <c>WorkflowReplayTests</c> — which runs in the <c>just test-unit</c>
 /// fast lane with no server.
 /// </summary>
 /// <remarks>
 /// <para>
-/// These tests are trait-gated out of the normal integration run (<c>just test-integration-ai</c>)
+/// These tests are trait-gated out of the normal integration run (<c>just test-integration</c>)
 /// so they do not overwrite the checked-in golden JSON on every run. Regenerate the corpus on
 /// demand with <c>just capture-histories</c> — run it ONLY when the workflow logic changes
 /// (new activity type, new wire string, new CAN trigger condition), then commit the updated JSON.

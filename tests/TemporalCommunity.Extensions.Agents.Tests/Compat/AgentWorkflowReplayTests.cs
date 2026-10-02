@@ -57,7 +57,7 @@ public class AgentWorkflowReplayTests
         if (!File.Exists(path))
         {
             throw new FileNotFoundException(
-                $"History file not found: {path}. Run 'just capture-agent-histories' to create it.",
+                $"History file not found: {path}. Run 'just capture-histories' to create it.",
                 path);
         }
 

@@ -549,10 +549,11 @@ just test-integration
 just test
 
 # Filter by test name
-just test-filter "FullyQualifiedName~Router"
+dotnet test tests/TemporalCommunity.Extensions.Agents.Tests \
+  --filter "FullyQualifiedName~Router"
 
-# Unit tests with code coverage
-just test-coverage
+# All tests with code coverage
+just coverage-report
 ```
 
 StateBag rollback performance can be measured locally without a Temporal server or model:
@@ -575,22 +576,24 @@ suite. Its checked-in queued-Update/StateBag history is regenerated only when th
 sequence intentionally changes:
 
 ```bash
-just capture-agent-histories
+just capture-histories
 ```
 
-> **Run the integration suite through `just`, not a bare `dotnet test`.** The capture tests are
-> tagged `Category=HistoryCapture`, and they do not assert against the checked-in fixtures — they
-> `File.WriteAllTextAsync` over them in the source tree. Every `just` recipe that executes tests
-> passes `--filter "Category!=HistoryCapture"`, including the diagnostic recipes
-> `test-individual` (which excludes them at discovery, since it runs every test it finds) and
-> `test-logged`. A bare `dotnet test tests/TemporalCommunity.Extensions.Agents.IntegrationTests`
-> carries no filter, so it *includes* them and leaves a working tree full of rewritten
+> **Run the integration suite with the history-capture filter.** Capture tests tagged
+> `Category=HistoryCapture` overwrite checked-in fixtures with `File.WriteAllTextAsync`; the public
+> `just test` and `just test-integration` recipes and diagnostic helpers `_test-individual` and
+> `_test-logged` exclude them with `--filter "Category!=HistoryCapture"`. The explicit
+> `capture-histories` recipe is the intentional exception and runs both libraries' capture tests,
+> regenerating replay fixtures for MEAI and MAF.
+> A bare `dotnet test tests/TemporalCommunity.Extensions.Agents.IntegrationTests` carries no filter,
+> so it *includes* capture tests and leaves a working tree full of rewritten
 > `Compat/Histories/*.json` that looks like an unrelated diff. Recover with
 > `git checkout -- tests/*/Compat/Histories`. Regenerate deliberately, via the recipe above, only
-> when the workflow command sequence has intentionally changed.
+> when the workflow command sequence has intentionally changed. Note that this also regenerates
+> the MEAI replay fixtures.
 >
-> Any new recipe that runs `dotnet test` against an integration project must carry that filter —
-> the exclusion lives in each recipe, not in the projects.
+> Any new ordinary test recipe that runs `dotnet test` against an integration project must carry
+> that exclusion — only the explicit history-capture recipes intentionally select the category.
 
 > **Integration tests** use `TestEnvironmentHelper.StartLocalAsync()`; no external server is
 > required. The helper pins Temporal CLI `v1.8.0` (embedded Temporal Server 1.31.2), verifies the

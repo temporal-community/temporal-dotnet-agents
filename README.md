@@ -110,14 +110,19 @@ dotnet run --project samples/MAF/BasicAgent
 ## Building
 
 ```bash
-just build        # Restore + Release build
+just build        # Restore + Release build; use `just build Debug` for Debug
+just clean        # Clean solution project outputs; leaves artifacts/ intact
 just test-unit    # Unit tests (no server required)
 just test         # Unit + integration tests (starts embedded Temporal test servers)
 just benchmark-statebag  # Release-mode StateBag rollback timing and allocation measurements
 just pack         # Build NuGet packages → artifacts/packages/
 just smoke-extensible-turns # Pack, isolate restore, and run the public typed-turn consumer
-just ci           # Full pipeline: clean → build → test-unit → pack
+just ci           # Local build/unit/repo checks/package pipeline; no integration/canary tests
 ```
+
+`just ci` runs the local clean, build, unit-test, repository/documentation-check, and package
+pipeline. It does **not** run integration tests or sample canaries that require external
+credentials; run `just test` for integration tests and `just test-samples` for sample canaries.
 
 ## License
 

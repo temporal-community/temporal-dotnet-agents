@@ -8,7 +8,7 @@
 #   exactly the moment a fresh defect can land, and the harness would stay silent about it.
 #   Existence of a harness file is not usage of it; this check converts existence into coverage.
 #
-#   Mirrors `just verify-sample-coverage`: a declared set, a discovered set, and a failure when the
+#   Mirrors `just _verify-sample-coverage`: a declared set, a discovered set, and a failure when the
 #   discovered set grows past the declared one.
 #
 # THE KEY

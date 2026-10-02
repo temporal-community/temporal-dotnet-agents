@@ -83,7 +83,7 @@ jobs:
         run: just pack
 
       - name: Run extensible-turn packed-package gate
-        run: just smoke-extensible-turns-packed
+        run: just _smoke-extensible-turns-packed
 
       # This must run before NuGet authentication/publishing. It consumes the freshly packed
       # local nupkgs and executes both libraries' netstandard2.1 assets on a real .NET Core 3.1

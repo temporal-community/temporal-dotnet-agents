@@ -219,14 +219,19 @@ Build automation uses [`just`](https://just.systems). All recipes in `justfile`.
 
 ```bash
 just --list             # All recipes
-just build              # Restore + Release build (default)
-just test-unit-all      # All unit tests — no server required
-just test-integration   # Agents integration — embedded server
-just test-integration-ai # AI integration — embedded server
+just build              # Restore + Release build; use `just build Debug` for Debug
+just clean              # Clean solution project outputs; leaves artifacts/ intact
+just test-unit          # All libraries' unit tests — no server required
+just test-integration   # All libraries' integration tests — embedded servers
+just test               # All unit + integration tests
 just pack               # clean → build → pack → artifacts/packages/*.nupkg
-just verify-doc-links   # Markdown link + #anchor checker; runs its own self-test first
-just ci                 # clean → build → test-unit-all → doc checks → pack
+just _verify-doc-links  # Markdown link + #anchor checker; runs its own self-test first
+just ci                 # Local build/unit/repo checks/package pipeline; no integration/canary tests
 ```
+
+`just ci` runs the local clean, build, unit-test, repository/documentation-check, and package
+pipeline. It does **not** run integration tests or the external-credential sample canaries; use
+`just test` for integration tests and `just test-samples` for sample canaries.
 
 **The doc gates deliberately depend on nothing beyond POSIX tools, `python3`, and what the workflow
 already installs.** They previously used `ripgrep`, which neither GitHub runner image ships; because
@@ -245,17 +250,17 @@ lessons from that outage still apply to anything added here:
 
 ```bash
 # When an integration suite hangs and you can't tell which test:
-just test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests       # per-test loop, 180s default cap, reports PASS/FAIL/HANG
-just test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests Pattern3 300  # filter + custom cap
+just _test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests       # per-test loop, 180s default cap, reports PASS/FAIL/HANG
+just _test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests Pattern3 300  # filter + custom cap
 
 # When a single test command hangs (pipe-buffering hides output):
-just test-logged tests/TemporalCommunity.Extensions.Agents.IntegrationTests       # writes to /tmp log, 600s default cap
+just _test-logged tests/TemporalCommunity.Extensions.Agents.IntegrationTests       # writes to /tmp log, 600s default cap
 
 # Orphaned embedded Temporal servers (.NET SDK extracts a CLI to /var/folders/.../T/):
 just list-orphans                                                          # read-only — show, don't kill
 just kill-orphans                                                          # narrow — temporal-sdk-dotnet only (safe across projects)
 just kill-test-hosts                                                       # opt-in — path-scoped to TemporalAgents (Rider/sibling repos untouched)
-just test-clean                                                            # alias: pre-test cleanup
+just _test-clean                                                            # alias: pre-test cleanup
 
 # Worktree cleanup after parallel agent work:
 just cleanup-stale-worktrees                                               # SAFE — checks dirty state, single -f only
@@ -264,11 +269,9 @@ just cleanup-stale-worktrees                                               # SAF
 ### Sample-canary (verify samples still run end-to-end)
 
 ```bash
-just test-samples-meai     # 11 MEAI samples, per-sample timeout budget, preflight checks OPENAI_API_KEY + Temporal server
-just test-samples-maf      # 15 MAF samples, same
-just test-samples          # both
-just verify-sample-coverage # drift detector — fails if a new sample dir isn't in the recipe lists
-just clean-test-artifacts  # remove artifacts/{test-individual,sample-runs}/
+just test-samples          # non-interactive MEAI + MAF samples
+just _verify-sample-coverage # maintenance drift check for internal sample-canary lists
+just _remove-test-artifacts # remove artifacts/{test-individual,sample-runs}/ only
 ```
 
 **Exit code is not the assertion.** All 26 entries carry application-owned output markers
@@ -290,33 +293,11 @@ the CLI binary's own version.
 
 ### Versioning
 
-**Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release by tagging the commit — `git tag -a X.Y.Z -m "..."` — then `just pack`. There is no baseline to promote first. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention — `0.1.0` through `0.14.2` (`git tag` for the full list; the stray `v0.1.0` predates the convention and MinVer ignores it).
+**Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release by tagging the commit — `git tag -a X.Y.Z -m "..."` — then `just pack`. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention — `0.1.0` through `0.14.2` (`git tag` for the full list; the stray `v0.1.0` predates the convention and MinVer ignores it).
 
 **Both packages are published on NuGet.org**, currently through `0.14.2` — do not assume this is an undeployed library. Breaking changes are still fine (pre-v1 policy; no migration guides or changelogs are wanted), but a behaviour change under an existing key or signature is a real break for consumers: state the new contract in the docs rather than narrating the old one.
 
-**Public API compatibility**: enforced by the SDK's `PackageValidation` at pack time, not by checked-in baseline files. Both libraries set `EnablePackageValidation` and `PackageValidationBaselineVersion` (currently `0.14.2`), so `dotnet pack` diffs the packed output against the last package actually published to NuGet.org and fails on a breaking change.
-
-Breaking changes are allowed pre-v1 — record an intentional one by regenerating the suppression file, then committing it:
-
-```bash
-dotnet pack src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions.Agents.csproj \
-    -c Release -p:GenerateCompatibilitySuppressionFile=true
-```
-
-**Packing offline.** The baseline is an ordinary NuGet package, cached under `~/.nuget/packages`
-after first use, so `just pack` works with no network — verified with every remote feed disabled,
-and it still catches breaking changes from the cache. The only cold case is a machine that has
-never fetched `0.14.2` (fresh clone, container, or after `dotnet nuget locals all --clear`), which
-is the same cold-cache rule as every other dependency. If you need a package right then without
-network, skip only the compatibility check:
-
-```bash
-dotnet pack <project> -c Release -p:EnablePackageValidation=false
-```
-
-`src/*/CompatibilitySuppressions.xml` is therefore the record of what broke since the baseline (18 entries today). This replaced `PublicAPI.{Shipped,Unshipped}.txt` and the `Microsoft.CodeAnalysis.PublicApiAnalyzers` gate, which had two problems: RS0016 has no CLI autofix, so recording an addition meant hand-writing Roslyn signature syntax; and the baseline was a file, so the `WorkingSetContextProvider` removal was made by deleting lines straight out of `Shipped.txt`, silencing the analyzer and leaving no trace. A published package cannot be edited after the fact. Bump `PackageValidationBaselineVersion` when a new version ships.
-
-**Publish**: to NuGet.org, either `just publish-nuget` (local, official — needs `NUGET_API_KEY`; `just pack` is the gate, via PackageValidation), `just publish-nuget-preview` (local, preview — ungated by design), or the `.github/workflows/publish.yml` workflow (`workflow_dispatch`, OIDC Trusted Publishing — no stored API key/secret; the `nuget-publish` GitHub environment must be configured). Remember: tags carry no `v` prefix.
+**Publish**: use `just publish-nuget` for either a preview or official version; MinVer derives the version from the current tag/branch context (local publishing needs `NUGET_API_KEY`). Alternatively, use the `.github/workflows/publish.yml` workflow (`workflow_dispatch`, OIDC Trusted Publishing — no stored API key/secret; the `nuget-publish` GitHub environment must be configured). Remember: tags carry no `v` prefix.
 
 ---
 
@@ -368,12 +349,12 @@ dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 | Worker won't start | `temporal server start-dev` running on `localhost:7233`? |
 | Search attributes missing in UI, or workflow start fails with "no mapping defined for search attribute" | `opts.EnableSearchAttributes` defaults to `true`; `AgentName`/`SessionCreatedAt`/`TurnCount` must be pre-registered before the worker starts — this is **not** automatic, even for a local `temporal server start-dev`. Start it with `--search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`; production clusters need the equivalent one-time CLI commands. |
 | Integration test "Unexpected workflow task failure" | `EnableSearchAttributes` defaults to `true` — use `TestEnvironmentHelper.StartLocalAsync()`, or set `opts.EnableSearchAttributes = false` to disable search attribute upserts |
-| Integration test suite hangs; can't tell which test | `just test-individual <project>` — per-test loop, reports PASS/FAIL/HANG. Default 180s cap, parameterizable. |
-| Test command hangs and pipe-buffering hides output | `just test-logged <project>` — writes to `/tmp/temporalagents-test-*.log`; `tail -f` separately. 600s default cap. |
+| Integration test suite hangs; can't tell which test | `just _test-individual <project>` — per-test loop, reports PASS/FAIL/HANG. Default 180s cap, parameterizable. |
+| Test command hangs and pipe-buffering hides output | `just _test-logged <project>` — writes to `/tmp/temporalagents-test-*.log`; `tail -f` separately. 600s default cap. |
 | Orphaned `temporal-sdk-dotnet` processes after `pkill` | `just list-orphans` + `just kill-orphans` — narrow to .NET SDK's extracted binary; safe across projects. |
 | Cross-project test hosts being killed | Use `just kill-test-hosts` (path-scoped) not unscoped `pkill`. Documented in `justfile` Process hygiene block. |
 | Locked agent worktrees won't remove | `just cleanup-stale-worktrees` — checks dirty state first, single `-f` only. Never use `-f -f` directly. |
-| New sample added but `test-samples-*` doesn't pick it up | Hardcoded list is intentional (skips interactive/multi-process). Run `just verify-sample-coverage` to catch drift. |
+| New sample added but the canary misses it | Hardcoded internal lists intentionally skip interactive/multi-process samples. Run `just _verify-sample-coverage` to catch drift. |
 
 ---
 

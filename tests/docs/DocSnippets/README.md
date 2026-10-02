@@ -77,9 +77,9 @@ exists.
 | Command | What it proves |
 |---|---|
 | `just build` | every snippet compiles |
-| `just verify-doc-snippets` | two self-tests, then: every qualifying doc block has a compiled counterpart, and every snippet still matches the doc block it quotes |
+| `just _verify-doc-snippets` | two self-tests, then: every qualifying doc block has a compiled counterpart, and every snippet still matches the doc block it quotes |
 
-`just verify-doc-snippets` runs `scripts/verify-doc-snippets.selftest.sh` first. That self-test
+`just _verify-doc-snippets` runs `scripts/verify-doc-snippets.selftest.sh` first. That self-test
 copies this project, drops the name argument from a real `AddTool` call, and **requires the build to
 fail**. Without it, a harness whose files silently stopped being compiled would report success
 forever — the failure mode `verify-markdown-links.selftest.sh` exists to prevent.

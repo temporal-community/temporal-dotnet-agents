@@ -45,7 +45,7 @@ fi
 
 echo "Sample catalog is valid: $(wc -l < "$expected" | tr -d ' ') tracked sample-project roots."
 
-# Drift guard: every MAF sample registered in justfile's test-samples-maf canary loop uses
+# Drift guard: every MAF sample registered in justfile's _test-samples-maf canary loop uses
 # AddDurableAgent/AddTemporalAgents, which defaults EnableSearchAttributes to true. A fresh
 # `temporal server start-dev` does not auto-register the AgentName/SessionCreatedAt/TurnCount
 # search attributes those agents upsert (confirmed via a live test against CLI 1.8.3 / Server
@@ -66,7 +66,7 @@ while IFS= read -r sample_name; do
 done < <(sed -nE 's#.*"([A-Za-z0-9]+):samples/MAF/[A-Za-z0-9]+:[0-9]+".*#\1#p' "$justfile")
 
 if [[ -n "$missing_docs" ]]; then
-    echo "ERROR: these MAF samples are registered in justfile's test-samples-maf canary loop" >&2
+    echo "ERROR: these MAF samples are registered in justfile's _test-samples-maf canary loop" >&2
     echo "  but their README does not document the required --search-attribute prerequisite" >&2
     echo "  (AddDurableAgent defaults EnableSearchAttributes to true):" >&2
     printf ' -%s\n' "$missing_docs" >&2

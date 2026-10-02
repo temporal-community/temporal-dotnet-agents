@@ -65,7 +65,7 @@ installed runtime. This is a weaker proxy than genuine 3.1 (it does not prove
 and executes the full durable path.
 
 ```bash
-just smoke-downlevel-proxy
+just _smoke-downlevel-proxy
 ```
 
 The program prints the loaded library's `compiled TargetFramework`; on this

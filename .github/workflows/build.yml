@@ -62,7 +62,7 @@ jobs:
         run: just build
 
       - name: Run unit tests
-        run: just test-unit-all
+        run: just test-unit
 
       # OS-independent, so it runs on one leg rather than both. It needs no build step of its
       # own: DocSnippets.csproj is in the solution (TemporalAgents.slnx:14), so `just build`
@@ -70,7 +70,7 @@ jobs:
       # verify scripts only check marker coverage and text fidelity.
       - name: Verify documentation and sample catalog
         if: matrix.os == 'ubuntu-latest'
-        run: just verify-sample-catalog verify-doc-links verify-doc-snippets
+        run: just _verify-sample-catalog _verify-doc-links _verify-doc-snippets
 
   package:
     name: Package
@@ -100,7 +100,7 @@ jobs:
         run: just pack
 
       - name: Run extensible-turn packed-package gate
-        run: just smoke-extensible-turns-packed
+        run: just _smoke-extensible-turns-packed
 
       - name: Upload packages
         uses: actions/upload-artifact@v7.0.1

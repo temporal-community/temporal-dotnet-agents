@@ -359,28 +359,30 @@ public class DurableChatSessionTests(IntegrationTestFixture fixture)
 
 ```bash
 # Unit tests — no server required
-just test-unit-ai
+dotnet test tests/TemporalCommunity.Extensions.AI.Tests
 
 # Integration tests — uses embedded Temporal server (no external process needed)
-just test-integration-ai
+dotnet test tests/TemporalCommunity.Extensions.AI.IntegrationTests \
+  --filter "Category!=HistoryCapture"
 
 # All tests
 just test
 ```
 
-> **Run the integration suite through `just`, not a bare `dotnet test`.** The replay fixtures under
-> `tests/TemporalCommunity.Extensions.AI.Tests/Compat/Histories/` are produced by tests tagged
+> The replay fixtures under `tests/TemporalCommunity.Extensions.AI.Tests/Compat/Histories/` are
+> produced by tests tagged
 > `Category=HistoryCapture`, which `File.WriteAllTextAsync` over the checked-in JSON rather than
-> asserting against it. Every `just` recipe that executes tests passes
-> `--filter "Category!=HistoryCapture"` — including the diagnostic recipes `test-individual` and
-> `test-logged`. A bare `dotnet test tests/TemporalCommunity.Extensions.AI.IntegrationTests` does
-> not, so it runs them. The symptom is a pile of unexplained fixture diffs; the fix is
-> `git checkout -- tests/*/Compat/Histories`. Regenerate on purpose with `just capture-histories`
-> (MEAI) or `just capture-agent-histories` (MAF) when a workflow's command sequence has genuinely
-> changed.
+> asserting against it. The public `just test` and `just test-integration` recipes and diagnostic
+> helpers `_test-individual` and `_test-logged` pass `--filter "Category!=HistoryCapture"`.
+> `capture-histories` is the intentional exception and runs both libraries' history-capture tests,
+> regenerating replay fixtures for MEAI and MAF. When
+> running the library project directly, use the filter shown above; otherwise those capture tests
+> run. The symptom is a pile of unexplained fixture diffs; the fix is
+> `git checkout -- tests/*/Compat/Histories`. Regenerate both corpora on purpose with
+> `just capture-histories` only when a workflow's command sequence has genuinely changed.
 >
-> Any new recipe that runs `dotnet test` against an integration project must carry that filter —
-> the exclusion lives in each recipe, not in the projects.
+> Any new ordinary test recipe that runs `dotnet test` against an integration project must carry
+> that exclusion — only the explicit history-capture recipes intentionally select the category.
 
 Both test suites use an embedded Temporal Server 1.31.2 — no separate `temporal server start-dev`
 process is needed. AI integration tests use `TemporalServiceTestEnvironment.StartLocalAsync()`;
