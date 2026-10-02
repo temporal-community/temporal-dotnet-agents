@@ -81,79 +81,70 @@ doctor:
 
     exit $FAILED
 
-# Remove all build output
-clean: clean-source clean-tests
-    @echo "Clean complete."
-
-# Clean source and sample projects (all projects in solution)
-clean-source:
+# Clean solution project build outputs; leaves artifacts/ (coverage, packages, and logs) intact.
+clean:
     dotnet clean {{solution}} --configuration {{configuration}} --nologo -v q
-
-# Clean test output directories
-clean-tests:
-    dotnet clean {{unit_tests_dir}} --configuration {{configuration}} --nologo -v q
-    dotnet clean {{integration_tests_dir}} --configuration {{configuration}} --nologo -v q
-    dotnet clean {{unit_tests_ai_dir}} --configuration {{configuration}} --nologo -v q
-    dotnet clean {{integration_tests_ai_dir}} --configuration {{configuration}} --nologo -v q
+    @echo "Clean complete."
 
 # Restore NuGet packages
 restore:
     dotnet restore {{solution}}
 
-# Build in Release (default)
-build: restore
-    dotnet build {{solution}} --configuration {{configuration}} --no-restore
+# Build in Release by default; pass Debug to build in Debug configuration.
+build config="Release": restore
+    dotnet build {{solution}} --configuration {{config}} --no-restore
 
-# Build in Debug
-build-debug: restore
-    dotnet build {{solution}} --configuration Debug --no-restore
+# Run all library unit tests (no Temporal server required)
+test-unit: build _test-unit-agents _test-unit-ai
 
-# Run unit tests only — Agents library (no Temporal server required)
-test-unit: build
+# Run Agents unit tests (internal helper)
+_test-unit-agents:
     dotnet test {{unit_tests_dir}} \
         --configuration {{configuration}} \
         --no-build \
         --logger "console;verbosity=normal"
 
-# Run unit tests only — AI library (no Temporal server required)
-test-unit-ai: build
+# Run AI unit tests (internal helper)
+_test-unit-ai:
     dotnet test {{unit_tests_ai_dir}} \
         --configuration {{configuration}} \
         --no-build \
         --logger "console;verbosity=normal"
 
-# Run all unit tests (Agents + AI)
-test-unit-all: test-unit test-unit-ai
+# Run all library integration tests (uses embedded Temporal servers)
+test-integration: build _test-integration-agents _test-integration-ai
 
-# Run integration tests only — Agents library (uses embedded Temporal server)
-test-integration: build
+# Run Agents integration tests (internal helper)
+_test-integration-agents:
     dotnet test {{integration_tests_dir}} \
         --configuration {{configuration}} \
         --no-build \
         --filter "Category!=HistoryCapture" \
         --logger "console;verbosity=normal"
 
-# Run integration tests only — AI library (uses in-process test server)
-test-integration-ai: build
+# Run AI integration tests (internal helper)
+_test-integration-ai:
     dotnet test {{integration_tests_ai_dir}} \
         --configuration {{configuration}} \
         --no-build \
         --filter "Category!=HistoryCapture" \
         --logger "console;verbosity=normal"
 
-# Regenerate the checked-in replay-corpus history JSON files. Run this ONLY when the
-# workflow command sequence legitimately changes (new activity/wire name, CAN logic, SDK bump),
-# then commit the updated files under tests/TemporalCommunity.Extensions.AI.Tests/Compat/Histories/.
-capture-histories: build
+# Regenerate both libraries' checked-in replay histories. This overwrites fixtures in both
+# test projects; run ONLY when a workflow command sequence legitimately changes.
+# Regenerate both libraries' checked-in replay-history fixtures.
+capture-histories: _capture-ai-histories _capture-agent-histories
+
+# Regenerate the MEAI replay-corpus histories (internal helper).
+_capture-ai-histories: build
     dotnet test {{integration_tests_ai_dir}} \
         --configuration {{configuration}} \
         --no-build \
         --filter "Category=HistoryCapture" \
         --logger "console;verbosity=normal"
 
-# Regenerate the checked-in AgentWorkflow replay history. Run this only when the
-# AgentWorkflow command sequence intentionally changes, then commit the updated JSON.
-capture-agent-histories: build
+# Regenerate the AgentWorkflow replay history (internal helper).
+_capture-agent-histories: build
     dotnet test {{integration_tests_dir}} \
         --configuration {{configuration}} \
         --no-build \
@@ -161,10 +152,10 @@ capture-agent-histories: build
         --logger "console;verbosity=normal"
 
 # Run both unit and integration tests (all libraries)
-test: test-unit-all test-integration test-integration-ai
+test: test-unit test-integration
 
 # Run all tests (unit + integration) with code coverage — Agents and AI libraries
-test-coverage: build
+_test-coverage: build
     rm -rf {{coverage_dir}}
     dotnet test {{unit_tests_dir}} \
         --configuration {{configuration}} \
@@ -201,6 +192,7 @@ test-coverage: build
 
 # Measure failed-turn StateBag rollback locally in Release mode. Benchmark results include
 # timing and managed allocations under BenchmarkDotNet-artifacts/results/.
+# Run the Release-mode StateBag rollback timing and allocation benchmark.
 benchmark-statebag: restore
     dotnet run --project benchmarks/TemporalCommunity.Extensions.Agents.Benchmarks \
         --configuration Release --no-restore -- \
@@ -208,21 +200,22 @@ benchmark-statebag: restore
 
 # Measure Temporal AI payload conversion and thresholded gzip locally. Results are evidence;
 # elapsed-time thresholds are intentionally not a CI gate.
+# Benchmark AI payload conversion and thresholded gzip locally (informational, not a CI gate).
 benchmark-ai-payloads: restore
     dotnet run --project benchmarks/TemporalCommunity.Extensions.AI.Benchmarks \
         --configuration Release --no-restore -- \
         --filter "*AIPayloadCodecBenchmarks*"
 
 # Merge all coverage XML files into an HTML report and print line/branch summary
-coverage-report: test-coverage
+coverage-report: _test-coverage
     dotnet tool run reportgenerator \
         -reports:"{{coverage_dir}}/**/*.cobertura.xml" \
         -targetdir:"{{coverage_dir}}/report" \
         -reporttypes:"HtmlInline_AzurePipelines;Cobertura;TextSummary"
     @cat "{{coverage_dir}}/report/Summary.txt"
 
-# Run tests matching a filter expression (e.g. just test-filter "FullyQualifiedName~Router")
-test-filter filter: build
+# Internal helper for running tests matching a filter expression.
+_test-filter filter: build
     dotnet test {{unit_tests_dir}} \
         --configuration {{configuration}} \
         --no-build \
@@ -232,6 +225,7 @@ test-filter filter: build
 # Pack NuGet packages (Release, into artifacts/packages/). Serialize the solution's
 # multi-target clean/build/pack graph; parallel outer builds can deadlock while both package
 # projects evaluate their net10.0 and netstandard2.1 legs.
+# Build and pack the solution's NuGet packages into artifacts/packages/.
 pack:
     dotnet clean {{solution}} --configuration {{configuration}} --nologo -v q -m:1
     dotnet restore {{solution}} -m:1
@@ -247,31 +241,23 @@ pack:
 # Run the down-level packed-package gate on the local net8 proxy. This verifies both
 # netstandard2.1 assets are selected and execute, but does not replace the netcoreapp3.1
 # container gate in publish.yml.
-smoke-downlevel-proxy: pack
+_smoke-downlevel-proxy: pack
     dotnet restore tests/smoke/DownLevelSmokeTest -p:SmokeProxy=true -p:PackedVersion={{version}}
     dotnet run --project tests/smoke/DownLevelSmokeTest --no-restore --configuration Debug -p:SmokeProxy=true -p:PackedVersion={{version}}
 
 # Pack and run the clean extensible-turn consumer against net10.0 and the netstandard2.1
 # package assets. Every run uses a temporary global-packages directory and verifies source/hash.
-smoke-extensible-turns: pack smoke-extensible-turns-packed
+# Pack, isolate restore, and run the typed-turn consumer against both package target frameworks.
+smoke-extensible-turns: pack _smoke-extensible-turns-packed
 
 # Run the extensible-turn package gate against artifacts already produced by `just pack`.
-smoke-extensible-turns-packed:
+_smoke-extensible-turns-packed:
     tests/smoke/ExtensibleDurableTurnsPackageSmokeTest/run-smoke.sh "{{version}}" "{{artifacts_dir}}"
 
-# Breaking changes vs the last published package are caught at PACK time by PackageValidation
-# (EnablePackageValidation in both library csproj files), so there is no separate baseline to
-# promote before releasing. An intentional break needs its suppression regenerated first:
-#   dotnet pack <project> -c Release -p:GenerateCompatibilitySuppressionFile=true
-# Push an OFFICIAL release to NuGet.org (NUGET_API_KEY required; CI uses OIDC in publish.yml).
+# Push the version produced by MinVer (preview or official) to NuGet.org (NUGET_API_KEY required;
+# CI uses OIDC in publish.yml).
+# Push the MinVer-derived package version to NuGet.org (requires NUGET_API_KEY locally).
 publish-nuget: pack
-    dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
-        --source "https://api.nuget.org/v3/index.json" \
-        --api-key "$NUGET_API_KEY" \
-        --skip-duplicate
-
-# Push a PREVIEW release to NuGet.org (NUGET_API_KEY required).
-publish-nuget-preview: pack
     dotnet nuget push "{{artifacts_dir}}/*.nupkg" \
         --source "https://api.nuget.org/v3/index.json" \
         --api-key "$NUGET_API_KEY" \
@@ -279,6 +265,7 @@ publish-nuget-preview: pack
 
 # Push main branch and all tags to origin (our only remote).
 # Refuses to run if the current branch is not main.
+# Push main and all tags to origin (main branch only).
 sync-remotes:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -292,24 +279,15 @@ sync-remotes:
     git push origin main --tags
     echo "✓ origin synced."
 
-# Alias: build
-compile: build
-
-# Alias: test-unit (Agents only, for backward compatibility)
-verify: test-unit
-
-# Build, unit tests, and repository-local documentation checks (no server required)
-validate: build test-unit-all verify-sample-catalog verify-doc-links verify-doc-snippets
-
 # Verify that the checked-in sample catalog represents every tracked sample project exactly once.
 # This is intentionally credential- and Temporal-service-free so it can run in local and CI checks.
-verify-sample-catalog:
+_verify-sample-catalog:
     bash scripts/verify-sample-catalog.sh
 
 # Verify repository-local Markdown links without requiring network access.
 # The self-test runs first: a gate that has silently stopped rejecting things reports
 # "links are valid" forever, and nothing else in the build would catch it.
-verify-doc-links:
+_verify-doc-links:
     @quiet() { out=$(bash "$1" 2>&1) || { printf '%s\n' "$out"; exit 1; }; }; quiet scripts/verify-markdown-links.selftest.sh
     bash scripts/verify-markdown-links.sh
 
@@ -320,14 +298,14 @@ verify-doc-links:
 # The self-test runs first, and its decisive case copies the harness, breaks one AddTool call, and
 # requires the build to FAIL. A harness whose files stopped being compiled would otherwise report
 # success forever.
-verify-doc-snippets:
+_verify-doc-snippets:
     @quiet() { out=$(bash "$1" 2>&1) || { printf '%s\n' "$out"; exit 1; }; }; quiet scripts/verify-doc-snippets.selftest.sh
     bash scripts/verify-doc-snippet-coverage.sh
     @quiet() { out=$(bash "$1" 2>&1) || { printf '%s\n' "$out"; exit 1; }; }; quiet scripts/verify-doc-snippet-fidelity.selftest.sh
     bash scripts/verify-doc-snippet-fidelity.sh
 
-# Full local CI pipeline: clean → build → test-unit-all → documentation checks → pack
-ci: clean build test-unit-all verify-sample-catalog verify-doc-links verify-doc-snippets pack
+# Local build/unit/repository-check/package pipeline; excludes integration tests and credentialed sample canaries.
+ci: clean build test-unit _verify-sample-catalog _verify-doc-links _verify-doc-snippets pack
 
 # ---------------------------------------------------------------------------
 # Process hygiene — orphan cleanup + safe logging
@@ -366,6 +344,7 @@ list-orphans:
 # Safe across multi-project machines — the binary name is unique to .NET SDK
 # integration test fixtures. Uses SIGTERM first, then SIGKILL for stragglers.
 # Does NOT touch testhost.dll or `dotnet test` — see `kill-test-hosts` for that.
+# Terminate orphaned Temporal embedded-server processes (temporal-sdk-dotnet only).
 kill-orphans:
     @echo "Sending SIGTERM to orphaned temporal-sdk-dotnet processes..."
     -@pkill -TERM -f "[t]emporal-sdk-dotnet" 2>/dev/null; true
@@ -379,6 +358,7 @@ kill-orphans:
 # Kill TemporalAgents-scoped test hosts (opt-in; risk of cross-project blast
 # without the path filter). Use this when `dotnet test` for THIS repo is hung
 # and `kill-orphans` alone didn't clean up its parent processes.
+# Terminate test hosts scoped to this repository (opt-in; path-filtered).
 kill-test-hosts:
     @echo "Killing TemporalAgents testhost.dll processes (path-scoped)..."
     -@pgrep -af "testhost.dll" 2>/dev/null | grep -i "TemporalAgents" | awk '{print $$1}' | xargs -r kill -TERM 2>/dev/null; true
@@ -393,7 +373,7 @@ kill-test-hosts:
     @pgrep -af "testhost.dll|dotnet test" 2>/dev/null | grep -i "TemporalAgents" || echo "(none)"
 
 # Pre-test cleanup: kill embedded-server orphans only (safe across projects).
-test-clean: kill-orphans
+_test-clean: kill-orphans
     @echo "Environment cleaned. Safe to run integration tests."
 
 # Run a test project writing output to a log file (NOT piped through tail).
@@ -401,8 +381,8 @@ test-clean: kill-orphans
 # rather than blocking the recipe forever.
 #
 # Usage:
-#   just test-logged tests/TemporalCommunity.Extensions.AI.IntegrationTests
-#   just test-logged tests/TemporalCommunity.Extensions.AI.IntegrationTests 900
+#   just _test-logged tests/TemporalCommunity.Extensions.AI.IntegrationTests
+#   just _test-logged tests/TemporalCommunity.Extensions.AI.IntegrationTests 900
 #
 # project: test project directory (relative to repo root)
 # limit:   per-process wall-clock timeout in seconds (default 600)
@@ -411,7 +391,7 @@ test-clean: kill-orphans
 # exits. If the test hangs, you see ZERO output until you kill it. Writing to
 # a file + a hard timeout gives you (a) tail -f the log in another shell,
 # (b) a guaranteed exit when a test hangs. (Cypher review, 2026-05-21.)
-test-logged project limit="600": build
+_test-logged project limit="600": build
     @if ! command -v timeout >/dev/null 2>&1; then \
         echo "ERROR: GNU coreutils 'timeout' is required. On macOS: brew install coreutils"; \
         exit 127; \
@@ -462,11 +442,12 @@ test-logged project limit="600": build
 #     commits unique to it. Prevents the orphaned-branch accumulation we saw
 #     before this was added.
 #
-# Recipe uses the bash-shebang block style (mirrors test-individual) rather
+# Recipe uses the bash-shebang block style (mirrors _test-individual) rather
 # than the `@cmd; \` line-continuation style. The latter is Makefile-idiom and
 # DOES NOT work in just — `$$VAR` is not transformed to `$VAR`, so bash sees
 # literal `$$` and treats it as the shell PID, producing syntax errors when
 # adjacent to `(`. (Chief review, 2026-05-27.)
+# Safely remove stale, clean, merged agent worktrees under .claude/worktrees/.
 cleanup-stale-worktrees:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -551,8 +532,8 @@ cleanup-stale-worktrees:
 # wall-clock timeout, report PASS / FAIL / HANG per test. Use when an
 # integration test suite hangs and you cannot tell which test is responsible.
 #
-#   just test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests Pattern3
-#   just test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests "" 300
+#   just _test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests Pattern3
+#   just _test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests "" 300
 #
 # project: test project directory (relative to repo root)
 # filter:  substring matched via FullyQualifiedName~ — empty matches all
@@ -561,7 +542,7 @@ cleanup-stale-worktrees:
 #
 # Tested against .NET SDK 10.0.x. If a future SDK changes the `--list-tests`
 # output format the awk discovery step may need updating. (Trinity review 2026-05-21.)
-test-individual project filter="" limit="180": build
+_test-individual project filter="" limit="180": build
     #!/usr/bin/env bash
     set -uo pipefail
     if ! command -v timeout >/dev/null 2>&1; then
@@ -670,7 +651,7 @@ _sample-preflight:
 # live test against CLI 1.8.3 / Server 1.31.2 — see
 # .clans/knowledge/maf-sample-search-attribute-doc-gap.md); an unregistered attribute fails the
 # workflow outright rather than just being absent from the UI. MEAI's DurableExecutionOptions
-# defaults EnableSearchAttributes to false, so test-samples-meai does not need this check.
+# defaults EnableSearchAttributes to false, so _test-samples-meai does not need this check.
 _sample-preflight-maf:
     @if ! command -v temporal >/dev/null 2>&1; then \
         echo "ERROR: Temporal CLI is required to verify registered search attributes."; \
@@ -701,7 +682,7 @@ _sample-preflight-maf:
 # (DurableEmbeddings parallel-indexes a corpus). Reports PASS / FAIL / HANG.
 # Requires OPENAI_API_KEY and a running Temporal server. HumanInTheLoop auto-approves its
 # deterministic review path and is included.
-test-samples-meai: build _sample-preflight
+_test-samples-meai: build _sample-preflight
     #!/usr/bin/env bash
     set -uo pipefail
     # Child sample projects have isolated user-secret stores. Reuse the repository's configured
@@ -782,7 +763,7 @@ test-samples-meai: build _sample-preflight
 # the 90s default where needed (ConfigurableAgent has multi-agent handoff).
 # Skips HumanInTheLoop (interactive)
 # and SplitWorkerClient (two processes — run manually).
-test-samples-maf: build _sample-preflight _sample-preflight-maf
+_test-samples-maf: build _sample-preflight _sample-preflight-maf
     #!/usr/bin/env bash
     set -uo pipefail
     # Child sample projects have isolated user-secret stores. Reuse the repository's configured
@@ -863,38 +844,38 @@ test-samples-maf: build _sample-preflight _sample-preflight-maf
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
 
 # Run the full sample canary (MEAI + MAF non-interactive).
-test-samples: test-samples-meai test-samples-maf
+test-samples: _test-samples-meai _test-samples-maf
 
 # Helper: drift detection for sample-canary recipes. Diffs `ls samples/{MEAI,MAF}`
 # against the hardcoded recipe lists; fails if a new sample directory appears
-# uncategorized (so adding a sample without updating test-samples-* surfaces).
+# uncategorized (so adding a sample without updating _test-samples-* surfaces).
 #
 # Intentional exclusions (interactive or multi-process — must run manually):
 #   - samples/MAF/HumanInTheLoop   (interactive Console.ReadLine)
 #   - samples/MAF/SplitWorkerClient (two-process — Worker + Client)
 #   - samples/MAF/ApprovalScopes   (interactive Console.ReadLine — scope selector)
-verify-sample-coverage:
+_verify-sample-coverage:
     #!/usr/bin/env bash
     set -uo pipefail
     EXIT=0
-    declared_meai=$(awk '/^test-samples-meai:/,/^test-samples-maf:/' justfile \
+    declared_meai=$(awk '/^_test-samples-meai:/,/^_test-samples-maf:/' justfile \
         | grep -oE 'samples/MEAI/[A-Za-z]+' | sort -u)
     actual_meai=$(find samples/MEAI -mindepth 1 -maxdepth 1 -type d \
         -not -name 'bin' -not -name 'obj' | sort -u)
     missing_meai=$(comm -23 <(echo "$actual_meai") <(echo "$declared_meai"))
     if [ -n "$missing_meai" ]; then
-        echo "WARN: MEAI samples missing from test-samples-meai:"
+        echo "WARN: MEAI samples missing from _test-samples-meai:"
         echo "$missing_meai" | sed 's/^/  /'
         EXIT=1
     fi
-    declared_maf=$(awk '/^test-samples-maf:/,/^test-samples:/' justfile \
+    declared_maf=$(awk '/^_test-samples-maf:/,/^test-samples:/' justfile \
         | grep -oE 'samples/MAF/[A-Za-z]+' | sort -u)
     actual_maf=$(find samples/MAF -mindepth 2 -type f -name '*.csproj' -exec dirname {} \; \
         | sed 's#^\(samples/MAF/[^/]*\).*#\1#' \
         | grep -Ev '/(HumanInTheLoop|SplitWorkerClient|ApprovalScopes)$' | sort -u)
     missing_maf=$(comm -23 <(echo "$actual_maf") <(echo "$declared_maf"))
     if [ -n "$missing_maf" ]; then
-        echo "WARN: MAF samples missing from test-samples-maf:"
+        echo "WARN: MAF samples missing from _test-samples-maf:"
         echo "$missing_maf" | sed 's/^/  /'
         EXIT=1
     fi
@@ -903,8 +884,8 @@ verify-sample-coverage:
     fi
     exit $EXIT
 
-# Remove timestamped artifact directories from prior diagnostic / sample-canary
-# runs. Safe across-the-board; logs are not load-bearing.
-clean-test-artifacts:
+# Remove diagnostic/sample-canary logs without touching build outputs. Keep this
+# niche cleanup helper internal: logs may be valuable for troubleshooting.
+_remove-test-artifacts:
     rm -rf artifacts/test-individual artifacts/sample-runs
     @echo "Removed artifacts/test-individual and artifacts/sample-runs."
