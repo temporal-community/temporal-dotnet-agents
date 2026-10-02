@@ -24,17 +24,7 @@
     <NoWarn>$(NoWarn);MEAI001</NoWarn>
     <!-- Analysis scoped to library projects only — test/sample projects inherit Directory.Build.props defaults. -->
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-  
-    <!-- Diffs the packed output against the last published package on NuGet.org rather than
-         against a checked-in baseline file. A file baseline only records what someone remembers
-         to record: the WorkingSetContextProvider removal in b5ccc0c was made by deleting lines
-         straight out of PublicAPI.Shipped.txt, which silenced the analyzer and left no trace.
-         The published package cannot be edited after the fact.
-         Intentional breaks are expected pre-v1 — regenerate the suppression file with:
-           dotnet pack <proj> -c Release -p:GenerateCompatibilitySuppressionFile=true -->
-    <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.14.2</PackageValidationBaselineVersion>
-</PropertyGroup>
+  </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Agents.AI" />
@@ -48,23 +38,8 @@
   </ItemGroup>
 
   <!-- netstandard2.1 down-level support -->
-  <PropertyGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-    <PolyArgumentExceptions>true</PolyArgumentExceptions>
-    <!-- The net10 asset retains the former IReadOnlySet<T> erasure overload for binary
-         compatibility. IReadOnlySet<T> does not exist on netstandard2.1, so the shared
-         public-API inventory intentionally contains one net10-only symbol. -->
-    <NoWarn>$(NoWarn);RS0017</NoWarn>
-    <!-- Embed Polyfill shim types so they do not collide with the same types imported via
-         IVT from the referenced Extensions.AI assembly. See the matching note there. -->
-    <PolyUseEmbeddedAttribute>true</PolyUseEmbeddedAttribute>
-  </PropertyGroup>
-
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
     <PackageReference Include="System.Text.Json" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Polyfill" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

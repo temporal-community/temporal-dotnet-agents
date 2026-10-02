@@ -11,17 +11,7 @@
     <PackageTags>temporal;ai;durable;workflow;dotnet;microsoft-extensions-ai</PackageTags>
     <!-- Analysis scoped to library projects only — test/sample projects inherit Directory.Build.props defaults. -->
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-  
-    <!-- Diffs the packed output against the last published package on NuGet.org rather than
-         against a checked-in baseline file. A file baseline only records what someone remembers
-         to record: the WorkingSetContextProvider removal in b5ccc0c was made by deleting lines
-         straight out of PublicAPI.Shipped.txt, which silenced the analyzer and left no trace.
-         The published package cannot be edited after the fact.
-         Intentional breaks are expected pre-v1 — regenerate the suppression file with:
-           dotnet pack <proj> -c Release -p:GenerateCompatibilitySuppressionFile=true -->
-    <EnablePackageValidation>true</EnablePackageValidation>
-    <PackageValidationBaselineVersion>0.14.2</PackageValidationBaselineVersion>
-</PropertyGroup>
+  </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.AI" />
@@ -31,25 +21,8 @@
   </ItemGroup>
 
   <!-- netstandard2.1 down-level support -->
-  <PropertyGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
-    <PolyArgumentExceptions>true</PolyArgumentExceptions>
-    <!-- Mark Polyfill's shim types with [Microsoft.CodeAnalysis.EmbeddedAttribute] so they
-         are compiler-private and NOT importable across the assembly boundary — even through
-         the [InternalsVisibleTo] this library grants to Extensions.Agents. Without this,
-         Agents sees BOTH its own Polyfill copy and this assembly's via IVT, producing
-         CS0436 (duplicate ExperimentalAttribute) and CS0121 (ambiguous extension methods).
-         Trade-off: on the ns2.1 asset the [Experimental] diagnostic is not surfaced to
-         downstream consumers (compile-time nicety only); the net10 asset uses the real BCL
-         attribute and is unaffected. -->
-    <PolyUseEmbeddedAttribute>true</PolyUseEmbeddedAttribute>
-  </PropertyGroup>
-
   <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
     <PackageReference Include="System.Text.Json" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Polyfill" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <DefineConstants>$(DefineConstants);COMPATIBILITY_GUARD_TESTS</DefineConstants>
     <IsTestProject>true</IsTestProject>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <!--
@@ -15,6 +16,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Compile the down-level implementation so tests cannot exercise native guards instead. -->
+    <Compile Include="../../src/Compatibility/RuntimeArgumentGuards.cs" Link="Compatibility/RuntimeArgumentGuards.cs" />
     <ProjectReference Include="../../src/TemporalCommunity.Extensions.AI/TemporalCommunity.Extensions.AI.csproj" />
     <ProjectReference Include="../TemporalCommunity.Extensions.Tests.Shared/TemporalCommunity.Extensions.Tests.Shared.csproj" />
   </ItemGroup>

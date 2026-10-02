@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.1'">
+    <Compile Include="$(MSBuildThisFileDirectory)Compatibility/*.cs" Link="Compatibility/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
