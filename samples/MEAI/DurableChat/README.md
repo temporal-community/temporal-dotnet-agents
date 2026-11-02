@@ -4,6 +4,14 @@ This sample runs multi-turn `DurableChatSessionClient` conversations and a manag
 loop. A conversation ID maps to a Temporal workflow; each turn is a workflow update and the
 workflow retains conversation history across worker restarts.
 
+This sample demonstrates the **current** API, not the
+[durable-chat redesign target](../../../docs/how-to/MEAI/usage.md#durable-chat-redesign-target-contracts).
+Its application conversation ID is not the provider's `ChatOptions.ConversationId`, and its
+correlation ID is not a deduplication key. Phase 0 changes research/tests/documentation only:
+request epochs, terminal ledgers, safe interrupted-turn recovery, and independent context/history
+budgets are not yet implemented. Do not retry an ambiguously completed effectful turn assuming
+the library will suppress duplicate external effects.
+
 Two `AddDurableToolset` registrations provide weather and service-status capabilities.
 `DefaultToolsetIds` composes them in a stable order as the stock workflow's worker-owned baseline.
 The client sends only its conversation ID, messages, and chat options; it does not construct or

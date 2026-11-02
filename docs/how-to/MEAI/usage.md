@@ -19,6 +19,45 @@ how-to reference for all of them:
   tool call inside that same workflow, `AIFunction.AsDurable()` remains available as the one
   low-level primitive that makes a single tool invocation durable.
 
+## Durable-chat redesign target contracts
+
+**Target design, not the current API:** Phase 0 verifies prerequisites; it does not add request
+deduplication, epochs, recovery, context budgets, or validated admission to production workflows.
+The current registration and `SendAsync` examples below remain runnable. In particular,
+`correlationId` is still not an idempotency key and current Continue-as-New can trim history.
+
+| Boundary | Selected target contract |
+|---|---|
+| Identity | The application session ID is distinct from provider `ChatOptions.ConversationId`. A new lineage gets an opaque epoch, carried across Continue-as-New (CAN). An optional expected-epoch mismatch is a typed rejection before effects. |
+| Admission | One active turn. Matching request ID and effect-bearing fingerprint joins it or returns its terminal result; another request gets `Busy`; changed input under the same ID gets `Conflict`. Success, failure, and cancellation are terminal ledger outcomes. |
+| Deduplication | Bound terminal entry count and serialized bytes; never evict pending requests. Cap pending joiners (`Pending` beyond the cap). Neither a ledger nor a single activity attempt guarantees exactly-once external effects. |
+| Approval and CAN | Close admission before draining; defer CAN until admitted handlers and the active turn finish. Approvals have finite deadlines. Replace mutable signals, including shutdown, with validated updates. Unknown, mismatched, and resolved decisions are rejected before admission. |
+| Event history | Use `Workflow.CurrentHistoryLength` and `CurrentHistorySize` (bytes, updated at workflow-task boundaries). Soft thresholds admit only completion, approval resolution, cancellation, and recovery. Near approval reserve exhaustion, expire deterministically as `Expired(HistoryBudget)`. Bound recovery per run and across CAN; a finite timer does not bound request volume. |
+| Failure and cancellation | With no dispatched tool effect, roll back the turn. After an effect, retain a bounded interrupted-turn record: completed call/result pairs, `unknown` for uncertain effects, `not executed` for undispatched calls, and a redacted bounded terminal marker. Drop partial assistant text and project protocol-valid model messages. |
+| Retained history | `GetHistory` is retained state, not an archive. Opt-in complete-turn trimming and a library-selected-prefix summarizer are separate from `IChatReducer`, which only shapes protected ephemeral model context. Without a configured compaction strategy, preserve history and enter `HistoryBlocked`; summarizer failure must never silently fall back to trimming. |
+| Model budget | Optional input-token limit plus output reserve, with a replaceable heuristic estimator counting instructions, tool declarations, output schema, context, active turn, and reserve. This is independent of Temporal payload limits. Protected content or reducer output that cannot fit gives `ContextBudgetExceeded`; unconfigured provider overflow maps to a typed non-retryable outcome. Summarization has its own budget. |
+| Tool safety | Reuse per-tool policies; unknown/effectful tools default to one attempt. Supply stable logical operation keys (epoch, request/turn, distinct call), enforced downstream for idempotency. Timeout/cancellation may mean `unknown`. Guard result and failure-detail bytes inside the activity before returning. |
+| Telemetry | MEAI owns inference spans and GenAI metrics; the library owns durable/tool telemetry. Content capture controls telemetry only, not persistence or model input. |
+
+No numeric ledger, joiner, token, event-reserve, or recovery limits are introduced in Phase 0.
+Later units must expose explicit limits and exercise their exact boundaries, not rely on provider
+or service payload caps. New histories must replay deterministically; this redesign does not
+require old-history patching or backward compatibility.
+
+### Pinned reducer prerequisites
+
+Contract tests execute the repository-pinned MEAI **10.10.0** and Temporalio **1.20.0**, not a
+floating source checkout. `IChatReducer`, `MessageCountingChatReducer`, and
+`SummarizingChatReducer` are experimental (`MEAI001`).
+
+The counting reducer retains the first system message and recent non-system messages, excluding
+entire messages containing function calls/results. It is not a complete-turn compactor.
+The summarizer excludes tool/approval exchanges from summarizer input, mutates the last dropped
+input message with `__summary__`, and returns a new **unmarked assistant summary**. Reusing the
+original input can recognize that marker; persisting only returned messages cannot rely on it as
+an incremental-compaction marker. Do not run this reducer directly over retained workflow state.
+See [Phase 0 research and harness](testing.md#phase-0-research-and-harness) for reproducible checks.
+
 ## Built-in managed session
 
 Register a `ChatClient`, a durable tool, and the worker in one place. This is close to the

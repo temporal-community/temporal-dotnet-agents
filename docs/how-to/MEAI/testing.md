@@ -7,7 +7,34 @@ Durable AI code has two distinct testing concerns, and they call for different t
 | Layer | What to test | Tool |
 |---|---|---|
 | **Application logic** | Code that depends on `IDurableChatSessionClient` — controllers, services, background jobs | xUnit unit tests with a stub implementation |
-| **Library integration** | The workflow, activities, and middleware together — that the full pipeline produces correct results | xUnit integration tests using `WorkflowEnvironment.StartLocalAsync()` |
+| **Library integration** | The workflow, activities, and middleware together — that the full pipeline produces correct results | xUnit integration tests using `TemporalServiceTestEnvironment.StartLocalAsync()` |
+
+## Phase 0 research and harness
+
+The [redesign target contracts](usage.md#durable-chat-redesign-target-contracts) are not production
+acceptance claims. Phase 0 executes package contracts against MEAI 10.10.0 and Temporalio 1.20.0:
+
+```bash
+dotnet test tests/TemporalCommunity.Extensions.AI.Tests --no-restore \
+  --filter "FullyQualifiedName~PinnedReducerContractTests"
+```
+
+`PinnedReducerContractTests` covers counting exclusions/first-system retention, summarizer
+thresholds, dropped-input mutation, unmarked summary output, reuse of original history, and
+exclusion of function and approval content from summarizer input. It also checks the SDK's
+integer history-count/byte-size properties and validator attribute. Runtime validation of the
+event-budget assumptions belongs to the isolated harness below, not to reflection alone.
+
+Evidence sources: read-only MEAI `ChatReduction` sources and Temporal SDK `Workflow`/validator
+sources, plus executed pinned NuGet assemblies. The MEAI source checkout HEAD was
+`4332a6910796b2496f9cc35c06fa362671ee1b2f`, not the earlier spike's
+`02107c65bab30aad9e35b5133ed643eaa77bccd8`; package execution is authoritative.
+Neither reference checkout is built or modified.
+
+**Unavailable prerequisite experiment:** the assumption that the pinned summarizer returns a
+persistent incremental marker is false. This blocks adopting that marker as a compaction wire
+contract, not Phase 0 or the library-selected-prefix summarizer design. The history-counter APIs
+are available; their values reflect the current workflow task and may be stale in queries.
 
 The rule of thumb: if your code just *calls* `SendAsync` or `GetHistoryAsync`, unit test it with a stub. If you are verifying that conversation history accumulates correctly or that `ContinueAsNew` works, use an integration test.
 
