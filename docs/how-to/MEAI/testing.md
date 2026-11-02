@@ -36,6 +36,39 @@ persistent incremental marker is false. This blocks adopting that marker as a co
 contract, not Phase 0 or the library-selected-prefix summarizer design. The history-counter APIs
 are available; their values reflect the current workflow task and may be stale in queries.
 
+### Spike findings and deferred acceptance
+
+The earlier uncommitted reducer spike reported **23 passing research tests**; the synthetic
+session-core spike reported **4 passing research tests**. Those counts are historical evidence,
+not checked-in production acceptance or a claim that their source was recovered.
+Phase 0 replaces the faulty persistent-summary-marker assumption with
+`PinnedReducerContractTests`, rather than importing that prototype. No prototype implementation
+is promoted to the library.
+
+`SessionCoreResearchTests` recreates the initialization race with an explicit workflow-state
+barrier, not a wall-clock sleep: the run waits for an update to enter before initializing state.
+The unsafe handler reads uninitialized state; an asynchronous handler that waits for initialization
+sees initialized state. Both executions replay. This is a controlled scheduling counterexample,
+not proof that the current stock session or every update-with-start always has this ordering.
+Current custom workflows already have `InitializeInput`/`WaitForInputAsync`; the new session core
+still needs its own authoritative initialization/admission design. Validators cannot await.
+
+```bash
+dotnet test tests/TemporalCommunity.Extensions.AI.IntegrationTests --no-restore \
+  --filter "FullyQualifiedName~SessionCoreResearchTests"
+```
+
+The skipped `RedesignedSessionCore_UpdateWithStart_CannotReadUninitializedState` names **unit 2.2**
+as its owner. Its counterexample deliberately fails if unskipped without replacing the synthetic
+unsafe path with the production redesigned core. It is intentionally unimplemented acceptance,
+not an unavailable pinned API and not a Phase 0 failure. Carried idle deadlines (2.4), approval
+waits (3.3), and MEAI dispatch (1.4/3.2) remain later-unit acceptance work; Phase 0 does not add
+placeholder passing tests for them.
+
+The target session declares **no signal handlers**. Current `Shutdown` is replaced by validated
+`RequestShutdown` in **2.6**, including both clients, samples, smoke tests, integration tests, and
+documentation; `ShutdownSignalName` is removed there, not during Phase 0.
+
 The rule of thumb: if your code just *calls* `SendAsync` or `GetHistoryAsync`, unit test it with a stub. If you are verifying that conversation history accumulates correctly or that `ContinueAsNew` works, use an integration test.
 
 For `DurableToolWorkflowBase`, integration tests should separately prove the one-managed-turn-per-
