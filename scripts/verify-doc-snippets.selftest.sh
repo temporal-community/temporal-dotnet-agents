@@ -149,6 +149,36 @@ embedding_snippet='// BEGIN SNIPPET docs/how-to/MEAI/embeddings.md#provider
 run_case meai-embedding-uncovered reject "$embedding_doc" '' '' 'docs/how-to/MEAI/embeddings.md'
 run_case meai-embedding-covered pass "$embedding_doc" "$embedding_snippet" '' 'docs/how-to/MEAI/embeddings.md'
 
+# MEAI usage and phase harness examples qualify without registration tokens.
+usage_doc='# Usage
+
+## Send
+
+```csharp
+var history = await sessionClient.GetHistoryAsync("session");
+```'
+usage_snippet='// BEGIN SNIPPET docs/how-to/MEAI/usage.md#send
+// END SNIPPET docs/how-to/MEAI/usage.md#send'
+run_case meai-usage-uncovered reject "$usage_doc" '' '' 'docs/how-to/MEAI/usage.md'
+run_case meai-usage-covered pass "$usage_doc" "$usage_snippet" '' 'docs/how-to/MEAI/usage.md'
+
+phase_doc='# Testing
+
+### Phase 0 timer harness
+
+```csharp
+await Workflow.DelayAsync(TimeSpan.FromDays(3));
+```'
+phase_snippet='// BEGIN SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
+// END SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness'
+run_case meai-phase-uncovered reject "$phase_doc" '' '' 'docs/how-to/MEAI/testing.md'
+run_case meai-phase-covered pass "$phase_doc" "$phase_snippet" '' 'docs/how-to/MEAI/testing.md'
+run_case meai-phase-second-block-uncovered reject "$phase_doc
+
+\`\`\`csharp
+var elapsed = Workflow.UtcNow;
+\`\`\`" "$phase_snippet" '' 'docs/how-to/MEAI/testing.md'
+
 # `AddTool(` inside a non-csharp fence (a shell transcript, say) must not demand coverage.
 run_case non-csharp-fence pass '# Example
 
@@ -241,6 +271,31 @@ else
             echo "FAIL: mutation did not change $target — the pattern no longer matches" >&2
             failures=$((failures + 1))
         fi
+    fi
+fi
+
+# The newly covered MEAI snippets must also participate in compilation.
+meai_target="$build_copy/Snippets/MEAI/Usage.cs"
+if [[ ! -f "$meai_target" ]]; then
+    echo "FAIL: MEAI usage snippet is missing" >&2
+    failures=$((failures + 1))
+else
+    cp "$meai_target" "$work/meai.orig"
+    perl -0pi -e 's/options\.ActivityTimeout/options.DefaultActivityTimeout/' "$meai_target"
+    if diff -q "$work/meai.orig" "$meai_target" >/dev/null; then
+        echo "FAIL: MEAI mutation no longer matches" >&2
+        failures=$((failures + 1))
+    elif build_copy_ok; then
+        echo "FAIL: MEAI snippet with nonexistent DefaultActivityTimeout built successfully" >&2
+        failures=$((failures + 1))
+    else
+        echo "ok: mutated MEAI usage snippet fails to build"
+    fi
+    cp "$work/meai.orig" "$meai_target"
+    if ! build_copy_ok; then
+        echo "FAIL: reverted MEAI snippet does not build" >&2
+        tail -30 "$work/build.txt" | sed 's/^/    /' >&2
+        failures=$((failures + 1))
     fi
 fi
 

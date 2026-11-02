@@ -21,12 +21,13 @@ trap 'rm -rf "$work"' EXIT
 # $1 name  $2 pass|reject  $3 doc body  $4 harness body  $5 allowlist body
 run_case() {
     local name="$1" expectation="$2" doc="$3" harness="$4" allow="${5:-}"
+    local doc_path="${6:-docs/how-to/MAF/example.md}"
     local repo="$work/$name"
 
-    mkdir -p "$repo/scripts" "$repo/docs/how-to/MAF" "$repo/tests/docs/DocSnippets/Snippets"
+    mkdir -p "$repo/scripts" "$repo/$(dirname "$doc_path")" "$repo/tests/docs/DocSnippets/Snippets"
     cp "$checker" "$repo/scripts/"
     cp "$engine" "$repo/scripts/"
-    printf '%s\n' "$doc"     > "$repo/docs/how-to/MAF/example.md"
+    printf '%s\n' "$doc"     > "$repo/$doc_path"
     printf '%s\n' "$harness" > "$repo/tests/docs/DocSnippets/Snippets/Example.cs"
     printf '%s\n' "$allow"   > "$repo/scripts/allow.txt"
 
@@ -71,6 +72,19 @@ HARNESS_MATCHING='internal static class Example
 }'
 
 run_case exact-match pass "$DOC_ONE_BLOCK" "$HARNESS_MATCHING"
+
+MEAI_DOC='### Phase 0 timer harness
+
+```csharp
+await Workflow.DelayAsync(TimeSpan.FromDays(3));
+```'
+MEAI_HARNESS='// BEGIN SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
+await Workflow.DelayAsync(TimeSpan.FromDays(3));
+// END SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness'
+run_case meai-phase-exact-match pass "$MEAI_DOC" "$MEAI_HARNESS" '' 'docs/how-to/MEAI/testing.md'
+run_case meai-phase-drift reject "$MEAI_DOC" '// BEGIN SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
+await Workflow.DelayAsync(TimeSpan.FromDays(4));
+// END SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness' '' 'docs/how-to/MEAI/testing.md'
 
 # The drift that motivated this gate: a doc line grows a trailing comment, the harness copy does not.
 run_case changed-harness-text reject '## Setup

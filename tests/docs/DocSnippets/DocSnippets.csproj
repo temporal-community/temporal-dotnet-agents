@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Compile-only harness for the C# examples in docs/how-to/MAF/.
+    Compile-only harness for MAF registration and MEAI usage/embeddings/phase testing examples.
 
     This is a LIBRARY on purpose: no OutputType=Exe, no entry point, no [Fact]s that execute.
     Nothing here is meant to run. The compiler is the assertion — if a documented registration
@@ -31,6 +31,7 @@
   <ItemGroup>
     <ProjectReference Include="../../../src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions.Agents.csproj" />
     <ProjectReference Include="../../../src/TemporalCommunity.Extensions.AI/TemporalCommunity.Extensions.AI.csproj" />
+    <ProjectReference Include="../../../tests/TemporalCommunity.Extensions.Tests.Shared/TemporalCommunity.Extensions.Tests.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

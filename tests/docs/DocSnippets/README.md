@@ -4,11 +4,16 @@ A `net10.0` **library**. No `OutputType=Exe`, no entry point, no tests. Nothing 
 compiler is the assertion: if a documented registration example stops binding to a real overload,
 this project fails to build and `just build` — and therefore CI — goes red.
 
-The coverage gate includes MAF registration examples and every C# block in
-[`embeddings.md`](../../../docs/how-to/MEAI/embeddings.md). The MEAI blocks compile verbatim with
+The coverage gate includes MAF registration examples and every C# block in MEAI
+[`usage.md`](../../../docs/how-to/MEAI/usage.md) and
+[`embeddings.md`](../../../docs/how-to/MEAI/embeddings.md), plus
+[`testing.md`](../../../docs/how-to/MEAI/testing.md) examples under `Phase N` headings.
+The MEAI blocks compile verbatim with
 application configuration supplied as harness parameters and the guide's explicitly external
 `DocumentIndexingInput` and `NullEmbeddingGenerator` supplied outside the markers. Dependencies
-use the repository pins (MEAI 10.8.3 and Temporalio 1.17.0).
+use the repository pins (MEAI 10.10.0 and Temporalio 1.20.0). The shared test project supplies the
+pinned environment helper and controlled activity attempt; these are test infrastructure, not
+public library APIs. Redesign target tables intentionally have no fictional executable API.
 
 ## Why not just grep the docs
 
@@ -83,6 +88,12 @@ exists.
 copies this project, drops the name argument from a real `AddTool` call, and **requires the build to
 fail**. Without it, a harness whose files silently stopped being compiled would report success
 forever — the failure mode `verify-markdown-links.selftest.sh` exists to prevent.
+
+Phase 0 also requires a broken MEAI `DurableExecutionOptions.DefaultActivityTimeout` example to
+fail compilation, and adds coverage/fidelity rejection fixtures for missing, duplicate-heading,
+and drifted MEAI phase examples. Eight new markers cover usage registration/manual converters,
+session send/history, direct durable tools, and timer/controlled-tool harnesses. Existing embedding
+coverage is unchanged; removal of the durable embedding surface is owned by unit 1.0.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 

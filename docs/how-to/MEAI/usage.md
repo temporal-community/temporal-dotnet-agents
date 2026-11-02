@@ -236,8 +236,9 @@ public sealed class ResearchWorkflow
         // ResearchActivities.SummarizeWeatherAsync is constructor-injected with the real,
         // worker-side IChatClient and dispatched as a standard Temporal activity.
         var activityOptions = new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(2) };
+        var weatherText = weather?.ToString() ?? string.Empty;
         return await Workflow.ExecuteActivityAsync(
-            (ResearchActivities a) => a.SummarizeWeatherAsync(request.City, weather?.ToString() ?? string.Empty),
+            (ResearchActivities a) => a.SummarizeWeatherAsync(request.City, weatherText),
             activityOptions);
     }
 }

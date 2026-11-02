@@ -63,7 +63,7 @@ fail() {
 }
 
 # Emits one `key` line per qualifying fenced block: a ```csharp block whose body contains
-# `AddDurableAgent(` or `AddTool(`, or any C# block in the MEAI embeddings guide.
+# `AddDurableAgent(` or `AddTool(`, every MEAI usage/embeddings block, or phase harness examples.
 # Headings inside fences are skipped, matching the slugger in
 # verify-markdown-links.sh — `# comment` in a shell example is not a section heading.
 scan_docs() {
@@ -89,7 +89,9 @@ scan_docs() {
             }
             infence = 0
             if (lang ~ /^csharp/ && (body ~ /AddDurableAgent\(/ || body ~ /AddTool\(/ ||
-                FILENAME == "docs/how-to/MEAI/embeddings.md")) {
+                FILENAME == "docs/how-to/MEAI/embeddings.md" ||
+                FILENAME == "docs/how-to/MEAI/usage.md" ||
+                (FILENAME == "docs/how-to/MEAI/testing.md" && heading ~ /^phase-[0-9]+-/))) {
                 print FILENAME "#" (heading == "" ? "-no-heading-" : heading)
             }
             next

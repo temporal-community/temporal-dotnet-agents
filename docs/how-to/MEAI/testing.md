@@ -118,6 +118,72 @@ meets the production minimum. A versioned production-service experiment on that 
 server is unavailable; transport, restart, retry, and validator-history prerequisites are
 verified on the version-checked local service instead.
 
+### Phase 0 timer harness
+
+This compile-checked example uses the repository's shared test project (not a separately
+published NuGet package). For application tests, copy the pinned environment helper or reference
+your own equivalent. Use it only for workflow-timer behavior, with no provider/tool activities.
+
+```csharp
+await using var environment = await TemporalServiceTestEnvironment.StartTimeSkippingAsync();
+environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+var queue = $"timer-example-{Guid.NewGuid():N}";
+using var worker = new TemporalWorker(environment.Client,
+    new TemporalWorkerOptions(queue).AddWorkflow<TimerExampleWorkflow>());
+
+await worker.ExecuteAsync(async () =>
+{
+    var handle = await environment.Client.StartWorkflowAsync(
+        (TimerExampleWorkflow workflow) => workflow.RunAsync(TimeSpan.FromDays(3)),
+        new($"timer-example-{Guid.NewGuid():N}", queue));
+    var elapsed = await handle.GetResultAsync().WaitAsync(TimeSpan.FromSeconds(30));
+    Assert.True(elapsed >= TimeSpan.FromDays(3));
+});
+```
+
+```csharp
+[Workflow]
+public class TimerExampleWorkflow
+{
+    [WorkflowRun]
+    public async Task<TimeSpan> RunAsync(TimeSpan delay)
+    {
+        var started = Workflow.UtcNow;
+        await Workflow.DelayAsync(delay);
+        return Workflow.UtcNow - started;
+    }
+}
+```
+
+### Phase 0 controlled tool attempt
+
+The shared `ControlledActivityAttempt<T>` makes an effect observable before returning a result,
+without sleeping. Use separate attempts to model retries, and always release blocked attempts in
+test cleanup. MEAI's factory normalizes this string result to `JsonElement`.
+
+```csharp
+var attempt = new ControlledActivityAttempt<string>();
+var effects = 0;
+var tool = AIFunctionFactory.Create(
+    (CancellationToken token) => attempt.ExecuteAsync(
+        () => Interlocked.Increment(ref effects), token),
+    "controlled_write");
+var pending = tool.InvokeAsync(new AIFunctionArguments()).AsTask();
+try
+{
+    await attempt.Entered.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(1, effects);
+    Assert.False(pending.IsCompleted);
+    attempt.Complete("written");
+    Assert.Equal("written", Assert.IsType<JsonElement>(await pending).GetString());
+}
+finally
+{
+    if (!attempt.IsCompletionSupplied)
+        attempt.Complete("cleanup");
+}
+```
+
 The rule of thumb: if your code just *calls* `SendAsync` or `GetHistoryAsync`, unit test it with a stub. If you are verifying that conversation history accumulates correctly or that `ContinueAsNew` works, use an integration test.
 
 For `DurableToolWorkflowBase`, integration tests should separately prove the one-managed-turn-per-
@@ -272,7 +338,8 @@ For a direct-adapter integration test:
 
 1. Register a real `[Workflow]` type and the backing activities on a local worker.
 2. Construct `ChatClientBuilder` with a sentinel inner client that throws if invoked, then apply
-   `UseDurableExecution()` inside the workflow.
+   `UseDurableExecution()` inside the workflow. This is legacy direct-adapter test coverage, not the recommended custom-workflow
+   design (use a hand-written model activity or the session base classes for new applications).
 3. Invoke `GetResponseAsync` from `[WorkflowRun]`. `GetStreamingResponseAsync` is intentionally
    unsupported in workflow context and must be tested by advancing its async enumerator and
    asserting the resulting `NotSupportedException`.
@@ -291,9 +358,10 @@ silently changing into a buffered response.
 ### NuGet packages
 
 ```xml
-<PackageReference Include="Temporalio.Testing" Version="1.11.1" />
+<PackageReference Include="Temporalio" Version="1.20.0" />
 <PackageReference Include="xunit" Version="2.9.3" />
-<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+<PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+<PackageReference Include="Microsoft.Extensions.AI" Version="10.10.0" />
 ```
 
 ### Fixture pattern
@@ -314,7 +382,8 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        Environment = await WorkflowEnvironment.StartLocalAsync();
+        Environment = await TemporalServiceTestEnvironment.StartLocalAsync();
+        Environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(Environment.Client);
@@ -337,7 +406,7 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     public async Task DisposeAsync()
     {
         if (_host is not null) { await _host.StopAsync(); _host.Dispose(); }
-        await Environment.ShutdownAsync();
+        await Environment.DisposeAsync();
     }
 }
 ```
@@ -427,10 +496,10 @@ public class DurableChatSessionTests(IntegrationTestFixture fixture)
 
         var history = await fixture.SessionClient.GetHistoryAsync(conversationId);
 
-        // user + assistant + user + assistant = 4 messages
+        // Each turn retains a request entry and a response entry, not individual messages.
         Assert.Equal(4, history.Count);
-        Assert.Equal(ChatRole.User, history[0].Role);
-        Assert.Equal(ChatRole.Assistant, history[1].Role);
+        Assert.IsType<DurableSessionRequest>(history[0]);
+        Assert.IsType<DurableSessionResponse>(history[1]);
     }
 
     [Fact]
