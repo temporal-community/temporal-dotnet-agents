@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Temporalio.Exceptions;
 
@@ -75,7 +76,10 @@ public sealed class ScriptedChatClient : IChatClient
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        var snapshot = messages.ToArray();
+        cancellationToken.ThrowIfCancellationRequested();
+        var snapshot = JsonSerializer.Deserialize<ChatMessage[]>(
+            JsonSerializer.Serialize(messages.ToArray(), AIJsonUtilities.DefaultOptions),
+            AIJsonUtilities.DefaultOptions)!;
         ChatResponse response;
         lock (_gate)
         {
@@ -93,7 +97,7 @@ public sealed class ScriptedChatClient : IChatClient
                     nonRetryable: true);
             }
             response = _scripted.Dequeue();
-            _calls.Add(new CapturedCall(snapshot, options, response));
+            _calls.Add(new CapturedCall(snapshot, options?.Clone(), response));
         }
 
         return Task.FromResult(response);

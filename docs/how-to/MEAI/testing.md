@@ -69,6 +69,55 @@ The target session declares **no signal handlers**. Current `Shutdown` is replac
 `RequestShutdown` in **2.6**, including both clients, samples, smoke tests, integration tests, and
 documentation; `ShutdownSignalName` is removed there, not during Phase 0.
 
+### Deterministic doubles and isolated environments
+
+Reuse `ScriptedChatClient` from `TemporalCommunity.Extensions.Tests.Shared`: every test owns its
+response queue; exhaustion is a non-retryable failure, not a default success. It captures detached
+JSON message snapshots and cloned `ChatOptions` (nested option values still follow MEAI's clone
+semantics). Cancellation before invocation does not consume a response. Avoid concurrent calls
+when the test requires a specific provider-response order.
+
+`ControlledActivityAttempt<T>` separates entry/side effects from completion, failure, and
+cancellation. Each retry gets a distinct attempt. Await `Entered` with a finite test-side bound
+before asserting an effect or releasing completion. A failed or cancelled response does not undo
+an already applied effect. These `TaskCompletionSource` gates are for activities/tools/providers,
+**never workflow code**; workflow barriers use `Workflow.WaitConditionAsync`.
+
+`Helpers/DurableChatTestEnvironment` starts a fresh server and sets
+`DurableAIDataConverter.Instance` on its client before any worker or handle is created. The worker
+inherits the client's converter in Temporalio 1.20.0 (there is no
+`TemporalWorkerOptions.DataConverter` property). Dispose each environment with `await using`;
+use a unique task queue and workflow ID. Do not mutate the shared collection's provider scripts
+for race tests.
+
+```bash
+dotnet test tests/TemporalCommunity.Extensions.AI.Tests --no-restore \
+  --filter "FullyQualifiedName~DeterministicHarnessContractTests"
+dotnet test tests/TemporalCommunity.Extensions.AI.IntegrationTests --no-restore \
+  --filter "FullyQualifiedName~PhaseZeroHarnessIntegrationTests"
+```
+
+The unit checks exercise deterministic provider output, captured inputs, cancellable controlled
+tools, and approval/function exchange round-trips. Pinned `AIFunctionFactory` returns a
+`JsonElement` for this string tool result; assertions inspect its string value.
+The isolated runtime checks prove a three-day workflow timer skips in bounded real test time
+and replays, controlled retries can duplicate an external effect, and worker restart/replay
+does not re-execute a completed activity. The timer's recorded duration is exactly three days;
+workflow-clock elapsed time includes task scheduling overhead and is not exactly the delay.
+
+On the idle local service, **ten validator rejections persist zero new events**, verified by
+comparing the full event-ID/type sequence before and after. Accepted updates grow both history
+count and byte size, and their history replays. This verifies a prerequisite, not a universal
+guarantee that rejection consumes no server CPU, RPC traffic, or workflow tasks alongside other
+work. Budget logic must use task-boundary snapshots, not query freshness or local rejection
+counters.
+
+`GetSystemInfo` reports **1.31.2** for the pinned local server. The SDK time-skipping server
+returns an **empty server version**; the harness reports that explicitly and does not claim it
+meets the production minimum. A versioned production-service experiment on that timer-only
+server is unavailable; transport, restart, retry, and validator-history prerequisites are
+verified on the version-checked local service instead.
+
 The rule of thumb: if your code just *calls* `SendAsync` or `GetHistoryAsync`, unit test it with a stub. If you are verifying that conversation history accumulates correctly or that `ContinueAsNew` works, use an integration test.
 
 For `DurableToolWorkflowBase`, integration tests should separately prove the one-managed-turn-per-
