@@ -169,7 +169,9 @@ internal class AgentWorkflow :
         var admission = BeginTurnAdmission(requestId, admissionFingerprint);
         try
         {
-            await WaitForAgentInputAsync().ConfigureAwait(true);
+            await Workflow.WaitConditionAsync(
+                () => _input is not null,
+                cancellationToken: CurrentTurnCancellationToken).ConfigureAwait(true);
             admission = RefreshTurnAdmission(admission, requestId, admissionFingerprint);
             ValidateInitializedTurnAdmission(admission);
 
@@ -423,11 +425,10 @@ internal class AgentWorkflow :
     {
         // This path builds its step options from the agent's frozen workflow input so per-agent
         // settings are applied consistently across every step in the durable agent loop.
-        _ = activityOptions;
         var agentRequestEntry = (AgentSessionRequest)requestEntry;
         var runRequest = ToRunRequest(agentRequestEntry);
 
-        return ExecuteAgentTurnAsync(runRequest);
+        return ExecuteAgentTurnAsync(runRequest, activityOptions);
     }
 
     /// <inheritdoc/>
@@ -543,15 +544,19 @@ internal class AgentWorkflow :
         };
     }
 
-    private async Task<AgentResponse> ExecuteAgentTurnAsync(RunRequest runRequest)
+    private async Task<AgentResponse> ExecuteAgentTurnAsync(
+        RunRequest runRequest,
+        ActivityOptions turnActivityOptions)
     {
-        var stepActivityOptions = new ActivityOptions
+        var stepActivityOptions = ApplyCurrentTurnCancellation(new ActivityOptions
         {
             StartToCloseTimeout = _input!.ActivityTimeout,
             HeartbeatTimeout = _input!.HeartbeatTimeout,
             Summary = AgentActivities.BuildActivitySummary(_input!.AgentName),
             RetryPolicy = _input!.RetryPolicy,
-        };
+            CancellationToken = turnActivityOptions.CancellationToken,
+            CancellationType = turnActivityOptions.CancellationType,
+        });
 
         return await ExecuteDurableAgentTurnAsync(runRequest, stepActivityOptions).ConfigureAwait(true);
     }
@@ -580,6 +585,8 @@ internal class AgentWorkflow :
         // (and again after the loop for the aborted-response log/message).
         for (var iteration = 0; iteration < _input!.MaxToolCallsPerTurn; iteration++)
         {
+            ThrowIfCurrentTurnCancellationRequested();
+
             // Proxy-started sessions have WorkerSettingsResolved=false.
             // On the first step of the first turn, ask the activity to resolve worker-side
             // settings (per-tool activity options) and return them.
@@ -602,6 +609,7 @@ internal class AgentWorkflow :
             var stepResult = await Workflow.ExecuteActivityAsync(
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 stepActivityOptions).ConfigureAwait(true);
+            ThrowIfCurrentTurnCancellationRequested();
 
             // Apply resolved worker-side settings once and carry the complete bundle forward
             // through continue-as-new.
@@ -741,7 +749,9 @@ internal class AgentWorkflow :
                         // See also: DurableChatWorkflow.ExecutePattern3TurnAsync (MEAI path) — parallel typed dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
-                            DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(tc.Name, interceptorOpts, interceptorToolOpts)));
+                            ApplyCurrentTurnCancellation(
+                                DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(
+                                    tc.Name, interceptorOpts, interceptorToolOpts))));
                     }
                 }
 
@@ -923,11 +933,12 @@ internal class AgentWorkflow :
 
             // ── Phase 2.5: Dispatch all buffered tool activities ──────────────────────────
             // All approval waits are resolved before any InvokeAgentTool activity starts.
+            ThrowIfCurrentTurnCancellationRequested();
             foreach (var (idx, input, opts) in pendingToolDispatches)
             {
                 toolTasks[idx] = Workflow.ExecuteActivityAsync(
                     (AgentActivities a) => a.InvokeAgentToolAsync(input),
-                    opts);
+                    ApplyCurrentTurnCancellation(opts));
             }
 
             // ── Phase 3: Wait for all dispatched tool activities ──────────────────────────
@@ -938,6 +949,7 @@ internal class AgentWorkflow :
             InvokeAgentToolResult[]? toolResults = pendingTasks.Count > 0
                 ? await Workflow.WhenAllAsync(pendingTasks).ConfigureAwait(true)
                 : null;
+            ThrowIfCurrentTurnCancellationRequested();
 
             // Assemble final results in original order.
             // X-1: also collect each tool's StateBag write-back, slotted by tool-call index so

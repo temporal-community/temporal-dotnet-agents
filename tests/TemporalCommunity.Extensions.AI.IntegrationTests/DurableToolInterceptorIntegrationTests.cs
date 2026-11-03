@@ -9,6 +9,7 @@ using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.AI.Tools;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
+using Temporalio.Worker;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.IntegrationTests;
@@ -382,6 +383,79 @@ public class DurableToolInterceptorIntegrationTests
         Assert.Equal(1, harness.GetInvocationCount("transfer_funds"));
 
         await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task CancelTurnAsync_CancelsPendingApprovalAndLeavesSessionUsable()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var harness = new ScriptedToolHarness();
+        var tool = harness.BuildAlwaysSucceeds("transfer_funds", "Transfers funds.", _ => "transferred");
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-cancel-approval", "transfer_funds")],
+            "The session remained usable.");
+        var interceptor = new DelegateInterceptor((_, _) => Task.FromResult(
+            DurableToolDecision.PauseForApproval("Review the transfer.")));
+
+        var taskQueue = $"cancel-pending-approval-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, scripted, builder =>
+            builder.AddDurableTools(tool), interceptor);
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"cancel-pending-approval-{Guid.NewGuid():N}";
+        const string requestId = "cancel-approval-turn";
+        var turnTask = sessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "transfer the funds")],
+            requestId: requestId);
+
+        try
+        {
+            DurableApprovalRequest? pending = null;
+            for (var i = 0; i < 30 && pending is null; i++)
+            {
+                await Task.Delay(200);
+                pending = await sessionClient.GetPendingApprovalAsync(conversationId);
+            }
+
+            Assert.NotNull(pending);
+            var cancellation = await sessionClient.CancelTurnAsync(conversationId, requestId);
+            Assert.Equal(DurableTurnCancellationStatus.CancellationRequested, cancellation.Status);
+
+            var exception = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                turnTask.WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.Equal(
+                "DurableTurnCancelled",
+                Assert.IsType<ApplicationFailureException>(exception.InnerException).ErrorType);
+            Assert.Null(await sessionClient.GetPendingApprovalAsync(conversationId));
+            Assert.Equal(0, harness.GetInvocationCount("transfer_funds"));
+
+            var next = await sessionClient.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "continue after cancellation")],
+                requestId: "turn-after-approval-cancel").WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal("The session remained usable.", next.Text);
+
+            var workflow = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+                sessionClient.GetWorkflowId(conversationId));
+            var replayOptions = new WorkflowReplayerOptions
+            {
+                DataConverter = DurableAIDataConverter.Instance,
+            };
+            replayOptions.AddWorkflow<DurableChatWorkflow>();
+            var history = await workflow.FetchHistoryAsync();
+            var replay = await new WorkflowReplayer(replayOptions)
+                .ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+            Assert.Null(replay.ReplayFailure);
+
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Threading;
 using Temporalio.Workflows;
 using Temporalio.Exceptions;
 
@@ -102,7 +103,9 @@ internal sealed class DurableApprovalMixin
         TimeSpan approvalTimeout,
         Action<DurableApprovalRequest>? onRequested = null,
         Action<DurableApprovalDecision>? onResolved = null,
-        Func<bool>? historyBudgetReserveReached = null)
+        Func<bool>? historyBudgetReserveReached = null,
+        CancellationToken? cancellationToken = null,
+        Func<bool>? turnCancellationRequested = null)
     {
         // Guard against invalid and concurrent requests. ValidateRequestApproval runs this check on the
         // [WorkflowUpdateValidator] path (update arrives over the wire), but direct turn-loop
@@ -128,10 +131,30 @@ internal sealed class DurableApprovalMixin
 
         onRequested?.Invoke(request);
 
-        var conditionMet = await Workflow.WaitConditionAsync(
-            () => (_approvalDecision is not null && _approvalDecision.RequestId == request.RequestId)
-                  || historyBudgetReserveReached?.Invoke() == true,
-            timeout: approvalTimeout);
+        var effectiveCancellationToken = cancellationToken ?? Workflow.CancellationToken;
+        bool conditionMet;
+        try
+        {
+            conditionMet = await Workflow.WaitConditionAsync(
+                () => (_approvalDecision is not null && _approvalDecision.RequestId == request.RequestId)
+                      || historyBudgetReserveReached?.Invoke() == true
+                      || turnCancellationRequested?.Invoke() == true,
+                timeout: approvalTimeout,
+                cancellationToken: effectiveCancellationToken);
+        }
+        catch (OperationCanceledException) when (effectiveCancellationToken.IsCancellationRequested)
+        {
+            _pendingApproval = null;
+            _approvalDecision = null;
+            throw;
+        }
+
+        if (turnCancellationRequested?.Invoke() == true)
+        {
+            _pendingApproval = null;
+            _approvalDecision = null;
+            throw new OperationCanceledException("The active turn was cancelled while awaiting approval.");
+        }
 
         var expiredForHistoryBudget = _approvalDecision is null
                                       && historyBudgetReserveReached?.Invoke() == true;

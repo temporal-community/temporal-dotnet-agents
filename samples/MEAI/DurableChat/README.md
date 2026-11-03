@@ -130,6 +130,16 @@ toolset selection or client profile configuration affects newly created sessions
 and tool implementations behind the recorded keys are still resolved at activity time, so
 deployments should preserve their expected behavior.
 
+The client also exposes `CancelTurnAsync(conversationId, requestId)` for an explicit,
+workflow-owned cancellation request. Retain the same caller-known request ID passed to
+`SendAsync`; cancelling the `SendAsync` RPC wait alone does not stop the admitted turn. The update
+propagates cancellation to active model/tool activities and interrupts approval waits; the workflow
+waits for activity cancellation to complete and schedules no later activity. Activity code and
+downstream operations must cooperate with cancellation. A dispatched external effect is never
+rolled back by cancellation. See
+[Cancel an active turn](../../../docs/how-to/MEAI/usage.md#cancel-an-active-turn) for the
+race-aware result and recovery guidance.
+
 Worker startup validates the configured default chat-client route, default toolset IDs, and
 cross-toolset function-name collisions. The chat-client check confirms the profile is registered
 without constructing the provider. If the model nevertheless returns an unknown or non-enabled

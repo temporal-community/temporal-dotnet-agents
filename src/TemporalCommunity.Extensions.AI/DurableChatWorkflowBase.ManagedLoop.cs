@@ -31,6 +31,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         DurableToolDispatchMode dispatchMode = DurableToolDispatchMode.Parallel,
         Internal.DurableToolsetManifest? effectiveToolsetManifest = null)
     {
+        stepActivityOptions = ApplyCurrentTurnCancellation(stepActivityOptions);
+
         // Seed the LLM with the flattened conversation transcript: prior turns from
         // history + the request that was just appended (which is the last entry in History
         // by the time ExecuteTurnAsync runs).
@@ -56,6 +58,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         var iteration = 0;
         while (iteration < maxIterations)
         {
+            ThrowIfCurrentTurnCancellationRequested();
+
             var stepInput = new DurableChatInput
             {
                 Messages = accumulated,
@@ -86,7 +90,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     (DurableChatActivities a) => a.GetChatStepAsync(stepInput),
                     stepActivityOptions).ConfigureAwait(true);
             }
-            catch (ActivityFailureException) when (Workflow.CancellationToken.IsCancellationRequested)
+            catch (ActivityFailureException) when (IsCurrentTurnCancellationRequested())
             {
                 // Workflow cancellation delivered as a faulted activity — propagate, never count.
                 throw;
@@ -143,6 +147,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 // produced, so the successful model/tool iteration budget is not consumed.
                 continue;
             }
+
+            ThrowIfCurrentTurnCancellationRequested();
 
             if (stepResult.Usage is not null)
             {
@@ -270,11 +276,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel typed dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (DurableChatActivities a) => a.RunToolInterceptorAsync(interceptorInput),
-                            manifestMember?.InterceptorActivityOptions
+                            ApplyCurrentTurnCancellation(manifestMember?.InterceptorActivityOptions
                                 ?? DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(
                                     tc.Name,
                                     interceptorActivityOpts!,
-                                    interceptorToolOpts)));
+                                    interceptorToolOpts))));
                     }
                 }
 
@@ -451,18 +457,23 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     funcInput.TurnState = currentTurnState;
                     var task = Workflow.ExecuteActivityAsync(
                         (DurableFunctionActivities a) => a.InvokeFunctionAsync(funcInput),
-                        opts);
+                        ApplyCurrentTurnCancellation(opts));
                     toolTasks[idx] = task;
 
                     try
                     {
                         var output = await task.ConfigureAwait(true);
+                        ThrowIfCurrentTurnCancellationRequested();
                         if (output.HasStateReplacement)
                         {
                             currentTurnState = output.StateReplacement;
                         }
                     }
-                    catch (ActivityFailureException) when (Workflow.CancellationToken.IsCancellationRequested)
+                    catch (OperationCanceledException) when (IsCurrentTurnCancellationRequested())
+                    {
+                        throw;
+                    }
+                    catch (ActivityFailureException) when (IsCurrentTurnCancellationRequested())
                     {
                         throw;
                     }
@@ -489,7 +500,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 {
                     toolTasks[idx] = Workflow.ExecuteActivityAsync(
                         (DurableFunctionActivities a) => a.InvokeFunctionAsync(funcInput),
-                        opts);
+                        ApplyCurrentTurnCancellation(opts));
                 }
             }
 
@@ -498,10 +509,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             // a workflow — it's non-deterministic on replay. WhenAllAsync throws if any task
             // faults; we swallow application failures here and look at each task's terminal state.
             // Workflow-level cancellation must propagate immediately. Two paths arrive here:
-            // (a) WhenAllAsync itself throws OperationCanceledException when the workflow token fires.
+            // (a) WhenAllAsync itself throws OperationCanceledException when the turn token fires.
             // (b) Temporal delivers a cancelled activity as a Faulted task (ActivityFailureException
             //     wrapping a cancellation cause), not as a Cancelled task — caught by the bare catch
-            //     below and re-detected via Workflow.CancellationToken.IsCancellationRequested.
+            //     below and re-detected via the active turn token.
             var pendingRealTasks = toolTasks
                 .Where(t => t is not null)
                 .Cast<Task<DurableFunctionOutput>>()
@@ -513,7 +524,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 {
                     await Workflow.WhenAllAsync(pendingRealTasks).ConfigureAwait(true);
                 }
-                catch (OperationCanceledException) when (Workflow.CancellationToken.IsCancellationRequested)
+                catch (OperationCanceledException) when (IsCurrentTurnCancellationRequested())
                 {
                     throw; // workflow cancellation as OCE — do not classify as an application error
                 }
@@ -521,7 +532,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 {
                     // If the workflow is being cancelled, faulted activity tasks may represent
                     // Temporal-delivered cancellations rather than application errors.
-                    if (Workflow.CancellationToken.IsCancellationRequested)
+                    if (IsCurrentTurnCancellationRequested())
                     {
                         throw new OperationCanceledException(
                             "Workflow cancelled during tool fan-out; propagating cancellation.");
@@ -529,6 +540,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     // Per-task inspection below handles application-level failures.
                 }
             }
+
+            ThrowIfCurrentTurnCancellationRequested();
 
             // Assemble final results in original order (synthetic and real interleaved by index).
             var functionResultContents = new List<AIContent>(toolCalls.Count);
@@ -568,7 +581,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     // not the tool's domain type. Accepted limitation — see DurableFunctionOutput.Result.
                     functionResultContents.Add(new FunctionResultContent(tc.CallId, task.Result.Result));
                 }
-                else if (task.IsCanceled || Workflow.CancellationToken.IsCancellationRequested)
+                else if (task.IsCanceled || IsCurrentTurnCancellationRequested())
                 {
                     // Workflow cancellation should propagate as OperationCanceledException.
                     // Temporal may deliver cancelled activities as Faulted (not Cancelled) tasks,

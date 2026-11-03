@@ -80,6 +80,79 @@ public class DurableChatLifecycleRegressionTests
     }
 
     [Fact]
+    public async Task SendAsync_CallerRpcCancellationDoesNotCancelAdmittedTurn()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new GatedChatClient();
+        var taskQueue = $"cancel-rpc-wait-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, model);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"cancel-rpc-wait-{Guid.NewGuid():N}";
+        const string requestId = "caller-disconnected-request";
+        using var cancellation = new CancellationTokenSource();
+
+        try
+        {
+            var originalRequest = session.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "wait for the model")],
+                requestId: requestId,
+                cancellationToken: cancellation.Token);
+            await model.Entered.WaitAsync(Deadline);
+
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<Exception>(() => originalRequest);
+
+            model.Release();
+            var recovered = await session.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "wait for the model")],
+                requestId: requestId).WaitAsync(Deadline);
+
+            Assert.Equal("completed admitted turn", recovered.Text);
+            Assert.Equal(1, model.Calls);
+        }
+        finally
+        {
+            model.Release();
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CancelTurnAsync_RejectsCompletedTurnBeforeAcceptance()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new TestChatClient();
+        var taskQueue = $"cancel-completed-turn-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, model);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"cancel-completed-turn-{Guid.NewGuid():N}";
+        const string requestId = "completed-request";
+
+        try
+        {
+            await session.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "finish first")],
+                requestId: requestId).WaitAsync(Deadline);
+
+            var exception = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                session.CancelTurnAsync(conversationId, requestId));
+            var applicationFailure = Assert.IsType<ApplicationFailureException>(exception.InnerException);
+            Assert.Equal("DurableTurnCancellationAlreadyCompleted", applicationFailure.ErrorType);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task OversizedModelActivityResult_FailsBeforeUpdateResultAndRollsBackHistory()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();

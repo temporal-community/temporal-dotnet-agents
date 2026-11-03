@@ -144,6 +144,20 @@ public interface IDurableChatSessionClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Requests workflow-owned cancellation of the active turn identified by
+    /// <paramref name="requestId"/>.
+    /// </summary>
+    /// <param name="conversationId">The application conversation identifier.</param>
+    /// <param name="requestId">The stable request ID supplied when the turn was started.</param>
+    /// <param name="cancellationToken">
+    /// Cancellation token for this RPC wait only. It does not cancel an accepted turn.
+    /// </param>
+    Task<DurableTurnCancellationResult> CancelTurnAsync(
+        string conversationId,
+        string requestId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Sends a validated graceful shutdown update to the session workflow, causing it to exit its
     /// session loop rather than sitting parked until the configured <c>SessionTimeToLive</c>.
     /// </summary>

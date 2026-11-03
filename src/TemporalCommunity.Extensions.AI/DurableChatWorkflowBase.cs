@@ -36,19 +36,36 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private DateTimeOffset? _sessionIdleDeadline;
     private int _turnCount;
 
-    private sealed class TurnExecutionRecord(
-        string requestId,
-        string admissionFingerprint)
+    private sealed class TurnExecutionRecord
     {
-        public string RequestId { get; } = requestId;
+        public TurnExecutionRecord(
+            string requestId,
+            string admissionFingerprint,
+            CancellationToken workflowCancellationToken = default)
+        {
+            RequestId = requestId;
+            AdmissionFingerprint = admissionFingerprint;
+            CancellationSource = workflowCancellationToken.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(workflowCancellationToken)
+                : new CancellationTokenSource();
+            CancellationToken = CancellationSource.Token;
+        }
 
-        public string AdmissionFingerprint { get; } = admissionFingerprint;
+        public string RequestId { get; }
+
+        public string AdmissionFingerprint { get; }
+
+        public CancellationTokenSource CancellationSource { get; }
+
+        public CancellationToken CancellationToken { get; }
 
         public int JoinerCount { get; set; }
 
         public string? TurnInputFingerprint { get; set; }
 
         public bool IsTerminal { get; set; }
+
+        public bool CancellationRequested { get; set; }
 
         public TOutput? Output { get; set; }
 
@@ -111,6 +128,36 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     protected DurableChatWorkflowInput RequiredInput =>
         Input ?? throw new InvalidOperationException(
             "RequiredInput accessed before RunAsync initialized Input.");
+
+    /// <summary>The active turn's token, linked to both workflow and turn cancellation.</summary>
+    protected CancellationToken CurrentTurnCancellationToken =>
+        _activeTurn?.CancellationToken ?? Workflow.CancellationToken;
+
+    /// <summary>
+    /// Copies activity options and binds them to the active turn's cancellation token. Waiting
+    /// for activity cancellation completion keeps the session from admitting a later turn while
+    /// a canceled activity is still running.
+    /// </summary>
+    protected ActivityOptions ApplyCurrentTurnCancellation(ActivityOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var boundOptions = (ActivityOptions)options.Clone();
+        boundOptions.CancellationToken = CurrentTurnCancellationToken;
+        boundOptions.CancellationType = ActivityCancellationType.WaitCancellationCompleted;
+        return boundOptions;
+    }
+
+    protected bool IsCurrentTurnCancellationRequested() =>
+        _activeTurn?.CancellationRequested == true
+        || CurrentTurnCancellationToken.IsCancellationRequested;
+
+    protected void ThrowIfCurrentTurnCancellationRequested()
+    {
+        if (IsCurrentTurnCancellationRequested())
+        {
+            throw new OperationCanceledException("The active turn was cancelled.");
+        }
+    }
 
     /// <summary>
     /// Initializes start-input state synchronously before a workflow run method first yields.
@@ -924,7 +971,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             return TurnAdmission.Create(active, requestId, isOwner: false, isJoiner: true);
         }
 
-        var record = new TurnExecutionRecord(requestId, admissionFingerprint);
+        var record = new TurnExecutionRecord(
+            requestId,
+            admissionFingerprint,
+            Workflow.CancellationToken);
         _activeTurn = record;
         _isProcessing = true;
         return TurnAdmission.Create(record, requestId, isOwner: true);
@@ -965,6 +1015,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             _activeTurn = null;
             _isProcessing = false;
+            DisposeTurnCancellationSourceIfSafe(current);
         }
         else if (admission.IsJoiner && current.JoinerCount > 0)
         {
@@ -1078,8 +1129,22 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             return;
         }
 
+        if (record.CancellationToken.IsCancellationRequested)
+        {
+            var cancellationFailure = CreateTurnCancellationFailure(exception);
+            CompleteTurnFailure(record, cancellationFailure);
+            throw cancellationFailure;
+        }
+
         CompleteTurnFailure(record, exception);
     }
+
+    private static ApplicationFailureException CreateTurnCancellationFailure(Exception exception) =>
+        new(
+            "The durable turn was cancelled before it completed. External effects may have occurred and are not rolled back.",
+            exception,
+            errorType: "DurableTurnCancelled",
+            nonRetryable: true);
 
     private void RejectTurnAdmission(TurnAdmission admission, Exception exception)
     {
@@ -1095,6 +1160,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             _activeTurn = null;
         }
         _isProcessing = false;
+        DisposeTurnCancellationSourceIfSafe(record);
     }
 
     private static TurnExecutionRecord GetTurnRecord(TurnAdmission admission) =>
@@ -1222,6 +1288,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
 
             AddTerminalTurnRecord(record, enforceBounds: false);
+            DisposeTurnCancellationSourceIfSafe(record);
         }
 
         EnforceTerminalTurnLedgerBounds();
@@ -1325,6 +1392,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             _activeTurn = null;
         }
         _isProcessing = false;
+        DisposeTurnCancellationSourceIfSafe(record);
     }
 
     private void CompleteTurnFailure(TurnExecutionRecord record, Exception exception)
@@ -1340,6 +1408,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             _activeTurn = null;
         }
         _isProcessing = false;
+        DisposeTurnCancellationSourceIfSafe(record);
+    }
+
+    private void DisposeTurnCancellationSourceIfSafe(TurnExecutionRecord record)
+    {
+        record.CancellationSource.Dispose();
     }
 
     /// <summary>
@@ -1380,6 +1454,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         SetTurnInputFingerprint(admission, requestEntry.InputFingerprint);
         RenewSessionIdleDeadline();
 
+        var turnRecord = GetTurnRecord(admission);
         var historyCountBeforeTurn = _history.Count;
         var turnCountBeforeTurn = _turnCount;
         var rollbackParticipant = this as Internal.IDurableTurnRollbackParticipant;
@@ -1388,6 +1463,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         try
         {
+            ThrowIfCurrentTurnCancellationRequested();
+
             // Capture derived transactional state only after this turn owns the gate. A queued
             // update may have started while the preceding turn was suspended; capturing outside
             // this critical section would give it a stale snapshot that could erase the preceding
@@ -1414,9 +1491,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 HeartbeatTimeout = RequiredInput.HeartbeatTimeout,
                 RetryPolicy = Internal.DefaultRetryPolicy.ResolveForModel(RequiredInput.RetryPolicy),
                 Summary = DurableChatClient.BuildActivitySummary(chatOptions),
+                CancellationToken = turnRecord.CancellationToken,
+                CancellationType = ActivityCancellationType.WaitCancellationCompleted,
             };
 
             var output = await ExecuteTurnAsync(activityOptions, requestEntry, chatOptions);
+            ThrowIfCurrentTurnCancellationRequested();
 
             // Build the response entry, then optionally strip its message payload before
             // appending so external-history mode keeps the workflow history metadata-only.
@@ -1479,8 +1559,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 rollbackParticipant!.RestoreTurnRollbackState(participantStateBeforeTurn);
             }
 
-            CompleteTurnFailure(GetTurnRecord(admission), exception);
-            RenewSessionIdleDeadline();
+            var terminalException = IsCurrentTurnCancellationRequested()
+                ? CreateTurnCancellationFailure(exception)
+                : exception;
+            CompleteTurnFailure(turnRecord, terminalException);
+            if (!IsCurrentTurnCancellationRequested())
+            {
+                RenewSessionIdleDeadline();
+            }
+            if (!ReferenceEquals(terminalException, exception))
+            {
+                throw terminalException;
+            }
+
             throw;
         }
         finally
@@ -1543,6 +1634,100 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     }
 
     // ── Updates ─────────────────────────────────────────────────────────────
+
+    /// <summary>Validates that the requested logical turn is active and not already cancelled.</summary>
+    [WorkflowUpdateValidator(nameof(CancelTurnAsync))]
+    public void ValidateCancelTurn(string requestId)
+    {
+        ValidateCancelTurnRequest(requestId);
+    }
+
+    private void ValidateCancelTurnRequest(string requestId)
+    {
+        if (string.IsNullOrWhiteSpace(requestId))
+        {
+            throw TurnCancellationFailure(
+                "A non-empty request ID is required to cancel a turn.",
+                "DurableTurnCancellationInvalidRequest");
+        }
+
+        if (_activeTurn is null)
+        {
+            throw CompletedOrInactiveTurnFailure(requestId);
+        }
+
+        if (!string.Equals(_activeTurn.RequestId, requestId, StringComparison.Ordinal))
+        {
+            if (_terminalTurns.ContainsKey(requestId))
+            {
+                throw CompletedOrInactiveTurnFailure(requestId);
+            }
+
+            throw TurnCancellationFailure(
+                "The request ID does not match the active turn.",
+                "DurableTurnCancellationRequestMismatch");
+        }
+
+        if (_activeTurn.IsTerminal)
+        {
+            throw CompletedOrInactiveTurnFailure(requestId);
+        }
+
+        if (_activeTurn.CancellationToken.IsCancellationRequested)
+        {
+            throw TurnCancellationFailure(
+                "Cancellation has already been requested for this turn.",
+                "DurableTurnCancellationAlreadyRequested");
+        }
+    }
+
+    /// <summary>
+    /// Requests cancellation of a specific active logical turn, including its current activity or
+    /// approval wait. The workflow waits for active activity cancellation to complete before ending
+    /// the turn. A caller cancellation token cancels only this update RPC wait; it does not cancel
+    /// the accepted turn.
+    /// </summary>
+    [WorkflowUpdate("CancelTurn")]
+    public Task<DurableTurnCancellationResult> CancelTurnAsync(string requestId)
+    {
+        // Accepted updates replay without validator-only state; handle races using workflow state.
+        var record = _activeTurn;
+        if (record is null
+            || record.IsTerminal
+            || !string.Equals(record.RequestId, requestId, StringComparison.Ordinal))
+        {
+            return Task.FromResult(new DurableTurnCancellationResult
+            {
+                RequestId = requestId,
+                Status = DurableTurnCancellationStatus.AlreadyCompleted,
+            });
+        }
+
+        if (!record.CancellationToken.IsCancellationRequested)
+        {
+            record.CancellationRequested = true;
+            record.CancellationSource.Cancel();
+        }
+        return Task.FromResult(new DurableTurnCancellationResult
+        {
+            RequestId = requestId,
+            Status = DurableTurnCancellationStatus.CancellationRequested,
+        });
+    }
+
+    private ApplicationFailureException CompletedOrInactiveTurnFailure(string requestId) =>
+        _terminalTurns.ContainsKey(requestId)
+            ? TurnCancellationFailure(
+                "The requested turn has already completed.",
+                "DurableTurnCancellationAlreadyCompleted")
+            : TurnCancellationFailure(
+                "No active turn matches the request ID.",
+                "DurableTurnCancellationNotActive");
+
+    private static ApplicationFailureException TurnCancellationFailure(
+        string message,
+        string errorType) =>
+        new(message, errorType: errorType, nonRetryable: true);
 
     /// <summary>
     /// Validates and requests graceful shutdown of this session.
@@ -1621,7 +1806,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             onResolved: d => Workflow.Logger.LogInformation(
                 "[{ConversationId}] Approval resolved (RequestId: {RequestId}, Approved: {Approved})",
                 Workflow.Info.WorkflowId, d.RequestId, d.Approved),
-            historyBudgetReserveReached: () => IsHistoryReserveReached);
+            historyBudgetReserveReached: () => IsHistoryReserveReached,
+            cancellationToken: CurrentTurnCancellationToken,
+            turnCancellationRequested: IsCurrentTurnCancellationRequested);
 
         if (input.EnableTransportPayloadGuard)
         {
@@ -1783,7 +1970,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             approvalTimeout,
             onRequested,
             onResolved,
-            historyBudgetReserveReached: () => IsHistoryReserveReached);
+            historyBudgetReserveReached: () => IsHistoryReserveReached,
+            cancellationToken: CurrentTurnCancellationToken,
+            turnCancellationRequested: IsCurrentTurnCancellationRequested);
 
         OnApprovalRequestResolved(decision);
         return decision;

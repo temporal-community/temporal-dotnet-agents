@@ -186,6 +186,18 @@ payload_codec_snippet='// BEGIN SNIPPET docs/how-to/MEAI/payload-codecs.md#confi
 run_case meai-payload-codec-uncovered reject "$payload_codec_doc" '' '' 'docs/how-to/MEAI/payload-codecs.md'
 run_case meai-payload-codec-covered pass "$payload_codec_doc" "$payload_codec_snippet" '' 'docs/how-to/MEAI/payload-codecs.md'
 
+maf_cancel_doc='# Agent usage
+
+## Cancel an active turn
+
+```csharp
+await agentClient.CancelTurnAsync(session.SessionId, requestId);
+```'
+maf_cancel_snippet='// BEGIN SNIPPET docs/how-to/MAF/usage.md#cancel-an-active-turn
+// END SNIPPET docs/how-to/MAF/usage.md#cancel-an-active-turn'
+run_case maf-cancel-uncovered reject "$maf_cancel_doc" '' '' 'docs/how-to/MAF/usage.md'
+run_case maf-cancel-covered pass "$maf_cancel_doc" "$maf_cancel_snippet" '' 'docs/how-to/MAF/usage.md'
+
 phase_doc='# Testing
 
 ### Phase 0 timer harness

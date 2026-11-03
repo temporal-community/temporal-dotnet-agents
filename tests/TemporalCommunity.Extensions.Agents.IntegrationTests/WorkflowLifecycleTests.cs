@@ -74,6 +74,23 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
         _output.WriteLine("Fresh workflow started after shutdown; turn count reset to 1.");
     }
 
+    [Fact]
+    public async Task CancelTurn_AgentClientRejectsAlreadyCompletedRequest()
+    {
+        var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
+        const string requestId = "completed-agent-request";
+
+        await _fixture.AgentProxy.RunAsync(
+            "Complete before cancellation",
+            session,
+            new TemporalAgentRunOptions { RequestId = requestId });
+
+        var exception = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            _fixture.AgentClient.CancelTurnAsync(session.SessionId, requestId));
+        var applicationFailure = Assert.IsType<ApplicationFailureException>(exception.InnerException);
+        Assert.Equal("DurableTurnCancellationAlreadyCompleted", applicationFailure.ErrorType);
+    }
+
     // ── Concurrent updates serialization ───────────────────────────────────────
 
     [Fact]

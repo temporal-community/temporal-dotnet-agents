@@ -39,6 +39,20 @@ public interface ITemporalAgentClient
         TemporalAgentSessionId sessionId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Requests workflow-owned cancellation of the active turn identified by
+    /// <paramref name="requestId"/>.
+    /// </summary>
+    /// <param name="sessionId">The application-owned agent session identifier.</param>
+    /// <param name="requestId">The stable request ID supplied when the turn was started.</param>
+    /// <param name="cancellationToken">
+    /// Cancellation token for this RPC wait only. It does not cancel an accepted turn.
+    /// </param>
+    Task<DurableTurnCancellationResult> CancelTurnAsync(
+        TemporalAgentSessionId sessionId,
+        string requestId,
+        CancellationToken cancellationToken = default);
+
     // ── Human-in-the-Loop (GAP 3) ────────────────────────────────────────────
 
     /// <summary>

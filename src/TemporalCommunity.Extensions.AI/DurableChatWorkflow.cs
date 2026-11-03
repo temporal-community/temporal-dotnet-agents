@@ -129,7 +129,9 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
         DurableSessionRequest? requestEntry = null;
         try
         {
-            await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+            await Workflow.WaitConditionAsync(
+                () => _toolAuthorityReady,
+                cancellationToken: CurrentTurnCancellationToken).ConfigureAwait(true);
             if (RequiredInput.EnableTransportPayloadGuard)
             {
                 Internal.DurableTransportPayloadGuard.EnsureWithinLimit(

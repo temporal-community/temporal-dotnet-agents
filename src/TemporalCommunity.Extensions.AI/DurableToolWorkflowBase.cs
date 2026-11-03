@@ -133,7 +133,9 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
 
         try
         {
-            await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+            await Workflow.WaitConditionAsync(
+                () => _toolAuthorityReady,
+                cancellationToken: CurrentTurnCancellationToken).ConfigureAwait(true);
 
             var requestEntry = DurableSessionRequest.FromMessages(
                 request.Messages,

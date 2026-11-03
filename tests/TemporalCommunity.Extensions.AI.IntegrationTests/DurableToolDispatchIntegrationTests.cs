@@ -4,12 +4,14 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Temporalio.Activities;
 using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
+using Temporalio.Worker;
 using Temporalio.Workflows;
 using Xunit;
 
@@ -1048,6 +1050,120 @@ public class DurableToolDispatchIntegrationTests
         toolGate.TrySetResult();
 
         await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task CancelTurnAsync_CancelsActiveToolAndReplays()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var toolCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var toolTokenWasCancelled = false;
+        var blockingTool = AIFunctionFactory.Create(
+            async (string? _ = null, CancellationToken cancellationToken = default) =>
+            {
+                toolStarted.TrySetResult();
+                try
+                {
+                    while (!cancellationToken.IsCancellationRequested)
+                    {
+                        ActivityExecutionContext.Current.Heartbeat();
+                        await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                }
+                catch (OperationCanceledException)
+                {
+                    toolTokenWasCancelled = cancellationToken.IsCancellationRequested;
+                    toolCancelled.TrySetResult();
+                    throw;
+                }
+
+                return (object?)"unexpected";
+            },
+            "blocking_cancel_tool",
+            "A tool that waits for cancellation.");
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-cancel-turn", "blocking_cancel_tool")],
+            "The session remained usable.");
+        var taskQueue = $"pattern3-cancel-turn-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            scripted,
+            builder => builder.AddDurableTool(blockingTool, options => options.NoRetry()));
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"cancel-turn-{Guid.NewGuid():N}";
+        const string requestId = "cancel-this-request";
+        var turnTask = sessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "start the blocking tool")],
+            requestId: requestId);
+
+        await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        var cancellation = await sessionClient.CancelTurnAsync(conversationId, requestId)
+            .WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(DurableTurnCancellationStatus.CancellationRequested, cancellation.Status);
+        Assert.Equal(requestId, cancellation.RequestId);
+        await toolCancelled.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var failure = await Assert.ThrowsAnyAsync<Exception>(() => turnTask);
+        var applicationFailure = FindApplicationFailure(failure);
+        Assert.NotNull(applicationFailure);
+        Assert.Equal("DurableTurnCancelled", applicationFailure!.ErrorType);
+        Assert.True(toolCancelled.Task.IsCompleted);
+        Assert.True(toolTokenWasCancelled);
+
+        var workflow = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+            sessionClient.GetWorkflowId(conversationId));
+        var historyBeforeDuplicate = await workflow.FetchHistoryAsync();
+        var duplicateCancellation = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            sessionClient.CancelTurnAsync(conversationId, requestId));
+        Assert.Equal(
+            "DurableTurnCancellationAlreadyCompleted",
+            Assert.IsType<ApplicationFailureException>(duplicateCancellation.InnerException).ErrorType);
+        var historyAfterDuplicate = await workflow.FetchHistoryAsync();
+        Assert.Equal(
+            historyBeforeDuplicate.Events.Count(
+                item => item.WorkflowExecutionUpdateAcceptedEventAttributes is not null),
+            historyAfterDuplicate.Events.Count(
+                item => item.WorkflowExecutionUpdateAcceptedEventAttributes is not null));
+
+        var next = await sessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "continue after cancellation")],
+            requestId: "turn-after-cancel");
+        Assert.Equal("The session remained usable.", next.Messages[^1].Text);
+
+        var replayOptions = new WorkflowReplayerOptions
+        {
+            DataConverter = DurableAIDataConverter.Instance,
+        };
+        replayOptions.AddWorkflow<DurableChatWorkflow>();
+        var history = await workflow.FetchHistoryAsync();
+        var replay = await new WorkflowReplayer(replayOptions)
+            .ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+        Assert.Null(replay.ReplayFailure);
+
+        await host.StopAsync();
+
+        static ApplicationFailureException? FindApplicationFailure(Exception exception)
+        {
+            for (Exception? current = exception; current is not null; current = current.InnerException)
+            {
+                if (current is ApplicationFailureException failure)
+                {
+                    return failure;
+                }
+            }
+
+            return null;
+        }
     }
 
     /// <summary>

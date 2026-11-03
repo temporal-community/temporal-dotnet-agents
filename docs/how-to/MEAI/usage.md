@@ -21,11 +21,12 @@ how-to reference for all of them:
 
 ## Durable-chat redesign target contracts
 
-**Implementation status:** Phases 0, 1, and 2.1–2.6 are implemented. The current API supports
-request identity, active-turn admission, bounded terminal outcomes, epoch-aware idle deadlines,
-per-payload transport guards, bounded turn joiners, event-history thresholds, and validated
-session shutdown. In particular, `correlationId` is not an idempotency key and current
-Continue-as-New can trim history.
+**Implementation status:** Phases 0, 1, 2.1–2.6, and 3.1–3.4 are implemented; workflow-owned turn
+cancellation is in progress. The current API supports request identity, active-turn admission,
+bounded terminal outcomes, epoch-aware idle deadlines, per-payload transport guards, bounded turn
+joiners, event-history thresholds, validated session shutdown, stable logical tool-operation keys,
+validated tool dispatch, call-bound approval decisions, and bounded review projections. In
+particular, `correlationId` is not an idempotency key and current Continue-as-New can trim history.
 
 | Boundary | Selected target contract |
 |---|---|
@@ -358,6 +359,37 @@ evicted; an individual outcome larger than the byte limit is not retained. Evict
 deduplication window for that request ID, so a later retry can execute again. This ledger does not
 make external tool effects exactly-once. Make effectful tools idempotent with an
 application-level business-operation ID when duplicate external effects must be suppressed.
+
+#### Cancel an active turn
+
+Turn cancellation is a separate workflow update; cancelling the `SendAsync` RPC wait does not
+cancel work already accepted by the workflow. Persist and reuse the same request ID to address the
+turn:
+
+```csharp
+var requestId = Guid.NewGuid().ToString("N"); // Persist before submission.
+var turn = sessionClient.SendAsync(
+    "customer-42",
+    [new ChatMessage(ChatRole.User, "Run the long operation.")],
+    requestId: requestId);
+
+var cancellation = await sessionClient.CancelTurnAsync("customer-42", requestId);
+if (cancellation.Status == DurableTurnCancellationStatus.CancellationRequested)
+{
+    Console.WriteLine("The workflow requested cancellation.");
+}
+```
+
+`CancelTurnAsync` targets only the matching active request. A cancellation race can return
+`AlreadyCompleted`; if the request has already completed or does not match the active turn, update
+validation rejects it before acceptance. Observe the original `turn` task for its terminal outcome.
+The update requests cancellation of an active model, interceptor, or tool activity and interrupts
+a pending approval wait. Temporal waits for an active activity's cancellation to complete before
+the turn terminates; activity code and downstream operations must cooperate, so it may not stop
+immediately. No later activity is scheduled. Cancellation does not roll back external effects: a
+dispatched effect may have completed even if its result was lost, so use downstream idempotency and
+reconcile authoritative state. The cancellation token passed to either RPC controls only that RPC
+wait; use `CancelTurnAsync` to request turn cancellation.
 
 #### Recovering a generated request ID
 

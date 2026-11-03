@@ -135,3 +135,15 @@ default; configure `MaxTerminalOutcomeCount` and `MaxTerminalOutcomeBytes` on
 is evicted first, while pending turns are never evicted. An oversized outcome is not retained.
 After eviction, retrying that request ID can execute the turn again, so tool-side business
 idempotency remains necessary even when request IDs are reused correctly.
+
+### Cancelling a managed turn
+
+Call `CancelTurnAsync(conversationId, requestId)` to request workflow-owned cancellation of the
+matching active turn. The request ID must match the one supplied to `SendAsync`. A mismatched or
+already completed request is rejected during update validation; a completion race may instead
+return `AlreadyCompleted`. Cancelling the caller's `SendAsync` RPC wait does not cancel accepted
+workflow work. The workflow propagates cancellation to an active model, interceptor, or tool
+activity and interrupts a pending approval wait. It waits for active activity cancellation to
+complete before stopping and does not schedule more activity work. Activity code and downstream
+operations must cooperate with cancellation; an external effect already dispatched is not undone
+and may need reconciliation.

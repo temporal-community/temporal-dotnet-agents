@@ -121,6 +121,21 @@ internal sealed class DefaultTemporalAgentClient(
     }
 
     /// <inheritdoc/>
+    public async Task<DurableTurnCancellationResult> CancelTurnAsync(
+        TemporalAgentSessionId sessionId,
+        string requestId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+
+        var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
+        return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableTurnCancellationResult>(
+            workflow => workflow.CancelTurnAsync(requestId),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
     public async Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
         TemporalAgentSessionId sessionId,
         DurableApprovalDecision decision,

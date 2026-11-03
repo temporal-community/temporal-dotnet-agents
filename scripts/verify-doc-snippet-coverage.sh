@@ -102,7 +102,8 @@ scan_docs() {
                  heading == "meai-approval-content" &&
                  body ~ /ToDurableDecision\(\)/) ||
                 (FILENAME == "docs/how-to/MAF/usage.md" &&
-                 (heading == "request-id-recovery" || heading == "inspecting-workflow-history-budget")) ||
+                 (heading == "request-id-recovery" || heading == "inspecting-workflow-history-budget" ||
+                  heading == "cancel-an-active-turn")) ||
                 (FILENAME == "docs/how-to/MEAI/custom-workflow-output.md" &&
                  heading == "package-managed-typed-turns" &&
                  body ~ /DurableToolWorkflowBase/) ||

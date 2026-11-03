@@ -175,6 +175,9 @@ public class ProxyResolutionFailureTests
         public Task<TemporalCommunity.Extensions.AI.DurableChatHistoryBudgetStatus> GetHistoryBudgetAsync(TemporalAgentSessionId session, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
+        public Task<TemporalCommunity.Extensions.AI.DurableTurnCancellationResult> CancelTurnAsync(TemporalAgentSessionId session, string requestId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
         public Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalRequest?> GetPendingApprovalAsync(TemporalAgentSessionId session, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 

@@ -350,6 +350,17 @@ sealed class TelemetryToolFunction(AIFunction inner, ILogger logger) : Delegatin
 Wrap the factory's function with the decorator before returning it: `Function = new
 TelemetryToolFunction(AIFunctionFactory.Create(...), logger)`.
 
+### Turn cancellation and tool effects
+
+The managed session exposes `CancelTurnAsync(conversationId, requestId)` to request cancellation
+of one active turn. It propagates cancellation to an in-flight model, interceptor, or tool activity
+and interrupts a pending approval wait. Temporal waits for activity cancellation to complete
+before the turn terminates; activity code and downstream operations must cooperate, so cancellation
+may not stop them immediately. No later activity is scheduled. Cancellation does not roll back an
+external effect; if an effect may have completed before cancellation was observed, reconcile its
+authoritative state and use the logical operation key for downstream idempotency. A caller
+cancelling the `SendAsync` RPC wait is not a turn-cancellation request.
+
 ### Activity idempotency key
 
 `Metadata.IdempotencyKey` identifies one logical tool call across activity retries and

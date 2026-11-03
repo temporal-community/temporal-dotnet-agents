@@ -139,3 +139,12 @@ Do not implement approval by passing a tool in `ChatOptions.Tools` or by putting
 For one model response, the workflow records all interceptor decisions, resolves every required
 approval, and only then schedules any approved tool activity. An allowed sibling tool therefore
 cannot execute while another tool from that response is awaiting review.
+
+To abandon the active turn while it is waiting for review, call
+`CancelTurnAsync(conversationId, requestId)` with the turn's persisted request ID. This cancels the
+workflow-owned approval wait and terminates the turn; it is distinct from resolving the approval
+as rejected. Any earlier external tool effect is not rolled back. The `CancellationToken` passed
+to the client call only cancels that RPC wait. If cancellation is requested while an activity is
+running, Temporal cancels the activity and the workflow waits for cancellation to complete;
+activity code and downstream operations must cooperate, and cancellation cannot undo an effect
+that already occurred.

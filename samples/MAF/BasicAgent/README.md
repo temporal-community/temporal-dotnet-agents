@@ -17,6 +17,7 @@ This sample demonstrates:
 - **History lives in the workflow.** Conversation context is stored in `AgentWorkflow` state, not in the client. Any process with the session ID can send a follow-up.
 - **Sessions are lazy.** `CreateSessionAsync()` creates a local session token — no Temporal workflow exists yet. The `AgentWorkflow` starts on the first `RunAsync()` call. Querying the workflow handle before sending any message will return "workflow not found".
 - **Tool calls are durable per-tool activities.** `get_weather` executes inside its own `InvokeAgentTool` activity. If the worker restarts between the tool call and the model response, the tool result is replayed from history.
+- **Turn cancellation is explicit.** Resolve `ITemporalAgentClient` and call `CancelTurnAsync(session.SessionId, requestId)` with the ID supplied to `RunAsync`. Cancelling the caller's `RunAsync` RPC wait does not cancel the accepted turn. The workflow propagates cancellation to active model/tool activities and waits for their cancellation to complete before stopping. Activity code must cooperate, and cancellation never rolls back an external tool effect.
 - **Single-process simplicity.** Worker, agent, and caller all live in the same `IHost` — the minimum viable setup before splitting into separate processes.
 
 ## Getting Started

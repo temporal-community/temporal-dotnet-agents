@@ -177,6 +177,37 @@ The fingerprint covers messages, the configured model route and tool authority, 
 and structured-output settings. Correlation IDs and Temporal Update IDs remain separate from this
 logical request identity.
 
+### Cancel an active turn
+
+Resolve `ITemporalAgentClient` for workflow-owned cancellation. The request ID must be the same ID
+supplied to `RunAsync`; cancellation is a separate update and does not undo external effects:
+
+```csharp
+var agentClient = services.GetRequiredService<ITemporalAgentClient>();
+var requestId = Guid.NewGuid().ToString("N"); // Persist before submission.
+var turn = agentProxy.RunAsync(
+    "Run the long operation.",
+    session,
+    new TemporalAgentRunOptions { RequestId = requestId });
+
+var cancellation = await agentClient.CancelTurnAsync(session.SessionId, requestId);
+if (cancellation.Status == DurableTurnCancellationStatus.CancellationRequested)
+{
+    Console.WriteLine("The workflow requested cancellation.");
+}
+```
+
+Observe the original `turn` task for its terminal outcome. A cancellation race can return
+`AlreadyCompleted`; if the request has already completed or does not match the active turn, update
+validation rejects it before acceptance. The workflow propagates cancellation to an active model,
+interceptor, or tool activity and interrupts a pending approval wait. Temporal waits for activity
+cancellation to complete before stopping and schedules no further activity work. Activity code and
+downstream operations must cooperate with cancellation. Cancellation cannot roll back a dispatched
+external effect, so an interrupted effect may have an uncertain outcome; use downstream idempotency
+and reconcile authoritative state. A cancellation token passed to `RunAsync` or `CancelTurnAsync`
+cancels only that RPC wait; it does not cancel an accepted turn. Use `CancelTurnAsync` to request
+turn cancellation.
+
 ---
 
 ## Reducing the LLM Context Window

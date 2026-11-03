@@ -381,6 +381,22 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             .ConfigureAwait(false);
     }
 
+    /// <inheritdoc/>
+    public async Task<DurableTurnCancellationResult> CancelTurnAsync(
+        string conversationId,
+        string requestId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+
+        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
+        return await handle.ExecuteUpdateAsync<DurableChatWorkflow, DurableTurnCancellationResult>(
+            wf => wf.CancelTurnAsync(requestId),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Sends a graceful shutdown update to the session workflow so it exits its session loop
     /// rather than sitting parked until <see cref="DurableExecutionOptions.SessionTimeToLive"/>.
