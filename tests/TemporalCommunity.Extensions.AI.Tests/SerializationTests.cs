@@ -203,6 +203,7 @@ public class SerializationTests
             Messages = [new ChatMessage(ChatRole.Assistant, [])],
             FinishReason = ChatFinishReason.Length,
             ResponseId = "response-1",
+            ProviderConversationId = "provider-conversation-1",
             ModelId = "model-1",
             AdditionalProperties = new AdditionalPropertiesDictionary { ["provider.key"] = "value" },
             CompletionReason = DurableTurnCompletionReason.IncompleteResponse,
@@ -217,6 +218,7 @@ public class SerializationTests
         Assert.True(restored.IsFinal);
         Assert.Equal(ChatFinishReason.Length, restored.FinishReason);
         Assert.Equal("response-1", restored.ResponseId);
+        Assert.Equal("provider-conversation-1", restored.ProviderConversationId);
         Assert.Equal("model-1", restored.ModelId);
         Assert.Equal("value", restored.AdditionalProperties!["provider.key"]?.ToString());
         Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, restored.CompletionReason);

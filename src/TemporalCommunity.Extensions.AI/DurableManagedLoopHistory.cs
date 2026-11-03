@@ -15,6 +15,7 @@ internal static class DurableManagedLoopHistory
             Usage = diagnosticResponse.Usage,
             FinishReason = diagnosticResponse.FinishReason,
             ResponseId = diagnosticResponse.ResponseId,
+            ConversationId = diagnosticResponse.ConversationId,
             ModelId = diagnosticResponse.ModelId,
             AdditionalProperties = diagnosticResponse.AdditionalProperties,
         };

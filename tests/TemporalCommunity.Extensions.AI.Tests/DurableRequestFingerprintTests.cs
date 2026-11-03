@@ -76,6 +76,46 @@ public class DurableRequestFingerprintTests
     }
 
     [Fact]
+    public void CreateChat_IncludesStructuredResponseSchemaIdentity()
+    {
+        var messages = new[] { new ChatMessage(ChatRole.User, "describe the result") };
+        var workflowInput = new DurableChatWorkflowInput();
+        var first = DurableRequestFingerprint.CreateChat(
+            new DurableChatInput
+            {
+                Messages = messages,
+                Options = new ChatOptions
+                {
+                    ResponseFormat = ChatResponseFormat.ForJsonSchema<FirstStructuredShape>(),
+                },
+            },
+            workflowInput);
+        var sameSchema = DurableRequestFingerprint.CreateChat(
+            new DurableChatInput
+            {
+                Messages = messages,
+                Options = new ChatOptions
+                {
+                    ResponseFormat = ChatResponseFormat.ForJsonSchema<FirstStructuredShape>(),
+                },
+            },
+            workflowInput);
+        var changedSchema = DurableRequestFingerprint.CreateChat(
+            new DurableChatInput
+            {
+                Messages = messages,
+                Options = new ChatOptions
+                {
+                    ResponseFormat = ChatResponseFormat.ForJsonSchema<SecondStructuredShape>(),
+                },
+            },
+            workflowInput);
+
+        Assert.Equal(first, sameSchema);
+        Assert.NotEqual(first, changedSchema);
+    }
+
+    [Fact]
     public void CreateChatAdmission_IncludesConversationButIgnoresCorrelationAndRequestIdentity()
     {
         var first = DurableRequestFingerprint.CreateChatAdmission(new DurableChatInput
@@ -154,5 +194,15 @@ public class DurableRequestFingerprintTests
             });
 
         Assert.NotEqual(original, changed);
+    }
+
+    public sealed class FirstStructuredShape
+    {
+        public string Name { get; set; } = string.Empty;
+    }
+
+    public sealed class SecondStructuredShape
+    {
+        public int Count { get; set; }
     }
 }

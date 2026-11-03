@@ -63,6 +63,34 @@ DurableChatSessionClient
   -> GetChatStep activity
 ```
 
+## Typed structured responses
+
+For a session configured with a provider that supports JSON-schema output, use
+`SendStructuredAsync<T>` to request and validate a typed object while retaining MEAI response
+metadata:
+
+```csharp
+var response = await sessionClient.SendStructuredAsync<WeatherSummary>(
+    "structured-weather",
+    "Return a JSON object with the weather summary.",
+    requestId: Guid.NewGuid().ToString("N"));
+
+Console.WriteLine(response.Result.Summary);
+Console.WriteLine(response.ResponseId);
+
+public sealed class WeatherSummary
+{
+    public string Summary { get; set; } = string.Empty;
+}
+```
+
+The generated schema is part of the request fingerprint, so retries with the same request ID must
+use the same result type and serializer settings. `DurableStructuredOutputException` retains the
+original response when the turn is incomplete or its final JSON cannot be deserialized. Leave
+`ChatOptions.ResponseFormat` unset; the helper supplies the type-bound schema. This sample's
+default worker also enables toolsets, so verify your provider's support for combining tool
+declarations with JSON-schema output or use a dedicated tool-free worker configuration.
+
 ## Run
 
 Start Temporal Service 1.31.0 or newer. For local development:

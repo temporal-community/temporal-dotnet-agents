@@ -267,6 +267,7 @@ internal sealed class DurableChatActivities(
             Usage = response.Usage,
             FinishReason = response.FinishReason,
             ResponseId = response.ResponseId,
+            ProviderConversationId = response.ConversationId,
             ModelId = response.ModelId,
             AdditionalProperties = response.AdditionalProperties,
             CompletionReason = completionReason,

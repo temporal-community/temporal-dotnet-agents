@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Exceptions;
 
 namespace TemporalCommunity.Extensions.AI.Session;
 
@@ -23,6 +24,13 @@ public class DurableSessionResponse : DurableSessionEntry
     /// <summary>The provider's response ID, when supplied.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResponseId { get; init; }
+
+    /// <summary>
+    /// The provider's conversation-state ID, when supplied. This is distinct from the
+    /// application-owned durable session identity.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProviderConversationId { get; init; }
 
     /// <summary>The model ID reported by the provider, when supplied.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -55,6 +63,50 @@ public class DurableSessionResponse : DurableSessionEntry
     [JsonIgnore]
     public string Text =>
         Messages.LastOrDefault(m => m.Role == ChatRole.Assistant)?.Text ?? string.Empty;
+
+    /// <summary>
+    /// Rehydrates this entry as an MEAI typed response and validates that it contains a
+    /// complete, non-null JSON value that can be deserialized as <typeparamref name="T"/>.
+    /// </summary>
+    /// <param name="serializerOptions">
+    /// JSON serialization options used for schema generation and result deserialization.
+    /// When omitted, the durable AI JSON options are used.
+    /// </param>
+    /// <exception cref="DurableStructuredOutputException">
+    /// The turn did not complete with a valid structured result.
+    /// </exception>
+    internal ChatResponse<T> ToStructuredChatResponse<T>(
+        JsonSerializerOptions serializerOptions)
+    {
+        var response = new ChatResponse(Messages.ToList())
+        {
+            ResponseId = ResponseId,
+            ConversationId = ProviderConversationId,
+            ModelId = ModelId,
+            CreatedAt = CreatedAt,
+            FinishReason = FinishReason,
+            Usage = Usage,
+            AdditionalProperties = RestoreAdditionalProperties(ResponseAdditionalProperties),
+        };
+        ArgumentNullException.ThrowIfNull(serializerOptions);
+        var typedResponse = new ChatResponse<T>(response, serializerOptions);
+
+        if (CompletionReason != DurableTurnCompletionReason.FinalResponse)
+        {
+            throw new DurableStructuredOutputException(
+                this,
+                DurableStructuredOutputFailureReason.IncompleteResponse);
+        }
+
+        if (!typedResponse.TryGetResult(out _))
+        {
+            throw new DurableStructuredOutputException(
+                this,
+                DurableStructuredOutputFailureReason.InvalidResponse);
+        }
+
+        return typedResponse;
+    }
 
     /// <summary>
     /// Creates a response entry from a <see cref="ChatResponse"/>.
@@ -114,6 +166,7 @@ public class DurableSessionResponse : DurableSessionEntry
             Messages = response.Messages.ToList(),
             Usage = response.Usage,
             ResponseId = response.ResponseId,
+            ProviderConversationId = response.ConversationId,
             ModelId = response.ModelId,
             ResponseAdditionalProperties = SerializeAdditionalProperties(response.AdditionalProperties),
             FinishReason = response.FinishReason,
@@ -133,6 +186,23 @@ public class DurableSessionResponse : DurableSessionEntry
         foreach (var (key, value) in properties)
         {
             result.Add(key, JsonSerializer.SerializeToElement(value, DurableAIJsonUtilities.DefaultOptions));
+        }
+
+        return result;
+    }
+
+    private static AdditionalPropertiesDictionary? RestoreAdditionalProperties(
+        IReadOnlyDictionary<string, JsonElement>? properties)
+    {
+        if (properties is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var result = new AdditionalPropertiesDictionary();
+        foreach (var (key, value) in properties)
+        {
+            result.Add(key, value);
         }
 
         return result;

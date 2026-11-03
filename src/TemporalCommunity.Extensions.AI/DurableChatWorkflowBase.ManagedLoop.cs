@@ -41,6 +41,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         List<ChatMessage> allTurnMessages = [];
         UsageDetails? totalUsage = null;
         string? responseId = null;
+        string? providerConversationId = null;
         string? modelId = null;
         AdditionalPropertiesDictionary? additionalProperties = null;
         var consecutiveErrors = 0;
@@ -149,6 +150,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 totalUsage.Add(stepResult.Usage);
             }
             responseId = stepResult.ResponseId;
+            providerConversationId = stepResult.ProviderConversationId;
             modelId = stepResult.ModelId;
             additionalProperties = stepResult.AdditionalProperties;
 
@@ -163,6 +165,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         Usage = totalUsage,
                         FinishReason = stepResult.FinishReason,
                         ResponseId = responseId,
+                        ConversationId = providerConversationId,
                         ModelId = modelId,
                         AdditionalProperties = additionalProperties,
                     },
@@ -178,6 +181,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         Usage = totalUsage,
                         FinishReason = stepResult.FinishReason,
                         ResponseId = responseId,
+                        ConversationId = providerConversationId,
                         ModelId = modelId,
                         AdditionalProperties = additionalProperties,
                     },
@@ -638,6 +642,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 // The library, not the provider, terminated this aggregate turn.
                 FinishReason = null,
                 ResponseId = responseId,
+                ConversationId = providerConversationId,
                 ModelId = modelId,
                 AdditionalProperties = additionalProperties,
             },

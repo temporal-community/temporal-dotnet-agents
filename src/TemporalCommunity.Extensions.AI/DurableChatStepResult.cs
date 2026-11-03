@@ -46,6 +46,10 @@ internal sealed class DurableChatStepResult
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResponseId { get; init; }
 
+    /// <summary>The provider conversation-state ID returned for this model step, when available.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProviderConversationId { get; init; }
+
     /// <summary>The model ID reported for this model step, when available.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ModelId { get; init; }

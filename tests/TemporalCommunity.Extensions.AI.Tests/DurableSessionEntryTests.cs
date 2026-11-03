@@ -98,6 +98,7 @@ public class DurableSessionEntryTests
         var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, "hello"))
         {
             ResponseId = "provider-response-1",
+            ConversationId = "provider-conversation-1",
             ModelId = "model-1",
             FinishReason = ChatFinishReason.Stop,
             AdditionalProperties = new AdditionalPropertiesDictionary
@@ -114,6 +115,7 @@ public class DurableSessionEntryTests
         var restored = RoundTrip(entry);
 
         Assert.Equal("provider-response-1", restored.ResponseId);
+        Assert.Equal("provider-conversation-1", restored.ProviderConversationId);
         Assert.Equal("model-1", restored.ModelId);
         Assert.Equal(ChatFinishReason.Stop, restored.FinishReason);
         Assert.Equal("trace-1", restored.ResponseAdditionalProperties!["provider.trace"].GetString());

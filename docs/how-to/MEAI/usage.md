@@ -293,6 +293,36 @@ Console.WriteLine(response.Text);
 var history = await sessionClient.GetHistoryAsync("customer-42");
 ```
 
+### Send schema-bound structured output
+
+Use `SendStructuredAsync<T>` when the response must deserialize to a non-null object. It generates
+the MEAI JSON schema from `T`, sends that schema as `ChatOptions.ResponseFormat`, and returns an
+MEAI `ChatResponse<T>` with the parsed `Result` and response metadata:
+
+```csharp
+var requestId = Guid.NewGuid().ToString("N"); // Persist before submission if retries are possible.
+var response = await sessionClient.SendStructuredAsync<WeatherSummary>(
+    "customer-42",
+    "Return a JSON object with the weather summary.",
+    requestId: requestId);
+
+Console.WriteLine(response.Result.Summary);
+Console.WriteLine(response.ResponseId);
+```
+
+`WeatherSummary` must produce a JSON object at the schema root; wrap primitive and array results in
+an object type. The provider must support JSON-schema structured output. Leave
+`ChatOptions.ResponseFormat` unset because the requested type owns the schema. `requestId`
+fingerprints the generated schema together with the messages and other request options, so retries
+must use the same type and serializer settings. `DurableStructuredOutputException` is thrown
+after a successful durable turn if the response is incomplete, malformed, or cannot deserialize as
+a non-null `T`; its `Response` property retains the original durable response for inspection.
+
+The returned `ChatResponse<T>` retains MEAI response ID, provider conversation ID, model ID,
+finish reason, usage, and serializable additional properties. Provider `RawRepresentation` is an
+in-memory SDK object and is not carried through Temporal; additional-property values are restored
+as `JsonElement`. Use `serializerOptions` when a non-default JSON contract is required.
+
 `SendAsync` accepts either one user string or an enumerable of MEAI `ChatMessage` instances.
 The application conversation ID is the durable session identity; provider-owned
 `ChatOptions.ConversationId` is rejected. `RawRepresentationFactory` and `ContinuationToken` are

@@ -238,6 +238,83 @@ public class DurableChatSessionIntegrationTests
     }
 
     [Fact]
+    public async Task SendStructuredAsync_TransportsSchemaPreservesMetadataAndFingerprintsItsType()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, """{"summary":"clear skies"}"""))
+            {
+                ResponseId = "structured-response",
+                ConversationId = "provider-conversation",
+                ModelId = "model-1",
+                FinishReason = ChatFinishReason.Stop,
+                Usage = new UsageDetails { InputTokenCount = 8, OutputTokenCount = 4 },
+                AdditionalProperties = new AdditionalPropertiesDictionary
+                {
+                    ["provider.trace"] = "structured-trace",
+                },
+            },
+        ]);
+        var taskQueue = $"managed-structured-output-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options =>
+            {
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+                options.SessionTimeToLive = TimeSpan.FromMinutes(5);
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var sessionClient = host.Services.GetRequiredService<IDurableChatSessionClient>();
+            var conversationId = $"managed-structured-output-{Guid.NewGuid():N}";
+            var response = await sessionClient.SendStructuredAsync<StructuredSummary>(
+                conversationId,
+                "Return a summary as JSON.",
+                requestId: "structured-request");
+
+            Assert.Equal("clear skies", response.Result.Summary);
+            Assert.Equal("structured-response", response.ResponseId);
+            Assert.Equal("provider-conversation", response.ConversationId);
+            Assert.Equal("model-1", response.ModelId);
+            Assert.Equal(ChatFinishReason.Stop, response.FinishReason);
+            Assert.Equal(8, response.Usage?.InputTokenCount);
+            Assert.Equal("structured-trace", Assert.IsType<System.Text.Json.JsonElement>(
+                response.AdditionalProperties!["provider.trace"]).GetString());
+
+            var format = Assert.IsType<ChatResponseFormatJson>(scripted.Calls.Single().Options?.ResponseFormat);
+            Assert.NotNull(format.Schema);
+            Assert.Equal("object", format.Schema.Value.GetProperty("type").GetString());
+
+            var conflict = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                sessionClient.SendStructuredAsync<StructuredCount>(
+                    conversationId,
+                    "Return a summary as JSON.",
+                    requestId: "structured-request"));
+            Assert.Equal(
+                "DurableTurnConflict",
+                Assert.IsType<ApplicationFailureException>(conflict.InnerException).ErrorType);
+            Assert.Single(scripted.Calls);
+
+            var storedResponse = Assert.IsType<DurableSessionResponse>(
+                (await sessionClient.GetHistoryAsync(conversationId))[1]);
+            Assert.Equal("provider-conversation", storedResponse.ProviderConversationId);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task SingleTurn_SendsMessageAndReceivesResponse()
     {
         var conversationId = $"single-turn-{Guid.NewGuid():N}";
@@ -254,6 +331,16 @@ public class DurableChatSessionIntegrationTests
         Assert.NotNull(response.Usage);
         // CorrelationId is auto-generated when not supplied.
         Assert.False(string.IsNullOrEmpty(response.CorrelationId));
+    }
+
+    public sealed class StructuredSummary
+    {
+        public string Summary { get; set; } = string.Empty;
+    }
+
+    public sealed class StructuredCount
+    {
+        public int Count { get; set; }
     }
 
     [Fact]
