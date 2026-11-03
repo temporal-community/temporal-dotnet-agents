@@ -78,7 +78,7 @@ public sealed class DurableAIFunction : DelegatingAIFunction
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // Unlike direct chat and embedding adapters, AsDurable functions intentionally share the
+        // Unlike direct chat adapters, AsDurable functions intentionally share the
         // calling workflow's task queue so the worker's AddDurableTools registry is colocated.
         var activityOptions = new ActivityOptions
         {

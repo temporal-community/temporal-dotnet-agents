@@ -66,10 +66,7 @@ public class DurableChatActivitiesTagTests
         services.AddSingleton(A.Fake<ITemporalClient>());
         services.AddSingleton(inner);
         services.AddSingleton<IChatClient>(inner);
-        DurableAIRegistrar.Register(
-            services,
-            builder: null,
-            options: new DurableExecutionOptions { TaskQueue = "test" });
+        services.AddHostedTemporalWorker("test").AddDurableAIWorker();
         return services.BuildServiceProvider();
     }
 

@@ -94,6 +94,9 @@ and drifted MEAI phase examples. Eight new markers cover usage registration/manu
 session send/history, direct durable tools, and timer/controlled-tool harnesses. The embedding
 snippets compile-check an application-owned Temporal activity using MEAI.
 
+Phase 1.1 adds a compiled split-hosting example so the client-only and worker-only registration
+overloads stay aligned with the MEAI usage guide.
+
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 
 ## Doc defects this harness carries corrections for

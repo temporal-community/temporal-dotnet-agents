@@ -275,7 +275,7 @@ builder.Services
     .AddSingletonActivities<ShoppingActivities>();
 ```
 
-The `RegisterDefaultWorkflow = false` setting tells `AddDurableAI()` to skip registering `DurableChatWorkflow` and `DurableChatSessionClient` since your custom workflow handles session management instead. All other supporting infrastructure (options, DataConverter, activities, embeddings) is still registered, including `IDurableChatWorkflowInputFactory`.
+The `RegisterDefaultWorkflow = false` setting tells the co-hosted `AddDurableAI()` registration to skip registering `DurableChatWorkflow` and `DurableChatSessionClient` since your custom workflow handles session management instead. All other supporting infrastructure (options, DataConverter, activities, and `IDurableChatWorkflowInputFactory`) is still registered.
 
 `RunTurnAsync` passes your `ExecuteTurnAsync` implementation the configured `RetryPolicy`, or the
 library's bounded default (five attempts) when none is configured. For a non-idempotent custom

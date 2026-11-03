@@ -53,10 +53,7 @@ public sealed class DurableAIDataConverterValidatorTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(CreateClient(DurableAIDataConverter.Instance));
-        DurableAIRegistrar.Register(
-            services,
-            builder: null,
-            options: new DurableExecutionOptions { TaskQueue = "test" });
+        services.AddHostedTemporalWorker("test").AddDurableAIWorker();
 
         var provider = services.BuildServiceProvider();
 

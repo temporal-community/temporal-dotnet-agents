@@ -120,6 +120,40 @@ builder.Services
 `DurableAIDataConverter.Instance` remains uncompressed. For large histories, an optional bounded
 gzip codec is available — see [payload codecs](payload-codecs.md).
 
+### Split client and worker hosting
+
+For separate deployments, register only session-starting services in the client process and only
+workflow/activity services in the worker process. The client process does not need the provider's
+`IChatClient`, model credentials, or tool implementations; those belong on the worker:
+
+```csharp
+// Client process
+clientBuilder.Services.AddTemporalClient("localhost:7233", "default");
+clientBuilder.Services.AddDurableAIClient("durable-chat");
+
+// Worker process
+workerBuilder.Services.AddChatClient(innerChatClient);
+workerBuilder.Services
+    .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+    .AddDurableAIWorker(options =>
+    {
+        options.SessionTimeToLive = TimeSpan.FromHours(24);
+        options.MaxToolCallsPerTurn = 10;
+    })
+    .AddDurableTool(weatherTool);
+```
+
+`AddDurableAIWorker()` does not require `ITemporalClient` in worker DI; the three-argument
+`AddHostedTemporalWorker` overload owns the worker connection. `AddDurableAIClient()` does require
+a DI `ITemporalClient`, and auto-configures the durable converter when it is created with
+`AddTemporalClient`. Manually constructed clients must set
+`DataConverter = DurableAIDataConverter.Instance` explicitly. The client and worker must use the
+same task queue. The client-only registration can be added before or after `AddTemporalClient`; a
+missing client is reported when `DurableChatSessionClient` is resolved.
+
+For a co-hosted deployment, `AddDurableAI()` remains the concise combined registration shown in
+[Built-in managed session](#built-in-managed-session).
+
 ### Sharing a worker with non-AI workflows
 
 Temporal configures a data converter per client or worker, not per workflow. Calling
@@ -254,7 +288,7 @@ A few contract points worth knowing up front:
 
 - `AsDurable()` function activities always run on the calling workflow's own task queue,
   regardless of `DurableExecutionOptions.TaskQueue` (which routes the managed session and
-  direct chat/embedding adapters instead) — its worker must be the same one that registered the
+  direct chat adapters instead) — its worker must be the same one that registered the
   tool via `AddDurableTools`/`AddDurableTool`. See
   [the direct-adapter task-queue boundary](../../architecture/MEAI/durable-chat-pipeline.md#direct-adapter-task-queue-boundary)
   for the full routing model.
@@ -294,7 +328,7 @@ These are separate APIs: registering a custom workflow does not change the manag
 contract, and a managed session's registered tools are not visible to a from-scratch workflow
 (which uses `AIFunction.AsDurable()` against the same worker-side registry instead).
 
-For the design reasoning behind recommending pattern 3 over constructing a durable chat/embedding
+For the design reasoning behind recommending pattern 3 over constructing a durable chat
 adapter directly inside workflow code, see
 [the direct-adapter anti-pattern record](../../architecture/MEAI/direct-adapter-anti-pattern.md).
 

@@ -117,17 +117,12 @@ public class DurableMixedPatternValidatorTests
     [Fact]
     public void Registered_ViaAddDurableAI_RunsAsPostConfigureOption()
     {
-        // Contract test: the validator must be picked up as an
-        // IPostConfigureOptions<TemporalWorkerServiceOptions> by the DI container after
-        // DurableAIRegistrar.Register runs. Sole purpose is to pin the wiring so a future
-        // refactor that removes the registrar's TryAddEnumerable line fails this test.
+        // Contract test: validators must be picked up as
+        // IPostConfigureOptions<TemporalWorkerServiceOptions> after worker registration.
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(A.Fake<ITemporalClient>());
-        DurableAIRegistrar.Register(
-            services,
-            builder: null,
-            options: new DurableExecutionOptions { TaskQueue = "test" });
+        services.AddHostedTemporalWorker("test").AddDurableAIWorker();
         var provider = services.BuildServiceProvider();
 
         var registered = provider.GetServices<IPostConfigureOptions<TemporalWorkerServiceOptions>>();

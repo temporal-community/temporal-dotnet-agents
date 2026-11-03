@@ -56,6 +56,11 @@ builder.Services
     .AddDurableTool(weatherTool); // one implicit worker-owned default toolset
 ```
 
+`AddDurableAI()` is the concise co-hosted registration. When the session client and worker run in
+separate processes, use `AddDurableAIClient(taskQueue)` with `AddTemporalClient(...)` on the client
+and `AddDurableAIWorker()` with `AddHostedTemporalWorker(...)` on the worker. The client process
+needs neither a provider client nor tool implementations; those remain worker-side.
+
 ### Usage
 
 ```csharp
@@ -299,5 +304,5 @@ for the two topologies.
 - [Human-in-the-Loop Patterns (MAF)](how-to/MAF/hitl-patterns.md)
 - [Cross-Library Integration Architecture](architecture/MEAI/cross-library-integration.md)
 - [Durable Chat Pipeline Architecture](architecture/MEAI/durable-chat-pipeline.md)
-- [Direct-Adapter-in-Workflow Anti-Pattern](architecture/MEAI/direct-adapter-anti-pattern.md) — why constructing a durable chat/embedding adapter directly inside workflow code is retired, and what to use instead
+- [Direct-Adapter-in-Workflow Anti-Pattern](architecture/MEAI/direct-adapter-anti-pattern.md) — why constructing a durable chat adapter directly inside workflow code is retired, and what to use instead
 - [Durability and Determinism](architecture/MAF/durability-and-determinism.md)

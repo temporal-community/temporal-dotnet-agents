@@ -40,6 +40,11 @@ if you connect a client manually instead (`TemporalClient.ConnectAsync`), you mu
 converter composed on top of its `PayloadConverter` — or the validator fails your worker before
 work begins.
 
+For split deployments, register `AddDurableAIClient(taskQueue)` with the frontend's
+`ITemporalClient` and `AddDurableAIWorker()` with the worker's hosted-worker registration. The
+client process does not need the provider `IChatClient` or tool implementations; those remain on
+the worker. `AddDurableAI()` remains the concise co-hosted path shown above.
+
 `AddDurableTool` registers one tool at a time and takes an optional per-tool configuration callback
 (as used above for `weatherTool`, to override the retry/timeout defaults for just that tool).
 `AddDurableTools` registers several tools in one call, all under the worker-level defaults, with no
@@ -185,10 +190,10 @@ The full pattern (Activity + `AsDurable()` combined) is backed by the runnable
 `samples/MEAI/DirectAdapters` sample; `samples/MEAI/CustomWorkflow`'s `ShoppingActivities` shows
 the same Activity shape for the LLM call. `AsDurable()`'s activity always runs on the calling
 workflow's own task queue, regardless of `DurableExecutionOptions.TaskQueue` (which routes the
-managed session and other durable chat/embedding activities instead) — see the
+managed session and direct chat activities instead) — see the
 [pipeline architecture](../../docs/architecture/MEAI/durable-chat-pipeline.md#direct-adapter-task-queue-boundary)
 for the full routing model. For why a hand-written Activity is recommended here instead of
-constructing a durable chat/embedding adapter directly in workflow code, see the
+constructing a durable chat adapter directly in workflow code, see the
 [direct-adapter anti-pattern record](../../docs/architecture/MEAI/direct-adapter-anti-pattern.md).
 
 ## License

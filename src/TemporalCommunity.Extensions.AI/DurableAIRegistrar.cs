@@ -10,72 +10,115 @@ namespace TemporalCommunity.Extensions.AI;
 
 /// <summary>
 /// Internal helper that performs the DI side of registering durable AI services.
-/// Invoked by <see cref="DurableAIServiceCollectionExtensions.AddDurableAI"/>, the single
-/// registration path for durable AI. Idempotent — safe to call more than once thanks to
-/// <see cref="ServiceCollectionDescriptorExtensions.TryAddEnumerable(IServiceCollection, ServiceDescriptor)"/>
-/// and <see cref="ServiceCollectionDescriptorExtensions.TryAddSingleton{TService}(IServiceCollection)"/>.
+/// Shared implementation for the co-hosted, client-only, and worker-only registration paths.
 /// </summary>
 internal static class DurableAIRegistrar
 {
     /// <summary>
-    /// Performs DI registration for durable AI: options, registry, session client,
-    /// activities, default workflow, and DurableAIDataConverter auto-wiring.
+    /// Registers all durable AI services for a process that hosts both client and worker.
     /// </summary>
-    /// <param name="services">The service collection (always required).</param>
-    /// <param name="builder">The worker options builder. When non-null, the
-    /// default workflow and activities are registered onto the worker. When null
-    /// (e.g., the plugin path that does not have a builder handy at registration
-    /// time), only the DI-side registrations are applied.</param>
-    /// <param name="options">The configured <see cref="DurableExecutionOptions"/>.</param>
-    public static void Register(
+    public static void RegisterCoHosted(
         IServiceCollection services,
-        ITemporalWorkerServiceOptionsBuilder? builder,
+        ITemporalWorkerServiceOptionsBuilder builder,
         DurableExecutionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (options.RegisterDefaultWorkflow && !services.Any(d => d.ServiceType == typeof(ITemporalClient)))
+        {
+            throw new InvalidOperationException(
+                "No ITemporalClient registered in DI. " +
+                "Call services.AddTemporalClient(address, namespace) before calling AddDurableAI(). " +
+                "For a worker-only process, use AddDurableAIWorker(); for a client-only process, " +
+                "use AddDurableAIClient().");
+        }
+
+        RegisterSharedServices(services, options);
+        RegisterWorkerServices(services, builder, options);
+        if (options.RegisterDefaultWorkflow)
+        {
+            RegisterClientServices(services, options);
+        }
+    }
+
+    /// <summary>
+    /// Registers durable AI services for a client process that does not host a worker.
+    /// </summary>
+    public static void RegisterClient(IServiceCollection services, DurableExecutionOptions options)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(options);
 
-        RegisterWorkflowInputServices(services, options);
+        RegisterSharedServices(services, options);
+        RegisterClientServices(services, options);
+    }
 
-        // Register the session client and default workflow only if enabled.
+    /// <summary>
+    /// Registers durable AI services for a worker process that does not start sessions.
+    /// </summary>
+    public static void RegisterWorker(
+        IServiceCollection services,
+        ITemporalWorkerServiceOptionsBuilder builder,
+        DurableExecutionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(options);
+
+        RegisterSharedServices(services, options);
+        RegisterWorkerServices(services, builder, options);
+    }
+
+    public static bool IsWorkerRegistered(
+        IServiceCollection services,
+        ITemporalWorkerServiceOptionsBuilder builder) =>
+        FindWorkerRegistration(services, builder) is not null;
+
+    private static void RegisterSharedServices(IServiceCollection services, DurableExecutionOptions options)
+    {
+        RegisterWorkflowInputServices(services, options);
+    }
+
+    private static void RegisterClientServices(IServiceCollection services, DurableExecutionOptions options)
+    {
+        services.TryAddSingleton<DurableChatSessionClient>(sp =>
+        {
+            var client = sp.GetService<ITemporalClient>()
+                ?? throw new InvalidOperationException(
+                    "No ITemporalClient registered in DI. Call services.AddTemporalClient(address, namespace) " +
+                    "before resolving DurableChatSessionClient.");
+            return new DurableChatSessionClient(
+                client,
+                options,
+                sp.GetRequiredService<IDurableChatWorkflowInputFactory>(),
+                sp.GetService<ILogger<DurableChatSessionClient>>());
+        });
+        services.TryAddSingleton<IDurableChatSessionClient>(
+            sp => sp.GetRequiredService<DurableChatSessionClient>());
+    }
+
+    private static void RegisterWorkerServices(
+        IServiceCollection services,
+        ITemporalWorkerServiceOptionsBuilder builder,
+        DurableExecutionOptions options)
+    {
+        if (FindWorkerRegistration(services, builder) is not null)
+        {
+            return;
+        }
+
+        services.AddSingleton(new WorkerRegistrationMarker(builder));
+
         if (options.RegisterDefaultWorkflow)
         {
-            // The stock session client starts workflows through a DI client. An activity-only
-            // worker can instead use AddHostedTemporalWorker(address, namespace, queue), whose
-            // worker-owned client is not registered as ITemporalClient.
-            if (!services.Any(d => d.ServiceType == typeof(ITemporalClient)))
-            {
-                throw new InvalidOperationException(
-                    "No ITemporalClient registered in DI. " +
-                    "Call services.AddTemporalClient(address, namespace) before calling AddDurableAI(). " +
-                    "Note: AddHostedTemporalWorker(address, namespace, queue) stores connection settings " +
-                    "on the worker service but does not register ITemporalClient in DI — " +
-                    "AddTemporalClient is required separately when RegisterDefaultWorkflow is true.");
-            }
-
-            // Register the session client (concrete + interface alias share the same instance).
-            // The canonical input factory emits a thin input for worker-owned toolsets and retains
-            // the declaration/policy snapshot only for the advanced caller-owned mode.
-            services.TryAddSingleton<DurableChatSessionClient>(sp =>
-                new DurableChatSessionClient(
-                    sp.GetRequiredService<ITemporalClient>(),
-                    options,
-                    sp.GetRequiredService<IDurableChatWorkflowInputFactory>(),
-                    sp.GetService<ILogger<DurableChatSessionClient>>()));
-            services.TryAddSingleton<IDurableChatSessionClient>(
-                sp => sp.GetRequiredService<DurableChatSessionClient>());
-
-            // Register the default workflow on the worker, if a builder is available.
-            builder?.AddWorkflow<DurableChatWorkflow>();
+            builder.AddWorkflow<DurableChatWorkflow>();
         }
 
-        // Register activities on the worker (always needed) when a builder is available.
-        if (builder is not null)
-        {
-            builder.AddSingletonActivities<DurableChatActivities>();
-            builder.AddScopedActivities<DurableFunctionActivities>();
-            builder.AddSingletonActivities<DurableToolsetActivities>();
-        }
+        builder.AddSingletonActivities<DurableChatActivities>();
+        builder.AddScopedActivities<DurableFunctionActivities>();
+        builder.AddSingletonActivities<DurableToolsetActivities>();
 
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
@@ -102,6 +145,19 @@ internal static class DurableAIRegistrar
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             Internal.DurableToolsetConfigurationValidator>());
+    }
+
+    private static WorkerRegistrationMarker? FindWorkerRegistration(
+        IServiceCollection services,
+        ITemporalWorkerServiceOptionsBuilder builder) =>
+        services
+            .Where(d => d.ServiceType == typeof(WorkerRegistrationMarker))
+            .Select(d => d.ImplementationInstance as WorkerRegistrationMarker)
+            .FirstOrDefault(marker => marker is not null && ReferenceEquals(marker.Builder, builder));
+
+    private sealed class WorkerRegistrationMarker(ITemporalWorkerServiceOptionsBuilder builder)
+    {
+        public ITemporalWorkerServiceOptionsBuilder Builder { get; } = builder;
     }
 
     /// <summary>

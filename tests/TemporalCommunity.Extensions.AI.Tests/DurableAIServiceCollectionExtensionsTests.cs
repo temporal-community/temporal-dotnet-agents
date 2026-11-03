@@ -62,8 +62,129 @@ public class DurableAIServiceCollectionExtensionsTests
             () => workerBuilder.AddDurableTool(tool));
 
         Assert.Equal(
-            "AddDurableTool requires AddDurableAI to be called first on the same worker builder.",
+            "AddDurableTool requires AddDurableAI or AddDurableAIWorker to be called first on the same worker builder.",
             ex.Message);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AddDurableAIClient_RegistersWithoutWorker_RegardlessOfTemporalClientOrder(
+        bool addTemporalClientFirst)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        var temporalClient = A.Fake<ITemporalClient>();
+
+        if (addTemporalClientFirst)
+        {
+            services.AddSingleton(temporalClient);
+        }
+
+        services.AddDurableAIClient("implementation-queue");
+
+        if (!addTemporalClientFirst)
+        {
+            services.AddSingleton(temporalClient);
+        }
+
+        using var provider = services.BuildServiceProvider();
+
+        var client = provider.GetRequiredService<DurableChatSessionClient>();
+        Assert.Same(client, provider.GetRequiredService<IDurableChatSessionClient>());
+        Assert.NotNull(provider.GetRequiredService<IDurableChatWorkflowInputFactory>());
+        Assert.DoesNotContain(services, descriptor =>
+            descriptor.ServiceType == typeof(DurableChatActivities)
+            || descriptor.ServiceType == typeof(DurableFunctionActivities)
+            || descriptor.ServiceType == typeof(DurableToolsetActivities)
+            || descriptor.ServiceType == typeof(IPostConfigureOptions<TemporalWorkerServiceOptions>));
+    }
+
+    [Fact]
+    public void AddDurableAIClient_ReportsMissingTemporalClientWhenClientIsResolved()
+    {
+        var services = new ServiceCollection();
+        services.AddDurableAIClient("implementation-queue");
+
+        using var provider = services.BuildServiceProvider();
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => provider.GetRequiredService<DurableChatSessionClient>());
+
+        Assert.Contains("No ITemporalClient registered in DI", exception.Message);
+        Assert.Contains("AddTemporalClient(address, namespace)", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AddDurableAIClient_ConfiguresDefaultConverterRegardlessOfOrder(
+        bool addTemporalClientFirst)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        if (addTemporalClientFirst)
+        {
+            services.AddTemporalClient("localhost:7233", "default");
+        }
+
+        services.AddDurableAIClient("implementation-queue");
+
+        if (!addTemporalClientFirst)
+        {
+            services.AddTemporalClient("localhost:7233", "default");
+        }
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<TemporalClientConnectOptions>>().Value;
+
+        Assert.Same(DurableAIDataConverter.Instance, options.DataConverter);
+    }
+
+    [Fact]
+    public void AddDurableAIClient_PreservesCustomConverter()
+    {
+        var customConverter = new DataConverter(
+            new DefaultPayloadConverter(),
+            new DefaultFailureConverter());
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTemporalClient(options => options.DataConverter = customConverter);
+        services.AddDurableAIClient("implementation-queue");
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<TemporalClientConnectOptions>>().Value;
+
+        Assert.Same(customConverter, options.DataConverter);
+    }
+
+    [Fact]
+    public void AddDurableAIWorker_DoesNotRequireTemporalClientInDI()
+    {
+        var services = new ServiceCollection();
+        var worker = services.AddHostedTemporalWorker("implementation-queue")
+            .AddDurableAIWorker();
+
+        Assert.NotNull(worker);
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(ITemporalClient));
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(DurableChatActivities));
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(DurableFunctionActivities));
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(DurableToolsetActivities));
+        Assert.DoesNotContain(services, descriptor => descriptor.ServiceType == typeof(DurableChatSessionClient));
+    }
+
+    [Fact]
+    public void AddDurableAIWorker_CalledTwice_DoesNotDuplicateWorkerActivities()
+    {
+        var services = new ServiceCollection();
+        var worker = services.AddHostedTemporalWorker("implementation-queue");
+
+        worker.AddDurableAIWorker();
+        worker.AddDurableAIWorker();
+
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(DurableChatActivities));
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(DurableFunctionActivities));
+        Assert.Single(services, descriptor => descriptor.ServiceType == typeof(DurableToolsetActivities));
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
 using TemporalCommunity.Extensions.AI.Internal;
+using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
 
 namespace TemporalCommunity.Extensions.AI;
@@ -60,7 +61,44 @@ public static class DurableAIServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers the durable AI workflow, activities, and support services on a Temporal worker.
+    /// Registers the durable chat session client and workflow-input services in a process that
+    /// starts sessions but does not host a Temporal worker.
+    /// </summary>
+    /// <param name="services">The client process service collection.</param>
+    /// <param name="taskQueue">The task queue polled by the implementation-bearing worker.</param>
+    /// <param name="configure">Optional durable execution configuration.</param>
+    /// <returns>The same service collection.</returns>
+    /// <remarks>
+    /// Register an <see cref="ITemporalClient"/> in the same service collection. The registration
+    /// may be added before or after this call; a missing client is reported when the session client
+    /// is resolved. Use <see cref="AddDurableAIWorker"/> in the worker process, or
+    /// <see cref="AddDurableAI"/> when co-hosting.
+    /// </remarks>
+    public static IServiceCollection AddDurableAIClient(
+        this IServiceCollection services,
+        string taskQueue,
+        Action<DurableExecutionOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskQueue);
+
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = taskQueue,
+            RegisterDefaultWorkflow = false,
+        };
+        configure?.Invoke(options);
+        options.TaskQueue = taskQueue;
+        options.RegisterDefaultWorkflow = false;
+        options.Validate();
+
+        DurableAIRegistrar.RegisterClient(services, options);
+        return services;
+    }
+
+    /// <summary>
+    /// Registers the durable AI workflow, activities, and support services on a Temporal worker
+    /// without registering a session client.
     /// </summary>
     /// <param name="builder">The worker options builder returned by AddHostedTemporalWorker.</param>
     /// <param name="configure">Optional delegate to configure <see cref="DurableExecutionOptions"/>.</param>
@@ -93,11 +131,41 @@ public static class DurableAIServiceCollectionExtensions
     /// camel-case payloads as null or default application members without throwing.
     /// </para>
     /// <para>
-    /// A DI <see cref="ITemporalClient"/> is required when <see cref="DurableExecutionOptions.RegisterDefaultWorkflow"/>
-    /// is enabled because the stock session client starts workflows. An activity-only implementation
-    /// worker may disable the default workflow and use the client owned by the three-argument
-    /// <c>AddHostedTemporalWorker</c> overload without registering a second DI client.
+    /// This worker-only registration does not require an <see cref="ITemporalClient"/> in DI. The
+    /// worker's own client is configured by the hosting integration. Use <see cref="AddDurableAIClient"/>
+    /// in a separate session-starting process, or <see cref="AddDurableAI"/> when co-hosting.
     /// </para>
+    /// </remarks>
+    public static ITemporalWorkerServiceOptionsBuilder AddDurableAIWorker(
+        this ITemporalWorkerServiceOptionsBuilder builder,
+        Action<DurableExecutionOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = builder.TaskQueue
+        };
+        configure?.Invoke(options);
+        options.TaskQueue = builder.TaskQueue;
+        options.Validate();
+
+        DurableAIRegistrar.RegisterWorker(builder.Services, builder, options);
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers the durable chat client, workflow, activities, and support services in one
+    /// co-hosted process.
+    /// </summary>
+    /// <param name="builder">The worker options builder returned by AddHostedTemporalWorker.</param>
+    /// <param name="configure">Optional delegate to configure <see cref="DurableExecutionOptions"/>.</param>
+    /// <returns>The same builder for further chaining.</returns>
+    /// <remarks>
+    /// Register an <see cref="ITemporalClient"/> in DI before calling this method. For split
+    /// deployments, use <see cref="AddDurableAIClient"/> in the client process and
+    /// <see cref="AddDurableAIWorker"/> in the worker process.
     /// </remarks>
     public static ITemporalWorkerServiceOptionsBuilder AddDurableAI(
         this ITemporalWorkerServiceOptionsBuilder builder,
@@ -110,10 +178,10 @@ public static class DurableAIServiceCollectionExtensions
             TaskQueue = builder.TaskQueue
         };
         configure?.Invoke(options);
+        options.TaskQueue = builder.TaskQueue;
         options.Validate();
 
-        DurableAIRegistrar.Register(builder.Services, builder, options);
-
+        DurableAIRegistrar.RegisterCoHosted(builder.Services, builder, options);
         return builder;
     }
 
@@ -524,10 +592,11 @@ public static class DurableAIServiceCollectionExtensions
         ITemporalWorkerServiceOptionsBuilder builder,
         string? caller = null)
     {
-        if (!builder.Services.Any(d => d.ServiceType == typeof(DurableExecutionOptions)))
+        if (!DurableAIRegistrar.IsWorkerRegistered(builder.Services, builder))
         {
             throw new InvalidOperationException(
-                $"{caller ?? "Durable tool registration"} requires AddDurableAI to be called first " +
+                $"{caller ?? "Durable tool registration"} requires AddDurableAI or AddDurableAIWorker " +
+                "to be called first " +
                 "on the same worker builder.");
         }
     }

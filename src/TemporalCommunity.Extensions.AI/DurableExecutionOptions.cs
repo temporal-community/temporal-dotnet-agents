@@ -11,7 +11,7 @@ public sealed class DurableExecutionOptions
 {
     /// <summary>
     /// Gets or sets the Temporal task queue for durable AI execution. Managed chat workflows start
-    /// on this queue. Direct chat and embedding adapters assign it to each scheduled activity, so
+    /// on this queue. Direct chat adapters assign it to each scheduled activity, so
     /// their workflow worker may poll a different queue from the AI activity worker. Must be set
     /// before use. <see cref="AIFunctionExtensions.AsDurable"/> function activities instead use the
     /// calling workflow's task queue and do not read this property.
@@ -126,7 +126,7 @@ public sealed class DurableExecutionOptions
     /// </para>
     /// <para>
     /// Disabling this only skips the default workflow and session client registration.
-    /// All supporting infrastructure (options, DataConverter, activities, embeddings, and
+    /// All supporting infrastructure (options, DataConverter, activities, and
     /// <see cref="IDurableChatWorkflowInputFactory"/>) is still registered regardless of this
     /// setting.
     /// </para>

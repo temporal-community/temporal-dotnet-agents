@@ -156,6 +156,22 @@ public class DurableAIDataConverterPluginTests
     }
 
     [Fact]
+    public void AddDurableAIWorker_RegistersClientAndWorkerConverterConfiguratorsWithoutDIClient()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddHostedTemporalWorker("my-queue").AddDurableAIWorker();
+
+        Assert.Contains(services, sd =>
+            sd.ServiceType == typeof(IConfigureOptions<TemporalClientConnectOptions>) &&
+            sd.ImplementationType == typeof(DurableAIClientOptionsConfigurator));
+        Assert.Contains(services, sd =>
+            sd.ServiceType == typeof(IPostConfigureOptions<TemporalWorkerServiceOptions>) &&
+            sd.ImplementationType == typeof(DurableAIWorkerClientConfigurator));
+        Assert.DoesNotContain(services, sd => sd.ServiceType == typeof(ITemporalClient));
+    }
+
+    [Fact]
     public void AddDurableAI_CalledTwice_ConfiguratorRegisteredOnce()
     {
         var services = new ServiceCollection();

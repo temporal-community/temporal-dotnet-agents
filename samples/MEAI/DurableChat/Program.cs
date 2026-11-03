@@ -104,9 +104,9 @@ builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 // The 1-arg AddHostedTemporalWorker(taskQueue) overload binds the worker to the
 // ITemporalClient registered above.
 //
-// AddDurableAI registers DurableChatWorkflow, DurableChatActivities, and
-// DurableChatSessionClient on the worker. The session client is resolved from
-// DI after the host starts.
+// AddDurableAI is the concise co-hosted registration: it registers
+// DurableChatWorkflow, DurableChatActivities, and DurableChatSessionClient.
+// Split client/worker deployments use AddDurableAIClient/AddDurableAIWorker.
 //
 // DefaultToolsetIds composes two named worker-owned toolsets in a stable order. The client never
 // receives their schemas. The workflow resolves one versioned manifest, then dispatches each

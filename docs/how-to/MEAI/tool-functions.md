@@ -335,7 +335,7 @@ function. It is not a replacement for the managed chat loop, and it does not mak
 `ChatOptions.Tools` durable. See the `samples/MEAI/DurableTools` sample for that direct activity
 dispatch use case. The function activity runs on the calling workflow's task queue. Even though
 `AsDurable()` accepts the shared `DurableExecutionOptions` type, its `TaskQueue` property applies
-only to managed sessions and direct chat/embedding adapters and does not reroute the function.
+only to managed sessions and direct chat adapters and does not reroute the function.
 
 When `RetryPolicy` is omitted, the activity uses a bounded five-attempt tool default with
 exponential backoff capped at 30 seconds. This is a termination backstop, not a total time budget

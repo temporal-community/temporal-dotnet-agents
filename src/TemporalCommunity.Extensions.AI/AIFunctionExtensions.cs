@@ -16,7 +16,7 @@ public static class AIFunctionExtensions
     /// Inside a workflow, the call is dispatched as a Temporal activity, so the activity worker
     /// polling the calling workflow's task queue must have called <c>AddDurableAI()</c> and
     /// <c>AddDurableTools(function)</c>. <see cref="DurableExecutionOptions.TaskQueue"/> is not
-    /// used by this adapter; it applies to managed sessions and direct chat/embedding adapters.
+    /// used by this adapter; it applies to managed sessions and direct chat adapters.
     /// If the function is not registered, the activity throws <see cref="InvalidOperationException"/>
     /// </remarks>
     /// <param name="function">The function to wrap.</param>

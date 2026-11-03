@@ -61,6 +61,30 @@ internal static class Usage
         // END SNIPPET docs/how-to/MEAI/usage.md#sharing-a-worker-with-non-ai-workflows
     }
 
+    internal static void SplitHosting(
+        HostApplicationBuilder clientBuilder,
+        HostApplicationBuilder workerBuilder,
+        IChatClient innerChatClient,
+        AIFunction weatherTool)
+    {
+        // BEGIN SNIPPET docs/how-to/MEAI/usage.md#split-client-and-worker-hosting
+        // Client process
+        clientBuilder.Services.AddTemporalClient("localhost:7233", "default");
+        clientBuilder.Services.AddDurableAIClient("durable-chat");
+
+        // Worker process
+        workerBuilder.Services.AddChatClient(innerChatClient);
+        workerBuilder.Services
+            .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+            .AddDurableAIWorker(options =>
+            {
+                options.SessionTimeToLive = TimeSpan.FromHours(24);
+                options.MaxToolCallsPerTurn = 10;
+            })
+            .AddDurableTool(weatherTool);
+        // END SNIPPET docs/how-to/MEAI/usage.md#split-client-and-worker-hosting
+    }
+
     internal static async Task SendAsync(IServiceProvider services)
     {
         // BEGIN SNIPPET docs/how-to/MEAI/usage.md#send-a-turn-and-read-history
