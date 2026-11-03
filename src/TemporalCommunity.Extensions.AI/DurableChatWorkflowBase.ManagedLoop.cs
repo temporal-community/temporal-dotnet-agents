@@ -65,6 +65,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 CorrelationId = requestEntry.CorrelationId,
                 ToolDeclarations = effectiveDeclarations,
             };
+            if (RequiredInput.EnableTransportPayloadGuard)
+            {
+                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    stepInput,
+                    RequiredInput.MaximumTransportPayloadSizeBytes,
+                    RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                    "model activity input");
+            }
 
             DurableChatStepResult stepResult;
             try
@@ -225,6 +234,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                             TurnNumber = CurrentTurnNumber,
                             ToolsetId = manifestMember?.ToolsetId,
                         };
+                        if (RequiredInput.EnableTransportPayloadGuard)
+                        {
+                            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                                Workflow.PayloadConverter,
+                                interceptorInput,
+                                RequiredInput.MaximumTransportPayloadSizeBytes,
+                                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                                "tool-interceptor activity input");
+                        }
 
                         // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel typed dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
@@ -386,6 +404,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             // All approval waits are resolved before any InvokeFunction activity starts.
             if (dispatchMode == DurableToolDispatchMode.Sequential)
             {
+                EnsureToolActivityInputsFit(pendingToolDispatches);
                 foreach (var (idx, funcInput, opts) in pendingToolDispatches)
                 {
                     funcInput.TurnState = currentTurnState;
@@ -424,6 +443,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
             else
             {
+                EnsureToolActivityInputsFit(pendingToolDispatches);
                 foreach (var (idx, funcInput, opts) in pendingToolDispatches)
                 {
                     toolTasks[idx] = Workflow.ExecuteActivityAsync(
@@ -576,6 +596,25 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             },
             DurableTurnCompletionReason.IterationLimitReached,
             currentTurnState);
+    }
+
+    private void EnsureToolActivityInputsFit(
+        IReadOnlyList<(int Index, DurableFunctionInput Input, ActivityOptions Options)> dispatches)
+    {
+        if (!RequiredInput.EnableTransportPayloadGuard)
+        {
+            return;
+        }
+
+        foreach (var (_, input, _) in dispatches)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                input,
+                RequiredInput.MaximumTransportPayloadSizeBytes,
+                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                "tool activity input");
+        }
     }
 
     /// <summary>

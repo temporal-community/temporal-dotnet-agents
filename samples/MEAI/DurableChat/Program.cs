@@ -120,6 +120,8 @@ var durableWorker = builder.Services
     {
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
         opts.DefaultToolsetIds = ["information", "operations"];
+        opts.MaximumTransportPayloadSizeBytes = 1024 * 1024;
+        opts.PayloadCodecExpansionAllowanceBytes = 0;
 
         // Worker-level fallback for any tool that doesn't override its RetryPolicy.
         // Override the library's bounded five-attempt default with three attempts.

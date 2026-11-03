@@ -78,6 +78,9 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         MaxEntryCount = _options.MaxEntryCount,
         MaxTerminalOutcomeCount = _options.MaxTerminalOutcomeCount,
         MaxTerminalOutcomeBytes = _options.MaxTerminalOutcomeBytes,
+        MaximumTransportPayloadSizeBytes = _options.MaximumTransportPayloadSizeBytes,
+        PayloadCodecExpansionAllowanceBytes = _options.PayloadCodecExpansionAllowanceBytes,
+        EnableTransportPayloadGuard = true,
         HistoryReducerKey = _options.DefaultHistoryReducerKey,
         ToolActivityOptions = _useWorkerToolsets ? null : _toolActivityOptions.Value,
         MaxToolCallsPerTurn = _options.MaxToolCallsPerTurn,
@@ -121,6 +124,9 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
                 RetryPolicy = perTool?.RetryPolicy ?? EffectiveToolRetryPolicy,
                 Summary = toolName,
             };
+            Internal.DurableTransportPayloadGuard.EnsureBoundedRetryPolicy(
+                result[toolName].RetryPolicy,
+                $"RetryPolicy for tool '{toolName}'");
         }
 
         return result;

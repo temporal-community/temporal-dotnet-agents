@@ -56,9 +56,20 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
                 RetryPolicy = Internal.DefaultRetryPolicy.ResolveForTool(input.RetryPolicy),
                 Summary = "Resolve durable toolsets",
             };
+            var resolutionRequest =
+                new Internal.DurableToolsetResolutionRequest { UseWorkerDefaults = true };
+            if (input.EnableTransportPayloadGuard)
+            {
+                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    resolutionRequest,
+                    input.MaximumTransportPayloadSizeBytes,
+                    input.PayloadCodecExpansionAllowanceBytes,
+                    "activity input");
+            }
             var manifest = await Workflow.ExecuteActivityAsync(
                 (DurableToolsetActivities activities) => activities.ResolveDurableToolsetsAsync(
-                    new Internal.DurableToolsetResolutionRequest { UseWorkerDefaults = true }),
+                    resolutionRequest),
                 resolverOptions).ConfigureAwait(true);
             manifest.Validate();
             input = input with { ToolsetManifest = manifest };
@@ -75,6 +86,15 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     public void ValidateChat(DurableChatInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        if (Input is { EnableTransportPayloadGuard: true } inputConfig)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                input,
+                inputConfig.MaximumTransportPayloadSizeBytes,
+                inputConfig.PayloadCodecExpansionAllowanceBytes,
+                "workflow update input");
+        }
         if (IsShutdownRequested)
             throw new InvalidOperationException("Session has been shut down.");
         if (IsContinueAsNewPending)
@@ -101,6 +121,15 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     public async Task<DurableSessionResponse> ChatAsync(DurableChatInput input)
     {
         await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                input,
+                RequiredInput.MaximumTransportPayloadSizeBytes,
+                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                "workflow update input");
+        }
         ValidateExpectedSessionEpoch(input.ExpectedSessionEpoch);
         ValidateTurnAdmission(input);
 
@@ -176,11 +205,23 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     protected override Task<List<Session.DurableSessionEntry>> ApplyKeyedHistoryReducerAsync(
         string reducerKey,
         List<Session.DurableSessionEntry> history,
-        ActivityOptions activityOptions) =>
-        Workflow.ExecuteActivityAsync(
+        ActivityOptions activityOptions)
+    {
+        var reducerInput = new ReduceHistoryByKeyInput { ReducerKey = reducerKey, History = history };
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                reducerInput,
+                RequiredInput.MaximumTransportPayloadSizeBytes,
+                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                "activity input");
+        }
+        return Workflow.ExecuteActivityAsync(
             (DurableChatActivities a) => a.ReduceHistoryByKeyAsync(
-                new ReduceHistoryByKeyInput { ReducerKey = reducerKey, History = history }),
+                reducerInput),
             activityOptions);
+    }
 
     protected override async Task<DurableManagedLoopResult> ExecuteTurnAsync(
         ActivityOptions activityOptions,

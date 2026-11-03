@@ -143,14 +143,87 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             input = input with { SessionIdleDeadline = sessionIdleDeadline };
         }
+        if (input.EnableTransportPayloadGuard)
+        {
+            ValidateTransportConfiguration(input);
+        }
         _maxTerminalOutcomeCount = input.MaxTerminalOutcomeCount;
         _maxTerminalOutcomeBytes = input.MaxTerminalOutcomeBytes;
         _sessionIdleDeadline = sessionIdleDeadline;
         Input = input;
+        if (input.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                input,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "workflow input");
+        }
         if (firstInitialization)
         {
             _approvalMixin.RestoreResolvedApprovals(input.ApprovalResolutionHistory);
             RestoreTerminalTurnOutcomes(input.CarriedTerminalOutcomes);
+        }
+    }
+
+    private static void ValidateTransportConfiguration(DurableChatWorkflowInput input)
+    {
+        if (input.MaximumTransportPayloadSizeBytes <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(input.MaximumTransportPayloadSizeBytes)} must be positive.");
+        }
+
+        if (input.PayloadCodecExpansionAllowanceBytes < 0
+            || input.PayloadCodecExpansionAllowanceBytes >= input.MaximumTransportPayloadSizeBytes)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(input.PayloadCodecExpansionAllowanceBytes)} must be non-negative and smaller " +
+                $"than {nameof(input.MaximumTransportPayloadSizeBytes)}.");
+        }
+
+        Internal.DurableTransportPayloadGuard.EnsureBoundedRetryPolicy(
+            input.RetryPolicy,
+            nameof(input.RetryPolicy));
+
+        ValidateActivityRetryPolicies(input.ToolActivityOptions);
+        ValidateActivityRetryPolicies(input.InterceptorToolActivityOptions);
+        ValidateActivityRetryPolicy(input.InterceptorActivityOptions);
+
+        if (input.ToolsetManifest is { } manifest)
+        {
+            foreach (var member in manifest.Members)
+            {
+                ValidateActivityRetryPolicy(member.ToolActivityOptions);
+                ValidateActivityRetryPolicy(member.InterceptorActivityOptions);
+            }
+        }
+    }
+
+    private static void ValidateActivityRetryPolicies(
+        IReadOnlyDictionary<string, ActivityOptions>? activityOptions)
+    {
+        if (activityOptions is null)
+        {
+            return;
+        }
+
+        foreach (var (toolName, options) in activityOptions)
+        {
+            ValidateActivityRetryPolicy(options, $"RetryPolicy for tool '{toolName}'");
+        }
+    }
+
+    private static void ValidateActivityRetryPolicy(
+        ActivityOptions? activityOptions,
+        string settingName = "ActivityOptions.RetryPolicy")
+    {
+        if (activityOptions is not null)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureBoundedRetryPolicy(
+                activityOptions.RetryPolicy,
+                settingName);
         }
     }
 
@@ -609,6 +682,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     SnapshotTerminalTurnOutcomes(),
                     _turnCount,
                     _sessionIdleDeadline);
+            }
+            if (input.EnableTransportPayloadGuard)
+            {
+                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    carriedInput,
+                    input.MaximumTransportPayloadSizeBytes,
+                    input.PayloadCodecExpansionAllowanceBytes,
+                    "continue-as-new workflow input");
             }
             throw CreateContinueAsNewException(carriedInput!);
         }
@@ -1182,6 +1264,21 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 requestEntry.RequestId,
                 output,
                 Workflow.UtcNow);
+            if (RequiredInput.EnableTransportPayloadGuard)
+            {
+                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    output,
+                    RequiredInput.MaximumTransportPayloadSizeBytes,
+                    RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                    "workflow update result");
+                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    responseEntry,
+                    RequiredInput.MaximumTransportPayloadSizeBytes,
+                    RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                    "workflow update result");
+            }
             var responseEntryToAppend = ShouldStripMessagesFromHistoryEntry()
                 ? (DurableSessionResponse)StripMessagesFromEntry(responseEntry)
                 : responseEntry;
@@ -1238,7 +1335,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// instances. Each turn appends a request entry followed by a response entry.
     /// </summary>
     [WorkflowQuery("GetHistory")]
-    public IReadOnlyList<DurableSessionEntry> GetHistory() => _history;
+    public IReadOnlyList<DurableSessionEntry> GetHistory()
+    {
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                _history,
+                RequiredInput.MaximumTransportPayloadSizeBytes,
+                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                "workflow query result");
+        }
+        return _history;
+    }
 
     /// <summary>Returns the opaque epoch identifying this session lineage.</summary>
     [WorkflowQuery("GetSessionEpoch")]
@@ -1275,6 +1384,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             return;
         }
 
+        if (Input.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                request,
+                Input.MaximumTransportPayloadSizeBytes,
+                Input.PayloadCodecExpansionAllowanceBytes,
+                "approval update input");
+        }
         _approvalMixin.ValidateRequestApproval(request);
     }
 
@@ -1282,6 +1400,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     public async Task<DurableApprovalDecision> RequestApprovalAsync(DurableApprovalRequest request)
     {
         var input = await WaitForInputAsync().ConfigureAwait(true);
+        if (input.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                request,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "approval update input");
+        }
         var decision = await _approvalMixin.RequestApprovalAsync(
             request,
             approvalTimeout: input.ApprovalTimeout,
@@ -1292,6 +1419,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 "[{ConversationId}] Approval resolved (RequestId: {RequestId}, Approved: {Approved})",
                 Workflow.Info.WorkflowId, d.RequestId, d.Approved));
 
+        if (input.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                decision,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "workflow update result");
+        }
         OnApprovalRequestResolved(decision);
         return decision;
     }
@@ -1308,6 +1444,16 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         if (Input is null)
         {
             await Workflow.WaitConditionAsync(() => Input is not null).ConfigureAwait(true);
+        }
+        var input = RequiredInput;
+        if (input.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                decision,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "approval-resolution update input");
         }
 
         // A continue-as-new input is the durable authority for prior resolutions. Rehydrate
@@ -1327,6 +1473,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             RenewSessionIdleDeadline();
         }
 
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                result,
+                RequiredInput.MaximumTransportPayloadSizeBytes,
+                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                "workflow update result");
+        }
         return result;
     }
 
@@ -1354,7 +1509,20 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// Returns the currently pending approval request, or null if none.
     /// </summary>
     [WorkflowQuery("GetPendingApproval")]
-    public DurableApprovalRequest? GetPendingApproval() => _approvalMixin.GetPendingApproval();
+    public DurableApprovalRequest? GetPendingApproval()
+    {
+        var request = _approvalMixin.GetPendingApproval();
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                request,
+                RequiredInput.MaximumTransportPayloadSizeBytes,
+                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                "workflow query result");
+        }
+        return request;
+    }
 
     /// <summary>
     /// Invokes the approval state machine directly from the turn loop (Feature A —
@@ -1375,6 +1543,15 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         Action<DurableApprovalRequest>? onRequested = null,
         Action<DurableApprovalDecision>? onResolved = null)
     {
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                request,
+                RequiredInput.MaximumTransportPayloadSizeBytes,
+                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                "approval request");
+        }
         var decision = await _approvalMixin.RequestApprovalAsync(
             request,
             approvalTimeout,

@@ -35,6 +35,12 @@ Persist `GetSessionEpochAsync` with the application conversation ID and pass it 
 `expectedSessionEpoch` when stale callers must not continue in that new lineage; a mismatch throws
 `DurableChatSessionEpochMismatchException` before provider or tool work.
 
+The sample sets a 1 MiB per-payload transport budget. The guard uses the configured Temporal
+payload converter and reserves any declared custom-codec expansion; the built-in gzip codec is
+non-expanding. Reduce the limit for a stricter Temporal deployment, and avoid raising it beyond
+the service's actual per-payload limit. Activity outputs/failure details and aggregate event-history
+budgets are handled by later redesign units.
+
 Two `AddDurableToolset` registrations provide weather and service-status capabilities.
 `DefaultToolsetIds` composes them in a stable order as the stock workflow's worker-owned baseline.
 The client sends only its conversation ID, messages, and chat options; it does not construct or

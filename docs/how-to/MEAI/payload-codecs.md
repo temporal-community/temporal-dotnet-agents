@@ -21,6 +21,13 @@ Set that converter on every participating Temporal client and worker. The codec 
 small payloads and payloads whose compressed representation does not meet the requested savings.
 Decode rejects unsupported versions, corrupt data, and payloads that cross either configured bound.
 
+Managed durable chat also checks the configured payload converter's complete serialized payload
+against `DurableExecutionOptions.MaximumTransportPayloadSizeBytes` (1 MiB by default), reserving
+`PayloadCodecExpansionAllowanceBytes` for codec growth. The gzip codec is non-expanding and uses
+the default zero allowance. If a custom codec can expand payloads, declare a verified upper bound;
+the workflow cannot invoke the codec during deterministic preflight. This guard is per payload and
+does not replace the codec's own bounds or prove that aggregate Temporal request envelopes fit.
+
 `CompressionLevel` defaults to `CompressionLevel.Fastest`. Faster compression generally spends less
 CPU but may produce larger payloads; denser levels may reduce stored bytes at higher CPU cost. Measure
 representative application payloads before changing it. Internal BenchmarkDotNet measurements on a

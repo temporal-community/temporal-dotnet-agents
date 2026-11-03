@@ -36,6 +36,17 @@ It checks that the session epoch and cumulative completed-turn count survive the
 bounds and confirm that eviction ends the deduplication window. Unit tests cover option validation,
 workflow-input serialization, and preservation of the ledger settings and epoch in Continue-as-New.
 
+## Phase 2.5 transport-budget verification
+
+`DurableTransportPayloadGuardTests` measures the complete payload produced by the configured
+payload converter and verifies that the declared codec-expansion reserve is applied at the exact
+boundary. `DurableExecutionOptionsTests` rejects invalid budgets and unbounded explicit retry
+policies; `ContinueAsNewInputTests` checks that both budget values survive Continue-as-New.
+Workflow integration coverage exercises the client-side workflow/update-input preflight, activity
+input checks before dispatch, update-result/query guards, and the final carried CAN input. These
+limits are per payload: Phase 3.7 adds activity-result/failure bounds, while Phase 2.6 separately
+budgets event-history growth.
+
 Custom workflows based on `DurableToolWorkflowBase<TRequestData, TTurnState>` must call
 `ValidateDurableTurnAdmission` from the validator paired with each turn Update. Handler-side checks
 remain defensive, but only a validator can reject a request before the Update is recorded. The

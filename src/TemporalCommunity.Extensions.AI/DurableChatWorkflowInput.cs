@@ -104,6 +104,64 @@ public record class DurableChatWorkflowInput
     [JsonIgnore]
     public int MaxTerminalOutcomeBytes { get; init; } = 1024 * 1024;
 
+    /// <summary>
+    /// Maximum size of one serialized Temporal payload, including payload metadata. Defaults to
+    /// 1 MiB. The codec-expansion reserve is subtracted before comparing the serialized size.
+    /// </summary>
+    [JsonIgnore]
+    public int MaximumTransportPayloadSizeBytes { get; init; } = 1024 * 1024;
+
+    [JsonInclude]
+    [JsonPropertyName("maximumTransportPayloadSizeBytes")]
+    internal int? SerializedMaximumTransportPayloadSizeBytes
+    {
+        get => this.MaximumTransportPayloadSizeBytes;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.MaximumTransportPayloadSizeBytes = value.Value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Bytes reserved for expansion by a custom payload codec. Defaults to zero.
+    /// </summary>
+    [JsonIgnore]
+    public int PayloadCodecExpansionAllowanceBytes { get; init; }
+
+    [JsonIgnore]
+    internal bool EnableTransportPayloadGuard { get; init; }
+
+    [JsonInclude]
+    [JsonPropertyName("enableTransportPayloadGuard")]
+    internal bool? SerializedEnableTransportPayloadGuard
+    {
+        get => this.EnableTransportPayloadGuard;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.EnableTransportPayloadGuard = value.Value;
+            }
+        }
+    }
+
+    [JsonInclude]
+    [JsonPropertyName("payloadCodecExpansionAllowanceBytes")]
+    internal int? SerializedPayloadCodecExpansionAllowanceBytes
+    {
+        get => this.PayloadCodecExpansionAllowanceBytes;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.PayloadCodecExpansionAllowanceBytes = value.Value;
+            }
+        }
+    }
+
     [JsonInclude]
     [JsonPropertyName("maxTerminalOutcomeBytes")]
     internal int? SerializedMaxTerminalOutcomeBytes

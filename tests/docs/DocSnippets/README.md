@@ -102,6 +102,8 @@ Phase 2.1 adds a compiled MAF request-ID example so caller-known retry identity 
 the usage guide and `TemporalAgentRunOptions`. Phase 2.2 adds a compiled custom typed-turn validator
 example showing pre-acceptance `Busy`/`Conflict` rejection through `ValidateDurableTurnAdmission`.
 Phase 2.3 adds a compiled managed-session recovery example for `DurableChatRequestException.RequestId`.
+Phase 2.5 keeps the compiled MEAI registration example aligned with the per-payload transport
+budget and codec-expansion reserve.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 

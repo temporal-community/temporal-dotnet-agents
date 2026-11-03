@@ -53,6 +53,8 @@ public class ContinueAsNewInputTests
             CompletedTurnCount = 41,
             MaxTerminalOutcomeCount = 17,
             MaxTerminalOutcomeBytes = 8192,
+            MaximumTransportPayloadSizeBytes = 16384,
+            PayloadCodecExpansionAllowanceBytes = 512,
             CarriedHistory =
             [
                 new DurableSessionRequest
@@ -139,6 +141,8 @@ public class ContinueAsNewInputTests
         Assert.Equal(42, actual.CompletedTurnCount);
         Assert.Equal(17, actual.MaxTerminalOutcomeCount);
         Assert.Equal(8192, actual.MaxTerminalOutcomeBytes);
+        Assert.Equal(16384, actual.MaximumTransportPayloadSizeBytes);
+        Assert.Equal(512, actual.PayloadCodecExpansionAllowanceBytes);
         Assert.Same(terminalOutcomes, actual.CarriedTerminalOutcomes);
         Assert.Same(toolOptions, actual.ToolActivityOptions);
         Assert.Same(interceptorOptions, actual.InterceptorActivityOptions);

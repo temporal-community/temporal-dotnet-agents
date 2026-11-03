@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.AI.Session;
+using TemporalCommunity.Extensions.Tests.Shared;
 using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Exceptions;
@@ -17,6 +18,175 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 public class DurableChatLifecycleRegressionTests
 {
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(40);
+
+    [Fact]
+    public async Task SessionClient_RejectsOversizedWorkflowInputBeforeStartingWorkflow()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new TestChatClient();
+        var taskQueue = $"payload-start-input-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            maximumTransportPayloadSizeBytes: 1);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<DurableTransportPayloadTooLargeException>(() =>
+                session.SendAsync("oversized-start-input", "small request"));
+
+            Assert.Equal("workflow input", exception.Boundary);
+            Assert.Equal(0, model.CallCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task SessionClient_RejectsOversizedUpdateInputBeforeDispatch()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new TestChatClient();
+        var taskQueue = $"payload-update-input-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            maximumTransportPayloadSizeBytes: 4096);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<DurableTransportPayloadTooLargeException>(() =>
+                session.SendAsync("oversized-update-input", new string('x', 8192)));
+
+            Assert.Equal("workflow update input", exception.Boundary);
+            Assert.Equal(0, model.CallCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task UpdateResult_RejectsOversizedResponseAndRollsBackHistory()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, new string('x', 8192))),
+        ]);
+        var taskQueue = $"payload-update-result-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            maximumTransportPayloadSizeBytes: 4096);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                session.SendAsync(
+                    "oversized-update-result",
+                    "small request",
+                    requestId: "oversized-update-result"));
+
+            Assert.Contains("workflow update result", exception.ToString(), StringComparison.Ordinal);
+            Assert.Equal(1, model.CallCount);
+            Assert.Empty(await session.GetHistoryAsync("oversized-update-result"));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ContinueAsNew_RejectsOversizedCarriedLedger()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, new string('x', 3000))),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "small response")),
+        ]);
+        var taskQueue = $"payload-can-input-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            maxEntryCount: 4,
+            maximumTransportPayloadSizeBytes: 4096);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var workflowId = session.GetWorkflowId("oversized-can-ledger");
+        var workflow = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+
+        try
+        {
+            await session.SendAsync("oversized-can-ledger", "first").WaitAsync(Deadline);
+            await session.SendAsync("oversized-can-ledger", "second").WaitAsync(Deadline);
+
+            var failure = await Assert.ThrowsAsync<WorkflowFailedException>(
+                () => workflow.GetResultAsync().WaitAsync(Deadline));
+
+            Assert.Contains(
+                "continue-as-new workflow input",
+                failure.ToString(),
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task HistoryQuery_RejectsOversizedQueryResult()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new TestChatClient();
+        var taskQueue = $"payload-history-query-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            maximumTransportPayloadSizeBytes: 4096);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+
+        try
+        {
+            var conversationId = $"payload-history-query-{Guid.NewGuid():N}";
+            await session.SendAsync(conversationId, new string('x', 1000)).WaitAsync(Deadline);
+            await session.SendAsync(conversationId, new string('y', 1000)).WaitAsync(Deadline);
+
+            var exception = await Record.ExceptionAsync(() =>
+                session.GetHistoryAsync(conversationId).WaitAsync(Deadline));
+
+            Assert.NotNull(exception);
+            Assert.Contains("workflow query result", exception.ToString(), StringComparison.Ordinal);
+            Assert.Equal(2, model.CallCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
 
     [Fact]
     public Task KeyedReducer_ContinueAsNew_RetainsLaterSuccessfullyCompletedTurn() =>
@@ -555,7 +725,8 @@ public class DurableChatLifecycleRegressionTests
         Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? reducer = null,
         int maxTerminalOutcomeCount = 128,
         int maxTerminalOutcomeBytes = 1024 * 1024,
-        TimeSpan? sessionTimeToLive = null)
+        TimeSpan? sessionTimeToLive = null,
+        int maximumTransportPayloadSizeBytes = 1024 * 1024)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
@@ -565,6 +736,7 @@ public class DurableChatLifecycleRegressionTests
             options.MaxEntryCount = maxEntryCount;
             options.MaxTerminalOutcomeCount = maxTerminalOutcomeCount;
             options.MaxTerminalOutcomeBytes = maxTerminalOutcomeBytes;
+            options.MaximumTransportPayloadSizeBytes = maximumTransportPayloadSizeBytes;
             options.ActivityTimeout = TimeSpan.FromSeconds(60);
             options.SessionTimeToLive = sessionTimeToLive ?? TimeSpan.FromMinutes(5);
             options.DefaultHistoryReducerKey = reducerKey;

@@ -29,8 +29,8 @@ public sealed class DurableExecutionOptions
     /// defaults: model calls cap inter-attempt backoff at 2 seconds, while tool and policy
     /// activities cap it at 30 seconds to allow more time for transient dependencies to recover.
     /// These are attempt bounds, not total execution budgets, and they do not interpret HTTP
-    /// <c>Retry-After</c>. Set an explicit policy to replace the corresponding defaults exactly,
-    /// including an intentional <c>MaximumAttempts = 0</c> unlimited policy.
+    /// <c>Retry-After</c>. Set an explicit policy to replace the corresponding defaults exactly;
+    /// an explicit policy must set a positive <c>MaximumAttempts</c>.
     /// </summary>
     public RetryPolicy? RetryPolicy { get; set; }
 
@@ -211,6 +211,29 @@ public sealed class DurableExecutionOptions
     public int MaxTerminalOutcomeBytes { get; set; } = 1024 * 1024;
 
     /// <summary>
+    /// Gets or sets the conservative maximum size, in bytes, of one serialized Temporal payload.
+    /// Defaults to 1 MiB and includes a separate reserve for payload-codec expansion.
+    /// </summary>
+    /// <remarks>
+    /// The guard measures the complete payload produced by the configured payload converter,
+    /// including metadata, then reserves <see cref="PayloadCodecExpansionAllowanceBytes"/> for
+    /// codec expansion. The default is below common Temporal per-payload limits; lower it when
+    /// the namespace or deployment has a smaller limit. Do not raise it above the applicable
+    /// service limit. Codecs that can expand payloads must declare a sufficient allowance.
+    /// </remarks>
+    public int MaximumTransportPayloadSizeBytes { get; set; } = 1024 * 1024;
+
+    /// <summary>
+    /// Gets or sets the number of bytes reserved for payload-codec expansion. Defaults to zero.
+    /// </summary>
+    /// <remarks>
+    /// The built-in gzip codec never expands a payload. Set this when using a custom codec whose
+    /// maximum expansion is known; the value is subtracted from
+    /// <see cref="MaximumTransportPayloadSizeBytes"/> for every guarded payload.
+    /// </remarks>
+    public int PayloadCodecExpansionAllowanceBytes { get; set; }
+
+    /// <summary>
     /// Gets or sets a factory that creates a worker-level
     /// <see cref="IDurableToolInterceptor{TContext}"/> for intercepting tool calls before
     /// dispatch in the durable tool loop. When <see langword="null"/> (default), no
@@ -276,6 +299,24 @@ public sealed class DurableExecutionOptions
             throw new InvalidOperationException(
                 $"{nameof(MaxTerminalOutcomeBytes)} must be positive in {nameof(DurableExecutionOptions)}.");
         }
+
+        if (MaximumTransportPayloadSizeBytes <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(MaximumTransportPayloadSizeBytes)} must be positive in {nameof(DurableExecutionOptions)}.");
+        }
+
+        if (PayloadCodecExpansionAllowanceBytes < 0
+            || PayloadCodecExpansionAllowanceBytes >= MaximumTransportPayloadSizeBytes)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(PayloadCodecExpansionAllowanceBytes)} must be non-negative and smaller than " +
+                $"{nameof(MaximumTransportPayloadSizeBytes)} in {nameof(DurableExecutionOptions)}.");
+        }
+
+        Internal.DurableTransportPayloadGuard.EnsureBoundedRetryPolicy(
+            RetryPolicy,
+            nameof(RetryPolicy));
 
         if (MaxToolCallsPerTurn <= 0)
         {

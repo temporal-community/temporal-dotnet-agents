@@ -55,6 +55,15 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
             var resolutionRequest = baselineIds is null
                 ? new Internal.DurableToolsetResolutionRequest { UseWorkerDefaults = true }
                 : new Internal.DurableToolsetResolutionRequest { ToolsetIds = baselineIds };
+            if (input.EnableTransportPayloadGuard)
+            {
+                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    resolutionRequest,
+                    input.MaximumTransportPayloadSizeBytes,
+                    input.PayloadCodecExpansionAllowanceBytes,
+                    "activity input");
+            }
             var manifest = await Workflow.ExecuteActivityAsync(
                 (DurableToolsetActivities activities) =>
                     activities.ResolveDurableToolsetsAsync(resolutionRequest),
@@ -309,11 +318,23 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
     protected sealed override Task<List<DurableSessionEntry>> ApplyKeyedHistoryReducerAsync(
         string reducerKey,
         List<DurableSessionEntry> history,
-        ActivityOptions activityOptions) =>
-        Workflow.ExecuteActivityAsync(
+        ActivityOptions activityOptions)
+    {
+        var reducerInput = new ReduceHistoryByKeyInput { ReducerKey = reducerKey, History = history };
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                reducerInput,
+                RequiredInput.MaximumTransportPayloadSizeBytes,
+                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                "activity input");
+        }
+        return Workflow.ExecuteActivityAsync(
             (DurableChatActivities activities) => activities.ReduceHistoryByKeyAsync(
-                new ReduceHistoryByKeyInput { ReducerKey = reducerKey, History = history }),
+                reducerInput),
             activityOptions);
+    }
 
     /// <inheritdoc/>
     protected sealed override ContinueAsNewException CreateContinueAsNewException(

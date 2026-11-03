@@ -30,6 +30,8 @@ internal static class Usage
                 options.ActivityTimeout = TimeSpan.FromMinutes(5);
                 options.SessionTimeToLive = TimeSpan.FromHours(24);
                 options.MaxToolCallsPerTurn = 10;
+                options.MaximumTransportPayloadSizeBytes = 1024 * 1024;
+                options.PayloadCodecExpansionAllowanceBytes = 0;
             })
             .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
         // END SNIPPET docs/how-to/MEAI/usage.md#built-in-managed-session

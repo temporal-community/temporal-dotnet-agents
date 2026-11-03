@@ -43,6 +43,12 @@ public sealed class DurableAIFunction : DelegatingAIFunction
             FunctionName = Name,
             Arguments = ConvertArguments(arguments),
         };
+        Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+            Workflow.PayloadConverter,
+            input,
+            _options.MaximumTransportPayloadSizeBytes,
+            _options.PayloadCodecExpansionAllowanceBytes,
+            "durable function activity input");
 
         var activityOptions = CreateActivityOptions(Name, _options);
 
@@ -86,6 +92,9 @@ public sealed class DurableAIFunction : DelegatingAIFunction
             RetryPolicy = Internal.DefaultRetryPolicy.ResolveForTool(options.RetryPolicy),
             Summary = BuildActivitySummary(functionName),
         };
+        Internal.DurableTransportPayloadGuard.EnsureBoundedRetryPolicy(
+            activityOptions.RetryPolicy,
+            nameof(options.RetryPolicy));
 
         return activityOptions;
     }

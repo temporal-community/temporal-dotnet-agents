@@ -132,6 +132,64 @@ public class DurableToolDispatchIntegrationTests
         await host.StopAsync();
     }
 
+    [Fact]
+    public async Task OversizedToolActivityInput_IsRejectedBeforeToolDispatch()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var invocations = 0;
+        var tool = AIFunctionFactory.Create(
+            (string value) =>
+            {
+                Interlocked.Increment(ref invocations);
+                return "invoked";
+            },
+            name: "large_input_tool",
+            description: "Consumes a string.");
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [
+                    new FunctionCallContent(
+                        "large-call",
+                        "large_input_tool",
+                        new Dictionary<string, object?> { ["value"] = new string('x', 8192) }),
+                ])),
+        ]);
+        var taskQueue = $"payload-tool-input-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            builder => builder.AddDurableTools(tool),
+            options =>
+            {
+                options.MaximumTransportPayloadSizeBytes = 8192;
+                options.RetryPolicy = new RetryPolicy { MaximumAttempts = 1 };
+            });
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                session.SendAsync(
+                    $"oversized-tool-input-{Guid.NewGuid():N}",
+                    "request fits",
+                    requestId: "oversized-tool-input"));
+
+            Assert.True(
+                exception.ToString().Contains("tool activity input", StringComparison.Ordinal),
+                exception.ToString());
+            Assert.Equal(0, Volatile.Read(ref invocations));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     private const string GetChatStepActivity = "TemporalCommunity.Extensions.AI.GetChatStep";
     private const string InvokeFunctionActivity = "TemporalCommunity.Extensions.AI.InvokeFunction";
 

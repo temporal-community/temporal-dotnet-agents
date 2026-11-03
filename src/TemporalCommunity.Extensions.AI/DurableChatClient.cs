@@ -59,6 +59,12 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
 
         // Inside a workflow — dispatch as an activity.
         var input = CreateInput(messages, options);
+        Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+            Workflow.PayloadConverter,
+            input,
+            _durableOptions.MaximumTransportPayloadSizeBytes,
+            _durableOptions.PayloadCodecExpansionAllowanceBytes,
+            "chat activity input");
 
         // Keep this continuation on Temporal's workflow task scheduler so subsequent
         // workflow commands are issued through the active workflow context.
@@ -157,6 +163,10 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
                 MaximumAttempts = maxRetry.Value,
             };
         }
+
+        Internal.DurableTransportPayloadGuard.EnsureBoundedRetryPolicy(
+            activityOptions.RetryPolicy,
+            nameof(_durableOptions.RetryPolicy));
 
         return activityOptions;
     }

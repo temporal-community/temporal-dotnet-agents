@@ -18,6 +18,8 @@ public class DurableExecutionOptionsTests
         Assert.Equal(TimeSpan.FromMinutes(2), options.HeartbeatTimeout);
         Assert.Equal(128, options.MaxTerminalOutcomeCount);
         Assert.Equal(1024 * 1024, options.MaxTerminalOutcomeBytes);
+        Assert.Equal(1024 * 1024, options.MaximumTransportPayloadSizeBytes);
+        Assert.Equal(0, options.PayloadCodecExpansionAllowanceBytes);
     }
 
     [Fact]
@@ -141,6 +143,43 @@ public class DurableExecutionOptionsTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
         Assert.Contains("SessionTimeToLive", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1024, -1)]
+    [InlineData(1024, 1024)]
+    public void Validate_RejectsInvalidTransportPayloadBudget(int maximumBytes, int expansionAllowanceBytes)
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "q",
+            MaximumTransportPayloadSizeBytes = maximumBytes,
+            PayloadCodecExpansionAllowanceBytes = expansionAllowanceBytes,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains(
+            maximumBytes <= 0
+                ? nameof(options.MaximumTransportPayloadSizeBytes)
+                : nameof(options.PayloadCodecExpansionAllowanceBytes),
+            exception.Message);
+    }
+
+    [Fact]
+    public void Validate_RejectsUnboundedActivityRetryPolicy()
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "q",
+            RetryPolicy = new Temporalio.Common.RetryPolicy { MaximumAttempts = 0 },
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains(nameof(options.RetryPolicy), exception.Message);
+        Assert.Contains("positive MaximumAttempts", exception.Message);
     }
 
     [Fact]

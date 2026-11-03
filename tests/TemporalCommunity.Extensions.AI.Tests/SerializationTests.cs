@@ -263,6 +263,9 @@ public class SerializationTests
             CompletedTurnCount = 23,
             MaxTerminalOutcomeCount = 15,
             MaxTerminalOutcomeBytes = 12345,
+            MaximumTransportPayloadSizeBytes = 16384,
+            PayloadCodecExpansionAllowanceBytes = 512,
+            EnableTransportPayloadGuard = true,
             CarriedTerminalOutcomes =
             [
                 new global::TemporalCommunity.Extensions.AI.Internal.DurableTerminalTurnOutcome
@@ -297,6 +300,9 @@ public class SerializationTests
         Assert.Equal(23, deserialized.CompletedTurnCount);
         Assert.Equal(15, deserialized.MaxTerminalOutcomeCount);
         Assert.Equal(12345, deserialized.MaxTerminalOutcomeBytes);
+        Assert.Equal(16384, deserialized.MaximumTransportPayloadSizeBytes);
+        Assert.Equal(512, deserialized.PayloadCodecExpansionAllowanceBytes);
+        Assert.True(deserialized.EnableTransportPayloadGuard);
         Assert.Equal("request-1", Assert.Single(deserialized.CarriedTerminalOutcomes!).RequestId);
         Assert.Equal(7, deserialized.MaxToolCallsPerTurn);
         Assert.Equal(1, deserialized.MaximumConsecutiveErrorsPerRequest);
@@ -317,6 +323,9 @@ public class SerializationTests
         Assert.Equal(1000, restored.MaxEntryCount);
         Assert.Equal(128, restored.MaxTerminalOutcomeCount);
         Assert.Equal(1024 * 1024, restored.MaxTerminalOutcomeBytes);
+        Assert.Equal(1024 * 1024, restored.MaximumTransportPayloadSizeBytes);
+        Assert.Equal(0, restored.PayloadCodecExpansionAllowanceBytes);
+        Assert.False(restored.EnableTransportPayloadGuard);
         Assert.Equal(20, restored.MaxToolCallsPerTurn);
         Assert.Equal(3, restored.MaximumConsecutiveErrorsPerRequest);
     }

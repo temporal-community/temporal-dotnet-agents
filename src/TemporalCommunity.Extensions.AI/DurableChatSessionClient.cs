@@ -137,6 +137,12 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         _logger.LogClientSendingChat(workflowId);
 
         var workflowInput = _workflowInputFactory.Create();
+        Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+            _client.Options.DataConverter.PayloadConverter,
+            workflowInput,
+            workflowInput.MaximumTransportPayloadSizeBytes,
+            workflowInput.PayloadCodecExpansionAllowanceBytes,
+            "workflow input");
         var requestedKey = options.GetChatClientKey();
         if (requestedKey is not null
             && !string.Equals(
@@ -178,6 +184,12 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         // the update-with-start RPC records the request in workflow history. The workflow
         // recomputes the stored fingerprint after resolving its authoritative tool manifest.
         _ = Internal.DurableRequestFingerprint.CreateChat(input, workflowInput);
+        Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+            _client.Options.DataConverter.PayloadConverter,
+            input,
+            workflowInput.MaximumTransportPayloadSizeBytes,
+            workflowInput.PayloadCodecExpansionAllowanceBytes,
+            "workflow update input");
 
         // Atomic update-with-start: starts the workflow if absent (UseExisting) and delivers the
         // chat turn in a single RPC, closing the client-crash window between start and update. Targets
@@ -211,6 +223,12 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         }
 
         span?.SetTag(DurableChatTelemetry.InputTokensAttribute, responseEntry.Usage?.InputTokenCount);
+        Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+            _client.Options.DataConverter.PayloadConverter,
+            responseEntry,
+            workflowInput.MaximumTransportPayloadSizeBytes,
+            workflowInput.PayloadCodecExpansionAllowanceBytes,
+            "workflow update result");
         span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, responseEntry.Usage?.OutputTokenCount);
         span?.SetTag(
             DurableChatTelemetry.ReasoningOutputTokensAttribute,

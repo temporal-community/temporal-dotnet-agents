@@ -130,6 +130,9 @@ internal sealed class DurableToolsetCatalog
     {
         var retryPolicy = DefaultRetryPolicy.ResolveForTool(
             member.Options.RetryPolicy ?? options.RetryPolicy);
+        DurableTransportPayloadGuard.EnsureBoundedRetryPolicy(
+            retryPolicy,
+            $"RetryPolicy for tool '{member.Declaration.Name}'");
         var interceptorEnabled = options.DefaultToolInterceptor is not null;
         return new DurableToolsetManifestMember
         {

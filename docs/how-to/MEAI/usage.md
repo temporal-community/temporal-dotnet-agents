@@ -21,10 +21,9 @@ how-to reference for all of them:
 
 ## Durable-chat redesign target contracts
 
-**Implementation status:** Phases 0, 1, and 2.1–2.3 are implemented. The current API supports
-request identity, active-turn admission, bounded terminal outcomes carried through
-Continue-as-New, and an opaque epoch and cumulative turn count preserved across the lineage.
-Expected-epoch validation, idle-deadline renewal, and event-history budgeting are later work.
+**Implementation status:** Phases 0, 1, and 2.1–2.5 are implemented. The current API supports
+request identity, active-turn admission, bounded terminal outcomes, epoch-aware idle deadlines,
+and conservative per-payload transport guards. Event-history budgeting is still later work.
 In particular, `correlationId` is not an idempotency key and current Continue-as-New can trim history.
 
 | Boundary | Selected target contract |
@@ -32,6 +31,7 @@ In particular, `correlationId` is not an idempotency key and current Continue-as
 | Identity | The application session ID is distinct from provider `ChatOptions.ConversationId`. A new lineage gets an opaque epoch, carried across Continue-as-New (CAN). An optional expected-epoch mismatch is a typed rejection before effects. |
 | Admission | One active turn. Matching request ID and effect-bearing fingerprint joins it or returns its terminal result; another request gets `Busy`; changed input under the same ID gets `Conflict`. Success, failure, and cancellation are terminal ledger outcomes. |
 | Deduplication | Bound terminal entry count and serialized bytes; never evict pending requests. Cap pending joiners (`Pending` beyond the cap). Neither a ledger nor a single activity attempt guarantees exactly-once external effects. |
+| Payload transport | Measure complete payloads with the configured Temporal payload converter; reserve an explicit codec-expansion allowance. Guard workflow/update inputs and results, query results, activity inputs, and CAN input. The default per-payload budget is 1 MiB. |
 | Approval and CAN | Close admission before draining; defer CAN until admitted handlers and the active turn finish. Approvals have finite deadlines. Declare no signal handlers: unit 2.6 replaces current `Shutdown` with validated `RequestShutdown` and removes `ShutdownSignalName`. Unknown, mismatched, and resolved decisions are rejected before admission. |
 | Event history | Use `Workflow.CurrentHistoryLength` and `CurrentHistorySize` (bytes, updated at workflow-task boundaries). Soft thresholds admit only completion, approval resolution, cancellation, and recovery. Near approval reserve exhaustion, expire deterministically as `Expired(HistoryBudget)`. Bound recovery per run and across CAN; a finite timer does not bound request volume. |
 | Failure and cancellation | With no dispatched tool effect, roll back the turn. After an effect, retain a bounded interrupted-turn record: completed call/result pairs, `unknown` for uncertain effects, `not executed` for undispatched calls, and a redacted bounded terminal marker. Drop partial assistant text and project protocol-valid model messages. |
@@ -81,6 +81,8 @@ builder.Services
         options.ActivityTimeout = TimeSpan.FromMinutes(5);
         options.SessionTimeToLive = TimeSpan.FromHours(24);
         options.MaxToolCallsPerTurn = 10;
+        options.MaximumTransportPayloadSizeBytes = 1024 * 1024;
+        options.PayloadCodecExpansionAllowanceBytes = 0;
     })
     .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
 ```
@@ -98,6 +100,27 @@ The workflow owns tool selection and dispatch, and both are rejected. For the fu
 tool-registration surface (`AddDurableTools`, `AddDurableToolset`, `AddDurableToolFactory`) see
 [tool functions](tool-functions.md) and the
 [managed-session tool rules](managed-session-tool-rules.md).
+
+### Payload and activity-retry bounds
+
+The default 1 MiB transport budget is a conservative per-payload ceiling, not a model-context or
+aggregate event-history budget. The guard measures the payload converter's complete Temporal
+payload, including metadata, and subtracts `PayloadCodecExpansionAllowanceBytes` before comparing
+it with `MaximumTransportPayloadSizeBytes`. Lower the maximum for deployments with stricter
+service limits; only raise it when the configured Temporal service allows it. The limit covers
+workflow input, update input/result, query result, Continue-as-New input, and managed/direct
+activity inputs. Activity outputs and failure details receive their own guard in Phase 3.7.
+
+The built-in gzip codec never expands a payload, so it needs no allowance. A custom codec must
+declare a known maximum expansion in `PayloadCodecExpansionAllowanceBytes`; the workflow can access
+the configured payload converter but not run the codec itself. A custom codec without a known
+expansion bound cannot provide this guard's conservative guarantee. A passing guard also does not
+prove that a later codec, aggregate command, or deployment-specific request envelope fits.
+
+Unconfigured activity policies use the library's finite five-attempt default. An explicit
+`RetryPolicy` must specify positive `MaximumAttempts`; `MaximumAttempts = 0` delegates to Temporal's
+unlimited server default and is rejected. `MaxToolCallsPerTurn` separately bounds the model/tool
+loop.
 
 ### Worker setup with a manual client
 
