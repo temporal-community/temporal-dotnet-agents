@@ -275,6 +275,8 @@ if (pending is not null)
     await sessionClient.ResolveApprovalAsync(convId3, new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
+        CallId = pending.CallId,
+        FunctionName = pending.FunctionName,
         Approved  = true,
         Reason    = "Auto-approved by sample reviewer.",
     });

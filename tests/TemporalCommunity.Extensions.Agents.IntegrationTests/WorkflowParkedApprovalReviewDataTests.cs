@@ -72,6 +72,8 @@ public sealed class WorkflowParkedApprovalReviewDataTests
             (await client.ResolveApprovalAsync(session.SessionId, new DurableApprovalDecision
             {
                 RequestId = pending.RequestId,
+                CallId = pending.CallId,
+                FunctionName = pending.FunctionName,
                 Approved = true,
             })).Status);
 
@@ -113,6 +115,8 @@ public sealed class WorkflowParkedApprovalReviewDataTests
         await client.ResolveApprovalAsync(session.SessionId, new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = false,
         });
         await runTask.WaitAsync(TimeSpan.FromSeconds(30));
@@ -161,6 +165,8 @@ public sealed class WorkflowParkedApprovalReviewDataTests
         await client2.ResolveApprovalAsync(session.SessionId, new DurableApprovalDecision
         {
             RequestId = pendingAfterRestart.RequestId,
+            CallId = pendingAfterRestart.CallId,
+            FunctionName = pendingAfterRestart.FunctionName,
             Approved = true,
         });
         await runTask.WaitAsync(TimeSpan.FromSeconds(30));
@@ -212,6 +218,8 @@ public sealed class WorkflowParkedApprovalReviewDataTests
         var decision = new DurableApprovalDecision
         {
             RequestId = pending!.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = true,
             Reason = "Approved by reviewer.",
         };

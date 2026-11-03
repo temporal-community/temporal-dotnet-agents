@@ -101,6 +101,10 @@ unknown; an activity failure does not prove that no effect occurred.
   downstream deduplication key when the external system supports one; it does not provide
   exactly-once effects by itself.
 - `MaxToolCallsPerTurn` caps a runaway model/tool loop. Set it for your cost and risk budget.
+- Tool approval decisions include the pending request's `CallId` and `FunctionName`; the workflow
+  rejects a missing or mismatched call identity before accepting the update. For MEAI approval UIs,
+  `DurableApprovalMeaiAdapter` preserves the request ID and function-call identity in both
+  directions. Its adapter supports function-call approvals only.
 
 The per-tool callback methods such as `.NoRetry()` configure these managed, worker-registered
 tools. They do not configure a separate `AIFunction.AsDurable()` call in custom workflow code;

@@ -68,6 +68,13 @@ internal sealed class DurableApprovalMixin
     {
         if (request is null || string.IsNullOrWhiteSpace(request.RequestId))
             throw Failure("RequestId must not be null, empty, or whitespace.", InvalidRequestErrorType);
+        if (request.CallId is not null
+            && (string.IsNullOrWhiteSpace(request.CallId) || string.IsNullOrWhiteSpace(request.FunctionName)))
+        {
+            throw Failure(
+                "A tool approval call identity must include a non-empty call ID and function name.",
+                InvalidRequestErrorType);
+        }
         if (_pendingApproval is not null)
             throw Failure(AlreadyPendingMessage, AlreadyPendingErrorType);
     }
@@ -132,6 +139,8 @@ internal sealed class DurableApprovalMixin
             var timedOutDecision = new DurableApprovalDecision
             {
                 RequestId = request.RequestId,
+                CallId = request.CallId,
+                FunctionName = request.FunctionName,
                 Approved = false,
                 Reason = expiredForHistoryBudget
                     ? "Approval expired because the workflow history reserve was reached."
@@ -187,7 +196,8 @@ internal sealed class DurableApprovalMixin
                 DurableApprovalResolutionStatus.NotPending =>
                     (ResolutionNotPendingErrorType, "No approval is pending for this request ID."),
                 DurableApprovalResolutionStatus.RequestMismatch =>
-                    (ResolutionRequestMismatchErrorType, "A different approval request is pending."),
+                    (ResolutionRequestMismatchErrorType,
+                        "The approval request ID or tool-call identity does not match the pending request."),
                 DurableApprovalResolutionStatus.AlreadyResolved =>
                     (ResolutionAlreadyResolvedErrorType, "This approval request is already resolved."),
                 DurableApprovalResolutionStatus.Conflict =>
@@ -227,6 +237,11 @@ internal sealed class DurableApprovalMixin
             return DurableApprovalResolutionStatus.RequestMismatch;
         }
 
+        if (!MatchesCallIdentity(_pendingApproval, decision))
+        {
+            return DurableApprovalResolutionStatus.RequestMismatch;
+        }
+
         if (_approvalDecision is not null)
         {
             return IsEquivalent(_approvalDecision, decision)
@@ -255,7 +270,24 @@ internal sealed class DurableApprovalMixin
 
     private static bool IsEquivalent(DurableApprovalDecision left, DurableApprovalDecision right) =>
         left.Approved == right.Approved &&
+        string.Equals(left.CallId, right.CallId, StringComparison.Ordinal) &&
+        string.Equals(left.FunctionName, right.FunctionName, StringComparison.Ordinal) &&
         string.Equals(left.Reason, right.Reason, StringComparison.Ordinal);
+
+    private static bool MatchesCallIdentity(
+        DurableApprovalRequest request,
+        DurableApprovalDecision decision)
+    {
+        if (request.CallId is null)
+        {
+            return decision.CallId is null
+                   && (decision.FunctionName is null
+                       || string.Equals(request.FunctionName, decision.FunctionName, StringComparison.Ordinal));
+        }
+
+        return string.Equals(request.CallId, decision.CallId, StringComparison.Ordinal)
+               && string.Equals(request.FunctionName, decision.FunctionName, StringComparison.Ordinal);
+    }
 
     private static DurableApprovalResolutionResult Result(
         DurableApprovalResolutionStatus status,

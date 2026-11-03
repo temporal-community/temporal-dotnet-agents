@@ -256,6 +256,8 @@ while (!turn.IsCompleted)
         new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved  = true,
             Reason    = "Reviewed under ticket INC-1234.",
         },
@@ -270,6 +272,9 @@ while (!turn.IsCompleted)
 
 var response = await turn;
 ```
+
+Tool approvals require both `CallId` and `FunctionName` from the pending request. A decision with
+missing or mismatched call identity is rejected before acceptance.
 
 `GetPendingApprovalAsync` is a workflow query: it never blocks and adds no history, so poll freely.
 

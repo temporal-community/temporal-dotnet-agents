@@ -216,6 +216,8 @@ while (true)
             var denialResolution = await client.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
             {
                 RequestId = pending.RequestId,
+                CallId = pending.CallId,
+                FunctionName = pending.FunctionName,
                 Approved  = false,
                 Reason    = "Denied by user.",
             });
@@ -239,6 +241,8 @@ while (true)
             var oneCall = await client.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
             {
                 RequestId = pending.RequestId,
+                CallId = pending.CallId,
+                FunctionName = pending.FunctionName,
                 Approved = true,
             });
             Console.WriteLine($"\n  Approved [this call only] ({oneCall.Status}) — agent is resuming...\n");

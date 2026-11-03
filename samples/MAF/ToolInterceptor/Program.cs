@@ -178,6 +178,8 @@ while (!agentTask.IsCompleted)
     var resolution = await agentClient.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
+        CallId = pending.CallId,
+        FunctionName = pending.FunctionName,
         Approved  = true,
         Reason    = "Demo auto-approve",
     });
@@ -192,6 +194,8 @@ while (!agentTask.IsCompleted)
         await agentClient.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = true,
             Reason = "Demo auto-approve",
         });

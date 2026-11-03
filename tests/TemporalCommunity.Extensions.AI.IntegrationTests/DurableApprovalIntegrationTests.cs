@@ -33,6 +33,7 @@ public class DurableApprovalIntegrationTests
         {
             RequestId = $"req-{Guid.NewGuid():N}",
             FunctionName = "delete_records",
+            CallId = "delete-call",
             Description = "Delete user data",
         };
 
@@ -56,10 +57,46 @@ public class DurableApprovalIntegrationTests
             Assert.NotNull(pending);
             Assert.Equal(request.RequestId, pending!.RequestId);
 
+            var wrongCall = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                _fixture.SessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
+                {
+                    RequestId = request.RequestId,
+                    CallId = "different-call",
+                    FunctionName = request.FunctionName,
+                    Approved = true,
+                }));
+            Assert.Equal(
+                DurableApprovalMixin.ResolutionRequestMismatchErrorType,
+                Assert.IsType<ApplicationFailureException>(wrongCall.InnerException).ErrorType);
+
+            var missingCallIdentity = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                _fixture.SessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
+                {
+                    RequestId = request.RequestId,
+                    Approved = true,
+                }));
+            Assert.Equal(
+                DurableApprovalMixin.ResolutionRequestMismatchErrorType,
+                Assert.IsType<ApplicationFailureException>(missingCallIdentity.InnerException).ErrorType);
+
+            var wrongFunction = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                _fixture.SessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
+                {
+                    RequestId = request.RequestId,
+                    CallId = request.CallId,
+                    FunctionName = "different_function",
+                    Approved = true,
+                }));
+            Assert.Equal(
+                DurableApprovalMixin.ResolutionRequestMismatchErrorType,
+                Assert.IsType<ApplicationFailureException>(wrongFunction.InnerException).ErrorType);
+
             // Submit approval decision.
             var decision = new DurableApprovalDecision
             {
                 RequestId = request.RequestId,
+                CallId = request.CallId,
+                FunctionName = request.FunctionName,
                 Approved = true,
                 Reason = "Approved by test",
             };
@@ -81,6 +118,8 @@ public class DurableApprovalIntegrationTests
                     new DurableApprovalDecision
                     {
                         RequestId = request.RequestId,
+                        CallId = request.CallId,
+                        FunctionName = request.FunctionName,
                         Approved = false,
                         Reason = "Conflicting retry",
                     }));
@@ -98,6 +137,8 @@ public class DurableApprovalIntegrationTests
                         new DurableApprovalDecision
                         {
                             RequestId = request.RequestId,
+                            CallId = request.CallId,
+                            FunctionName = request.FunctionName,
                             Approved = false,
                             Reason = "Test cleanup — forced reject to unblock",
                         });
@@ -125,6 +166,7 @@ public class DurableApprovalIntegrationTests
         {
             RequestId = $"req-{Guid.NewGuid():N}",
             FunctionName = "dangerous_operation",
+            CallId = "dangerous-call",
         };
 
         // Request approval in a background task (it blocks until decision).
@@ -150,6 +192,8 @@ public class DurableApprovalIntegrationTests
             var decision = new DurableApprovalDecision
             {
                 RequestId = request.RequestId,
+                CallId = request.CallId,
+                FunctionName = request.FunctionName,
                 Approved = false,
                 Reason = "Too risky",
             };
@@ -171,6 +215,8 @@ public class DurableApprovalIntegrationTests
                         new DurableApprovalDecision
                         {
                             RequestId = request.RequestId,
+                            CallId = request.CallId,
+                            FunctionName = request.FunctionName,
                             Approved = false,
                             Reason = "Test cleanup — forced reject to unblock",
                         });
@@ -196,6 +242,29 @@ public class DurableApprovalIntegrationTests
 
         var pending = await _fixture.SessionClient.GetPendingApprovalAsync(conversationId);
         Assert.Null(pending);
+    }
+
+    [Fact]
+    public async Task ToolApprovalRequest_RequiresCompleteCallIdentity()
+    {
+        var conversationId = $"approval-invalid-identity-{Guid.NewGuid():N}";
+        await _fixture.SessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "Hello")]);
+
+        var workflowId = _fixture.SessionClient.GetWorkflowId(conversationId);
+        var handle = _fixture.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        var failure = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            handle.ExecuteUpdateAsync(workflow => workflow.RequestApprovalAsync(new DurableApprovalRequest
+            {
+                RequestId = $"req-{Guid.NewGuid():N}",
+                CallId = "call-without-function",
+            })));
+
+        Assert.Equal(
+            DurableApprovalMixin.InvalidRequestErrorType,
+            Assert.IsType<ApplicationFailureException>(failure.InnerException).ErrorType);
+        Assert.Null(await _fixture.SessionClient.GetPendingApprovalAsync(conversationId));
     }
 
     [Fact]
@@ -266,7 +335,11 @@ public class DurableApprovalIntegrationTests
         Assert.True(conflictFailure.NonRetryable);
 
         var resolution = await handle.ExecuteUpdateAsync(workflow => workflow.ResolveApprovalAsync(
-            new DurableApprovalDecision { RequestId = request.RequestId, Approved = false }));
+            new DurableApprovalDecision
+            {
+                RequestId = request.RequestId,
+                Approved = false,
+            }));
         Assert.Equal(DurableApprovalResolutionStatus.Accepted, resolution.Status);
         Assert.False((await first).Approved);
 

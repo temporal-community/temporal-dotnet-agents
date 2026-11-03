@@ -78,6 +78,8 @@ public class ApprovalScopeForgeRegressionTests : IClassFixture<ApprovalScopeForg
         await handle.ExecuteUpdateAsync(wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
         {
             RequestId = pending1!.RequestId,
+            CallId = pending1.CallId,
+            FunctionName = pending1.FunctionName,
             Approved = true,
         }));
 
@@ -98,6 +100,8 @@ public class ApprovalScopeForgeRegressionTests : IClassFixture<ApprovalScopeForg
         await handle.ExecuteUpdateAsync(wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
         {
             RequestId = pending2!.RequestId,
+            CallId = pending2.CallId,
+            FunctionName = pending2.FunctionName,
             Approved = true,
         }));
         await turn2Task;

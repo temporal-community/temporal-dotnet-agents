@@ -111,6 +111,7 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
             // Assert: the decision should be rejected with a timeout message.
             Assert.False(decision.Approved);
             Assert.Equal(approvalRequest.RequestId, decision.RequestId);
+            Assert.Equal(DurableApprovalExpirationReason.Timeout, decision.ExpirationReason);
             Assert.NotNull(decision.Reason);
             Assert.Contains("timed out", decision.Reason, StringComparison.OrdinalIgnoreCase);
 

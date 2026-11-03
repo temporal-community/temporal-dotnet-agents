@@ -96,6 +96,8 @@ public class InToolApprovalHeartbeatTests
                 new DurableApprovalDecision
                 {
                     RequestId = pending!.RequestId,
+                    CallId = pending.CallId,
+                    FunctionName = pending.FunctionName,
                     Approved = true,
                     Reason = "Reviewed after the heartbeat timeout elapsed.",
                 });

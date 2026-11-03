@@ -795,6 +795,8 @@ var result = await client.ResolveApprovalAsync(
     new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
+        CallId = pending.CallId,
+        FunctionName = pending.FunctionName,
         Approved  = true,
         Reason    = "Reviewed and approved by operations team."
     });

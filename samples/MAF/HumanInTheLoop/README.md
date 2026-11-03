@@ -23,7 +23,13 @@ await authorization.RequireApprovalPermissionAsync(request.User, resource);
 var pending = await agentClient.GetPendingApprovalAsync(resource.SessionId);
 var result = await agentClient.ResolveApprovalAsync(
     resource.SessionId,
-    new DurableApprovalDecision { RequestId = pending!.RequestId, Approved = approved });
+    new DurableApprovalDecision
+    {
+        RequestId = pending!.RequestId,
+        CallId = pending.CallId,
+        FunctionName = pending.FunctionName,
+        Approved = approved,
+    });
 ```
 
 The `send_email` tool must reauthorize current authoritative state immediately before delivery.

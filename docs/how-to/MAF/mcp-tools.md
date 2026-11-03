@@ -127,6 +127,8 @@ if (pending is not null)
         new DurableApprovalDecision
         {
             RequestId = pending.RequestId,   // required — ties the answer to the request
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = true,
         },
         cancellationToken);

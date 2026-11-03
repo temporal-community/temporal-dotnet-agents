@@ -266,6 +266,8 @@ public class DurableToolInterceptorIntegrationTests
         await sessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = true,
         });
 
@@ -371,6 +373,8 @@ public class DurableToolInterceptorIntegrationTests
         await sessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = true,
         });
 
@@ -425,6 +429,8 @@ public class DurableToolInterceptorIntegrationTests
         await sessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
         {
             RequestId = first!.RequestId,
+            CallId = first.CallId,
+            FunctionName = first.FunctionName,
             Approved = true,
         });
 
@@ -437,6 +443,8 @@ public class DurableToolInterceptorIntegrationTests
         await sessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
         {
             RequestId = second.RequestId,
+            CallId = second.CallId,
+            FunctionName = second.FunctionName,
             Approved = false,
             Reason = "Denied by test",
         });
@@ -514,6 +522,8 @@ public class DurableToolInterceptorIntegrationTests
         await client2.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
         {
             RequestId = pendingAfterRestart.RequestId,
+            CallId = pendingAfterRestart.CallId,
+            FunctionName = pendingAfterRestart.FunctionName,
             Approved = true,
         });
         await chatTask.WaitAsync(TimeSpan.FromSeconds(30));
@@ -550,6 +560,8 @@ public class DurableToolInterceptorIntegrationTests
         var decision = new DurableApprovalDecision
         {
             RequestId = pending!.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = true,
             Reason = "Approved by reviewer.",
         };
@@ -630,6 +642,8 @@ public class DurableToolInterceptorIntegrationTests
         var decision = new DurableApprovalDecision
         {
             RequestId = pending!.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = true,
             Reason = "approved for CAN retention test",
         };
@@ -686,12 +700,28 @@ public class DurableToolInterceptorIntegrationTests
         Assert.Equal(0, continuedResolverSchedules);
         Assert.Contains(
             continuedInput.ApprovalResolutionHistory!,
-            retained => retained.RequestId == decision.RequestId && retained.Approved);
+            retained => retained.RequestId == decision.RequestId
+                        && retained.CallId == decision.CallId
+                        && retained.FunctionName == decision.FunctionName
+                        && retained.Approved);
         var retry = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
             continuedHandle.ExecuteUpdateAsync<DurableChatWorkflow, DurableApprovalResolutionResult>(
                 workflow => workflow.ResolveApprovalAsync(decision)));
         var failure = Assert.IsType<ApplicationFailureException>(retry.InnerException);
         Assert.Equal(DurableApprovalMixin.ResolutionAlreadyResolvedErrorType, failure.ErrorType);
+
+        var callMismatch = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            continuedHandle.ExecuteUpdateAsync<DurableChatWorkflow, DurableApprovalResolutionResult>(
+                workflow => workflow.ResolveApprovalAsync(new DurableApprovalDecision
+                {
+                    RequestId = decision.RequestId,
+                    CallId = "different-call",
+                    FunctionName = decision.FunctionName,
+                    Approved = decision.Approved,
+                    Reason = decision.Reason,
+                })));
+        var mismatchFailure = Assert.IsType<ApplicationFailureException>(callMismatch.InnerException);
+        Assert.Equal(DurableApprovalMixin.ResolutionConflictErrorType, mismatchFailure.ErrorType);
 
         await host.StopAsync();
     }

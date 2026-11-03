@@ -218,6 +218,8 @@ public class SessionScopeBoundingTests : IClassFixture<SessionScopeBoundingTests
         _ = await handle.ExecuteUpdateAsync(wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
         {
             RequestId = req.RequestId,
+            CallId = req.CallId,
+            FunctionName = req.FunctionName,
             Approved = true,
         }));
     }

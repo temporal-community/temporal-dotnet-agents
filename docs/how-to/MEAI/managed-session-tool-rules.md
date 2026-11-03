@@ -97,15 +97,26 @@ When a tool requires human approval before dispatch, resolve the pending request
 session client rather than any ad hoc channel:
 
 ```csharp
+var pending = await sessionClient.GetPendingApprovalAsync("customer-42")
+    ?? throw new InvalidOperationException("No approval is pending.");
 var result = await sessionClient.ResolveApprovalAsync(
     "customer-42",
-    new DurableApprovalDecision { RequestId = requestId, Approved = true });
+    new DurableApprovalDecision
+    {
+        RequestId = pending.RequestId,
+        CallId = pending.CallId,
+        FunctionName = pending.FunctionName,
+        Approved = true,
+    });
 ```
 
 `ResolveApprovalAsync` returns a `DurableApprovalResolutionResult` for an accepted decision.
 Unknown, stale, already-resolved, and conflicting decisions are rejected by the workflow update
 validator before they enter history; handle the resulting update failure and reconcile using
-application-owned review state.
+application-owned review state. Copy the call ID and function name from the pending request;
+both fields are required for a tool-call request, and a mismatch is rejected. Use
+`DurableApprovalMeaiAdapter` when mapping to MEAI's approval content types so the original
+function-call identity is retained.
 
 Tool exposure is not business authorization. Unknown and unselected model calls receive the same
 safe blocked result and no tool activity is scheduled. For external writes, reauthorize using

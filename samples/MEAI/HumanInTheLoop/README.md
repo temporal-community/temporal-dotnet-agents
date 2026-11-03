@@ -29,8 +29,18 @@ await authorization.RequireApprovalPermissionAsync(request.User, resource);
 var pending = await sessionClient.GetPendingApprovalAsync(resource.ConversationId);
 var result = await sessionClient.ResolveApprovalAsync(
     resource.ConversationId,
-    new DurableApprovalDecision { RequestId = pending!.RequestId, Approved = approved });
+    new DurableApprovalDecision
+    {
+        RequestId = pending!.RequestId,
+        CallId = pending.CallId,
+        FunctionName = pending.FunctionName,
+        Approved = approved,
+    });
 ```
+
+When adapting to MEAI's approval content model, use `pending.ToMeaiRequest()` and
+`ToolApprovalRequestContent.CreateResponse(...)` so the request ID and function-call identity
+round-trip together. Durable resolution rejects an explicitly mismatched function name or call ID.
 
 The `delete_records` activity must independently re-read current tenant, ownership, and policy data
 immediately before deletion. See the repository [security boundary](../../../docs/security.md).

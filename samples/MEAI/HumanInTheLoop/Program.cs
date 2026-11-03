@@ -215,6 +215,8 @@ static async Task RunHitlDemoAsync(DurableChatSessionClient sessionClient)
         var decision = new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved  = true,
             Reason    = "Auto-approved by sample reviewer.",
         };

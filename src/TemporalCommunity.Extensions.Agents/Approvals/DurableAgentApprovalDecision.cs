@@ -11,6 +11,12 @@ internal sealed class DurableAgentApprovalDecision
     /// <summary>The request ID this decision applies to.</summary>
     public required string RequestId { get; init; }
 
+    /// <summary>The tool call ID this decision applies to, when the request represents a tool call.</summary>
+    public string? CallId { get; init; }
+
+    /// <summary>The function name this decision applies to, when the request represents a function call.</summary>
+    public string? FunctionName { get; init; }
+
     /// <summary>Whether the pending tool invocation is approved.</summary>
     public bool Approved { get; init; }
 

@@ -63,7 +63,8 @@ fail() {
 }
 
 # Emits one `key` line per qualifying fenced block: a ```csharp block whose body contains
-# `AddDurableAgent(` or `AddTool(`, every MEAI usage/embeddings block, or phase harness examples.
+# `AddDurableAgent(` or `AddTool(`, every MEAI usage/embeddings block, selected MEAI tool/HITL
+# examples, or phase harness examples.
 # Headings inside fences are skipped, matching the slugger in
 # verify-markdown-links.sh — `# comment` in a shell example is not a section heading.
 scan_docs() {
@@ -97,6 +98,9 @@ scan_docs() {
                 (FILENAME == "docs/how-to/MEAI/tool-functions.md" &&
                  heading == "retry-safety" &&
                  body ~ /Idempotent\(\)/) ||
+                (FILENAME == "docs/how-to/MEAI/hitl-patterns.md" &&
+                 heading == "meai-approval-content" &&
+                 body ~ /ToDurableDecision\(\)/) ||
                 (FILENAME == "docs/how-to/MAF/usage.md" &&
                  (heading == "request-id-recovery" || heading == "inspecting-workflow-history-budget")) ||
                 (FILENAME == "docs/how-to/MEAI/testing.md" && heading ~ /^phase-[0-9]+-/))) {

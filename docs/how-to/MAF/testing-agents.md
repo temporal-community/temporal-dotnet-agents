@@ -451,6 +451,8 @@ public async Task ResolveApproval_BeforeTimeout_ReturnsAcceptedResult()
     var approvalDecision = new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
+        CallId = pending.CallId,
+        FunctionName = pending.FunctionName,
         Approved  = true,
         Reason    = "Looks good"
     };

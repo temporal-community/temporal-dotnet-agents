@@ -105,6 +105,8 @@ if (pendingApproval is not null)
         workflow => workflow.ResolveApprovalAsync(new DurableApprovalDecision
         {
             RequestId = pendingApproval.RequestId,
+            CallId = pendingApproval.CallId,
+            FunctionName = pendingApproval.FunctionName,
             Approved = true,
             Reason = "Approved by the sample reviewer.",
         }));
@@ -173,6 +175,8 @@ if (pendingApproval is not null)
         workflow => workflow.ResolveApprovalAsync(new DurableApprovalDecision
         {
             RequestId = pendingApproval.RequestId,
+            CallId = pendingApproval.CallId,
+            FunctionName = pendingApproval.FunctionName,
             Approved = true,
             Reason = "Approved to demonstrate effect-time authorization denial.",
         }));

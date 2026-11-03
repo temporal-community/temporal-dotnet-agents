@@ -252,6 +252,8 @@ internal class AgentWorkflow :
         var coreDecision = new DurableApprovalDecision
         {
             RequestId = decision.RequestId,
+            CallId = decision.CallId,
+            FunctionName = decision.FunctionName,
             Approved = decision.Approved,
             Reason = decision.Reason,
         };
@@ -313,10 +315,17 @@ internal class AgentWorkflow :
         }
 
         var known = FindKnownAgentApproval(request.RequestId);
+        var pending = GetPendingApproval();
+        var matchingPending = string.Equals(
+            pending?.RequestId,
+            request.RequestId,
+            StringComparison.Ordinal) ? pending : null;
         var grantId = known?.GrantId ?? Workflow.NewGuid().ToString("N");
         var decision = new DurableAgentApprovalDecision
         {
             RequestId = request.RequestId,
+            CallId = known?.CallId ?? matchingPending?.CallId,
+            FunctionName = known?.FunctionName ?? matchingPending?.FunctionName,
             Approved = true,
             Reason = request.Reason,
             Scope = ApprovalScope.Session,
@@ -1033,6 +1042,8 @@ internal class AgentWorkflow :
         new()
         {
             RequestId = decision.RequestId,
+            CallId = decision.CallId,
+            FunctionName = decision.FunctionName,
             Approved = decision.Approved,
             Reason = decision.Reason,
             Scope = ApprovalScope.ThisCallOnly,
@@ -1043,6 +1054,8 @@ internal class AgentWorkflow :
         DurableAgentApprovalDecision left,
         DurableAgentApprovalDecision right) =>
         left.Approved == right.Approved
+        && string.Equals(left.CallId, right.CallId, StringComparison.Ordinal)
+        && string.Equals(left.FunctionName, right.FunctionName, StringComparison.Ordinal)
         && string.Equals(left.Reason, right.Reason, StringComparison.Ordinal)
         && left.Scope == right.Scope
         && AreEquivalent(left.ScopePattern, right.ScopePattern)

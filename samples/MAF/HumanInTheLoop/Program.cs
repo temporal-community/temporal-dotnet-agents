@@ -230,6 +230,8 @@ while (true)
         var resolution = await client.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = choice == "approve",
             Reason = comment
         });

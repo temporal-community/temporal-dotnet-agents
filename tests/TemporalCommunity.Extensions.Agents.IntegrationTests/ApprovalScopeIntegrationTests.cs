@@ -157,6 +157,8 @@ public class ApprovalScopeIntegrationTests : IClassFixture<ApprovalScopeIntegrat
         await agentClient.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
         {
             RequestId = callBRequest!.RequestId,
+            CallId = callBRequest.CallId,
+            FunctionName = callBRequest.FunctionName,
             Approved = true,
         });
         _output.WriteLine("Turn N, Call B approved.");

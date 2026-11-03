@@ -4,6 +4,8 @@ using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
 using Xunit;
 
+#pragma warning disable TAI001
+
 namespace TemporalCommunity.Extensions.AI.Tests;
 
 public class DurableApprovalTests
@@ -39,11 +41,15 @@ public class DurableApprovalTests
         var decision = new DurableApprovalDecision
         {
             RequestId = "req-1",
+            CallId = "call-42",
+            FunctionName = "delete_records",
             Approved = true,
             Reason = "Looks good",
         };
 
         Assert.Equal("req-1", decision.RequestId);
+        Assert.Equal("call-42", decision.CallId);
+        Assert.Equal("delete_records", decision.FunctionName);
         Assert.True(decision.Approved);
         Assert.Equal("Looks good", decision.Reason);
     }
@@ -92,6 +98,8 @@ public class DurableApprovalTests
         var decision = new DurableApprovalDecision
         {
             RequestId = "req-42",
+            CallId = "call-7",
+            FunctionName = "deploy",
             Approved = true,
             Reason = "LGTM",
         };
@@ -101,8 +109,40 @@ public class DurableApprovalTests
 
         Assert.NotNull(deserialized);
         Assert.Equal("req-42", deserialized!.RequestId);
+        Assert.Equal("call-7", deserialized.CallId);
+        Assert.Equal("deploy", deserialized.FunctionName);
         Assert.True(deserialized.Approved);
         Assert.Equal("LGTM", deserialized.Reason);
+    }
+
+    [Fact]
+    public void MeaiApprovalAdapter_RoundTripsRequestAndCallIdentity()
+    {
+        var request = new DurableApprovalRequest
+        {
+            RequestId = "req-1",
+            CallId = "call-42",
+            FunctionName = "delete_records",
+        };
+
+        var meaiRequest = request.ToMeaiRequest();
+        var response = meaiRequest.CreateResponse(approved: false, reason: "Needs review");
+        var decision = response.ToDurableDecision();
+
+        Assert.True(meaiRequest.RequiresConfirmation);
+        Assert.Equal(request.RequestId, decision.RequestId);
+        Assert.Equal(request.CallId, decision.CallId);
+        Assert.Equal(request.FunctionName, decision.FunctionName);
+        Assert.False(decision.Approved);
+        Assert.Equal("Needs review", decision.Reason);
+    }
+
+    [Fact]
+    public void MeaiApprovalAdapter_RequiresToolCallIdentity()
+    {
+        var request = new DurableApprovalRequest { RequestId = "req-1" };
+
+        Assert.Throws<ArgumentNullException>(() => request.ToMeaiRequest());
     }
 
     [Fact]
@@ -114,7 +154,9 @@ public class DurableApprovalTests
             .OrderBy(name => name)
             .ToArray();
 
-        Assert.Equal(["Approved", "ExpirationReason", "Reason", "RequestId"], properties);
+        Assert.Equal(
+            ["Approved", "CallId", "ExpirationReason", "FunctionName", "Reason", "RequestId"],
+            properties);
         Assert.DoesNotContain(
             typeof(DurableApprovalDecision).Assembly.GetReferencedAssemblies(),
             assembly => string.Equals(
@@ -122,6 +164,8 @@ public class DurableApprovalTests
                 "TemporalCommunity.Extensions.Agents",
                 StringComparison.Ordinal));
     }
+
+    #pragma warning restore TAI001
 
     [Fact]
     public void DurableChatWorkflowBase_DoesNotRegisterLegacySubmitApprovalUpdate()

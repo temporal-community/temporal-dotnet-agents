@@ -40,14 +40,20 @@ public static class DurableApprovalMeaiAdapter
     public static ToolApprovalRequestContent ToMeaiRequest(this DurableApprovalRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.RequestId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.CallId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.FunctionName);
 
         var toolCall = new FunctionCallContent(
-            callId: request.CallId ?? request.RequestId ?? string.Empty,
-            name:   request.FunctionName ?? string.Empty);
+            callId: request.CallId,
+            name: request.FunctionName);
 
         return new ToolApprovalRequestContent(
-            requestId: request.RequestId ?? string.Empty,
-            toolCall:  toolCall);
+            requestId: request.RequestId,
+            toolCall: toolCall)
+        {
+            RequiresConfirmation = true,
+        };
     }
 
     /// <summary>
@@ -57,18 +63,28 @@ public static class DurableApprovalMeaiAdapter
     /// </summary>
     /// <param name="response">The MEAI approval response from the UI or approver.</param>
     /// <returns>
-    /// A <see cref="DurableApprovalDecision"/> containing the response request ID, outcome,
-    /// and optional reason.
+    /// A <see cref="DurableApprovalDecision"/> containing the response request ID, function
+    /// name, call ID, outcome, and optional reason.
     /// </returns>
     public static DurableApprovalDecision ToDurableDecision(this ToolApprovalResponseContent response)
     {
         ArgumentNullException.ThrowIfNull(response);
+        if (response.ToolCall is not FunctionCallContent functionCall)
+        {
+            throw new ArgumentException(
+                "Only function-call approval responses can be mapped to durable tool decisions.",
+                nameof(response));
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(functionCall.CallId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(functionCall.Name);
 
         return new DurableApprovalDecision
         {
             RequestId = response.RequestId,
-            Approved  = response.Approved,
-            Reason    = response.Reason,
+            CallId = functionCall.CallId,
+            FunctionName = functionCall.Name,
+            Approved = response.Approved,
+            Reason = response.Reason,
         };
     }
 }

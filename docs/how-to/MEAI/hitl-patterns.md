@@ -50,6 +50,8 @@ if (pending is not null)
     var resolution = await sessionClient.ResolveApprovalAsync(conversationId, new DurableApprovalDecision
     {
         RequestId = pending.RequestId,
+        CallId = pending.CallId,
+        FunctionName = pending.FunctionName,
         Approved = true,
         Reason = "Approved by the review service.",
     });
@@ -67,6 +69,22 @@ tool. `ResolveApprovalAsync` accepts only a matching pending decision. Unknown, 
 already-resolved, or conflicting decisions fail validation before Temporal records an accepted
 update. If the RPC result is ambiguous, inspect the pending request again and reconcile through
 your application's review state rather than treating a retry as a successful resolution.
+For tool approvals, copy both `CallId` and `FunctionName` from the pending request into the
+decision. A tool decision that omits either field or supplies a different call identity is rejected.
+The MEAI adapter preserves these fields when mapping approval content.
+
+## MEAI approval content
+
+The adapter bridges a pending durable tool approval to MEAI's `ToolApprovalRequestContent` and
+back. The response is correlated by request ID and the original function call identity; only
+function-call approvals are supported by this adapter.
+
+```csharp
+var meaiRequest = pending.ToMeaiRequest();
+var meaiResponse = meaiRequest.CreateResponse(approved: true, reason: "Reviewed.");
+var decision = meaiResponse.ToDurableDecision();
+await sessionClient.ResolveApprovalAsync(conversationId, decision);
+```
 
 Every pending request includes `ExpiresAt`, the workflow-time deadline used for automatic denial.
 Set a tool-specific deadline when approval urgency differs by operation:

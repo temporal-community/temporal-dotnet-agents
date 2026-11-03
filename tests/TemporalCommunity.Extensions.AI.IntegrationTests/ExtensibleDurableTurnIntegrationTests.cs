@@ -676,6 +676,8 @@ public class ExtensibleDurableTurnIntegrationTests
             workflow => workflow.ResolveApprovalAsync(new DurableApprovalDecision
             {
                 RequestId = pending!.RequestId,
+                CallId = pending.CallId,
+                FunctionName = pending.FunctionName,
                 Approved = true,
                 Reason = "approved",
             }));
