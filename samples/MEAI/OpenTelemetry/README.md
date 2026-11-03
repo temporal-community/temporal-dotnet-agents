@@ -102,7 +102,16 @@ the full list.
   protocol spans and trace-context propagation.
 - **`TracingInterceptor` is required for connected traces.** Without it, Temporal's internal gRPC
   calls break the distributed trace and the library spans appear disconnected from the protocol
-  spans in your backend.
+  spans in your backend. Configure a W3C `TraceContextPropagator` when your host has not configured
+  an OpenTelemetry default propagator; this sample does so explicitly.
+- **Update handlers are linked, not necessarily nested.** `HandleUpdate:{name}` spans link to the
+  corresponding client `UpdateWorkflow:{name}` span while remaining rooted in the workflow's
+  original trace context. Both carry the Temporal workflow ID. Retries can emit additional spans;
+  traces are not an exactly-once audit record.
+- **Custom workflow diagnostics must be replay-safe.** Use
+  `TrackWorkflowDiagnosticActivity` around bounded work; never call
+  `ActivitySource.StartActivity()` in workflow code or keep a diagnostic scope across approval or
+  idle waits. The extension records workflow diagnostic context, not a long-lived exported span.
 - **The library's source is not the inference source.** Add the MEAI wrapper's source when
   collecting inference spans; the exact trace parent layout depends on cross-process propagation.
 - **`AddDurableAI()` is the registration entry point.** The package ships no plugin-registration

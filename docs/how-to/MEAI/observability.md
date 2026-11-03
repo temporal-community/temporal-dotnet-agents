@@ -22,6 +22,63 @@ builder.Services
 `Temporalio.Extensions.OpenTelemetry` supplies the Temporal client/workflow/activity tracing
 interceptor and cross-process context propagation. It does not implement the library's toolset
 metrics. Register both when you need the complete scheduling envelope and semantic AI signals.
+Add `TracingInterceptor` to the Temporal client; workers created from that client use its tracing
+interceptor as well.
+
+### W3C propagator
+
+Use a propagator that carries W3C trace context. OpenTelemetry SDK hosting usually configures a
+default propagator, but when the process has no SDK-provided default, set it explicitly:
+
+```csharp
+var tracingInterceptor = new TracingInterceptor(new TracingInterceptorOptions
+{
+    Propagator = new TraceContextPropagator(),
+});
+```
+
+An update or signal caller and its workflow handler are not guaranteed to form one parent/child
+span chain. The SDK links `HandleUpdate:{name}` and `HandleSignal:{name}` handler spans to their
+client-side `UpdateWorkflow:{name}` and `SignalWorkflow:{name}` spans respectively, while each
+handler remains rooted in the workflow's original trace context. Both sides include the Temporal
+workflow ID by default. Activity retries and workflow-task retries may produce additional spans;
+tracing is diagnostic, not an exactly-once audit record.
+
+### Workflow diagnostic
+
+For a custom workflow diagnostic scope, use the SDK's replay-safe
+`TrackWorkflowDiagnosticActivity` extension rather than calling `ActivitySource.StartActivity()`
+from workflow code. It records a workflow diagnostic context immediately and lets SDK-created child
+operations inherit it; it does not keep an exported span open. Keep the scope around bounded work,
+not approval or idle waits:
+
+```csharp
+using System.Diagnostics;
+using Temporalio.Extensions.OpenTelemetry;
+using Temporalio.Workflows;
+
+[Workflow]
+public class DiagnosticWorkflow
+{
+    private static readonly ActivitySource Diagnostics = new("MyApp.DurableWorkflow");
+
+    [WorkflowRun]
+    public async Task RunAsync()
+    {
+        using (Diagnostics.TrackWorkflowDiagnosticActivity("durable_chat.model_step"))
+        {
+            await Workflow.ExecuteActivityAsync(
+                (MyActivities activity) => activity.DoThingAsync(),
+                new() { StartToCloseTimeout = TimeSpan.FromSeconds(30) });
+        }
+    }
+}
+```
+
+The Temporal workflow ID is the stable correlation key on SDK spans. The library's
+`durable_chat.send` span and tool spans use the application session ID (`conversation.id` and
+`gen_ai.conversation.id` respectively); when a workflow ID prefix is configured, these values are
+related by that prefix rather than being identical.
 
 The library creates these spans:
 
@@ -34,6 +91,8 @@ The library creates these spans:
 The library does not create inference spans or copy token usage onto its Temporal update span.
 Inference spans and token metrics come from an application-configured MEAI
 `OpenTelemetryChatClient`; without one, inference telemetry is not emitted by this package:
+
+### MEAI inference instrumentation
 
 ```csharp
 builder.Services
@@ -63,6 +122,8 @@ Workflow outcome counters use Temporal's replay-safe `Workflow.MetricMeter`; the
 through `DurableChatTelemetry.MeterName`. Configure the Temporal runtime metrics sink separately
 if you need these counters exported. For example, the pinned SDK supports its runtime OpenTelemetry
 metrics exporter:
+
+### Temporal workflow metrics exporter
 
 ```csharp
 using Temporalio.Runtime;

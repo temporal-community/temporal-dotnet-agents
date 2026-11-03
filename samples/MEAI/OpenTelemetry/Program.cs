@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
+using OpenTelemetry.Context.Propagation;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Temporalio.Client;
@@ -91,7 +92,13 @@ var temporalRuntime = new TemporalRuntime(new TemporalRuntimeOptions(new Telemet
 var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions(temporalAddress)
 {
     DataConverter = DurableAIDataConverter.Instance,
-    Interceptors = [new TracingInterceptor()],
+    Interceptors =
+    [
+        new TracingInterceptor(new TracingInterceptorOptions
+        {
+            Propagator = new TraceContextPropagator(),
+        }),
+    ],
     Namespace = "default",
     Runtime = temporalRuntime,
 });
