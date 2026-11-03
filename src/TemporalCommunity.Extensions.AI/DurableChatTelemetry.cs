@@ -102,6 +102,12 @@ public static class DurableChatTelemetry
     /// <summary>The registered description of the tool being invoked.</summary>
     public const string ToolDescriptionAttribute = "gen_ai.tool.description";
 
+    /// <summary>Tool-call arguments, included only when telemetry content capture is enabled.</summary>
+    public const string ToolCallArgumentsAttribute = "gen_ai.tool.call.arguments";
+
+    /// <summary>Tool-call result, included only when telemetry content capture is enabled.</summary>
+    public const string ToolCallResultAttribute = "gen_ai.tool.call.result";
+
     /// <summary>The GenAI conversation identifier for the durable session.</summary>
     public const string GenAiConversationIdAttribute = "gen_ai.conversation.id";
 

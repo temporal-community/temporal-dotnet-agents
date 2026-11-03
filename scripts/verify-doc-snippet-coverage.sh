@@ -93,7 +93,8 @@ scan_docs() {
                 FILENAME == "docs/how-to/MEAI/embeddings.md" ||
                 FILENAME == "docs/how-to/MEAI/usage.md" ||
                 (FILENAME == "docs/how-to/MEAI/observability.md" &&
-                 (heading == "w3c-propagator" || heading == "workflow-diagnostic")) ||
+                 (heading == "w3c-propagator" || heading == "workflow-diagnostic" ||
+                  heading == "telemetry-content-capture")) ||
                 (FILENAME == "docs/how-to/MEAI/tool-functions.md" &&
                  heading == "logical-operation-identity" &&
                  body ~ /context\.Metadata\.IdempotencyKey/) ||

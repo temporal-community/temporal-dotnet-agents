@@ -115,6 +115,12 @@ contains only `ChatOptions.ModelId` when configured; managed search attributes c
 creation time and completed-turn count. Custom workflows remain responsible for keeping their own
 IDs, summaries, memo, and custom search attributes content-free.
 
+Payload codecs also do not protect OpenTelemetry output. MEAI inference message capture and the
+durable library's optional tool-argument/result span attributes are governed separately by
+`DurableExecutionOptions.CaptureTelemetryContent` and
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`. Keep that policy disabled unless telemetry
+exporters, access controls, and retention are approved for the captured content.
+
 Worker configuration snapshots contain routing keys and execution policy, not provider clients or
 credentials. `DurableChatWorkflowInput.DefaultChatClientKey` is a worker-side DI route name, not a
 secret store. Keep API keys in worker-owned secret configuration and inject the provider-backed

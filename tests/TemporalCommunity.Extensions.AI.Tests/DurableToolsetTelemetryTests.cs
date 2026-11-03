@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.AI.Internal;
 using TemporalCommunity.Extensions.Tests.Shared;
@@ -13,6 +14,17 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 [Collection(nameof(DurableToolsetTelemetryTests))]
 public sealed class DurableToolsetTelemetryTests
 {
+    [Fact]
+    public void TelemetryContentCapture_DefaultFollowsMEAIEnvironmentVariable()
+    {
+        var expected = string.Equals(
+            Environment.GetEnvironmentVariable("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+
+        Assert.Equal(expected, DurableTelemetryContentCapturePolicy.Resolve(null));
+    }
+
     [Fact]
     public async Task ResolverDiagnostics_AreSafeWithoutListenersAndInstrumentsAreRegisteredOnce()
     {
@@ -82,8 +94,12 @@ public sealed class DurableToolsetTelemetryTests
         var conversationId = new string('c', 150);
         var callId = new string('i', 150);
         var function = AIFunctionFactory.Create(() => "ok", "safe_tool", description);
+        using var services = new ServiceCollection()
+            .AddSingleton(new DurableExecutionOptions { CaptureTelemetryContent = false })
+            .BuildServiceProvider();
         var activities = new DurableFunctionActivities(
-            new Dictionary<string, AIFunction> { [function.Name] = function });
+            new Dictionary<string, AIFunction> { [function.Name] = function },
+            serviceProvider: services);
         var input = new DurableFunctionInput
         {
             FunctionName = function.Name,
@@ -107,7 +123,83 @@ public sealed class DurableToolsetTelemetryTests
         Assert.Equal(
             description[..256],
             span.GetTagItem(DurableChatTelemetry.ToolDescriptionAttribute));
+        Assert.Null(span.GetTagItem(DurableChatTelemetry.ToolCallArgumentsAttribute));
+        Assert.Null(span.GetTagItem(DurableChatTelemetry.ToolCallResultAttribute));
         Assert.DoesNotContain("private", string.Join("|", span.Tags.Select(tag => tag.Value)));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ToolInvocation_ContentCaptureFollowsWorkerPolicy(bool enabled)
+    {
+        using var capture = new TelemetryCapture();
+        var function = AIFunctionFactory.Create(
+            (string privateArgument) => $"result:{privateArgument}",
+            "capture_tool");
+        using var services = new ServiceCollection()
+            .AddSingleton(new DurableExecutionOptions { CaptureTelemetryContent = enabled })
+            .BuildServiceProvider();
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [function.Name] = function },
+            serviceProvider: services);
+        var input = new DurableFunctionInput
+        {
+            FunctionName = function.Name,
+            Declaration = DurableFunctionDeclarationSnapshot.Create(function.AsDeclarationOnly()),
+            Arguments = new Dictionary<string, object?> { ["privateArgument"] = "private-argument" },
+        };
+
+        await new ActivityEnvironment().RunAsync(() => activities.InvokeFunctionAsync(input));
+
+        var span = Assert.Single(capture.Activities);
+        var arguments = span.GetTagItem(DurableChatTelemetry.ToolCallArgumentsAttribute)?.ToString();
+        var result = span.GetTagItem(DurableChatTelemetry.ToolCallResultAttribute)?.ToString();
+        if (enabled)
+        {
+            Assert.Contains("private-argument", arguments, StringComparison.Ordinal);
+            Assert.Contains("result:private-argument", result, StringComparison.Ordinal);
+            Assert.True(arguments!.Length <= 4096);
+            Assert.True(result!.Length <= 4096);
+        }
+        else
+        {
+            Assert.Null(arguments);
+            Assert.Null(result);
+        }
+    }
+
+    [Fact]
+    public async Task ToolInvocation_ContentAttributesAreTruncatedToConfiguredBound()
+    {
+        using var capture = new TelemetryCapture();
+        var largeValue = new string('x', 5000);
+        var function = AIFunctionFactory.Create(
+            (string privateArgument) => privateArgument,
+            "large_content");
+        using var services = new ServiceCollection()
+            .AddSingleton(new DurableExecutionOptions { CaptureTelemetryContent = true })
+            .BuildServiceProvider();
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [function.Name] = function },
+            serviceProvider: services);
+
+        await new ActivityEnvironment().RunAsync(() => activities.InvokeFunctionAsync(new()
+        {
+            FunctionName = function.Name,
+            Declaration = DurableFunctionDeclarationSnapshot.Create(function.AsDeclarationOnly()),
+            Arguments = new Dictionary<string, object?> { ["privateArgument"] = largeValue },
+        }));
+
+        var span = Assert.Single(capture.Activities);
+        var arguments = Assert.IsType<string>(
+            span.GetTagItem(DurableChatTelemetry.ToolCallArgumentsAttribute));
+        var result = Assert.IsType<string>(
+            span.GetTagItem(DurableChatTelemetry.ToolCallResultAttribute));
+        Assert.Equal(4096, arguments.Length);
+        Assert.Equal(4096, result.Length);
+        Assert.EndsWith("...[truncated]", arguments, StringComparison.Ordinal);
+        Assert.EndsWith("...[truncated]", result, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -101,22 +101,55 @@ builder.Services
     .Build();
 ```
 
-`UseOpenTelemetry()` follows the pinned MEAI GenAI conventions and captures message content only
-when explicitly enabled. Set `DurableExecutionOptions.InferenceTelemetryMode` to
+`UseOpenTelemetry()` follows the pinned MEAI GenAI conventions. Its content-capture default comes
+from `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`. Set
+`DurableExecutionOptions.InferenceTelemetryMode` to
 `RequireVisibleOpenTelemetryClient` to reject a resolved chat-client chain unless it contains
 exactly one discoverable MEAI wrapper. Chain discovery follows `DelegatingChatClient` inner links.
 If an application-owned opaque client hides an already configured wrapper, explicitly select
 `TrustOpaqueApplicationInstrumentation`; this trusts the application and does not add another
-wrapper. The default `ApplicationOwned` mode leaves instrumentation entirely to the application.
-These modes verify configuration only; the library never wraps the provider client for inference
-telemetry.
+wrapper. The default `ApplicationOwned` mode leaves inference instrumentation entirely to the
+application. These modes verify configuration only; the library never wraps the provider client for
+inference telemetry.
+
+### Telemetry content capture
+
+The worker's `CaptureTelemetryContent` option provides one policy for visible MEAI inference
+wrappers and library-owned tool spans. When unset, it follows MEAI's
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` default (`true`, case-insensitive, enables
+capture; otherwise content stays redacted). An explicit value overrides the environment default
+and configures a discoverable `OpenTelemetryChatClient` to match:
+
+```csharp
+builder.Services
+    .AddHostedTemporalWorker("durable-chat")
+    .AddDurableAI(options => options.CaptureTelemetryContent = false);
+```
+
+For an opaque application-owned client chain, set both
+`InferenceTelemetryMode = TrustOpaqueApplicationInstrumentation` and
+`CaptureTelemetryContent` explicitly, and configure the hidden wrapper to the same value. The
+library cannot inspect or change an opaque wrapper; it fails configuration rather than claiming
+the two policies match. A visible wrapper whose explicitly configured setting differs from the
+environment default also requires an explicit library override.
+
+When enabled, the library's `execute_tool` span adds JSON-serialized
+`gen_ai.tool.call.arguments` and `gen_ai.tool.call.result` attributes, each bounded to 4096
+characters. Unsupported or unserializable values are omitted from telemetry; large values are
+marked as truncated. Serialization failures produce a content-free warning and do not fail an
+already completed tool effect.
+When disabled, these attributes are absent, and the MEAI wrapper redacts message bodies. Streamed
+assistant text is never included in Temporal activity heartbeat details. Content capture is a
+sensitive-data policy choice, not a storage or payload-codec setting: exporters, access controls,
+sampling, and retention still apply.
 
 A tool span uses `ActivityKind.Internal` and includes `gen_ai.operation.name=execute_tool`,
 `gen_ai.tool.name`, `gen_ai.tool.type=function`, and the available
 `gen_ai.tool.call.id`, `gen_ai.tool.description`, and `gen_ai.conversation.id`. Call IDs,
-descriptions, conversation IDs, and error types are length-bounded. Tool arguments, results, and
-exception messages are not span attributes. Failed tool spans use a bounded `error.type` and an
-error status without an exception-message description.
+descriptions, conversation IDs, and error types are length-bounded. Arguments and successful
+results are additional content attributes only when the capture policy is enabled; exception
+messages are never span attributes. Failed tool spans use a bounded `error.type` and an error status
+without an exception-message description.
 
 Workflow outcome counters use Temporal's replay-safe `Workflow.MetricMeter`; they are not emitted
 through `DurableChatTelemetry.MeterName`. Configure the Temporal runtime metrics sink separately
@@ -160,10 +193,10 @@ retry. The library `MeterName` remains the collection point for package-owned ac
 as toolset resolution and validation.
 
 MEAI's default content-capture behavior is controlled by
-`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (unset/false means redacted). Applications
-may explicitly set `OpenTelemetryChatClient.EnableSensitiveData`, which overrides that default.
-Treat enabling capture as a sensitive-data policy change: prompts, responses, tool arguments, and
-tool results may appear in telemetry.
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`; `CaptureTelemetryContent` can explicitly
+override it for the durable library's visible wrapper and tool spans. Treat enabling capture as a
+sensitive-data policy change: prompts, responses, tool arguments, and tool results may appear in
+telemetry.
 
 ## Toolset metrics and logs
 

@@ -117,7 +117,7 @@ IChatClient openAiChatClient = new OpenAIClient(
 // This sample registers no tools, so we deliberately do NOT chain
 // .UseFunctionInvocation() — managed durable sessions own function invocation.
 // Inference instrumentation is application-owned; this visible MEAI wrapper emits one span
-// per provider attempt and keeps message content redacted by default.
+// per provider attempt; AddDurableAI below explicitly disables content capture.
 builder.Services.AddChatClient(openAiChatClient).UseOpenTelemetry().Build();
 
 // ── Setup: Register worker + durable AI ────────────────────────────────────
@@ -131,6 +131,8 @@ builder.Services
     {
         opts.InferenceTelemetryMode =
             DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient;
+        // Keep prompts, responses, tool arguments, and tool results out of telemetry.
+        opts.CaptureTelemetryContent = false;
         opts.ActivityTimeout = TimeSpan.FromMinutes(5);
         // Demo-friendly TTL (default is 14 days). The sample finishes in seconds;
         // long TTLs only matter for production sessions that may sit idle between turns.

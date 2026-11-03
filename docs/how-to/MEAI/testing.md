@@ -16,8 +16,12 @@ library emits no inference span by itself, while an application-configured MEAI
 `OpenTelemetryChatClient` emits exactly one span with the pinned GenAI operation/model/usage
 attributes. It also verifies that `RequireVisibleOpenTelemetryClient` rejects a missing wrapper and
 that `TrustOpaqueApplicationInstrumentation` permits a wrapped client hidden behind an
-application-owned opaque chain. These tests do not infer global exactly-once telemetry across
-Temporal activity retries.
+application-owned opaque chain. Content-capture tests verify the explicit override for visible MEAI
+wrappers, rejection of mismatched/unspecified opaque-chain policies, and optional bounded tool
+argument/result attributes, including truncation at the configured content bound. The streaming
+activity heartbeats without streamed text or other details, and a heartbeat-timeout integration
+test verifies it remains alive across multiple chunks. These tests do not infer global exactly-once
+telemetry across Temporal activity retries.
 
 ## Phase 2.2 turn-admission verification
 

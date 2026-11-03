@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
@@ -145,6 +147,16 @@ internal sealed class DurableFunctionActivities(
         SetBoundedTag(span, DurableChatTelemetry.ToolCallIdAttribute, input.ToolCallId, 128);
         SetBoundedTag(span, DurableChatTelemetry.GenAiConversationIdAttribute, input.ConversationId, 128);
         SetBoundedTag(span, DurableChatTelemetry.ToolDescriptionAttribute, input.Declaration?.Description, 256);
+        var captureTelemetryContent = Internal.DurableTelemetryContentCapturePolicy.Resolve(
+            serviceProvider?.GetService<DurableExecutionOptions>());
+        if (captureTelemetryContent && span is not null)
+        {
+            SetBoundedTag(
+                span,
+                DurableChatTelemetry.ToolCallArgumentsAttribute,
+                SerializeBoundedTelemetryContent(input.Arguments),
+                4096);
+        }
 
         _logger.LogFunctionInvoking(input.FunctionName);
 
@@ -234,6 +246,17 @@ internal sealed class DurableFunctionActivities(
                 }
             }
 
+            if (captureTelemetryContent
+                && span is not null
+                && output.Status == DurableFunctionOutputStatus.Succeeded)
+            {
+                SetBoundedTag(
+                    span,
+                    DurableChatTelemetry.ToolCallResultAttribute,
+                    SerializeBoundedTelemetryContent(output.Result),
+                    4096);
+            }
+
             return output;
         }
         catch (Exception ex)
@@ -251,6 +274,26 @@ internal sealed class DurableFunctionActivities(
             activity?.SetTag(name, value.Length <= maximumLength
                 ? value
                 : value[..maximumLength]);
+        }
+    }
+
+    private string? SerializeBoundedTelemetryContent(object? value)
+    {
+        try
+        {
+            var serialized = JsonSerializer.Serialize(value, DurableAIJsonUtilities.DefaultOptions);
+            const string truncatedMarker = "...[truncated]";
+            return serialized.Length <= 4096
+                ? serialized
+                : string.Concat(serialized.AsSpan(0, 4096 - truncatedMarker.Length), truncatedMarker);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // Telemetry is best-effort; serialization must not invalidate a completed tool effect.
+            _logger.LogWarning(
+                "Could not serialize tool telemetry content ({ExceptionType}); omitting the attribute.",
+                exception.GetType().Name);
+            return null;
         }
     }
 

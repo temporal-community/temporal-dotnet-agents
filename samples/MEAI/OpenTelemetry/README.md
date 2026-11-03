@@ -26,7 +26,7 @@ The library and the Temporal SDK emit spans during a chat turn:
 
 - `TemporalCommunity.Extensions.AI` — Temporal update and toolset spans
 - `execute_tool {toolName}` — internal GenAI tool-operation span with bounded call/session
-  metadata and no tool arguments or result content
+  metadata; tool arguments and results are absent unless telemetry content capture is enabled
 - MEAI `OpenTelemetryChatClient` — provider inference spans and token metrics
 - `Temporalio-Client`, `Temporalio-Workflow`, `Temporalio-Activity` — Temporal SDK protocol spans
   (emitted by `TracingInterceptor`)
@@ -100,6 +100,11 @@ the full list.
   `.UseOpenTelemetry()` on the provider chat client; the durable library does not add inference
   spans or duplicate token usage tags. `Temporalio.Extensions.OpenTelemetry` supplies the Temporal
   protocol spans and trace-context propagation.
+- **Content capture is explicitly disabled in this sample.** `CaptureTelemetryContent = false`
+  keeps MEAI message bodies and library tool argument/result attributes out of spans even if the
+  MEAI environment variable enables capture. If unset, the option follows
+  `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`. For opaque app-owned wrappers, set the
+  option explicitly and configure the wrapper to the same policy.
 - **`TracingInterceptor` is required for connected traces.** Without it, Temporal's internal gRPC
   calls break the distributed trace and the library spans appear disconnected from the protocol
   spans in your backend. Configure a W3C `TraceContextPropagator` when your host has not configured
@@ -221,8 +226,9 @@ This sample does not register durable tools, so every chat turn dispatches a sin
 - Each tool invocation produces a separate `RunActivity:TemporalCommunity.Extensions.AI.InvokeFunction`
   span — one span per tool call — plus an `execute_tool {toolName}` internal span with
   `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.type`, and available bounded call ID,
-  description, and conversation ID attributes. Failure spans have a bounded `error.type`; messages,
-  arguments, and results are not added as span attributes.
+  description, and conversation ID attributes. Failure spans have a bounded `error.type`; exception
+  messages are never attributes. Arguments and successful results are added only when
+  `CaptureTelemetryContent` is enabled and are bounded to 4096 characters.
 
 See `docs/how-to/MEAI/tool-functions.md` for the managed durable-tool contract.
 

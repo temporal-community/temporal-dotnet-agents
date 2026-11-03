@@ -25,13 +25,15 @@ public class DurableChatActivitiesTelemetryTests
     private static DurableChatActivities BuildActivities(
         IChatClient client,
         ILoggerFactory? loggerFactory = null,
-        DurableInferenceTelemetryMode telemetryMode = DurableInferenceTelemetryMode.ApplicationOwned)
+        DurableInferenceTelemetryMode telemetryMode = DurableInferenceTelemetryMode.ApplicationOwned,
+        bool? captureTelemetryContent = null)
     {
         var services = new ServiceCollection()
             .AddSingleton(client)
             .AddSingleton(new DurableExecutionOptions
             {
                 InferenceTelemetryMode = telemetryMode,
+                CaptureTelemetryContent = captureTelemetryContent,
             });
         var provider = services.BuildServiceProvider();
         return new DurableChatActivities(provider, loggerFactory);
@@ -134,6 +136,39 @@ public class DurableChatActivitiesTelemetryTests
         Assert.Equal((long)OutputTokens, Convert.ToInt64(tags["gen_ai.usage.output_tokens"]));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetChatStepAsync_ExplicitContentCaptureControlsMEAIWrapper(bool enabled)
+    {
+        var captured = StartCapture();
+        var client = new ChatClientBuilder(new UsageReportingChatClient())
+            .UseOpenTelemetry()
+            .Build();
+        var wrapper = Assert.IsType<OpenTelemetryChatClient>(client);
+        var activities = BuildActivities(
+            client,
+            telemetryMode: DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient,
+            captureTelemetryContent: enabled);
+
+        await activities.GetChatStepAsync(InputWithModel());
+
+        Assert.Equal(enabled, wrapper.EnableSensitiveData);
+        var span = Assert.Single(captured, IsInferenceSpan);
+        var inputContent = span.GetTagItem("gen_ai.input.messages")?.ToString();
+        var outputContent = span.GetTagItem("gen_ai.output.messages")?.ToString();
+        if (enabled)
+        {
+            Assert.Contains("ping", inputContent, StringComparison.Ordinal);
+            Assert.Contains("hello", outputContent, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Null(inputContent);
+            Assert.Null(outputContent);
+        }
+    }
+
     [Fact]
     public async Task GetChatStepAsync_EmptyIncompleteResponse_SetsSpanAttributeAndStructuredWarning()
     {
@@ -177,11 +212,14 @@ public class DurableChatActivitiesTelemetryTests
     public async Task OpaqueApplicationChain_RequiresExplicitTelemetryTrust()
     {
         var captured = StartCapture();
-        var wrapped = new ChatClientBuilder(new UsageReportingChatClient()).UseOpenTelemetry().Build();
+        var wrapped = Assert.IsType<OpenTelemetryChatClient>(
+            new ChatClientBuilder(new UsageReportingChatClient()).UseOpenTelemetry().Build());
+        wrapped.EnableSensitiveData = false;
         var opaque = new OpaqueChatClient(wrapped);
         var activities = BuildActivities(
             opaque,
-            telemetryMode: DurableInferenceTelemetryMode.TrustOpaqueApplicationInstrumentation);
+            telemetryMode: DurableInferenceTelemetryMode.TrustOpaqueApplicationInstrumentation,
+            captureTelemetryContent: false);
 
         var result = await activities.GetChatStepAsync(InputWithModel());
 
@@ -194,6 +232,41 @@ public class DurableChatActivitiesTelemetryTests
     {
         var activities = BuildActivities(
             new UsageReportingChatClient(),
+            telemetryMode: DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient);
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => activities.GetChatStepAsync(InputWithModel()));
+
+        Assert.Equal("DurableInferenceTelemetryConfigurationInvalid", exception.ErrorType);
+    }
+
+    [Fact]
+    public async Task TrustOpaqueTelemetryMode_RequiresExplicitContentCapturePolicy()
+    {
+        var activities = BuildActivities(
+            new OpaqueChatClient(new UsageReportingChatClient()),
+            telemetryMode: DurableInferenceTelemetryMode.TrustOpaqueApplicationInstrumentation);
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => activities.GetChatStepAsync(InputWithModel()));
+
+        Assert.Equal("DurableInferenceTelemetryConfigurationInvalid", exception.ErrorType);
+    }
+
+    [Fact]
+    public async Task VisibleMEAIWrapper_RejectsCaptureSettingThatDiffersFromEnvironmentDefault()
+    {
+        var client = new ChatClientBuilder(new UsageReportingChatClient())
+            .UseOpenTelemetry()
+            .Build();
+        var wrapper = Assert.IsType<OpenTelemetryChatClient>(client);
+        var environmentDefault = string.Equals(
+            Environment.GetEnvironmentVariable("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+        wrapper.EnableSensitiveData = !environmentDefault;
+        var activities = BuildActivities(
+            client,
             telemetryMode: DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient);
 
         var exception = await Assert.ThrowsAsync<ApplicationFailureException>(

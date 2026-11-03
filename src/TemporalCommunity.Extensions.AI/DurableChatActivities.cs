@@ -72,7 +72,9 @@ internal sealed class DurableChatActivities(
         // the A-check cannot reach. Per-client cache so the walk runs at most once per
         // resolved instance.
         EnsureMixedPatternCheck(chatClient);
-        EnsureInferenceTelemetryConfiguration(chatClient);
+        Internal.DurableTelemetryContentCapturePolicy.ConfigureChatClient(
+            chatClient,
+            services.GetService<DurableExecutionOptions>());
         chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
         Internal.ChatClientActivityTags.Apply(resolvedOptions, _logger);
 
@@ -84,29 +86,6 @@ internal sealed class DurableChatActivities(
         _logger.LogChatActivityCompleted(input.ConversationId, input.TurnNumber);
 
         return response;
-    }
-
-    private void EnsureInferenceTelemetryConfiguration(IChatClient chatClient)
-    {
-        var mode = services.GetService<DurableExecutionOptions>()?.InferenceTelemetryMode
-            ?? DurableInferenceTelemetryMode.ApplicationOwned;
-        if (mode != DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient)
-        {
-            return;
-        }
-
-        var wrapperCount = Internal.AgentChainWalker.WalkChatClient(chatClient)
-            .OfType<OpenTelemetryChatClient>()
-            .Take(2)
-            .Count();
-        if (wrapperCount != 1)
-        {
-            throw new ApplicationFailureException(
-                "InferenceTelemetryMode requires exactly one discoverable MEAI " +
-                "OpenTelemetryChatClient in the resolved chat-client chain.",
-                errorType: "DurableInferenceTelemetryConfigurationInvalid",
-                nonRetryable: true);
-        }
     }
 
     /// <summary>
@@ -221,7 +200,9 @@ internal sealed class DurableChatActivities(
             .ConfigureAwait(false);
         var chatClient = ResolveChatClient(input.ClientKey);
         EnsureMixedPatternCheck(chatClient);
-        EnsureInferenceTelemetryConfiguration(chatClient);
+        Internal.DurableTelemetryContentCapturePolicy.ConfigureChatClient(
+            chatClient,
+            services.GetService<DurableExecutionOptions>());
         chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
         Internal.ChatClientActivityTags.Apply(effectiveOptions, _logger);
 
@@ -643,7 +624,7 @@ internal sealed class DurableChatActivities(
     }
 
     /// <summary>
-    /// Shared streaming accumulator: streams the LLM response, heartbeats each chunk,
+    /// Shared streaming accumulator: streams the LLM response, heartbeats without details,
     /// materializes it via <c>ToChatResponse()</c>, and rethrows failures with a log entry.
     /// </summary>
     private async Task<ChatResponse> StreamAndCollectAsync(
@@ -662,7 +643,7 @@ internal sealed class DurableChatActivities(
                 .ConfigureAwait(false))
             {
                 collected.Add(update);
-                ctx?.Heartbeat(update.Text);
+                ctx?.Heartbeat();
             }
             var response = collected.ToChatResponse();
             return response;

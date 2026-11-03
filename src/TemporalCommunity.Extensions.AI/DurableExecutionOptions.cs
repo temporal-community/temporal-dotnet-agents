@@ -167,6 +167,18 @@ public sealed class DurableExecutionOptions
         DurableInferenceTelemetryMode.ApplicationOwned;
 
     /// <summary>
+    /// Gets or sets whether inference and tool telemetry may include message, tool-argument, and
+    /// tool-result content. When unset, the MEAI
+    /// <c>OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT</c> environment default is used.
+    /// </summary>
+    /// <remarks>
+    /// Enabling capture can expose sensitive application data to telemetry exporters. This value
+    /// configures visible MEAI <see cref="OpenTelemetryChatClient"/> wrappers and library tool
+    /// spans consistently. Opaque application-owned wrappers must be configured to the same value.
+    /// </remarks>
+    public bool? CaptureTelemetryContent { get; set; }
+
+    /// <summary>
     /// Gets or sets the optional keyed chat-client profile used by the library-owned history
     /// summarizer. When unset, the managed session's default chat-client profile is used.
     /// </summary>

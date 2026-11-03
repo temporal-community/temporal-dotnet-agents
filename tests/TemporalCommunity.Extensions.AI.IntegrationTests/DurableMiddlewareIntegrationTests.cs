@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
@@ -7,6 +8,7 @@ using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
+using Temporalio.Worker.Interceptors;
 using Temporalio.Workflows;
 using TemporalCommunity.Extensions.AI.Tests.Compat;
 using TemporalCommunity.Extensions.Tests.Shared;
@@ -263,9 +265,12 @@ public class DurableMiddlewareIntegrationTests
         builder.Services.AddSingleton<IChatClient>(new SlowStreamingChatClient());
 
         const string taskQueue = "test-heartbeat-6";
+        var heartbeatDetails = new ConcurrentQueue<object?[]>();
 
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
+            .ConfigureOptions(options =>
+                options.Interceptors = [new HeartbeatCaptureWorkerInterceptor(heartbeatDetails)])
             .AddDurableAI(opts =>
             {
                 opts.ActivityTimeout = TimeSpan.FromSeconds(30);
@@ -287,6 +292,8 @@ public class DurableMiddlewareIntegrationTests
         // completion is the proof that heartbeats kept it alive.
         var result = await handle.GetResultAsync();
         Assert.Equal("chunk1 chunk2 chunk3", result);
+        Assert.NotEmpty(heartbeatDetails);
+        Assert.All(heartbeatDetails, details => Assert.Empty(details));
 
         await host.StopAsync();
     }
@@ -558,5 +565,31 @@ public sealed class ChatActivityTestWorkflow
             });
 
         return response.Messages.Count > 0 ? response.Messages[0].Text ?? string.Empty : string.Empty;
+    }
+}
+
+internal sealed class HeartbeatCaptureWorkerInterceptor(
+    ConcurrentQueue<object?[]> heartbeatDetails) : IWorkerInterceptor
+{
+    public ActivityInboundInterceptor InterceptActivity(ActivityInboundInterceptor nextInterceptor) =>
+        new HeartbeatCaptureActivityInboundInterceptor(nextInterceptor, heartbeatDetails);
+}
+
+internal sealed class HeartbeatCaptureActivityInboundInterceptor(
+    ActivityInboundInterceptor next,
+    ConcurrentQueue<object?[]> heartbeatDetails) : ActivityInboundInterceptor(next)
+{
+    public override void Init(ActivityOutboundInterceptor outbound) =>
+        base.Init(new HeartbeatCaptureActivityOutboundInterceptor(outbound, heartbeatDetails));
+}
+
+internal sealed class HeartbeatCaptureActivityOutboundInterceptor(
+    ActivityOutboundInterceptor next,
+    ConcurrentQueue<object?[]> heartbeatDetails) : ActivityOutboundInterceptor(next)
+{
+    public override void Heartbeat(HeartbeatInput input)
+    {
+        heartbeatDetails.Enqueue(input.Details);
+        base.Heartbeat(input);
     }
 }

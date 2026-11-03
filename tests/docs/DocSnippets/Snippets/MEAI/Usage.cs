@@ -39,6 +39,15 @@ internal static class Usage
         // END SNIPPET docs/how-to/MEAI/usage.md#built-in-managed-session
     }
 
+    internal static void ConfigureTelemetryCapture(HostApplicationBuilder builder)
+    {
+        // BEGIN SNIPPET docs/how-to/MEAI/observability.md#telemetry-content-capture
+        builder.Services
+            .AddHostedTemporalWorker("durable-chat")
+            .AddDurableAI(options => options.CaptureTelemetryContent = false);
+        // END SNIPPET docs/how-to/MEAI/observability.md#telemetry-content-capture
+    }
+
     internal static async Task ManualClientAsync(HostApplicationBuilder builder, IChatClient innerChatClient)
     {
         // BEGIN SNIPPET docs/how-to/MEAI/usage.md#worker-setup-with-a-manual-client
