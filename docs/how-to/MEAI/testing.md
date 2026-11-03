@@ -55,7 +55,7 @@ remain defensive, but only a validator can reject a request before the Update is
 ## Phase 0 research and harness
 
 The [redesign target contracts](usage.md#durable-chat-redesign-target-contracts) are not production
-acceptance claims. Phase 0 executes package contracts against MEAI 10.10.0 and Temporalio 1.20.0:
+acceptance claims. Phase 0 executes package contracts against MEAI 10.10.0 and Temporalio 1.21.1:
 
 ```bash
 dotnet test tests/TemporalCommunity.Extensions.AI.Tests --no-restore \
@@ -129,7 +129,7 @@ an already applied effect. These `TaskCompletionSource` gates are for activities
 
 `Helpers/DurableChatTestEnvironment` starts a fresh server and sets
 `DurableAIDataConverter.Instance` on its client before any worker or handle is created. The worker
-inherits the client's converter in Temporalio 1.20.0 (there is no
+inherits the client's converter in Temporalio 1.21.1 (there is no
 `TemporalWorkerOptions.DataConverter` property). Dispose each environment with `await using`;
 use a unique task queue and workflow ID. Do not mutate the shared collection's provider scripts
 for race tests.
@@ -402,7 +402,7 @@ silently changing into a buffered response.
 ### NuGet packages
 
 ```xml
-<PackageReference Include="Temporalio" Version="1.20.0" />
+<PackageReference Include="Temporalio" Version="1.21.1" />
 <PackageReference Include="xunit" Version="2.9.3" />
 <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
 <PackageReference Include="Microsoft.Extensions.AI" Version="10.10.0" />

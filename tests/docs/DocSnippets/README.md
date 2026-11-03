@@ -10,7 +10,7 @@ The coverage gate includes MAF registration examples and every C# block in MEAI
 [`testing.md`](../../../docs/how-to/MEAI/testing.md) examples under `Phase N` headings.
 The MEAI blocks compile verbatim with application configuration supplied as harness parameters.
 Dependencies
-use the repository pins (MEAI 10.10.0 and Temporalio 1.20.0). The shared test project supplies the
+use the repository pins (MEAI 10.10.0 and Temporalio 1.21.1). The shared test project supplies the
 pinned environment helper and controlled activity attempt; these are test infrastructure, not
 public library APIs. Redesign target tables intentionally have no fictional executable API.
 

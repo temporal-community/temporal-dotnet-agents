@@ -24,6 +24,6 @@
     <PackageReference Include="TemporalCommunity.Extensions.Agents" Version="$(PackedVersion)" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.10" />
-    <PackageReference Include="Temporalio.Extensions.Hosting" Version="1.20.0" />
+    <PackageReference Include="Temporalio.Extensions.Hosting" Version="1.21.1" />
   </ItemGroup>
 </Project>
