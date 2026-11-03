@@ -230,6 +230,11 @@ public class DurableChatSessionIntegrationTests
                 (await sessionClient.GetHistoryAsync(conversationId))[0]);
             Assert.Equal("logical-request-1", storedRequest.RequestId);
             Assert.StartsWith("tai-request-v1:", storedRequest.InputFingerprint, StringComparison.Ordinal);
+            Assert.False(string.IsNullOrWhiteSpace(storedRequest.EntryId));
+            Assert.False(string.IsNullOrWhiteSpace(stored.EntryId));
+            Assert.NotEqual(storedRequest.EntryId, stored.EntryId);
+            Assert.False(string.IsNullOrWhiteSpace(storedRequest.TurnId));
+            Assert.Equal(storedRequest.TurnId, stored.TurnId);
         }
         finally
         {

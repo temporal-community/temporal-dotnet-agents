@@ -82,6 +82,11 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
         Assert.Equal("logical-request-1", request.RequestId);
         Assert.StartsWith("tai-request-v1:", request.InputFingerprint, StringComparison.Ordinal);
         Assert.Equal(request.RequestId, response.RequestId);
+        Assert.False(string.IsNullOrWhiteSpace(request.EntryId));
+        Assert.False(string.IsNullOrWhiteSpace(response.EntryId));
+        Assert.NotEqual(request.EntryId, response.EntryId);
+        Assert.False(string.IsNullOrWhiteSpace(request.TurnId));
+        Assert.Equal(request.TurnId, response.TurnId);
     }
 
     [Fact]

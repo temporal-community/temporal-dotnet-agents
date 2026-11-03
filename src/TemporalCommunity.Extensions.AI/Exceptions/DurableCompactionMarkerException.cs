@@ -4,7 +4,7 @@ namespace TemporalCommunity.Extensions.AI.Exceptions;
 
 /// <summary>
 /// Thrown when compaction-marker handling encounters a structural problem — e.g. a marker
-/// references source-entry correlation IDs that are no longer present in the store
+/// references a replaced-entry range that is no longer present in the store
 /// (projection validation failure), or a marker is missing required fields after a
 /// custom-implementor mistake bypassed the compile-time required-field guard.
 /// </summary>
@@ -17,10 +17,9 @@ namespace TemporalCommunity.Extensions.AI.Exceptions;
 /// </para>
 /// <para>
 /// <see cref="MarkerCorrelationId"/> identifies the marker entry whose validation failed.
-/// <see cref="MissingMessageIds"/> is the subset of
-/// <see cref="CompactionMarkerEntry.CompactedMessageIds"/> the store could not resolve when
-/// applying the projection — populated for the "marker references entries that were erased
-/// out of band" sub-case, empty for other structural issues.
+/// <see cref="MissingEntryIds"/> contains bounded entry identities the store could not resolve
+/// when applying the projection — populated for the "marker references entries that were
+/// erased out of band" sub-case, empty for other structural issues.
 /// </para>
 /// <para>
 /// <c>[Experimental("TA002")]</c> while compaction is in active development; the wire
@@ -44,11 +43,10 @@ public sealed class DurableCompactionMarkerException : DurableConfigurationExcep
     /// (e.g. "marker references entries no longer in store", "marker missing required
     /// strategy field") without quoting user data.
     /// </param>
-    /// <param name="missingMessageIds">
-    /// The subset of <see cref="CompactionMarkerEntry.CompactedMessageIds"/> the store
-    /// could not resolve when applying the projection. May be empty when the failure mode
-    /// is not "missing source entries". Never <see langword="null"/> — empty lists are the
-    /// "not applicable" sentinel.
+    /// <param name="missingEntryIds">
+    /// Bounded entry identities the store could not resolve when applying the projection. May
+    /// be empty when the failure mode is not "missing source entries". Never
+    /// <see langword="null"/> — empty lists are the "not applicable" sentinel.
     /// </param>
     /// <param name="innerException">
     /// Optional originating exception (e.g. a <see cref="System.Text.Json.JsonException"/>
@@ -57,12 +55,12 @@ public sealed class DurableCompactionMarkerException : DurableConfigurationExcep
     public DurableCompactionMarkerException(
         string markerCorrelationId,
         string message,
-        IReadOnlyList<string>? missingMessageIds = null,
+        IReadOnlyList<string>? missingEntryIds = null,
         Exception? innerException = null)
         : base(message, innerException)
     {
         MarkerCorrelationId = markerCorrelationId;
-        MissingMessageIds = missingMessageIds ?? Array.Empty<string>();
+        MissingEntryIds = missingEntryIds ?? Array.Empty<string>();
     }
 
     /// <summary>
@@ -74,5 +72,5 @@ public sealed class DurableCompactionMarkerException : DurableConfigurationExcep
     /// Gets the subset of marker-referenced source IDs the store could not resolve.
     /// Empty when the failure mode is not "missing source entries".
     /// </summary>
-    public IReadOnlyList<string> MissingMessageIds { get; init; }
+    public IReadOnlyList<string> MissingEntryIds { get; init; }
 }

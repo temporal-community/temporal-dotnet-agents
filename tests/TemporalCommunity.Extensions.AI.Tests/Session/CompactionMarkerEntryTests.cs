@@ -9,8 +9,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.AI.Tests.Session;
 
 /// <summary>
-/// Step 5a tests: marker type wire format, discriminator pinning, and backward-compat
-/// behavior under the Step-2 source-gen harness.
+/// Pins marker wire formats, discriminator values, and source-generated serialization.
 /// </summary>
 public class CompactionMarkerEntryTests
 {
@@ -29,10 +28,15 @@ public class CompactionMarkerEntryTests
 
         var marker = Assert.IsType<CompactionMarkerEntry>(back);
         Assert.Equal(original.CorrelationId, marker.CorrelationId);
-        Assert.Equal(original.CompactedMessageIds, marker.CompactedMessageIds);
+        Assert.Equal(original.FirstReplacedEntryId, marker.FirstReplacedEntryId);
+        Assert.Equal(original.LastReplacedEntryId, marker.LastReplacedEntryId);
+        Assert.Equal(original.ReplacedEntryCount, marker.ReplacedEntryCount);
+        Assert.Equal(original.FirstReplacedTurnId, marker.FirstReplacedTurnId);
+        Assert.Equal(original.LastReplacedTurnId, marker.LastReplacedTurnId);
+        Assert.Equal(original.ReplacedTurnCount, marker.ReplacedTurnCount);
         Assert.Equal(original.Strategy, marker.Strategy);
         Assert.Equal(original.ModelId, marker.ModelId);
-        Assert.Equal(original.OriginatingTurnCorrelationIds, marker.OriginatingTurnCorrelationIds);
+        Assert.Equal(original.Summary.Text, marker.Summary.Text);
         // CompactedAt aliases CreatedAt — never duplicated on the wire.
         Assert.Equal(marker.CreatedAt, marker.CompactedAt);
     }
@@ -61,6 +65,54 @@ public class CompactionMarkerEntryTests
         using var doc = JsonDocument.Parse(json);
         Assert.True(doc.RootElement.TryGetProperty("createdAt", out _));
         Assert.False(doc.RootElement.TryGetProperty("compactedAt", out _));
+    }
+
+    [Fact]
+    public void TruncationMarker_RoundTrips_WithDistinctPinnedDiscriminator()
+    {
+        DurableSessionEntry original = new TruncationMarkerEntry
+        {
+            CorrelationId = "truncation-1",
+            CreatedAt = new DateTimeOffset(2026, 5, 14, 12, 0, 0, TimeSpan.Zero),
+            FirstRemovedEntryId = "entry-1",
+            LastRemovedEntryId = "entry-6",
+            RemovedEntryCount = 6,
+            FirstRemovedTurnId = "turn-1",
+            LastRemovedTurnId = "turn-3",
+            RemovedTurnCount = 3,
+        };
+
+        var json = JsonSerializer.Serialize(original, DurableAIJsonUtilities.DefaultOptions);
+        var marker = Assert.IsType<TruncationMarkerEntry>(
+            JsonSerializer.Deserialize<DurableSessionEntry>(json, DurableAIJsonUtilities.DefaultOptions));
+
+        Assert.Equal("truncation-marker", JsonDocument.Parse(json).RootElement.GetProperty("$type").GetString());
+        Assert.Equal("entry-1", marker.FirstRemovedEntryId);
+        Assert.Equal("entry-6", marker.LastRemovedEntryId);
+        Assert.Equal(6, marker.RemovedEntryCount);
+        Assert.Equal("turn-1", marker.FirstRemovedTurnId);
+        Assert.Equal("turn-3", marker.LastRemovedTurnId);
+        Assert.Equal(3, marker.RemovedTurnCount);
+    }
+
+    [Fact]
+    public void SessionSummary_RoundTripsWithUsageMetadata()
+    {
+        var summary = new DurableSessionSummary
+        {
+            Text = "bounded summary",
+            ModelId = "summary-model",
+            Usage = new Microsoft.Extensions.AI.UsageDetails { InputTokenCount = 12, OutputTokenCount = 4 },
+        };
+
+        var json = JsonSerializer.Serialize(summary, DurableAIJsonUtilities.DefaultOptions);
+        var back = JsonSerializer.Deserialize<DurableSessionSummary>(json, DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(back);
+        Assert.Equal(summary.Text, back.Text);
+        Assert.Equal(summary.ModelId, back.ModelId);
+        Assert.Equal(12, back.Usage!.InputTokenCount);
+        Assert.Equal(4, back.Usage.OutputTokenCount);
     }
 
     [Fact]
@@ -110,9 +162,14 @@ public class CompactionMarkerEntryTests
     {
         CorrelationId = "marker-1",
         CreatedAt = new DateTimeOffset(2026, 5, 14, 12, 0, 0, TimeSpan.Zero),
-        CompactedMessageIds = new[] { "msg-1", "msg-2", "msg-3" },
+        FirstReplacedEntryId = "entry-1",
+        LastReplacedEntryId = "entry-3",
+        ReplacedEntryCount = 3,
+        FirstReplacedTurnId = "turn-1",
+        LastReplacedTurnId = "turn-2",
+        ReplacedTurnCount = 2,
         Strategy = "summarization",
         ModelId = "gpt-4o-mini",
-        OriginatingTurnCorrelationIds = new[] { "turn-a", "turn-b" },
+        Summary = new DurableSessionSummary { Text = "summary text" },
     };
 }

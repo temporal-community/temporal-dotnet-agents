@@ -389,20 +389,27 @@ public class PolymorphicSerializationAuditTests
             {
                 new(ChatRole.Assistant, "summary text"),
             },
-            CompactedMessageIds = new[] { "id-1", "id-2", "id-3" },
+            FirstReplacedEntryId = "id-1",
+            LastReplacedEntryId = "id-3",
+            ReplacedEntryCount = 3,
+            FirstReplacedTurnId = "turn-1",
+            LastReplacedTurnId = "turn-2",
+            ReplacedTurnCount = 2,
             Strategy = "summarization",
             ModelId = "gpt-4o-mini",
-            OriginatingTurnCorrelationIds = new[] { "turn-1", "turn-2" },
+            Summary = new DurableSessionSummary { Text = "summary text" },
         };
 
         var roundTripped = RoundTrip(original);
 
         var marker = Assert.IsType<CompactionMarkerEntry>(roundTripped);
         Assert.Equal("marker-1", marker.CorrelationId);
-        Assert.Equal(3, marker.CompactedMessageIds.Count);
+        Assert.Equal("id-1", marker.FirstReplacedEntryId);
+        Assert.Equal("id-3", marker.LastReplacedEntryId);
+        Assert.Equal(3, marker.ReplacedEntryCount);
         Assert.Equal("summarization", marker.Strategy);
         Assert.Equal("gpt-4o-mini", marker.ModelId);
-        Assert.Equal(2, marker.OriginatingTurnCorrelationIds.Count);
+        Assert.Equal("summary text", marker.Summary.Text);
     }
 
     // ─── List<DurableSessionEntry> — registered explicitly in the source-gen context ────
@@ -437,16 +444,32 @@ public class PolymorphicSerializationAuditTests
             {
                 CorrelationId = "m1",
                 CreatedAt = DateTimeOffset.UtcNow,
-                CompactedMessageIds = new[] { "r1" },
+                FirstReplacedEntryId = "r1",
+                LastReplacedEntryId = "r1",
+                ReplacedEntryCount = 1,
+                FirstReplacedTurnId = "turn-1",
+                LastReplacedTurnId = "turn-1",
+                ReplacedTurnCount = 1,
                 Strategy = "truncation",
                 ModelId = string.Empty,
-                OriginatingTurnCorrelationIds = new[] { "turn-1" },
+                Summary = new DurableSessionSummary { Text = "old content removed" },
+            },
+            new TruncationMarkerEntry
+            {
+                CorrelationId = "t1",
+                CreatedAt = DateTimeOffset.UtcNow,
+                FirstRemovedEntryId = "r2",
+                LastRemovedEntryId = "r3",
+                RemovedEntryCount = 2,
+                FirstRemovedTurnId = "turn-2",
+                LastRemovedTurnId = "turn-3",
+                RemovedTurnCount = 2,
             },
         };
 
         var roundTripped = RoundTrip(original);
 
-        Assert.Equal(4, roundTripped.Count);
+        Assert.Equal(5, roundTripped.Count);
         Assert.IsType<DurableSessionRequest>(roundTripped[0]);
         var agentReq = Assert.IsType<AgentSessionRequest>(roundTripped[1]);
         Assert.Equal("orch-x", agentReq.OrchestrationId);
@@ -455,5 +478,6 @@ public class PolymorphicSerializationAuditTests
         Assert.Equal(2, agentResp.Usage!.OutputTokenCount);
         var marker = Assert.IsType<CompactionMarkerEntry>(roundTripped[3]);
         Assert.Equal("truncation", marker.Strategy);
+        Assert.IsType<TruncationMarkerEntry>(roundTripped[4]);
     }
 }

@@ -122,6 +122,8 @@ public class HistoryReducerAtCanTests
             Assert.NotEmpty(carried);
             var reducedBase = Assert.IsType<DurableSessionResponse>(carried[0]);
             Assert.StartsWith("response ", reducedBase.Text);
+            Assert.False(string.IsNullOrWhiteSpace(reducedBase.EntryId));
+            Assert.False(string.IsNullOrWhiteSpace(reducedBase.TurnId));
 
             await host.StopAsync();
         }

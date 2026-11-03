@@ -25,8 +25,10 @@ is outside the deduplication window, so a later retry can execute again; the led
 external tool effects exactly-once. If `SendAsync` fails after generating a request ID, its
 `DurableChatRequestException.RequestId` exposes that ID; callers needing recovery across process
 failure should persist their own ID before submission. Phase 0 documented pinned reducer and replay
-prerequisites. Phase 1.0 removed the durable embedding wrapper; safe interrupted-turn recovery and
-independent context/history budgets are still pending.
+prerequisites. Phase 1.0 removed the durable embedding wrapper, and Phase 3.6 retains bounded,
+protocol-valid interrupted-turn history after a tool effect may have occurred. Retained
+request/response entries also carry distinct stable `EntryId` values and a shared `TurnId`, which
+survive Continue-as-New; those identities are not deduplication or authorization tokens.
 
 `SessionTimeToLive` is an idle lifetime tracked as an absolute workflow-time deadline. Admitted or
 completed work renews it, active turns and approval waits drain before expiry, and Continue-as-New

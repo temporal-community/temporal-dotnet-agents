@@ -21,8 +21,8 @@ how-to reference for all of them:
 
 ## Durable-chat redesign target contracts
 
-**Implementation status:** Phases 0, 1, 2.1–2.6, and 3.1–3.4 are implemented; workflow-owned turn
-cancellation is in progress. The current API supports request identity, active-turn admission,
+**Implementation status:** Phases 0, 1, 2.1–2.6, 3.1–3.7, and 4.1 are implemented; later history
+budget and compaction behavior remains in progress. The current API supports request identity, active-turn admission,
 bounded terminal outcomes, epoch-aware idle deadlines, per-payload transport guards, bounded turn
 joiners, event-history thresholds, validated session shutdown, stable logical tool-operation keys,
 validated tool dispatch, call-bound approval decisions, and bounded review projections. In
@@ -37,7 +37,7 @@ particular, `correlationId` is not an idempotency key and current Continue-as-Ne
 | Approval and CAN | Close admission before draining; defer CAN until admitted handlers and the active turn finish. Approvals have finite deadlines. Session shutdown uses the validated `RequestShutdown` update; unknown, mismatched, and already-resolved approval decisions are rejected before admission. |
 | Event history | Use `Workflow.CurrentHistoryLength` and `CurrentHistorySize` (bytes, updated at workflow-task boundaries). Defaults are 40,000/45,000 events and 40/45 MiB soft/reserve thresholds; use `GetHistoryBudgetAsync` to inspect current usage. At the soft threshold, reject new turns while allowing completion and recovery work. Near reserve exhaustion, expire approvals as `Expired(HistoryBudget)`. A finite timer does not bound request volume. |
 | Failure and cancellation | With no dispatched tool effect, roll back the turn. After an effect, retain a bounded interrupted-turn record: completed call/result pairs, `unknown` for uncertain effects, `not executed` for undispatched calls, and a redacted bounded terminal marker. Drop partial assistant text and project protocol-valid model messages. |
-| Retained history | `GetHistory` is retained state, not an archive. Opt-in complete-turn trimming and a library-selected-prefix summarizer are separate from `IChatReducer`, which only shapes protected ephemeral model context. Without a configured compaction strategy, preserve history and enter `HistoryBlocked`; summarizer failure must never silently fall back to trimming. |
+| Retained history | `GetHistory` is retained state, not an archive. Library-created request/response entries have distinct stable `EntryId`s and share a `TurnId`, preserved across Continue-as-New. Compaction markers store a bounded contiguous replaced range and a summary DTO; truncation markers use a separate discriminator and record removed ranges. Opt-in complete-turn trimming and a library-selected-prefix summarizer are separate from `IChatReducer`, which only shapes protected ephemeral model context. |
 | Model budget | Optional input-token limit plus output reserve, with a replaceable heuristic estimator counting instructions, tool declarations, output schema, context, active turn, and reserve. This is independent of Temporal payload limits. Protected content or reducer output that cannot fit gives `ContextBudgetExceeded`; unconfigured provider overflow maps to a typed non-retryable outcome. Summarization has its own budget. |
 | Tool safety | Reuse per-tool policies; unknown/effectful tools default to one attempt. Supply stable logical operation keys (epoch, request/turn, distinct call), enforced downstream for idempotency. Timeout/cancellation may mean `unknown`. Guard result and failure-detail bytes inside the activity before returning. |
 | Telemetry | MEAI owns inference spans and GenAI metrics; the library owns durable/tool telemetry. Content capture controls telemetry only, not persistence or model input. |
@@ -46,6 +46,32 @@ No numeric ledger, joiner, token, event-reserve, or recovery limits are introduc
 Later units must expose explicit limits and exercise their exact boundaries, not rely on provider
 or service payload caps. New histories must replay deterministically; this redesign does not
 require old-history patching or backward compatibility.
+
+### Retained-history identities
+
+Each library-created request and response receives a distinct stable `EntryId`; both share a
+`TurnId`. These identifiers are workflow-generated and survive history snapshots and
+Continue-as-New. They are separate from `CorrelationId`, which remains an observability field.
+Compaction markers describe a contiguous replaced range using endpoint IDs and counts rather than
+an unbounded source-ID array. A `DurableSessionSummary` carries the summary result, and explicit
+truncation uses the distinct `truncation-marker` discriminator so removed content is not confused
+with replacement text.
+
+```csharp
+// Inspect the stable identities associated with retained request/response pairs.
+var history = await sessionClient.GetHistoryAsync("customer-42");
+foreach (var turn in history
+    .OfType<DurableSessionRequest>()
+    .Where(request => request.EntryId is not null && request.TurnId is not null))
+{
+    var response = history
+        .OfType<DurableSessionResponse>()
+        .FirstOrDefault(entry => entry.TurnId == turn.TurnId);
+    Console.WriteLine($"{turn.TurnId}: {turn.EntryId} -> {response?.EntryId}");
+}
+```
+
+<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/MEAI/RetainedHistoryIdentity.cs. -->
 
 ### Pinned reducer prerequisites
 

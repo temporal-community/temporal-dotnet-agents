@@ -517,6 +517,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             DurableSessionResponse resp => new DurableSessionResponse
             {
+                EntryId = resp.EntryId,
+                TurnId = resp.TurnId,
                 CorrelationId = resp.CorrelationId,
                 RequestId = resp.RequestId,
                 CreatedAt = resp.CreatedAt,
@@ -531,6 +533,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             },
             DurableSessionRequest req => new DurableSessionRequest
             {
+                EntryId = req.EntryId,
+                TurnId = req.TurnId,
                 CorrelationId = req.CorrelationId,
                 RequestId = req.RequestId,
                 InputFingerprint = req.InputFingerprint,
@@ -1495,6 +1499,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 participantStateCaptured = true;
             }
 
+            requestEntry.EntryId ??= Workflow.NewGuid().ToString("N");
+            requestEntry.TurnId ??= Workflow.NewGuid().ToString("N");
+
             // Append the request entry for this turn. When external-history mode is on we
             // replace the messages with an empty list so the in-workflow history never holds
             // the raw user prompt — only request identity and metadata for turn counting.
@@ -1525,6 +1532,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 requestEntry.RequestId,
                 output,
                 Workflow.UtcNow);
+            responseEntry.EntryId ??= Workflow.NewGuid().ToString("N");
+            responseEntry.TurnId = requestEntry.TurnId;
             if (RequiredInput.EnableTransportPayloadGuard)
             {
                 Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
@@ -1589,6 +1598,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     requestEntryToAppend.CorrelationId,
                     requestEntry.RequestId,
                     IsCurrentTurnCancellationRequested());
+                interruptedResponse.EntryId ??= Workflow.NewGuid().ToString("N");
+                interruptedResponse.TurnId = requestEntryToAppend.TurnId;
                 _history.Add(requestEntryToAppend);
                 _history.Add(ShouldStripMessagesFromHistoryEntry()
                     ? (DurableSessionResponse)StripMessagesFromEntry(interruptedResponse)

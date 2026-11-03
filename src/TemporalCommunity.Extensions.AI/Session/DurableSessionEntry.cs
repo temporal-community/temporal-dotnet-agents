@@ -13,14 +13,30 @@ namespace TemporalCommunity.Extensions.AI.Session;
 /// The <c>$type</c> discriminator strings (<c>"ai_request"</c>, <c>"ai_response"</c>)
 /// are wire-format constants embedded in workflow event history forever — do not change.
 /// </para>
+/// <para>
+/// Library-created entries receive a stable <see cref="EntryId"/> and share a
+/// <see cref="TurnId"/> with the paired request or response. Correlation IDs remain an
+/// observability field and are not unique entry identifiers.
+/// </para>
 /// </remarks>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
 [JsonDerivedType(typeof(DurableSessionRequest), "ai_request")]
 [JsonDerivedType(typeof(DurableSessionResponse), "ai_response")]
 [JsonDerivedType(typeof(CompactionMarkerEntry), "compaction-marker")]
+[JsonDerivedType(typeof(TruncationMarkerEntry), "truncation-marker")]
 public abstract class DurableSessionEntry
 {
     private IReadOnlyList<ChatMessage> messages = [];
+
+    /// <summary>Stable library identity for this retained history entry.</summary>
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EntryId { get; internal set; }
+
+    /// <summary>Stable identity shared by entries belonging to one logical turn.</summary>
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TurnId { get; internal set; }
 
     /// <summary>
     /// Per-turn correlation identifier used for log/trace threading and for matching

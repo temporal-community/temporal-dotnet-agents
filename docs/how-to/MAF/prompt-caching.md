@@ -65,12 +65,14 @@ var stepInput = new AgentStepInput
 
 ## History Serialization Format
 
-History entries use a polymorphic JSON format with a `$type` discriminator at the entry layer. The MAF-specific subclasses use the discriminators `agent_request` / `agent_response`; the AI library's own concrete types (in mixed-library scenarios) use `ai_request` / `ai_response`. Within each entry's `messages`, individual `AIContent` items carry MEAI's own `$type` discriminator (e.g., `text`, `functionCall`, `functionResult`) emitted by `AIJsonUtilities.DefaultOptions`:
+History entries use a polymorphic JSON format with a `$type` discriminator at the entry layer. The MAF-specific subclasses use the discriminators `agent_request` / `agent_response`; the AI library's own concrete types (in mixed-library scenarios) use `ai_request` / `ai_response`. Library-created entries also carry distinct stable `entryId` values and a shared `turnId` for each request/response pair; both survive Continue-as-New. These identities are separate from `correlationId`, which is intended for observability. Within each entry's `messages`, individual `AIContent` items carry MEAI's own `$type` discriminator (e.g., `text`, `functionCall`, `functionResult`) emitted by `AIJsonUtilities.DefaultOptions`:
 
 ```json
 [
   {
     "$type": "agent_request",
+    "entryId": "request-entry-id",
+    "turnId": "turn-id",
     "correlationId": "abc123",
     "createdAt": "2026-04-30T10:00:00Z",
     "messages": [
@@ -82,6 +84,8 @@ History entries use a polymorphic JSON format with a `$type` discriminator at th
   },
   {
     "$type": "agent_response",
+    "entryId": "response-entry-id",
+    "turnId": "turn-id",
     "correlationId": "abc123",
     "createdAt": "2026-04-30T10:00:01Z",
     "messages": [
