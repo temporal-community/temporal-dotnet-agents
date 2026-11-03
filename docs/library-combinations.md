@@ -73,7 +73,7 @@ var response = await sessionClient.SendAsync(
 - Managed tool-call durability through one implicit `AddDurableTool()`/`AddDurableTools()` group or ordered named
   `AddDurableToolset(...)` groups. The worker owns schemas and implementations, the client remains
   thin, and each tool invocation becomes its own activity with its own retry policy.
-- Durable embedding generation via `DurableEmbeddingGenerator`.
+- Embedding generation through an application-owned Temporal activity.
 - HITL approval gates via `DurableApprovalRequest` / `DurableApprovalDecision`.
 - `DurableAIDataConverter` auto-wired when using the managed registration overloads (`AddTemporalClient` + `AddDurableAI`, or the 3-arg `AddHostedTemporalWorker` overload). It applies to every workflow sharing that worker client, including ordinary workflows. Manual `TemporalClient.ConnectAsync` callers that exchange those payloads must set `DataConverter = DurableAIDataConverter.Instance` explicitly; see [the shared-worker guidance](how-to/MEAI/usage.md#sharing-a-worker-with-non-ai-workflows).
 - Custom workflow output — subclass `DurableChatWorkflowBase<TOutput>` to return domain-specific types from workflow Update handlers. The session loop, history, HITL, and continue-as-new are all inherited. See [custom-workflow-output.md](how-to/MEAI/custom-workflow-output.md).
@@ -189,7 +189,7 @@ an inline `UseFunctionInvocation()` loop.
 Incremental adoption paths:
 
 - **Replace the custom workflow** — swap the hand-rolled workflow and activities for `DurableChatWorkflow` + `DurableChatActivities` by registering `AddDurableAI()` and updating the external entry point to `DurableChatSessionClient`.
-- **Adopt specific components** — keep the custom workflow and add `DurableEmbeddingGenerator` + `EmbeddingGeneratorBuilderExtensions.UseDurableExecution()` or `DurableAIDataConverter` individually. These components are each independently composable and do not require the full workflow replacement.
+- **Adopt specific components** — keep the custom workflow and add `DurableAIDataConverter` individually. For durable embeddings, call an application-owned Temporal activity that uses MEAI's `IEmbeddingGenerator`; see the [embeddings guide](how-to/MEAI/embeddings.md).
 
 ---
 

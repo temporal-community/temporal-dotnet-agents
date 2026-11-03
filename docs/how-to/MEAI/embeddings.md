@@ -1,120 +1,82 @@
-# Durable Embeddings
+# Durable Embeddings with an Application-Owned Activity
 
-`DurableEmbeddingGenerator` wraps an `IEmbeddingGenerator<string, Embedding<float>>` and
-dispatches each workflow-side `GenerateAsync` call as a `DurableEmbeddingActivities.GenerateAsync`
-activity. The activity resolves the real provider-backed generator from worker DI. Completed
-activity results replay from Temporal history; an incomplete attempt may run again according to
-its retry policy.
+The MEAI package does not provide a durable embedding-generator wrapper. To make embedding
+generation durable, call an application-owned Temporal activity from your workflow and inject
+`IEmbeddingGenerator<string, Embedding<float>>` into that activity. Temporal records the activity
+input and result in workflow history; completed results replay without calling the provider again.
+An incomplete activity attempt can run again according to the retry policy.
 
-## Register the provider on the activity worker
+## Register the generator and activity
 
-Use the public MEAI adapter from the pinned `Microsoft.Extensions.AI.OpenAI` 10.8.3 package. The
-`OpenAIEmbeddingGenerator` implementation type is not the API to construct directly; adapt the
-public OpenAI embedding client with `AsIEmbeddingGenerator()`:
+This example uses the public adapter from `Microsoft.Extensions.AI.OpenAI` and registers a normal
+activity. Keep provider credentials and the generator in worker-side dependency injection; do not
+pass either through workflow inputs.
 
 ```csharp
-var openAiClient = new OpenAIClient(
+IEmbeddingGenerator<string, Embedding<float>> generator = new OpenAIClient(
     new ApiKeyCredential(apiKey),
-    new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) });
+    new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) })
+    .GetEmbeddingClient(modelId)
+    .AsIEmbeddingGenerator();
 
+builder.Services.AddSingleton(generator);
 builder.Services
-    .AddEmbeddingGenerator(
-        openAiClient.GetEmbeddingClient(modelId).AsIEmbeddingGenerator())
-    .Build();
+    .AddHostedTemporalWorker(temporalAddress, "default", taskQueue)
+    .AddWorkflow<EmbeddingWorkflow>()
+    .AddSingletonActivities<EmbeddingActivities>();
 ```
 
-Register `AddDurableAI()` on a worker that polls the activity queue. The workflow worker may use a
-different queue:
+## Call the activity from workflow code
 
-```csharp
-builder.Services
-    .AddHostedTemporalWorker(activityTaskQueue)
-    .AddDurableAI(options =>
-    {
-        options.TaskQueue = activityTaskQueue;
-        options.ActivityTimeout = TimeSpan.FromMinutes(2);
-        options.RegisterDefaultWorkflow = false;
-    });
-
-builder.Services
-    .AddHostedTemporalWorker(workflowTaskQueue)
-    .AddWorkflow<DocumentIndexingWorkflow>();
-```
-
-`AddDurableAI()` registers `DurableEmbeddingActivities`. Its worker-side activity resolves the
-real `IEmbeddingGenerator<string, Embedding<float>>` from DI and calls the provider. If workflow and
-activity workers use different queues, the activity queue must be set in the durable options and
-carried in the workflow input, as in the [runnable sample](../../../samples/MEAI/DurableEmbeddings/).
-
-## Construct the adapter inside workflow code
-
-Do not inject an `IEmbeddingGenerator` or resolve application DI services in a workflow. Construct
-the durable wrapper from deterministic workflow input instead. Its inner generator satisfies the
-constructor, but is not called when `Workflow.InWorkflow` is true: the wrapper schedules the
-activity on `DurableExecutionOptions.TaskQueue`.
+Configure an explicit start-to-close timeout and bounded retry policy for the provider call. The
+activity forwards Temporal's cancellation token to MEAI, allowing the provider request to stop when
+the activity is cancelled.
 
 ```csharp
 [Workflow]
-public sealed class DocumentIndexingWorkflow
+public sealed class EmbeddingWorkflow
 {
     [WorkflowRun]
-    public async Task<float[]> RunAsync(DocumentIndexingInput input)
-    {
-        var generator = new DurableEmbeddingGenerator(
-            new NullEmbeddingGenerator(),
-            new DurableExecutionOptions
+    public Task<float[]> RunAsync(string text) =>
+        Workflow.ExecuteActivityAsync(
+            (EmbeddingActivities activities) => activities.GenerateAsync(text),
+            new ActivityOptions
             {
-                TaskQueue = input.ActivityTaskQueue,
-                ActivityTimeout = input.ActivityTimeout,
+                StartToCloseTimeout = TimeSpan.FromMinutes(2),
                 RetryPolicy = new RetryPolicy { MaximumAttempts = 3 },
             });
+}
 
+public sealed class EmbeddingActivities(IEmbeddingGenerator<string, Embedding<float>> generator)
+{
+    [Temporalio.Activities.Activity]
+    public async Task<float[]> GenerateAsync(string text)
+    {
         var embeddings = await generator.GenerateAsync(
-            [input.Chunks[0]],
-            new EmbeddingGenerationOptions { ModelId = input.ModelId });
-
+            [text],
+            cancellationToken: Temporalio.Activities.ActivityExecutionContext.Current.CancellationToken);
         return embeddings[0].Vector.ToArray();
     }
 }
 ```
 
-`DocumentIndexingInput` is an application DTO, and `NullEmbeddingGenerator` in this example is a
-sample-local throwing stub, not a library type. See
-[`DocumentIndexingWorkflow.cs`](../../../samples/MEAI/DurableEmbeddings/DocumentIndexingWorkflow.cs)
-for its implementation and the full sequential/parallel examples. The task-queue value originates
-in the workflow input; `DurableExecutionOptions.TaskQueue` routes the embedding activity to that
-queue, where the real provider generator is registered.
+## Payload size, privacy, and retries
 
-## Configuration
-
-The workflow-side adapter takes `DurableExecutionOptions`:
-
-| Option | Purpose |
-|--------|---------|
-| `TaskQueue` | Queue polled by the worker hosting `DurableEmbeddingActivities`; pass it in workflow input when the queues differ. |
-| `ActivityTimeout` | Start-to-close timeout for each embedding activity. |
-| `HeartbeatTimeout` | Heartbeat timeout for the activity; choose it for the provider's expected behavior and workload. |
-| `RetryPolicy` | Retry policy for an incomplete/failed activity. When omitted, the library uses a bounded five-attempt default; set an explicit policy for the operation's idempotency and failure budget. |
-
-Each activity is independent. Calling `GenerateAsync([chunk])` once per chunk provides one retry
-boundary per chunk. To fan out in a workflow, collect the tasks and await them with
-`Workflow.WhenAllAsync` rather than `Task.WhenAll`.
+Activity arguments and results are persisted in Temporal history. Large vectors can make histories
+and payloads expensive; sensitive vectors become part of the history data path and are subject to
+the application's Temporal access controls, codecs, and retention. For large or sensitive vectors,
+write them to application-controlled external storage and return a bounded reference instead.
+External writes should be idempotent because retries can repeat an incomplete activity attempt.
 
 ## Runnable example
 
-Start Temporal Service 1.31.0 or newer, then configure credentials and run the sample:
+The [DurableEmbeddings sample](../../../samples/MEAI/DurableEmbeddings/) shows this pattern with an
+application-owned activity, an explicit timeout and retry policy, and cancellation-token forwarding.
+Start Temporal Service 1.31.0 or newer, set the provider credentials, and run:
 
 ```bash
 temporal server start-dev
 dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MEAI/DurableEmbeddings
+dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --project samples/MEAI/DurableEmbeddings
 DOTNET_ENVIRONMENT=Development dotnet run --project samples/MEAI/DurableEmbeddings/DurableEmbeddings.csproj
-```
-
-In PowerShell:
-
-```powershell
-temporal server start-dev
-dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MEAI/DurableEmbeddings
-$env:DOTNET_ENVIRONMENT = "Development"
-dotnet run --project samples/MEAI/DurableEmbeddings/DurableEmbeddings.csproj
 ```

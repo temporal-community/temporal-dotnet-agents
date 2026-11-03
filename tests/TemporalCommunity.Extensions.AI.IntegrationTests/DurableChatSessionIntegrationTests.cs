@@ -35,8 +35,6 @@ public class DurableChatSessionIntegrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(env.Client);
         builder.Services.AddSingleton<IChatClient>(providerClient);
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
             .AddDurableAI(options =>
@@ -106,8 +104,6 @@ public class DurableChatSessionIntegrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(env.Client);
         builder.Services.AddSingleton<IChatClient>(scripted);
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
             .AddDurableAI(options =>
@@ -405,21 +401,4 @@ public class DurableChatSessionIntegrationTests
         }
     }
 
-    private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
-    }
 }

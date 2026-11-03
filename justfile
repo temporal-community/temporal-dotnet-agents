@@ -678,8 +678,8 @@ _sample-preflight-maf:
     echo "Required search attributes (AgentName, SessionCreatedAt, TurnCount) are registered."
 
 # Run all non-interactive MEAI samples end-to-end. Per-sample timeouts:
-# default 90s, with overrides for samples that legitimately take longer
-# (DurableEmbeddings parallel-indexes a corpus). Reports PASS / FAIL / HANG.
+# default 90s, with overrides for samples that legitimately take longer.
+# Reports PASS / FAIL / HANG.
 # Requires OPENAI_API_KEY and a running Temporal server. HumanInTheLoop auto-approves its
 # deterministic review path and is included.
 _test-samples-meai: build _sample-preflight
@@ -711,7 +711,7 @@ _test-samples-meai: build _sample-preflight
     for entry in \
         "DurableChat:samples/MEAI/DurableChat:120:Total entries stored:" \
         "DurableTools:samples/MEAI/DurableTools:90:City      : London|Done." \
-        "DurableEmbeddings:samples/MEAI/DurableEmbeddings:180:Completed activities replay from history on worker restart" \
+        "DurableEmbeddings:samples/MEAI/DurableEmbeddings:90:Generated embedding with" \
         "CustomWorkflow:samples/MEAI/CustomWorkflow:90:Cart actions:" \
         "DirectAdapters:samples/MEAI/DirectAdapters:90:City      : Seattle|Done." \
         "OpenTelemetry:samples/MEAI/OpenTelemetry:90:telemetry.sdk.name: opentelemetry" \

@@ -581,8 +581,6 @@ public class TypedDurableTurnLifecycleTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
         builder.Services.AddChatClient(chatClient).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         builder.Services.AddKeyedSingleton<Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
             ReducerKey,
             (_, _) => history => history.TakeLast(1).ToList());
@@ -721,18 +719,4 @@ public class TypedDurableTurnLifecycleTests
         public void Dispose() { }
     }
 
-    private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-        public void Dispose() { }
-    }
 }

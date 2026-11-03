@@ -207,7 +207,7 @@ For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how
 - **Never** call `ActivitySource.StartActivity()` inside `[Workflow]` — non-deterministic on replay
 - Don't use wall-clock time in workflows (`DateTime.UtcNow`, `DateTimeOffset.Now`)
 - Don't use `Random` or `Guid.NewGuid()` in workflows
-- Don't construct `DurableChatClient`/`DurableEmbeddingGenerator`/`ChatClientBuilder` composition inside `[WorkflowRun]`/`[WorkflowUpdate]` methods — see `docs/architecture/MEAI/direct-adapter-anti-pattern.md`
+- Don't construct `DurableChatClient`/`ChatClientBuilder` composition inside `[WorkflowRun]`/`[WorkflowUpdate]` methods — see `docs/architecture/MEAI/direct-adapter-anti-pattern.md`
 
 ---
 

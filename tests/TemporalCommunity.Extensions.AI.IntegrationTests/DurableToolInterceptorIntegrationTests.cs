@@ -748,8 +748,6 @@ public class DurableToolInterceptorIntegrationTests
         builder.Services
             .AddChatClient(chatClient)
             .Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         builder.Services.AddSingleton<IDurableToolInterceptor<DurableToolContext>>(interceptor);
 
         var workerBuilder = builder.Services
@@ -783,8 +781,6 @@ public class DurableToolInterceptorIntegrationTests
         builder.Services
             .AddChatClient(chatClient)
             .Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
 
         var workerBuilder = builder.Services
             .AddHostedTemporalWorker(taskQueue)
@@ -800,24 +796,6 @@ public class DurableToolInterceptorIntegrationTests
         registerTools(workerBuilder);
 
         return builder.Build();
-    }
-
-    /// <summary>
-    /// Stub IEmbeddingGenerator required by DurableEmbeddingActivities constructor injection.
-    /// </summary>
-    private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-        public void Dispose() { }
     }
 
     /// <summary>

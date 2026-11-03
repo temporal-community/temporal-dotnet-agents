@@ -110,7 +110,7 @@ builder.Services.AddChatClient(openAiChatClient);
 // ── Setup: Register worker + durable AI ────────────────────────────────────
 // AddDurableAI is the registration path for AI integrations. It registers
 // DurableChatWorkflow, DurableChatActivities, DurableFunctionActivities,
-// DurableEmbeddingActivities, the function registry, DurableChatSessionClient,
+// the function registry, DurableChatSessionClient,
 // the DurableExecutionOptions singleton, and the DurableAIDataConverter wiring.
 builder.Services
     .AddHostedTemporalWorker("durable-chat-otel")

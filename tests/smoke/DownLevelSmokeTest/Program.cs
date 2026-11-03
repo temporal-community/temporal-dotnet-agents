@@ -98,6 +98,7 @@ namespace DownLevelSmokeTest
                     },
                 }).ConfigureAwait(false);
 #pragma warning restore CA2007
+            env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
             var systemInfo = await env.Client.WorkflowService.GetSystemInfoAsync(
                 new GetSystemInfoRequest()).ConfigureAwait(false);
             var serverVersion = ParseAndValidateServerVersion(systemInfo.ServerVersion);
@@ -145,9 +146,6 @@ namespace DownLevelSmokeTest
                 .AddChatClient(scripted)
                 .Build();
 
-            // Stub embedding generator required by DurableEmbeddingActivities ctor injection.
-            builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-                new NoopEmbeddingGenerator());
 
             var worker = builder.Services.AddHostedTemporalWorker(taskQueue);
             worker
@@ -277,20 +275,5 @@ namespace DownLevelSmokeTest
             public void Dispose() { }
         }
 
-        /// <summary>Stub embedding generator; satisfies DurableEmbeddingActivities ctor injection.</summary>
-        private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-        {
-            public EmbeddingGeneratorMetadata Metadata { get; } = new EmbeddingGeneratorMetadata("noop", null, null, 1);
-
-            public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-                IEnumerable<string> values,
-                EmbeddingGenerationOptions? options = null,
-                CancellationToken cancellationToken = default) =>
-                Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                    values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
-
-            public object? GetService(Type serviceType, object? serviceKey = null) => null;
-            public void Dispose() { }
-        }
     }
 }

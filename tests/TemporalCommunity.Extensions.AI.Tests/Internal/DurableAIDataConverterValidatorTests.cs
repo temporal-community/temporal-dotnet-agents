@@ -21,14 +21,12 @@ public sealed class DurableAIDataConverterValidatorTests
     }
 
     [Fact]
-    public void PostConfigure_RejectsDefaultConverterThatLosesDurableAIData()
+    public void PostConfigure_AcceptsDefaultConverterWhenItPreservesRemainingDurableAIData()
     {
         var validator = CreateValidator(DataConverter.Default);
 
-        var exception = Assert.Throws<DurableConfigurationException>(
-            () => validator.PostConfigure(null, new TemporalWorkerServiceOptions()));
-
-        Assert.Contains("DurableAIDataConverter", exception.Message);
+        Assert.Null(Record.Exception(() =>
+            validator.PostConfigure(null, new TemporalWorkerServiceOptions())));
     }
 
     [Fact]

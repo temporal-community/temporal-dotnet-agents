@@ -48,8 +48,6 @@ public class MixedInterceptorBatchPolicyRegressionTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(env.Client);
         builder.Services.AddChatClient(scripted).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         builder.Services.AddSingleton<IDurableToolInterceptor<DurableToolContext>>(interceptor);
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
@@ -101,18 +99,4 @@ public class MixedInterceptorBatchPolicyRegressionTests
             handler(context, cancellationToken);
     }
 
-    private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(new float[] { 0f })).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-        public void Dispose() { }
-    }
 }

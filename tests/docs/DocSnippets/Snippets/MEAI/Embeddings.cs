@@ -1,4 +1,3 @@
-// Harness parameters supply application configuration omitted from the registration examples.
 using System.ClientModel;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,89 +6,59 @@ using OpenAI;
 using Temporalio.Common;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
-using TemporalCommunity.Extensions.AI;
 
 namespace DocSnippets.MEAI;
 
 internal static class Embeddings
 {
-    internal static void RegisterProvider(
-        HostApplicationBuilder builder, string apiKey, string apiBaseUrl, string modelId)
+    internal static void RegisterWorker(
+        HostApplicationBuilder builder,
+        string apiKey,
+        string apiBaseUrl,
+        string modelId,
+        string taskQueue,
+        string temporalAddress)
     {
-        // BEGIN SNIPPET docs/how-to/MEAI/embeddings.md#register-the-provider-on-the-activity-worker
-        var openAiClient = new OpenAIClient(
+        // BEGIN SNIPPET docs/how-to/MEAI/embeddings.md#register-the-generator-and-activity
+        IEmbeddingGenerator<string, Embedding<float>> generator = new OpenAIClient(
             new ApiKeyCredential(apiKey),
-            new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) });
+            new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) })
+            .GetEmbeddingClient(modelId)
+            .AsIEmbeddingGenerator();
 
+        builder.Services.AddSingleton(generator);
         builder.Services
-            .AddEmbeddingGenerator(
-                openAiClient.GetEmbeddingClient(modelId).AsIEmbeddingGenerator())
-            .Build();
-        // END SNIPPET docs/how-to/MEAI/embeddings.md#register-the-provider-on-the-activity-worker
-    }
-
-    internal static void RegisterWorkers(
-        HostApplicationBuilder builder, string activityTaskQueue, string workflowTaskQueue)
-    {
-        // BEGIN SNIPPET docs/how-to/MEAI/embeddings.md#register-the-provider-on-the-activity-worker
-        builder.Services
-            .AddHostedTemporalWorker(activityTaskQueue)
-            .AddDurableAI(options =>
-            {
-                options.TaskQueue = activityTaskQueue;
-                options.ActivityTimeout = TimeSpan.FromMinutes(2);
-                options.RegisterDefaultWorkflow = false;
-            });
-
-        builder.Services
-            .AddHostedTemporalWorker(workflowTaskQueue)
-            .AddWorkflow<DocumentIndexingWorkflow>();
-        // END SNIPPET docs/how-to/MEAI/embeddings.md#register-the-provider-on-the-activity-worker
+            .AddHostedTemporalWorker(temporalAddress, "default", taskQueue)
+            .AddWorkflow<EmbeddingWorkflow>()
+            .AddSingletonActivities<EmbeddingActivities>();
+        // END SNIPPET docs/how-to/MEAI/embeddings.md#register-the-generator-and-activity
     }
 }
 
-// BEGIN SNIPPET docs/how-to/MEAI/embeddings.md#construct-the-adapter-inside-workflow-code
+// BEGIN SNIPPET docs/how-to/MEAI/embeddings.md#call-the-activity-from-workflow-code
 [Workflow]
-public sealed class DocumentIndexingWorkflow
+public sealed class EmbeddingWorkflow
 {
     [WorkflowRun]
-    public async Task<float[]> RunAsync(DocumentIndexingInput input)
-    {
-        var generator = new DurableEmbeddingGenerator(
-            new NullEmbeddingGenerator(),
-            new DurableExecutionOptions
+    public Task<float[]> RunAsync(string text) =>
+        Workflow.ExecuteActivityAsync(
+            (EmbeddingActivities activities) => activities.GenerateAsync(text),
+            new ActivityOptions
             {
-                TaskQueue = input.ActivityTaskQueue,
-                ActivityTimeout = input.ActivityTimeout,
+                StartToCloseTimeout = TimeSpan.FromMinutes(2),
                 RetryPolicy = new RetryPolicy { MaximumAttempts = 3 },
             });
+}
 
+public sealed class EmbeddingActivities(IEmbeddingGenerator<string, Embedding<float>> generator)
+{
+    [Temporalio.Activities.Activity]
+    public async Task<float[]> GenerateAsync(string text)
+    {
         var embeddings = await generator.GenerateAsync(
-            [input.Chunks[0]],
-            new EmbeddingGenerationOptions { ModelId = input.ModelId });
-
+            [text],
+            cancellationToken: Temporalio.Activities.ActivityExecutionContext.Current.CancellationToken);
         return embeddings[0].Vector.ToArray();
     }
 }
-// END SNIPPET docs/how-to/MEAI/embeddings.md#construct-the-adapter-inside-workflow-code
-
-// The guide explicitly delegates these application-local types to the runnable sample.
-public sealed class DocumentIndexingInput
-{
-    public required IReadOnlyList<string> Chunks { get; init; }
-    public required string ActivityTaskQueue { get; init; }
-    public TimeSpan ActivityTimeout { get; init; } = TimeSpan.FromMinutes(2);
-    public required string ModelId { get; init; }
-}
-
-internal sealed class NullEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-{
-    public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-        IEnumerable<string> values,
-        EmbeddingGenerationOptions? options = null,
-        CancellationToken cancellationToken = default)
-        => throw new InvalidOperationException("The workflow must dispatch to the embedding activity.");
-
-    public object? GetService(Type serviceType, object? serviceKey = null) => null;
-    public void Dispose() { }
-}
+// END SNIPPET docs/how-to/MEAI/embeddings.md#call-the-activity-from-workflow-code

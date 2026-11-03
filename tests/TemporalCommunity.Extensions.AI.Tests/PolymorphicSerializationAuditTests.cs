@@ -12,8 +12,6 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 /// round-trip" bug class. Three instances of this bug have been caught reactively during
 /// sample reviews:
 /// <list type="bullet">
-///   <item><c>GeneratedEmbeddings.Usage</c> (wrapper around <see cref="System.Collections.ObjectModel.Collection{T}"/>; side-properties dropped)</item>
-///   <item><c>GeneratedEmbeddings.AdditionalProperties</c> (same root cause)</item>
 ///   <item><c>ChatOptions.Tools</c> (polymorphic <c>IList&lt;AITool&gt;</c>; collapses to <see langword="null"/>)</item>
 /// </list>
 /// Each instance was a silent data-loss bug: no exception, no warning, just lossy round-trip.
@@ -230,39 +228,6 @@ public class PolymorphicSerializationAuditTests
         Assert.Equal(2, deserialized.Options.StopSequences!.Count);
         Assert.Contains("STOP", deserialized.Options.StopSequences);
         Assert.Contains("END", deserialized.Options.StopSequences);
-    }
-
-    // ─── EmbeddingGenerationOptions polymorphic members ────────────────────────────────────
-
-    /// <summary>
-    /// <see cref="EmbeddingGenerationOptions.AdditionalProperties"/> mirrors
-    /// <see cref="ChatOptions.AdditionalProperties"/> in shape. Flows over the wire as part
-    /// of <c>DurableEmbeddingInput.Options</c>. Same polymorphic-Object risk.
-    /// </summary>
-    [Fact]
-    public void Audit_EmbeddingGenerationOptions_AdditionalProperties_RoundTrip()
-    {
-        var input = new DurableEmbeddingInput
-        {
-            Values = new List<string> { "hello" },
-            Options = new EmbeddingGenerationOptions
-            {
-                ModelId = "text-embedding-3-small",
-                AdditionalProperties = new AdditionalPropertiesDictionary
-                {
-                    ["dimensions"] = 512,
-                    ["user_tag"] = "audit",
-                },
-            },
-        };
-
-        var deserialized = RoundTrip(input);
-
-        Assert.NotNull(deserialized.Options);
-        Assert.Equal("text-embedding-3-small", deserialized.Options!.ModelId);
-        Assert.NotNull(deserialized.Options.AdditionalProperties);
-        Assert.True(deserialized.Options.AdditionalProperties!.ContainsKey("dimensions"));
-        Assert.True(deserialized.Options.AdditionalProperties.ContainsKey("user_tag"));
     }
 
     // ─── ChatResponse — return type of the activity, persisted in DurableSessionResponse ──

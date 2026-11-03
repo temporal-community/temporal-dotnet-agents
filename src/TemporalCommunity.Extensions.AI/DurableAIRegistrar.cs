@@ -74,7 +74,6 @@ internal static class DurableAIRegistrar
         {
             builder.AddSingletonActivities<DurableChatActivities>();
             builder.AddScopedActivities<DurableFunctionActivities>();
-            builder.AddSingletonActivities<DurableEmbeddingActivities>();
             builder.AddSingletonActivities<DurableToolsetActivities>();
         }
 

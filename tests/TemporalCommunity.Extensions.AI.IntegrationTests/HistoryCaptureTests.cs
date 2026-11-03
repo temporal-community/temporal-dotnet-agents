@@ -387,8 +387,6 @@ public class HistoryCaptureTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(client);
         builder.Services.AddChatClient(chatClient).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
 
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
@@ -407,8 +405,6 @@ public class HistoryCaptureTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(client);
         builder.Services.AddSingleton<IChatClient>(new TestChatClient());
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
 
         builder.Services
             .AddHostedTemporalWorker(DurableChatClientWorkflow.TaskQueue)
@@ -432,8 +428,6 @@ public class HistoryCaptureTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(client);
         builder.Services.AddChatClient(chatClient).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
 
         var workerBuilder = builder.Services
             .AddHostedTemporalWorker(taskQueue)
@@ -458,8 +452,6 @@ public class HistoryCaptureTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(client);
         builder.Services.AddChatClient(chatClient).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
 
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
@@ -482,8 +474,6 @@ public class HistoryCaptureTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
         builder.Services.AddChatClient(chatClient).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         var worker = builder.Services
             .AddHostedTemporalWorker(taskQueue)
             .AddDurableAI(options =>
@@ -513,18 +503,4 @@ public class HistoryCaptureTests
         return builder.Build();
     }
 
-    private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-        public void Dispose() { }
-    }
 }

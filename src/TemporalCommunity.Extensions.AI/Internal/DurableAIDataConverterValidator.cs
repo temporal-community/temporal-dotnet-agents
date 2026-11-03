@@ -14,17 +14,13 @@ namespace TemporalCommunity.Extensions.AI.Internal;
 /// </summary>
 /// <remarks>
 /// The check is behavioral instead of requiring <see cref="DurableAIDataConverter.Instance"/>,
-/// so application-owned converter and payload-codec composition remains supported. The three
+/// so application-owned converter and payload-codec composition remains supported. The two
 /// probes cover the durable roots that require library JSON support: polymorphic
-/// <see cref="ChatMessage"/> content, polymorphic <see cref="DurableSessionEntry"/> history,
-/// and the <see cref="GeneratedEmbeddings{TEmbedding}"/> wrapper properties used by the
-/// embedding activity. Other durable AI DTOs are composed from primitives, collections, and
-/// these roots.
+/// <see cref="ChatMessage"/> content and polymorphic <see cref="DurableSessionEntry"/> history.
+/// Other durable AI DTOs are composed from primitives, collections, and these roots.
 /// </remarks>
 internal sealed class DurableAIDataConverterValidator : IPostConfigureOptions<TemporalWorkerServiceOptions>
 {
-    private static readonly float[] ValidatorVector = [1.0f];
-
     private readonly IServiceProvider serviceProvider;
 
     public DurableAIDataConverterValidator(IServiceProvider serviceProvider) =>
@@ -48,7 +44,6 @@ internal sealed class DurableAIDataConverterValidator : IPostConfigureOptions<Te
         {
             ValidatePolymorphicChatContent(converter);
             ValidateSessionEntry(converter);
-            ValidateEmbeddingWrapper(converter);
         }
         catch (DurableConfigurationException)
         {
@@ -93,28 +88,6 @@ internal sealed class DurableAIDataConverterValidator : IPostConfigureOptions<Te
 
         if (roundTripped is not DurableSessionRequest request ||
             request.CorrelationId != entry.CorrelationId)
-        {
-            throw CreateException();
-        }
-    }
-
-    private static void ValidateEmbeddingWrapper(Temporalio.Converters.DataConverter converter)
-    {
-        var output = new DurableEmbeddingOutput
-        {
-            Embeddings = new GeneratedEmbeddings<Embedding<float>>([new Embedding<float>(ValidatorVector)])
-            {
-                Usage = new UsageDetails { InputTokenCount = 1, TotalTokenCount = 1 },
-                AdditionalProperties = new AdditionalPropertiesDictionary { ["validator"] = "present" },
-            },
-        };
-
-        var payload = converter.PayloadConverter.ToPayload(output);
-        var roundTripped = converter.PayloadConverter.ToValue(payload, typeof(DurableEmbeddingOutput))
-            as DurableEmbeddingOutput;
-
-        if (roundTripped?.Embeddings.Usage?.InputTokenCount != 1 ||
-            roundTripped.Embeddings.AdditionalProperties?.ContainsKey("validator") != true)
         {
             throw CreateException();
         }

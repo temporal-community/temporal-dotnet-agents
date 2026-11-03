@@ -31,7 +31,7 @@ Welcome to the documentation for **Temporal .NET Agents**, providing durable exe
 - **[Usage & Getting Started](how-to/MEAI/usage.md)** — Setting up `DurableChatSessionClient` and `AddDurableAI`.
 - **[Durable Tools](how-to/MEAI/tool-functions.md)** — Converting `AIFunction` into durable activities (`AsDurable`).
 - **[Human-in-the-Loop (HITL)](how-to/MEAI/hitl-patterns.md)** — Approval requests, signals, and workflow updates.
-- **[Embeddings](how-to/MEAI/embeddings.md)** — Durable embedding generation with activity retries and backoff.
+- **[Embeddings](how-to/MEAI/embeddings.md)** — Use an application-owned Temporal activity for MEAI embedding generation.
 - **[Payload Codecs & Encryption](how-to/MEAI/payload-codecs.md)** — Custom data converters, encryption, and compression.
 - **[Custom Workflow Output](how-to/MEAI/custom-workflow-output.md)** — Processing intermediate turn data and structured outputs.
 - **[Observability](how-to/MEAI/observability.md)** — OpenTelemetry integration for MEAI chat pipelines.

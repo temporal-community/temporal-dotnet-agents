@@ -280,8 +280,6 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         // resolution surfaces loudly rather than silently returning wrong responses.
         builder.Services.AddSingleton<IChatClient>(new ThrowingChatClient());
 
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
 
         var workerBuilder = builder.Services
             .AddHostedTemporalWorker(taskQueue)
@@ -497,22 +495,4 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         public void Dispose() { }
     }
 
-    /// <summary>
-    /// Stub <see cref="IEmbeddingGenerator{TInput, TEmbedding}"/> to satisfy
-    /// <see cref="DurableEmbeddingActivities"/> constructor injection without exercising it.
-    /// </summary>
-    private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-        public void Dispose() { }
-    }
 }

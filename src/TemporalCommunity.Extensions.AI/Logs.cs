@@ -92,21 +92,6 @@ internal static partial class Logs
         Message = "DataConverter already set to {Type}; DurableAIDataConverter not applied.")]
     public static partial void LogConverterSkippedForConnectOptions(this ILogger logger, string type);
 
-    // ── Embedding activity logs ──────────────────────────────────────────────
-
-    [LoggerMessage(EventId = 16, Level = LogLevel.Debug,
-        Message = "Executing durable embedding activity for {Count} inputs")]
-    public static partial void LogEmbeddingActivityStarted(
-        this ILogger logger, int count);
-
-    [LoggerMessage(EventId = 17, Level = LogLevel.Debug,
-        Message = "Durable embedding activity completed")]
-    public static partial void LogEmbeddingActivityCompleted(this ILogger logger);
-
-    [LoggerMessage(EventId = 18, Level = LogLevel.Error,
-        Message = "Durable embedding activity failed")]
-    public static partial void LogEmbeddingActivityFailed(this ILogger logger, Exception ex);
-
     // ── Per-call activity tags ──────────────────────────────────────────────
 
     [LoggerMessage(EventId = 19, Level = LogLevel.Warning,

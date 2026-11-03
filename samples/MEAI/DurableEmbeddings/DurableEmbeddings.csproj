@@ -9,13 +9,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../../src/TemporalCommunity.Extensions.AI/TemporalCommunity.Extensions.AI.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="OpenAI" />
+    <PackageReference Include="Temporalio" />
+    <PackageReference Include="Temporalio.Extensions.Hosting" />
   </ItemGroup>
 
   <ItemGroup>

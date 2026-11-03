@@ -42,8 +42,6 @@ public class ExtensibleDurableTurnIntegrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(env.Client);
         builder.Services.AddChatClient(chatClient).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         var worker = builder.Services
             .AddHostedTemporalWorker(taskQueue)
             .AddDurableAI(options => options.RegisterDefaultWorkflow = false)
@@ -154,8 +152,6 @@ public class ExtensibleDurableTurnIntegrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(env.Client);
         builder.Services.AddChatClient(chatClient).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         builder.Services.AddSingleton<IDurableToolInterceptor<DurableToolContext>>(
             new DelegateInterceptor((_, _) =>
             {
@@ -252,8 +248,6 @@ public class ExtensibleDurableTurnIntegrationTests
         builder.Services.AddHttpClient("durable-tool-attempt");
         builder.Services.AddSingleton(new AttemptScopeTracker());
         builder.Services.AddScoped<AttemptScopedToolServices>();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         var worker = builder.Services
             .AddHostedTemporalWorker(
                 env.Client.Connection.Options.TargetHost
@@ -741,8 +735,6 @@ public class ExtensibleDurableTurnIntegrationTests
         builder.Services.AddHttpClient("durable-tool-attempt");
         builder.Services.AddSingleton(new AttemptScopeTracker());
         builder.Services.AddScoped<AttemptScopedToolServices>();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         builder.Services.AddSingleton(interceptor);
 
         var worker = builder.Services
@@ -819,8 +811,6 @@ public class ExtensibleDurableTurnIntegrationTests
         builder.Services.AddHttpClient("durable-tool-attempt");
         builder.Services.AddSingleton(attemptScopes ?? new AttemptScopeTracker());
         builder.Services.AddScoped<AttemptScopedToolServices>();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
 
         var worker = builder.Services
             .AddHostedTemporalWorker(taskQueue)
@@ -850,8 +840,6 @@ public class ExtensibleDurableTurnIntegrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
         builder.Services.AddChatClient(chatClient).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
         var worker = builder.Services
             .AddHostedTemporalWorker(taskQueue)
             .AddDurableAI(options =>
@@ -909,8 +897,6 @@ public class ExtensibleDurableTurnIntegrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
         builder.Services.AddChatClient(chatClient).Build();
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
 
         var worker = builder.Services
             .AddHostedTemporalWorker(taskQueue)
@@ -1124,21 +1110,6 @@ public class ExtensibleDurableTurnIntegrationTests
             Client.Dispose();
             _tracker.Disposed.Add(InstanceId);
         }
-    }
-
-    private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-        public void Dispose() { }
     }
 
     private sealed record ToolObservation(

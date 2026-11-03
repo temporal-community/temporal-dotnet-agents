@@ -938,8 +938,7 @@ public class DurableToolDispatchIntegrationTests
     /// <summary>
     /// Wires up the standard durable-tool worker host: scripted chat client,
     /// <see cref="DurableAIServiceCollectionExtensions.AddDurableAI"/>,
-    /// optional per-tool / per-option configuration, and a stub embedding generator
-    /// to satisfy <see cref="DurableEmbeddingActivities"/> constructor injection.
+    /// optional per-tool / per-option configuration.
     /// </summary>
     private static IHost BuildHost(
         ITemporalClient client,
@@ -956,9 +955,6 @@ public class DurableToolDispatchIntegrationTests
             .AddChatClient(chatClient)
             .Build();
 
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new NoopEmbeddingGenerator());
-
         var workerBuilder = builder.Services
             .AddHostedTemporalWorker(taskQueue)
             .AddDurableAI(opts =>
@@ -972,25 +968,6 @@ public class DurableToolDispatchIntegrationTests
         registerTools(workerBuilder);
 
         return builder.Build();
-    }
-
-    /// <summary>
-    /// Stub IEmbeddingGenerator required by <see cref="DurableEmbeddingActivities"/>
-    /// constructor injection even when not exercised by the test.
-    /// </summary>
-    private sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
-
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-                values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-        public void Dispose() { }
     }
 
     private sealed class FailingThenFinalChatClient(

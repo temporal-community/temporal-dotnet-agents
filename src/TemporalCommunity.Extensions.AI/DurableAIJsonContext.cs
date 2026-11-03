@@ -20,8 +20,6 @@ namespace TemporalCommunity.Extensions.AI;
 [JsonSerializable(typeof(DurableApprovalRequest))]
 [JsonSerializable(typeof(DurableApprovalDecision))]
 [JsonSerializable(typeof(IReadOnlyDictionary<string, string>))]
-[JsonSerializable(typeof(DurableEmbeddingInput))]
-[JsonSerializable(typeof(DurableEmbeddingOutput))]
 [JsonSerializable(typeof(ChatMessage))]
 [JsonSerializable(typeof(ChatResponse))]
 [JsonSerializable(typeof(ChatOptions))]
@@ -62,8 +60,6 @@ public static class DurableAIJsonUtilities
     /// Gets the default <see cref="JsonSerializerOptions"/> configured with MEAI type support.
     /// This leverages <see cref="AIJsonUtilities.DefaultOptions"/> which handles
     /// <see cref="AIContent"/> polymorphism correctly.
-    /// On the <c>netstandard2.1</c> asset, <see cref="System.Half"/> is unavailable, so the
-    /// <c>GeneratedEmbeddings&lt;Embedding&lt;Half&gt;&gt;</c> converter is not registered.
     /// </summary>
     public static JsonSerializerOptions DefaultOptions { get; } = CreateOptions();
 
@@ -86,29 +82,6 @@ public static class DurableAIJsonUtilities
         // and source-generated paths. Converter-list entries take precedence over attributes.
         options.Converters.Insert(0, new JsonNumberEnumConverter<DurableTurnCompletionReason>());
         options.Converters.Insert(0, new JsonNumberEnumConverter<DurableToolDispatchMode>());
-
-        // GeneratedEmbeddings<T> implements IList<T>, so both reflection-based and source-gen
-        // resolvers treat it as a bare collection and silently drop Usage / AdditionalProperties.
-        // Register an explicit converter so the wrapper's own properties round-trip.
-        //
-        // Rationale: DurableEmbeddingOutput is currently hard-coded to Embedding<float>, so only
-        // the <float> closure is active code today. The remaining registrations are defensive:
-        // Embedding<T> is generic with no constraint, and MEAI documents <float>, <double>, and
-        // <Half> as typical element types. Registering all numerically-plausible closures keeps
-        // the converter coverage in lockstep with the type's surface area, so a future broadening
-        // of the activity contract (or a downstream consumer that reuses DurableAIDataConverter
-        // for its own embedding closures) gets correct wrapper-property handling for free. Cost
-        // is one line + tiny metadata footprint per closure.
-        options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<float>>());
-        options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<double>>());
-#if NET5_0_OR_GREATER
-        // System.Half is a net5.0+ type — absent on netstandard2.1. Half-precision embeddings
-        // are not registered on the down-level leg (float/double/byte/int still covered). This
-        // is a narrow, documented down-level limitation.
-        options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<Half>>());
-#endif
-        options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<byte>>());
-        options.Converters.Add(new GeneratedEmbeddingsJsonConverter<Embedding<int>>());
 
         options.MakeReadOnly();
         return options;

@@ -99,7 +99,7 @@ await Workflow.ExecuteActivityAsync(...);
 await Workflow.ExecuteActivityAsync(...).ConfigureAwait(true);
 ```
 
-**Why:** `ConfigureAwait(false)` opts the continuation out of the current Temporal workflow `TaskScheduler`. Subsequent workflow commands no longer execute through the active workflow context and the workflow may stop making progress. This is a `[Workflow]`-only rule — `AgentActivities.cs` and `DefaultTemporalAgentClient.cs` correctly use `ConfigureAwait(false)` because they are not workflow code. The same rule applies to the workflow paths in `DurableChatClient`, `DurableAIFunction`, and `DurableEmbeddingGenerator`.
+**Why:** `ConfigureAwait(false)` opts the continuation out of the current Temporal workflow `TaskScheduler`. Subsequent workflow commands no longer execute through the active workflow context and the workflow may stop making progress. This is a `[Workflow]`-only rule — `AgentActivities.cs` and `DefaultTemporalAgentClient.cs` correctly use `ConfigureAwait(false)` because they are not workflow code. The same rule applies to the workflow paths in `DurableChatClient` and `DurableAIFunction`.
 
 ### Do use GetTemporalAgent() with string constants or activity results
 

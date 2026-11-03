@@ -20,7 +20,7 @@ Simple, single-process samples introducing core framework features.
 | [ConfigurableAgent](MAF/ConfigurableAgent/) | MAF | Per-agent configuration and read-only tools | Unattended Script | Automated: `just test-samples` |
 | [DurableChat](MEAI/DurableChat/) | MEAI | Multi-turn durable chat with worker-owned tools | Unattended Script | Automated: `just test-samples` |
 | [DurableTools](MEAI/DurableTools/) | MEAI | Durable function dispatch and per-tool policies | Unattended Script | Automated: `just test-samples` |
-| [DurableEmbeddings](MEAI/DurableEmbeddings/) | MEAI | Durable per-chunk embedding dispatch | Unattended Script | Automated: `just test-samples` |
+| [DurableEmbeddings](MEAI/DurableEmbeddings/) | MEAI | MEAI embeddings in an application-owned Temporal activity | Unattended Script | Automated: `just test-samples` |
 
 ---
 

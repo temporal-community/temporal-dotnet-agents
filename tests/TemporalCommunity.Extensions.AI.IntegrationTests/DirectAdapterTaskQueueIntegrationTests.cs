@@ -12,12 +12,8 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 
 public class DirectAdapterTaskQueueIntegrationTests
 {
-    [Theory]
-    [InlineData(DirectAdapterKind.Chat, "activity-queue-chat")]
-    [InlineData(DirectAdapterKind.Embedding, "1:3")]
-    public async Task DirectAdapterTaskQueue_RoutesToSeparateActivityWorker(
-        DirectAdapterKind kind,
-        string expected)
+    [Fact]
+    public async Task DirectChatClientTaskQueue_RoutesToSeparateActivityWorker()
     {
         await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
         environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
@@ -27,11 +23,9 @@ public class DirectAdapterTaskQueueIntegrationTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(environment.Client);
         builder.Services.AddSingleton<IChatClient>(new ActivityWorkerChatClient());
-        builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-            new ActivityWorkerEmbeddingGenerator());
         builder.Services
             .AddHostedTemporalWorker(workflowQueue)
-            .AddWorkflow<DirectAdapterTaskQueueWorkflow>();
+            .AddWorkflow<DirectChatTaskQueueWorkflow>();
         builder.Services
             .AddHostedTemporalWorker(activityQueue)
             .AddDurableAI(options =>
@@ -47,13 +41,14 @@ public class DirectAdapterTaskQueueIntegrationTests
         try
         {
             var handle = await environment.Client.StartWorkflowAsync(
-                (DirectAdapterTaskQueueWorkflow workflow) => workflow.RunAsync(
-                    new DirectAdapterTaskQueueInput(activityQueue, kind)),
+                (DirectChatTaskQueueWorkflow workflow) => workflow.RunAsync(activityQueue),
                 new WorkflowOptions(
-                    $"direct-task-queue-{kind}-{Guid.NewGuid():N}",
+                    $"direct-task-queue-{Guid.NewGuid():N}",
                     workflowQueue));
 
-            Assert.Equal(expected, await handle.GetResultAsync().WaitAsync(TimeSpan.FromSeconds(15)));
+            Assert.Equal(
+                "activity-queue-chat",
+                await handle.GetResultAsync().WaitAsync(TimeSpan.FromSeconds(15)));
         }
         finally
         {
@@ -80,70 +75,25 @@ public class DirectAdapterTaskQueueIntegrationTests
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
-    }
-
-    private sealed class ActivityWorkerEmbeddingGenerator
-        : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default)
-        {
-            var embeddings = values.Select(_ =>
-                new Embedding<float>(new[] { 0.1f, 0.2f, 0.3f }));
-            return Task.FromResult(
-                new GeneratedEmbeddings<Embedding<float>>(embeddings));
-        }
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
+        public void Dispose() { }
     }
 }
 
-public enum DirectAdapterKind
-{
-    Chat,
-    Embedding,
-}
-
-public sealed record DirectAdapterTaskQueueInput(
-    string ActivityTaskQueue,
-    DirectAdapterKind Kind);
-
-[Workflow("TemporalCommunity.Extensions.AI.Tests.DirectAdapterTaskQueueWorkflow")]
-public sealed class DirectAdapterTaskQueueWorkflow
+[Workflow("TemporalCommunity.Extensions.AI.Tests.DirectChatTaskQueueWorkflow")]
+public sealed class DirectChatTaskQueueWorkflow
 {
     [WorkflowRun]
-    public async Task<string> RunAsync(DirectAdapterTaskQueueInput input)
+    public async Task<string> RunAsync(string activityTaskQueue)
     {
-        var durableOptions = new DurableExecutionOptions
+        var client = new DurableChatClient(new WorkflowOnlyChatClient(), new DurableExecutionOptions
         {
-            TaskQueue = input.ActivityTaskQueue,
+            TaskQueue = activityTaskQueue,
             ActivityTimeout = TimeSpan.FromSeconds(10),
             HeartbeatTimeout = TimeSpan.FromSeconds(5),
-        };
-
-        if (input.Kind == DirectAdapterKind.Chat)
-        {
-            var client = new DurableChatClient(new WorkflowOnlyChatClient(), durableOptions);
-            var response = await client.GetResponseAsync(
-                [new ChatMessage(ChatRole.User, "hello")]);
-            return response.Text ?? string.Empty;
-        }
-
-        var generator = new DurableEmbeddingGenerator(
-            new WorkflowOnlyEmbeddingGenerator(),
-            durableOptions);
-        var embeddings = await generator.GenerateAsync(["hello"]);
-        return $"{embeddings.Count}:{embeddings[0].Vector.Length}";
+        });
+        var response = await client.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, "hello")]);
+        return response.Text ?? string.Empty;
     }
 
     private sealed class WorkflowOnlyChatClient : IChatClient
@@ -161,25 +111,6 @@ public sealed class DirectAdapterTaskQueueWorkflow
             throw new InvalidOperationException("Workflow-local chat provider must not execute.");
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
-    }
-
-    private sealed class WorkflowOnlyEmbeddingGenerator
-        : IEmbeddingGenerator<string, Embedding<float>>
-    {
-        public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-            IEnumerable<string> values,
-            EmbeddingGenerationOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            throw new InvalidOperationException("Workflow-local embedding provider must not execute.");
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose()
-        {
-        }
+        public void Dispose() { }
     }
 }

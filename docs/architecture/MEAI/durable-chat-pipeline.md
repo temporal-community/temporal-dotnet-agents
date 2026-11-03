@@ -67,20 +67,21 @@ tags, activity and heartbeat timeouts, and maximum retry attempts.
 
 ## Direct-adapter task-queue boundary
 
-The public `DurableChatClient` and `DurableEmbeddingGenerator` adapters can be constructed inside a
-custom workflow. Their `DurableExecutionOptions.TaskQueue` is assigned directly to the Temporal
-`ActivityOptions.TaskQueue` for each provider call:
+The public `DurableChatClient` adapter can be constructed inside a custom workflow. Its
+`DurableExecutionOptions.TaskQueue` is assigned directly to the Temporal `ActivityOptions.TaskQueue`
+for each provider call:
 
 ```
 custom workflow worker [workflow task queue]
-  -> DurableChatClient / DurableEmbeddingGenerator
+  -> DurableChatClient
   -> Temporal activity [DurableExecutionOptions.TaskQueue]
-  -> worker-side IChatClient / IEmbeddingGenerator
+  -> worker-side IChatClient
 ```
 
 The configured queue does not change the workflow's own task queue. This makes workflow and AI
-activity workers independently deployable. If the adapter omitted the activity queue, the Temporal
-SDK would default the activity to the workflow queue; the adapters set it explicitly.
+activity workers independently deployable. For embeddings, use a regular application-owned
+Temporal activity that injects MEAI's `IEmbeddingGenerator`; see the
+[embeddings guide](../../how-to/MEAI/embeddings.md).
 
 ## Boundary and deployment rules
 

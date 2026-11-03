@@ -1,15 +1,14 @@
 # The Direct-Adapter-in-Workflow Anti-Pattern
 
 This document is a **design-decision record and guardrail**, not a how-to. It explains why
-`TemporalCommunity.Extensions.AI` does **not** support constructing a durable chat/embedding
-adapter directly inside workflow code, so that nobody re-proposes the shape without understanding
-why it was rejected. For the supported patterns, see [MEAI usage](../../how-to/MEAI/usage.md) and
-the package [README](../../../src/TemporalCommunity.Extensions.AI/README.md).
+`TemporalCommunity.Extensions.AI` does **not** support constructing a durable chat adapter directly
+inside workflow code, so that nobody re-proposes the shape without understanding why it was
+rejected. For the supported patterns, see [MEAI usage](../../how-to/MEAI/usage.md) and the package
+[README](../../../src/TemporalCommunity.Extensions.AI/README.md).
 
 ## Quick Answer
 
-- ❌ **Don't** construct `DurableChatClient` / `DurableEmbeddingGenerator` — or any
-  `ChatClientBuilder` / `EmbeddingGeneratorBuilder` composition wrapping either — inside a
+- ❌ **Don't** construct `DurableChatClient` — or any `ChatClientBuilder` composition wrapping it — inside a
   `[WorkflowRun]` or `[WorkflowUpdate]` method.
 - ✅ **Do** use one of the three supported patterns instead:
   1. **Managed session** (`DurableChatSessionClient` / `AddDurableAI()`) — the stock workflow owns
@@ -31,13 +30,13 @@ construction — a pattern that used to sit alongside option 3 — in favor of t
 Two shapes of "construct a durable adapter directly inside workflow code" were explored and both
 were retired before ever shipping as a recommended pattern:
 
-1. **`WorkflowOnlyChatClient.Instance` / `WorkflowOnlyEmbeddingGenerator.Instance` sentinels.**
-   `ChatClientBuilder` and `EmbeddingGeneratorBuilder` both require a real inner client instance at
-   construction time, but a `[WorkflowRun]` method has no DI container and no real `IChatClient` to
+1. **`WorkflowOnlyChatClient.Instance` sentinels.**
+   `ChatClientBuilder` requires a real inner client instance at construction time, but a
+   `[WorkflowRun]` method has no DI container and no real `IChatClient` to
    hand them — workflow code only needs to reach `Workflow.ExecuteActivityAsync`, never the actual
    model. The sentinel types existed purely to satisfy that constructor requirement: a value with
    no behavior of its own, whose only job was to be wrapped by `.UseDurableExecution()` so the
-   *outer* `DurableChatClient`/`DurableEmbeddingGenerator` could do the real dispatch.
+   *outer* `DurableChatClient` could do the real dispatch.
 2. **A later-planned `DurableChatClient.CreateForWorkflow(...)` factory** that would have hidden
    the sentinel behind a cleaner static-factory API surface. This was discussed and evaluated but
    never implemented — grep for it in `src/` or `docs/` today and you will find nothing. It's

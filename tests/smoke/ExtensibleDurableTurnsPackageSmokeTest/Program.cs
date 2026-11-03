@@ -90,8 +90,6 @@ var workerBuilder = Host.CreateApplicationBuilder();
 var workerServices = workerBuilder.Services;
 workerServices.AddLogging();
 workerServices.AddSingleton<IChatClient>(scripted);
-workerServices.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(
-    new NoopEmbeddingGenerator());
 workerServices.AddHttpClient("packed-attempt");
 workerServices.AddSingleton(scopes);
 workerServices.AddScoped<ScopedToolService>();
@@ -428,21 +426,6 @@ internal sealed class PackageScriptedChatClient : IChatClient
 
         return new ChatResponse(new ChatMessage(ChatRole.Assistant, $"final-{call}"));
     }
-
-    public object? GetService(Type serviceType, object? serviceKey = null) => null;
-    public void Dispose() { }
-}
-
-internal sealed class NoopEmbeddingGenerator : IEmbeddingGenerator<string, Embedding<float>>
-{
-    public EmbeddingGeneratorMetadata Metadata { get; } = new("noop", null, null, 1);
-
-    public Task<GeneratedEmbeddings<Embedding<float>>> GenerateAsync(
-        IEnumerable<string> values,
-        EmbeddingGenerationOptions? options = null,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult(new GeneratedEmbeddings<Embedding<float>>(
-            values.Select(_ => new Embedding<float>(new[] { 0f })).ToList()));
 
     public object? GetService(Type serviceType, object? serviceKey = null) => null;
     public void Dispose() { }
