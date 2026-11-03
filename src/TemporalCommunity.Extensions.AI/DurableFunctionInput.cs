@@ -62,6 +62,14 @@ internal sealed record class DurableFunctionInput
 
     public string? CorrelationId { get; init; }
 
+    public string? SessionEpoch { get; init; }
+
+    public string? RequestId { get; init; }
+
+    public int? TurnNumber { get; init; }
+
+    public bool IsIdempotent { get; init; }
+
     public int IdempotencyKeyVersion { get; init; }
 
 }

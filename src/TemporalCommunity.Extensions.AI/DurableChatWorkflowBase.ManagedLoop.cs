@@ -317,6 +317,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                                 CallIndex = i,
                                 ConversationId = conversationId,
                                 CorrelationId = requestEntry.CorrelationId,
+                                SessionEpoch = CurrentSessionEpoch,
+                                RequestId = requestEntry.RequestId
+                                    ?? throw new InvalidOperationException("The durable request ID is missing."),
+                                TurnNumber = CurrentTurnNumber,
+                                IsIdempotent = manifestMember?.IsIdempotent
+                                    ?? RequiredInput.IdempotentTools?.Contains(tc.Name, StringComparer.Ordinal) == true,
                                 IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
                             }, ResolveToolActivityOptions(tc.Name, manifestMember)));
                             break;
@@ -375,6 +381,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                                     CallIndex = i,
                                     ConversationId = conversationId,
                                     CorrelationId = requestEntry.CorrelationId,
+                                    SessionEpoch = CurrentSessionEpoch,
+                                    RequestId = requestEntry.RequestId
+                                        ?? throw new InvalidOperationException("The durable request ID is missing."),
+                                    TurnNumber = CurrentTurnNumber,
+                                    IsIdempotent = manifestMember?.IsIdempotent
+                                        ?? RequiredInput.IdempotentTools?.Contains(tc.Name, StringComparer.Ordinal) == true,
                                     IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
                                 }, ResolveToolActivityOptions(tc.Name, manifestMember)));
                             }

@@ -104,7 +104,9 @@ example showing pre-acceptance `Busy`/`Conflict` rejection through `ValidateDura
 Phase 2.3 adds a compiled managed-session recovery example for `DurableChatRequestException.RequestId`.
 Phase 2.5 keeps the compiled MEAI registration example aligned with the per-payload transport
 budget and codec-expansion reserve. Phase 2.6 adds a compiled MAF history-budget query example
-so the read-only status API remains aligned with the usage guide.
+so the read-only status API remains aligned with the usage guide. Phase 3.1 adds a compiled
+MEAI logical-operation identity example so invocation metadata, downstream idempotency guidance,
+and per-tool idempotency declarations remain aligned with the tool-functions guide.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 

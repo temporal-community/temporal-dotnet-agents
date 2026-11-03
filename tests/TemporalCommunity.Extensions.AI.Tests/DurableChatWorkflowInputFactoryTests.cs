@@ -24,6 +24,7 @@ public class DurableChatWorkflowInputFactoryTests
                 .WithMaxAttempts(1)
                 .WithInterceptorTimeout(TimeSpan.FromSeconds(32))
                 .RequireApproval()
+                .Idempotent()
                 .WithApprovalTimeout(TimeSpan.FromMinutes(33)),
             ["read_record"] = new DurableChatToolOptions().SkipInterceptor(),
         };
@@ -48,6 +49,7 @@ public class DurableChatWorkflowInputFactoryTests
             TimeSpan.FromSeconds(31),
             actual.ToolActivityOptions["write_record"].StartToCloseTimeout);
         Assert.Equal(1, actual.ToolActivityOptions["write_record"].RetryPolicy!.MaximumAttempts);
+        Assert.Equal("write_record", Assert.Single(actual.IdempotentTools!));
         Assert.Equal(
             options.ActivityTimeout,
             actual.ToolActivityOptions["read_record"].StartToCloseTimeout);

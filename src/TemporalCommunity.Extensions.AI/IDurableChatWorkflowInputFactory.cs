@@ -34,6 +34,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
     private readonly Lazy<IReadOnlyList<string>?> _interceptorSkippedTools;
     private readonly Lazy<IReadOnlyList<string>?> _requiresApprovalTools;
     private readonly Lazy<IReadOnlyDictionary<string, TimeSpan>?> _toolApprovalTimeouts;
+    private readonly Lazy<IReadOnlyList<string>?> _idempotentTools;
 
     internal DurableChatWorkflowInputFactory(
         DurableExecutionOptions options,
@@ -64,6 +65,9 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         _toolApprovalTimeouts = new(
             BuildToolApprovalTimeouts,
             LazyThreadSafetyMode.ExecutionAndPublication);
+        _idempotentTools = new(
+            BuildIdempotentTools,
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public DurableChatWorkflowInput Create() => new()
@@ -88,6 +92,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         MaxConcurrentTurnJoiners = _options.MaxConcurrentTurnJoiners,
         HistoryReducerKey = _options.DefaultHistoryReducerKey,
         ToolActivityOptions = _useWorkerToolsets ? null : _toolActivityOptions.Value,
+        IdempotentTools = _useWorkerToolsets ? null : _idempotentTools.Value,
         MaxToolCallsPerTurn = _options.MaxToolCallsPerTurn,
         MaximumConsecutiveErrorsPerRequest = _options.MaximumConsecutiveErrorsPerRequest,
         IncludeDetailedErrors = _options.IncludeDetailedErrors,
@@ -135,6 +140,21 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         }
 
         return result;
+    }
+
+    private IReadOnlyList<string>? BuildIdempotentTools()
+    {
+        if (_toolOptionsRegistry is null)
+        {
+            return null;
+        }
+
+        var toolNames = _toolOptionsRegistry
+            .Where(pair => pair.Value.IsIdempotent)
+            .Select(pair => pair.Key)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        return toolNames.Length == 0 ? null : toolNames;
     }
 
     private ActivityOptions? BuildInterceptorActivityOptions()

@@ -84,7 +84,10 @@ The workflow executes this sequence until the model returns a final response:
   The Temporal workflow owns function invocation.
 - Register every tool on every worker that can run the session task queue, with stable names.
 - Treat side-effecting tools as activities: make them idempotent where possible, or use
-  `tool.NoRetry()` when a retry would repeat an unsafe operation.
+  `tool.NoRetry()` when a retry would repeat an unsafe operation. Invocation-scoped factories
+  receive a stable `DurableToolInvocationMetadata.IdempotencyKey` derived from the session epoch,
+  request/turn, and distinct tool-call identity. Use it as a downstream deduplication key when the
+  external system supports one; it does not provide exactly-once effects by itself.
 - `MaxToolCallsPerTurn` caps a runaway model/tool loop. Set it for your cost and risk budget.
 
 The per-tool callback methods such as `.NoRetry()` configure these managed, worker-registered
@@ -153,6 +156,43 @@ wrapped by existing MEAI `DelegatingAIFunction` decorators. The supplied `IServi
 to that activity attempt. Resolve scoped services inside the factory; a retry receives a fresh
 scope, and disposable scoped services are disposed when the attempt ends. Do not capture that
 provider or its scoped services in singleton state.
+
+The factory's `context.Metadata` includes `SessionEpoch`, `RequestId`, `TurnNumber`,
+`ModelIteration`, `ToolCallId`, and `CallIndex`. These are framework-created logical-call context,
+not model arguments. The idempotency key remains stable across activity retries and
+Continue-as-New, and changes for a new session epoch, request, or distinct tool call. If the model
+does not provide a call ID, the deterministic call index is used as the identity fallback.
+Applications must still handle uncertain external outcomes; Temporal activity retries and a stable
+key do not guarantee that an external effect happens exactly once.
+
+### Logical operation identity
+
+Mark a tool idempotent only when the downstream operation enforces deduplication with the supplied
+key. `Idempotent()` records that declaration; retry counts remain controlled by the per-tool
+`RetryPolicy` or `WithMaxAttempts` configuration.
+
+```csharp
+var declaration = AIFunctionFactory.Create(
+    (string recordId) => string.Empty,
+    name: "write_record",
+    description: "Writes a record.").AsDeclarationOnly();
+
+toolset.AddDurableToolFactory<WriteRequest, WriteState>(
+    declaration,
+    (services, context) =>
+    {
+        var sink = services.GetRequiredService<IIdempotentRecordSink>();
+        return new DurableToolActivation<WriteState>
+        {
+            Function = AIFunctionFactory.Create(
+                (string recordId) => sink.Write(
+                    recordId,
+                    context.Metadata.IdempotencyKey),
+                name: "write_record"),
+        };
+    },
+    options => options.Idempotent().WithMaxAttempts(3));
+```
 
 The implementation name, parameter schema, and return schema must structurally match the frozen
 declaration. A mismatch fails non-retryably before invocation. Object-property ordering is ignored,
@@ -271,8 +311,9 @@ TelemetryToolFunction(AIFunctionFactory.Create(...), logger)`.
 
 ### Activity idempotency key
 
-`Metadata.IdempotencyKey` identifies one scheduled tool activity across its activity retries. Read
-it from the same `DurableToolInvocationContext` supplied to a declaration-plus-activation factory:
+`Metadata.IdempotencyKey` identifies one logical tool call across activity retries and
+Continue-as-New. Read it from the same `DurableToolInvocationContext` supplied to a
+declaration-plus-activation factory:
 
 ```csharp
 (services, context) =>
@@ -299,29 +340,26 @@ it from the same `DurableToolInvocationContext` supplied to a declaration-plus-a
 }
 ```
 
-The v1 algorithm is fixed:
+Managed session tools use the v2 logical-call algorithm:
 
 1. Write the strict UTF-8 bytes of
-   `TemporalCommunity.Extensions.AI/IdempotencyKey/v1\0`.
-2. In order, encode namespace, workflow ID, workflow run ID, and activity ID. For each component,
-   write its strict UTF-8 byte length as unsigned 32-bit big-endian, then its bytes. Do not trim,
-   normalize, or case-fold.
-3. SHA-256 hash the complete preimage and return `tai-v1:` plus the lowercase 64-character hex
+   `TemporalCommunity.Extensions.AI/IdempotencyKey/v2\0`.
+2. In order, encode namespace, workflow ID, session epoch, request ID, turn number, tool name,
+   provider call ID (or `index:{CallIndex}` when absent), model iteration, and call index. For each
+   component, write its strict UTF-8 byte length as unsigned 32-bit big-endian, then its bytes. Do
+   not trim, normalize, or case-fold.
+3. SHA-256 hash the complete preimage and return `tai-v2:` plus the lowercase 64-character hex
    digest.
 
-The fixed vector `default`, `workflow-123`,
-`01234567-89ab-cdef-0123-456789abcdef`, `7` produces
-`tai-v1:4fd719d1966cbf5585d884d8c0dd3c791d9c0737decebd0caa765ad467d36139`.
-The activity input carries the algorithm version; unknown or missing versions fail non-retryably
-before the factory or function runs. A future algorithm requires a new carried version and output
-prefix while workers retain old calculators for supported in-flight activities.
+The workflow run ID, activity ID, and attempt are diagnostic only and are not part of the v2 key.
+The session epoch and request/turn identity keep separate sessions and logical turns distinct;
+model iteration and call index disambiguate calls within a turn. A direct `AIFunction.AsDurable()`
+call has no managed-session request context and continues to use the activity-scoped v1 key.
+Unknown or missing versions fail non-retryably before the factory or function runs.
 
-Attempt is diagnostic only and is not part of the key. The key is stable for retries of one
-scheduled activity and ordinary replay. It is not promised across Continue-as-New, workflow reset,
-a different run, or an application-created replacement operation. Activities—including `NoRetry()`
-activities—do not provide exactly-once external effects. Supply this key to downstream idempotency
-storage for activity-retry protection, and carry a separate application business-operation ID in
-`RequestData` when an effect must deduplicate across workflow runs.
+Activities—including `NoRetry()` activities—do not provide exactly-once external effects. Supply
+the managed logical-call key to downstream idempotency storage, and retain an application business
+operation ID in `RequestData` when effects must deduplicate beyond this session epoch or request.
 
 The SDK workflow Update ID is a third, separate identifier: it deduplicates an ambiguous Update
 submission only within one workflow run. A cross-run business key can prevent a duplicate external

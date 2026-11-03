@@ -105,6 +105,10 @@ public class DurableFunctionActivitiesTests
             CallIndex = 4,
             ConversationId = "conversation",
             CorrelationId = "correlation",
+            SessionEpoch = "epoch-a",
+            RequestId = "request-a",
+            TurnNumber = 3,
+            IsIdempotent = true,
             IdempotencyKeyVersion = DurableToolIdempotencyKey.CurrentVersion,
         };
         var env = new ActivityEnvironment
@@ -130,6 +134,9 @@ public class DurableFunctionActivitiesTests
         Assert.Equal("workflow-a", received.Metadata.WorkflowId);
         Assert.Equal("run-a", received.Metadata.WorkflowRunId);
         Assert.Equal("activity-a", received.Metadata.ActivityId);
+        Assert.Equal("epoch-a", received.Metadata.SessionEpoch);
+        Assert.Equal("request-a", received.Metadata.RequestId);
+        Assert.Equal(3, received.Metadata.TurnNumber);
         Assert.Equal(3, received.Metadata.Attempt);
         Assert.Equal("queue-a", received.Metadata.TaskQueue);
         Assert.Equal("call-7", received.Metadata.ToolCallId);
@@ -137,7 +144,8 @@ public class DurableFunctionActivitiesTests
         Assert.Equal(4, received.Metadata.CallIndex);
         Assert.Equal("conversation", received.Metadata.ConversationId);
         Assert.Equal("correlation", received.Metadata.CorrelationId);
-        Assert.StartsWith("tai-v1:", received.Metadata.IdempotencyKey, StringComparison.Ordinal);
+        Assert.StartsWith("tai-v2:", received.Metadata.IdempotencyKey, StringComparison.Ordinal);
+        Assert.True(received.Metadata.IsIdempotent);
         Assert.Equal("tenant-a:3:model", Assert.IsType<JsonElement>(output.Result).GetString());
         Assert.False(output.HasStateReplacement);
     }

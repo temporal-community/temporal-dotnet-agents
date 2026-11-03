@@ -19,6 +19,15 @@ namespace TemporalCommunity.Extensions.AI;
 /// charge a card) so non-idempotent re-execution does not occur on activity retry.
 /// Read-style tools generally inherit the default retry policy.
 /// </para>
+/// <para>
+/// Invocation-scoped tool factories also receive logical-call context and a stable
+/// <see cref="DurableToolInvocationMetadata.IdempotencyKey"/>. A downstream system must enforce
+/// deduplication itself; this key does not guarantee exactly-once external effects.
+/// </para>
+/// <para>
+/// <see cref="Idempotent"/> records the application's declaration that retries are safe when the
+/// downstream operation deduplicates with that key. It does not configure the retry policy.
+/// </para>
 /// </remarks>
 public sealed class DurableChatToolOptions
 {
@@ -39,6 +48,12 @@ public sealed class DurableChatToolOptions
     /// When <see langword="null"/>, the worker-level default is used.
     /// </summary>
     public RetryPolicy? RetryPolicy { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether the tool is declared idempotent and safe to retry when
+    /// downstream effects are deduplicated with the logical-call key.
+    /// </summary>
+    public bool IsIdempotent { get; private set; }
 
     /// <summary>
     /// Gets a value indicating whether the configured
@@ -81,6 +96,18 @@ public sealed class DurableChatToolOptions
     public DurableChatToolOptions NoRetry()
     {
         RetryPolicy = new RetryPolicy { MaximumAttempts = 1 };
+        return this;
+    }
+
+    /// <summary>
+    /// Declares that repeated attempts for one logical tool call are safe because the tool or its
+    /// downstream service deduplicates using <see cref="DurableToolInvocationMetadata.IdempotencyKey"/>.
+    /// This declaration does not itself configure an activity retry policy.
+    /// </summary>
+    /// <returns>This instance, for fluent chaining.</returns>
+    public DurableChatToolOptions Idempotent()
+    {
+        IsIdempotent = true;
         return this;
     }
 

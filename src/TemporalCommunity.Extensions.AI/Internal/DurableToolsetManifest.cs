@@ -180,6 +180,8 @@ internal sealed record DurableToolsetManifestMember
 
     public bool RequiresApproval { get; init; }
 
+    public bool IsIdempotent { get; init; }
+
     public required TimeSpan ApprovalTimeout { get; init; }
 
     internal void Validate(HashSet<string> selectedToolsetIds)

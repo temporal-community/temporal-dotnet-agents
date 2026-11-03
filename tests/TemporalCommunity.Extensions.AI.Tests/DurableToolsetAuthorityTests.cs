@@ -10,6 +10,27 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 public sealed class DurableToolsetAuthorityTests
 {
     [Fact]
+    public void ToolsetManifest_CarriesPerToolIdempotencyDeclaration()
+    {
+        var function = AIFunctionFactory.Create(() => "ok", "recorded_tool");
+        var registration = new DurableToolsetRegistration("recorded", isImplicitDefault: false);
+        registration.Add(new DurableRegisteredTool(
+            DurableFunctionDeclarationSnapshot.Create(function.AsDeclarationOnly()),
+            new DurableChatToolOptions().Idempotent(),
+            function,
+            ActivationFactory: null));
+
+        var manifest = new DurableToolsetCatalog(
+            [registration],
+            new DurableExecutionOptions { TaskQueue = "test" }).Resolve(new()
+        {
+            ToolsetIds = ["recorded"],
+        });
+
+        Assert.True(Assert.Single(manifest.Members).IsIdempotent);
+    }
+
+    [Fact]
     public async Task InvokeFunction_ValidRecordedBinding_ReachesExactImplementation()
     {
         var setup = CreateSetup();

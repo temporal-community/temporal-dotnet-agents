@@ -282,17 +282,44 @@ internal sealed class DurableFunctionActivities(
             ?? throw new InvalidOperationException("Activity workflow ID is missing.");
         var workflowRunId = info.WorkflowRunId
             ?? throw new InvalidOperationException("Activity workflow run ID is missing.");
-        var idempotencyKey = Internal.DurableToolIdempotencyKey.Create(
-            input.IdempotencyKeyVersion,
-            info.Namespace,
-            workflowId,
-            workflowRunId,
-            info.ActivityId);
+        var idempotencyKey = input.IdempotencyKeyVersion switch
+        {
+            Internal.DurableToolIdempotencyKey.ActivityIdentityVersion =>
+                Internal.DurableToolIdempotencyKey.Create(
+                    input.IdempotencyKeyVersion,
+                    info.Namespace,
+                    workflowId,
+                    workflowRunId,
+                    info.ActivityId),
+            Internal.DurableToolIdempotencyKey.CurrentVersion =>
+                Internal.DurableToolIdempotencyKey.CreateLogicalCall(
+                    input.IdempotencyKeyVersion,
+                    info.Namespace,
+                    workflowId,
+                    input.SessionEpoch!,
+                    input.RequestId!,
+                    input.TurnNumber
+                        ?? throw new ApplicationFailureException(
+                            "Durable tool turn number is missing.",
+                            errorType: nameof(Exceptions.DurableConfigurationException),
+                            nonRetryable: true),
+                    input.FunctionName,
+                    input.ToolCallId,
+                    input.ModelIteration,
+                    input.CallIndex),
+            _ => throw new ApplicationFailureException(
+                $"Unsupported durable tool idempotency-key version '{input.IdempotencyKeyVersion}'.",
+                errorType: nameof(Exceptions.DurableConfigurationException),
+                nonRetryable: true),
+        };
         var metadata = new DurableToolInvocationMetadata(
             info.Namespace,
             workflowId,
             workflowRunId,
             info.ActivityId,
+            input.SessionEpoch,
+            input.RequestId,
+            input.TurnNumber,
             info.Attempt,
             info.TaskQueue,
             input.FunctionName,
@@ -301,7 +328,8 @@ internal sealed class DurableFunctionActivities(
             input.CallIndex,
             input.ConversationId,
             input.CorrelationId,
-            idempotencyKey);
+            idempotencyKey,
+            input.IsIdempotent);
         return activationFactory.Create(
             serviceProvider ?? throw new InvalidOperationException(
                 "Invocation-scoped durable tools require an activity service provider."),

@@ -42,6 +42,7 @@ public sealed class DurableAIFunction : DelegatingAIFunction
         {
             FunctionName = Name,
             Arguments = ConvertArguments(arguments),
+            IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.ActivityIdentityVersion,
         };
         Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
             Workflow.PayloadConverter,

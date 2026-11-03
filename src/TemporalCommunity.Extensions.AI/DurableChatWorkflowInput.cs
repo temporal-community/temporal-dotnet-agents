@@ -421,6 +421,13 @@ public record class DurableChatWorkflowInput
     public IReadOnlyDictionary<string, ActivityOptions>? ToolActivityOptions { get; init; }
 
     /// <summary>
+    /// Tool names whose worker registration declares downstream idempotency. Worker-owned toolsets
+    /// carry this value in their resolved manifest instead.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? IdempotentTools { get; init; }
+
+    /// <summary>
     /// Shared <see cref="ActivityOptions"/> used when dispatching a <c>RunToolInterceptor</c>
     /// activity. Non-null only when a <c>DefaultToolInterceptor</c> was registered at session
     /// start. A null value means no interceptor

@@ -154,6 +154,7 @@ internal static class DurableRequestFingerprint
             ManifestFingerprint = toolsetManifestFingerprint ?? input.ToolsetManifest?.Fingerprint,
             input.ToolDeclarations,
             input.ToolActivityOptions,
+            input.IdempotentTools,
             input.InterceptorActivityOptions,
             input.InterceptorToolActivityOptions,
             input.InterceptorSkippedTools,

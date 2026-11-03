@@ -101,6 +101,9 @@ public class DurableFunctionStateCompletionTests
             RequestData = JsonSerializer.SerializeToElement(new RequestData("operation")),
             TurnState = JsonSerializer.SerializeToElement(new TurnState(1)),
             DispatchMode = dispatchMode,
+            SessionEpoch = "epoch",
+            RequestId = "request",
+            TurnNumber = 1,
             IdempotencyKeyVersion = DurableToolIdempotencyKey.CurrentVersion,
         };
         var environment = new ActivityEnvironment

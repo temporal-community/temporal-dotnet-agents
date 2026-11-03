@@ -55,6 +55,44 @@ public class DurableToolIdempotencyKeyTests
     }
 
     [Fact]
+    public void CreateLogicalCall_IsStableAcrossContinueAsNewAndDistinctAcrossLogicalCalls()
+    {
+        var firstRun = DurableToolIdempotencyKey.CreateLogicalCall(
+            2, "ns", "wf", "epoch", "request", 4, "tool", "call-1", 1, 0);
+        var continuedRun = DurableToolIdempotencyKey.CreateLogicalCall(
+            2, "ns", "wf", "epoch", "request", 4, "tool", "call-1", 1, 0);
+        var newEpoch = DurableToolIdempotencyKey.CreateLogicalCall(
+            2, "ns", "wf", "new-epoch", "request", 4, "tool", "call-1", 1, 0);
+        var nextRequest = DurableToolIdempotencyKey.CreateLogicalCall(
+            2, "ns", "wf", "epoch", "next-request", 5, "tool", "call-1", 1, 0);
+        var nextTurn = DurableToolIdempotencyKey.CreateLogicalCall(
+            2, "ns", "wf", "epoch", "request", 5, "tool", "call-1", 1, 0);
+        var nextCall = DurableToolIdempotencyKey.CreateLogicalCall(
+            2, "ns", "wf", "epoch", "request", 4, "tool", "call-2", 1, 1);
+        var duplicateProviderId = DurableToolIdempotencyKey.CreateLogicalCall(
+            2, "ns", "wf", "epoch", "request", 4, "tool", "call-1", 1, 1);
+
+        Assert.Equal(firstRun, continuedRun);
+        Assert.StartsWith("tai-v2:", firstRun, StringComparison.Ordinal);
+        Assert.NotEqual(firstRun, newEpoch);
+        Assert.NotEqual(firstRun, nextRequest);
+        Assert.NotEqual(firstRun, nextTurn);
+        Assert.NotEqual(firstRun, nextCall);
+        Assert.NotEqual(firstRun, duplicateProviderId);
+    }
+
+    [Fact]
+    public void CreateLogicalCall_UsesCallIndexWhenProviderCallIdIsMissing()
+    {
+        var firstCall = DurableToolIdempotencyKey.CreateLogicalCall(
+            2, "ns", "wf", "epoch", "request", 4, "tool", null, 1, 0);
+        var secondCall = DurableToolIdempotencyKey.CreateLogicalCall(
+            2, "ns", "wf", "epoch", "request", 4, "tool", null, 1, 1);
+
+        Assert.NotEqual(firstCall, secondCall);
+    }
+
+    [Fact]
     public async Task MissingVersion_FailsNonRetryablyBeforeFactoryOrFunctionInvocation()
     {
         var factoryCount = 0;

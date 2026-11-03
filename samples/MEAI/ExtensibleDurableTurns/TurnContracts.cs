@@ -8,7 +8,7 @@ public sealed record ProcessingRequest(
 public sealed record ProcessingReceipt(
     string Step,
     string Value,
-    string ActivityIdempotencyKey);
+    string LogicalCallIdempotencyKey);
 
 public sealed record ProcessingState(
     int Revision,

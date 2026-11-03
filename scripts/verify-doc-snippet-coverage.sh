@@ -91,6 +91,9 @@ scan_docs() {
             if (lang ~ /^csharp/ && (body ~ /AddDurableAgent\(/ || body ~ /AddTool\(/ ||
                 FILENAME == "docs/how-to/MEAI/embeddings.md" ||
                 FILENAME == "docs/how-to/MEAI/usage.md" ||
+                (FILENAME == "docs/how-to/MEAI/tool-functions.md" &&
+                 heading == "logical-operation-identity" &&
+                 body ~ /context\.Metadata\.IdempotencyKey/) ||
                 (FILENAME == "docs/how-to/MAF/usage.md" &&
                  (heading == "request-id-recovery" || heading == "inspecting-workflow-history-budget")) ||
                 (FILENAME == "docs/how-to/MEAI/testing.md" && heading ~ /^phase-[0-9]+-/))) {

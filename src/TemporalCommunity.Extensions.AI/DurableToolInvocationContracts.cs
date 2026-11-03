@@ -41,6 +41,9 @@ public sealed class DurableToolInvocationMetadata
         string workflowId,
         string workflowRunId,
         string activityId,
+        string? sessionEpoch,
+        string? requestId,
+        int? turnNumber,
         int attempt,
         string taskQueue,
         string toolName,
@@ -49,12 +52,16 @@ public sealed class DurableToolInvocationMetadata
         int callIndex,
         string? conversationId,
         string? correlationId,
-        string idempotencyKey)
+        string idempotencyKey,
+        bool isIdempotent)
     {
         Namespace = @namespace;
         WorkflowId = workflowId;
         WorkflowRunId = workflowRunId;
         ActivityId = activityId;
+        SessionEpoch = sessionEpoch;
+        RequestId = requestId;
+        TurnNumber = turnNumber;
         Attempt = attempt;
         TaskQueue = taskQueue;
         ToolName = toolName;
@@ -64,12 +71,19 @@ public sealed class DurableToolInvocationMetadata
         ConversationId = conversationId;
         CorrelationId = correlationId;
         IdempotencyKey = idempotencyKey;
+        IsIdempotent = isIdempotent;
     }
 
     public string Namespace { get; }
     public string WorkflowId { get; }
     public string WorkflowRunId { get; }
     public string ActivityId { get; }
+    /// <summary>Gets the stable application-session lineage identity, preserved across continue-as-new.</summary>
+    public string? SessionEpoch { get; }
+    /// <summary>Gets the durable request identity for the turn that requested this tool call.</summary>
+    public string? RequestId { get; }
+    /// <summary>Gets the one-based managed-session turn number, if this call belongs to a session.</summary>
+    public int? TurnNumber { get; }
     public int Attempt { get; }
     public string TaskQueue { get; }
     public string ToolName { get; }
@@ -79,6 +93,8 @@ public sealed class DurableToolInvocationMetadata
     public string? ConversationId { get; }
     public string? CorrelationId { get; }
     public string IdempotencyKey { get; }
+    /// <summary>Gets whether registration declared the tool safe to retry with downstream deduplication.</summary>
+    public bool IsIdempotent { get; }
 }
 
 /// <summary>

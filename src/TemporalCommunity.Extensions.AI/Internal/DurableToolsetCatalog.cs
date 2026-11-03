@@ -162,6 +162,7 @@ internal sealed class DurableToolsetCatalog
                 : null,
             SkipInterceptor = member.Options.SkipInterceptorFlag,
             RequiresApproval = member.Options.RequireApprovalFlag,
+            IsIdempotent = member.Options.IsIdempotent,
             ApprovalTimeout = member.Options.ApprovalTimeout ?? options.ApprovalTimeout,
         };
     }

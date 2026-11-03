@@ -124,7 +124,7 @@ if (result.CompletionReason != DurableTurnCompletionReason.FinalResponse)
 
 foreach (var receipt in result.FinalTurnState?.Receipts ?? [])
 {
-    Console.WriteLine($"{receipt.Step}: {receipt.Value} ({receipt.ActivityIdempotencyKey})");
+    Console.WriteLine($"{receipt.Step}: {receipt.Value} ({receipt.LogicalCallIdempotencyKey})");
 }
 
 var adapterAudit = host.Services.GetRequiredService<ExecutionAdapterAudit>();
@@ -244,6 +244,7 @@ void RegisterStatefulTool(
         options =>
         {
             options.WithMaxAttempts(2);
+            options.Idempotent();
             if (requireApproval)
             {
                 options.RequireApproval();

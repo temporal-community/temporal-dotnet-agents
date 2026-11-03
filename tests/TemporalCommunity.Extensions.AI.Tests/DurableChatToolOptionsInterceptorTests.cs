@@ -13,6 +13,21 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 public class DurableChatToolOptionsInterceptorTests
 {
     [Fact]
+    public void Idempotent_DefaultIsFalse()
+    {
+        var opts = new DurableChatToolOptions();
+        Assert.False(opts.IsIdempotent);
+    }
+
+    [Fact]
+    public void Idempotent_SetsFlagAndReturnsSameInstance()
+    {
+        var opts = new DurableChatToolOptions();
+        Assert.Same(opts, opts.Idempotent());
+        Assert.True(opts.IsIdempotent);
+    }
+
+    [Fact]
     public void SkipInterceptorFlag_DefaultIsFalse()
     {
         var opts = new DurableChatToolOptions();
