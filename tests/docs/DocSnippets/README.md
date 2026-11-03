@@ -107,6 +107,8 @@ budget and codec-expansion reserve. Phase 2.6 adds a compiled MAF history-budget
 so the read-only status API remains aligned with the usage guide. Phase 3.1 adds a compiled
 MEAI logical-operation identity example so invocation metadata, downstream idempotency guidance,
 and per-tool idempotency declarations remain aligned with the tool-functions guide.
+Phase 4.3b adds a compiled history-summarizer budget example so the keyed client profile and
+independent input/output budget settings stay aligned with the MEAI usage guide.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 

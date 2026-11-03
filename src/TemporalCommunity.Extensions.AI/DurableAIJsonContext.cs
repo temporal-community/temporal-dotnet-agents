@@ -14,6 +14,10 @@ namespace TemporalCommunity.Extensions.AI;
 /// handle <see cref="AIContent"/> polymorphism (TextContent, FunctionCallContent, etc.).
 /// </summary>
 [JsonSerializable(typeof(DurableChatInput))]
+[JsonSerializable(typeof(DurableHistorySummaryTurn))]
+[JsonSerializable(typeof(DurableHistorySummarizationInput))]
+[JsonSerializable(typeof(DurableHistorySummarizationResult))]
+[JsonSerializable(typeof(IReadOnlyList<DurableHistorySummaryTurn>))]
 [JsonSerializable(typeof(DurableChatTurnRange))]
 [JsonSerializable(typeof(DurableFunctionInput))]
 [JsonSerializable(typeof(DurableFunctionOutput))]

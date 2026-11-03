@@ -141,6 +141,28 @@ public sealed class DurableExecutionOptions
     public string? DefaultContextReducerKey { get; set; }
 
     /// <summary>
+    /// Gets or sets the optional keyed chat-client profile used by the library-owned history
+    /// summarizer. When unset, the managed session's default chat-client profile is used.
+    /// </summary>
+    /// <remarks>
+    /// The matching <see cref="IChatClient"/> must be registered in worker DI. This setting and
+    /// the summarizer budgets are frozen into new session inputs and carried across
+    /// Continue-as-New; they do not enable automatic history compaction by themselves.
+    /// </remarks>
+    public string? DefaultHistorySummarizerClientKey { get; set; }
+
+    /// <summary>
+    /// Gets or sets the summarizer's total context budget, including its output reserve.
+    /// Defaults to 8192 tokens.
+    /// </summary>
+    public int HistorySummarizerMaxContextTokens { get; set; } = 8192;
+
+    /// <summary>
+    /// Gets or sets the summarizer's response-token reserve. Defaults to 1024 tokens.
+    /// </summary>
+    public int HistorySummarizerOutputTokenReserve { get; set; } = 1024;
+
+    /// <summary>
     /// Gets or sets whether to register the default <see cref="DurableChatWorkflow"/> and
     /// <see cref="DurableChatSessionClient"/>. Defaults to <see langword="true"/>.
     /// </summary>
@@ -362,6 +384,20 @@ public sealed class DurableExecutionOptions
                 $"{nameof(ModelOutputTokenReserve)} must be non-negative and smaller than the configured context limit.");
         }
 
+        if (HistorySummarizerMaxContextTokens <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(HistorySummarizerMaxContextTokens)} must be positive.");
+        }
+
+        if (HistorySummarizerOutputTokenReserve <= 0
+            || HistorySummarizerOutputTokenReserve >= HistorySummarizerMaxContextTokens)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(HistorySummarizerOutputTokenReserve)} must be positive and smaller than " +
+                $"{nameof(HistorySummarizerMaxContextTokens)}.");
+        }
+
         if (MaxTerminalOutcomeCount <= 0)
         {
             throw new InvalidOperationException(
@@ -430,6 +466,13 @@ public sealed class DurableExecutionOptions
         {
             throw new InvalidOperationException(
                 $"{nameof(DefaultChatClientKey)} must be null or a non-empty profile key.");
+        }
+
+        if (DefaultHistorySummarizerClientKey is not null
+            && string.IsNullOrWhiteSpace(DefaultHistorySummarizerClientKey))
+        {
+            throw new InvalidOperationException(
+                $"{nameof(DefaultHistorySummarizerClientKey)} must be null or a non-empty profile key.");
         }
 
         if (DefaultToolsetIds is not null)

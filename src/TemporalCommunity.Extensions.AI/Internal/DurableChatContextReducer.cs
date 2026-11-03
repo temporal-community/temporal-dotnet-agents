@@ -185,7 +185,7 @@ internal static class DurableChatContextReducer
         }
     }
 
-    private static void ValidateToolGrammar(IReadOnlyList<ChatMessage> messages)
+    internal static void ValidateToolGrammar(IReadOnlyList<ChatMessage> messages)
     {
         var pendingCallIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var message in messages)

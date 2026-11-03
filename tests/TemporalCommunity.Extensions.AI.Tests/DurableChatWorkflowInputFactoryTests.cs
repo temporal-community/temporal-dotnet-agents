@@ -34,6 +34,11 @@ public class DurableChatWorkflowInputFactoryTests
 
         Assert.Equal(options.SessionTimeToLive, actual.TimeToLive);
         Assert.Equal("primary-profile", actual.DefaultChatClientKey);
+        Assert.Equal("summary-profile", actual.HistorySummarizerClientKey);
+        Assert.Equal(options.HistorySummarizerMaxContextTokens, actual.HistorySummarizerMaxContextTokens);
+        Assert.Equal(
+            options.HistorySummarizerOutputTokenReserve,
+            actual.HistorySummarizerOutputTokenReserve);
         Assert.Equal(options.ActivityTimeout, actual.ActivityTimeout);
         Assert.Equal(options.HeartbeatTimeout, actual.HeartbeatTimeout);
         Assert.Equal(9, actual.RetryPolicy!.MaximumAttempts);
@@ -87,6 +92,21 @@ public class DurableChatWorkflowInputFactoryTests
         var actual = client.CreateWorkflowInput();
 
         AssertEquivalent(expected, actual);
+    }
+
+    [Fact]
+    public void Create_DefaultsSummarizerClientToTheFrozenSessionProfile()
+    {
+        var options = CreateOptions();
+        options.DefaultHistorySummarizerClientKey = null;
+        var factory = new DurableChatWorkflowInputFactory(
+            options,
+            new DurableFunctionRegistry(),
+            new DurableChatToolOptionsRegistry());
+
+        var input = factory.Create();
+
+        Assert.Equal(options.DefaultChatClientKey, input.HistorySummarizerClientKey);
     }
 
     [Fact]
@@ -158,6 +178,11 @@ public class DurableChatWorkflowInputFactoryTests
 
         Assert.Equal(input.TimeToLive, actual.TimeToLive);
         Assert.Equal(input.DefaultChatClientKey, actual.DefaultChatClientKey);
+        Assert.Equal(input.HistorySummarizerClientKey, actual.HistorySummarizerClientKey);
+        Assert.Equal(input.HistorySummarizerMaxContextTokens, actual.HistorySummarizerMaxContextTokens);
+        Assert.Equal(
+            input.HistorySummarizerOutputTokenReserve,
+            actual.HistorySummarizerOutputTokenReserve);
         Assert.Equal(input.RetryPolicy!.MaximumAttempts, actual.RetryPolicy!.MaximumAttempts);
         Assert.Equal(input.HistoryReducerKey, actual.HistoryReducerKey);
         Assert.Equal(input.MaxToolCallsPerTurn, actual.MaxToolCallsPerTurn);
@@ -224,6 +249,7 @@ public class DurableChatWorkflowInputFactoryTests
         DefaultHistoryReducerKey = "history-v1",
         DefaultContextReducerKey = "context-v1",
         DefaultChatClientKey = "primary-profile",
+        DefaultHistorySummarizerClientKey = "summary-profile",
         MaxToolCallsPerTurn = 13,
         MaximumConsecutiveErrorsPerRequest = 4,
         IncludeDetailedErrors = true,
@@ -236,6 +262,11 @@ public class DurableChatWorkflowInputFactoryTests
     {
         Assert.Equal(expected.TimeToLive, actual.TimeToLive);
         Assert.Equal(expected.DefaultChatClientKey, actual.DefaultChatClientKey);
+        Assert.Equal(expected.HistorySummarizerClientKey, actual.HistorySummarizerClientKey);
+        Assert.Equal(expected.HistorySummarizerMaxContextTokens, actual.HistorySummarizerMaxContextTokens);
+        Assert.Equal(
+            expected.HistorySummarizerOutputTokenReserve,
+            actual.HistorySummarizerOutputTokenReserve);
         Assert.Equal(expected.ActivityTimeout, actual.ActivityTimeout);
         Assert.Equal(expected.HeartbeatTimeout, actual.HeartbeatTimeout);
         Assert.Equal(expected.RetryPolicy!.MaximumAttempts, actual.RetryPolicy!.MaximumAttempts);

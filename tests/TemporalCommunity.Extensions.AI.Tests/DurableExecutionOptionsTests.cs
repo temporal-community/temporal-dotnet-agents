@@ -25,6 +25,8 @@ public class DurableExecutionOptionsTests
         Assert.Equal(40 * 1024 * 1024, options.HistorySizeSoftLimitBytes);
         Assert.Equal(45 * 1024 * 1024, options.HistorySizeReserveLimitBytes);
         Assert.Equal(32, options.MaxConcurrentTurnJoiners);
+        Assert.Equal(8192, options.HistorySummarizerMaxContextTokens);
+        Assert.Equal(1024, options.HistorySummarizerOutputTokenReserve);
     }
 
     [Fact]
@@ -96,6 +98,22 @@ public class DurableExecutionOptionsTests
     {
         var options = new DurableExecutionOptions { DefaultChatClientKey = "gpt-4o" };
         Assert.Equal("gpt-4o", options.DefaultChatClientKey);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Validate_RejectsEmptyHistorySummarizerClientProfile(string key)
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "queue",
+            DefaultHistorySummarizerClientKey = key,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains(nameof(DurableExecutionOptions.DefaultHistorySummarizerClientKey), exception.Message);
     }
 
     [Theory]
@@ -185,6 +203,26 @@ public class DurableExecutionOptionsTests
 
         Assert.Contains(nameof(options.RetryPolicy), exception.Message);
         Assert.Contains("positive MaximumAttempts", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1024, -1)]
+    [InlineData(1024, 1024)]
+    public void Validate_RejectsInvalidHistorySummarizerBudget(
+        int maxContextTokens,
+        int outputTokenReserve)
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "queue",
+            HistorySummarizerMaxContextTokens = maxContextTokens,
+            HistorySummarizerOutputTokenReserve = outputTokenReserve,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains("HistorySummarizer", exception.Message);
     }
 
     [Theory]

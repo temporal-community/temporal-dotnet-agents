@@ -11,6 +11,18 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 public class ContinueAsNewInputTests
 {
     [Fact]
+    public void MissingHistorySummarizerSettings_UseFrozenDefaults()
+    {
+        var restored = JsonSerializer.Deserialize<DurableChatWorkflowInput>(
+            """{"defaultChatClientKey":"primary"}""",
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(restored);
+        Assert.Equal(8192, restored.HistorySummarizerMaxContextTokens);
+        Assert.Equal(1024, restored.HistorySummarizerOutputTokenReserve);
+    }
+
+    [Fact]
     public void CreateContinueAsNewInput_PreservesAllFrozenSettings()
     {
         var retryPolicy = new RetryPolicy { MaximumAttempts = 7 };
@@ -78,6 +90,9 @@ public class ContinueAsNewInputTests
             HistoryReducerKey = "reducer-v2",
             ContextReducerKey = "context-reducer-v1",
             DefaultChatClientKey = "profile-v1",
+            HistorySummarizerClientKey = "summary-profile-v1",
+            HistorySummarizerMaxContextTokens = 16_384,
+            HistorySummarizerOutputTokenReserve = 2_048,
             OriginalCreatedAt = DateTimeOffset.UnixEpoch,
             ToolActivityOptions = toolOptions,
             InterceptorActivityOptions = interceptorOptions,
@@ -142,6 +157,9 @@ public class ContinueAsNewInputTests
         Assert.Equal("reducer-v2", actual.HistoryReducerKey);
         Assert.Equal("context-reducer-v1", actual.ContextReducerKey);
         Assert.Equal("profile-v1", actual.DefaultChatClientKey);
+        Assert.Equal("summary-profile-v1", actual.HistorySummarizerClientKey);
+        Assert.Equal(16_384, actual.HistorySummarizerMaxContextTokens);
+        Assert.Equal(2_048, actual.HistorySummarizerOutputTokenReserve);
         Assert.Equal(createdAt, actual.OriginalCreatedAt);
         Assert.Equal("session-epoch", actual.SessionEpoch);
         Assert.Equal(renewedIdleDeadline, actual.SessionIdleDeadline);

@@ -122,6 +122,10 @@ var durableWorker = builder.Services
         opts.DefaultToolsetIds = ["information", "operations"];
         opts.MaxModelContextTokens = 8192;
         opts.ModelOutputTokenReserve = 1024;
+        // Reserved for an explicitly selected retained-history compaction strategy.
+        // These independent limits do not compact history by themselves.
+        opts.HistorySummarizerMaxContextTokens = 8192;
+        opts.HistorySummarizerOutputTokenReserve = 1024;
         opts.MaximumTransportPayloadSizeBytes = 1024 * 1024;
         opts.PayloadCodecExpansionAllowanceBytes = 0;
 

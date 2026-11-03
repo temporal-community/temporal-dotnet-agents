@@ -73,6 +73,10 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
     public DurableChatWorkflowInput Create() => new()
     {
         DefaultChatClientKey = _options.DefaultChatClientKey,
+        HistorySummarizerClientKey =
+            _options.DefaultHistorySummarizerClientKey ?? _options.DefaultChatClientKey,
+        HistorySummarizerMaxContextTokens = _options.HistorySummarizerMaxContextTokens,
+        HistorySummarizerOutputTokenReserve = _options.HistorySummarizerOutputTokenReserve,
         TimeToLive = _options.SessionTimeToLive,
         ActivityTimeout = _options.ActivityTimeout,
         HeartbeatTimeout = _options.HeartbeatTimeout,

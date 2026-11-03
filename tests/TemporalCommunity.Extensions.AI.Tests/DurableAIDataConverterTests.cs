@@ -140,4 +140,63 @@ public class DurableAIDataConverterTests
         Assert.Equal("test-model", deserialized.ModelId);
         Assert.Single(deserialized.Messages);
     }
+
+    [Fact]
+    public void PayloadConverter_PreservesHistorySummarizationTurnToolContent()
+    {
+        var converter = DurableAIDataConverter.Instance.PayloadConverter;
+        var input = new DurableHistorySummarizationInput
+        {
+            ClientKey = "summarizer",
+            MaxContextTokens = 4096,
+            OutputTokenReserve = 512,
+            Turns =
+            [
+                new DurableHistorySummaryTurn
+                {
+                    TurnId = "turn-1",
+                    Messages =
+                    [
+                        new ChatMessage(ChatRole.Assistant,
+                        [
+                            new FunctionCallContent(
+                                "call-1",
+                                "lookup",
+                                new Dictionary<string, object?> { ["key"] = "value" }),
+                        ]),
+                        new ChatMessage(ChatRole.Tool,
+                        [
+                            new FunctionResultContent("call-1", new { result = "found" }),
+                        ]),
+                    ],
+                },
+            ],
+        };
+
+        var payload = converter.ToPayload(input);
+        var restored = Assert.IsType<DurableHistorySummarizationInput>(
+            converter.ToValue(payload, typeof(DurableHistorySummarizationInput)));
+
+        Assert.Equal("summarizer", restored.ClientKey);
+        Assert.Equal("turn-1", Assert.Single(restored.Turns).TurnId);
+        Assert.IsType<FunctionCallContent>(restored.Turns[0].Messages[0].Contents[0]);
+        Assert.IsType<FunctionResultContent>(restored.Turns[0].Messages[1].Contents[0]);
+
+        var result = new DurableHistorySummarizationResult
+        {
+            SummarizedTurnCount = 1,
+            Summary = new TemporalCommunity.Extensions.AI.Session.DurableSessionSummary
+            {
+                Text = "summary",
+                ModelId = "summary-model",
+            },
+        };
+        var resultPayload = converter.ToPayload(result);
+        var restoredResult = Assert.IsType<DurableHistorySummarizationResult>(
+            converter.ToValue(resultPayload, typeof(DurableHistorySummarizationResult)));
+
+        Assert.Equal(1, restoredResult.SummarizedTurnCount);
+        Assert.Equal("summary", restoredResult.Summary.Text);
+        Assert.Equal("summary-model", restoredResult.Summary.ModelId);
+    }
 }

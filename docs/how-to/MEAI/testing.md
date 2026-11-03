@@ -83,6 +83,16 @@ reducer filters tool messages, rejection of malformed reducer output, and a fina
 budget check. These tests cover ephemeral model context only; they do not prove that retained
 history has been compacted or that Temporal's prior event history has been reduced.
 
+## Library-owned history summarizer verification
+
+`DurableHistorySummarizerTests` verifies that the activity selects the largest oldest prefix of
+complete turns fitting an independent token budget, applies the output reserve, renders function
+calls/results as serialized data, and rejects protected turns, unsupported content, or a single
+turn that cannot fit before invoking the provider. `DurableAIDataConverterTests` round-trips the
+summary activity's tool-bearing input and result through the configured converter. The summarizer
+returns text plus model/usage metadata; Phase 4.4 owns when a validated summary is committed to
+retained history.
+
 **Unavailable prerequisite experiment:** the assumption that the pinned summarizer returns a
 persistent incremental marker is false. This blocks adopting that marker as a compaction wire
 contract, not Phase 0 or the library-selected-prefix summarizer design. The history-counter APIs

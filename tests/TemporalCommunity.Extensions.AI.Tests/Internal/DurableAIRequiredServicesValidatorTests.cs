@@ -57,6 +57,27 @@ public sealed class DurableAIRequiredServicesValidatorTests
     }
 
     [Fact]
+    public void PostConfigure_ValidatesSeparateSummarizerProfile()
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "queue",
+            DefaultChatClientKey = "primary",
+            DefaultHistorySummarizerClientKey = "summarizer",
+        };
+        var services = new ServiceCollection();
+        services.AddKeyedSingleton<IChatClient>("primary", A.Fake<IChatClient>());
+
+        var exception = Assert.Throws<DurableConfigurationException>(
+            () => Validate(services, options));
+        Assert.Contains("history summarizer", exception.Message);
+        Assert.Contains("summarizer", exception.Message);
+
+        services.AddKeyedSingleton<IChatClient>("summarizer", A.Fake<IChatClient>());
+        Validate(services, options);
+    }
+
+    [Fact]
     public void PostConfigure_SkipsChatClientRequirement_ForCustomWorkflow()
     {
         Validate(new ServiceCollection(), new DurableExecutionOptions

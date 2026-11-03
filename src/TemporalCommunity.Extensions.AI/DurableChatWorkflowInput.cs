@@ -27,6 +27,46 @@ public record class DurableChatWorkflowInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? DefaultChatClientKey { get; init; }
 
+    /// <summary>The summarizer-specific chat-client key, or the session profile when null.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? HistorySummarizerClientKey { get; init; }
+
+    /// <summary>The history summarizer's total context budget, including its output reserve.</summary>
+    [JsonIgnore]
+    public int HistorySummarizerMaxContextTokens { get; init; } = 8192;
+
+    [JsonInclude]
+    [JsonPropertyName("historySummarizerMaxContextTokens")]
+    internal int? SerializedHistorySummarizerMaxContextTokens
+    {
+        get => this.HistorySummarizerMaxContextTokens;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.HistorySummarizerMaxContextTokens = value.Value;
+            }
+        }
+    }
+
+    /// <summary>The history summarizer's response-token reserve.</summary>
+    [JsonIgnore]
+    public int HistorySummarizerOutputTokenReserve { get; init; } = 1024;
+
+    [JsonInclude]
+    [JsonPropertyName("historySummarizerOutputTokenReserve")]
+    internal int? SerializedHistorySummarizerOutputTokenReserve
+    {
+        get => this.HistorySummarizerOutputTokenReserve;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.HistorySummarizerOutputTokenReserve = value.Value;
+            }
+        }
+    }
+
     /// <summary>
     /// The session idle lifetime. Each admitted or completed operation renews the absolute
     /// <see cref="SessionIdleDeadline"/> by this duration.

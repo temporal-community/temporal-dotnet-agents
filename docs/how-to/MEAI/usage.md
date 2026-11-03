@@ -350,6 +350,43 @@ provider calls made by a reducer have their own retry and cost implications. MEA
 `SummarizingChatReducer` returns an unmarked summary. The library validates grammar but does not
 interpret a reducer's omissions as retained-history compaction.
 
+### Library-owned history summarizer
+
+The history-summarization activity uses a worker-registered `IChatClient`; it does not call a
+network-backed client from workflow code. Configure an optional keyed summarizer profile and a
+separate context/output budget. If no profile key is set, the session's frozen default chat-client
+profile is used:
+
+```csharp
+var summaryOptions = new DurableExecutionOptions
+{
+    TaskQueue = "durable-chat",
+    DefaultChatClientKey = "primary",
+    DefaultHistorySummarizerClientKey = "summarizer",
+    HistorySummarizerMaxContextTokens = 8192,
+    HistorySummarizerOutputTokenReserve = 1024,
+};
+```
+
+<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/MEAI/HistorySummarizer.cs. -->
+
+The activity selects the largest oldest prefix of complete turns that fits this budget, counting
+its fixed instructions and output reserve. Tool calls and results are serialized into the prompt as
+historical data; no tool is dispatched. Content types the library cannot render safely fail
+explicitly rather than disappearing from the summary input. Protected turns and turns containing
+system/developer instructions or approval content are rejected. A single turn that cannot fit
+blocks summarization. Token counts use the configured `IDurableChatTokenEstimator` or its
+deterministic heuristic default; estimates are not a provider-enforced limit. The resulting summary
+includes model and usage metadata. Missing client-profile configuration is a non-retryable activity
+failure (and is checked at startup for the stock workflow). Provider calls may be retried according
+to the activity policy, so retries can incur additional cost. Summary text can contain sensitive
+conversation data and, when later committed by the compaction strategy, remains part of Temporal
+workflow history; compaction does not erase prior events.
+
+These settings and the activity are available for the selected compaction strategy, but this unit
+does not schedule compaction. Automatic bounded compaction and recovery behavior is covered by the
+subsequent history-recovery phase; configuring a summarizer alone does not rewrite `GetHistory`.
+
 ### Send a turn and read history
 
 ```csharp

@@ -202,6 +202,18 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             throw new InvalidOperationException("The configured model-context token budget is invalid.");
         }
+        if (input.HistorySummarizerMaxContextTokens <= 0
+            || input.HistorySummarizerOutputTokenReserve <= 0
+            || input.HistorySummarizerOutputTokenReserve >= input.HistorySummarizerMaxContextTokens)
+        {
+            throw new InvalidOperationException("The configured history-summarizer token budget is invalid.");
+        }
+        if (input.HistorySummarizerClientKey is not null
+            && string.IsNullOrWhiteSpace(input.HistorySummarizerClientKey))
+        {
+            throw new InvalidOperationException(
+                "The configured history-summarizer client key cannot be empty or whitespace.");
+        }
         var sessionEpoch = input.SessionEpoch ?? Input?.SessionEpoch;
         if (sessionEpoch is null)
         {
