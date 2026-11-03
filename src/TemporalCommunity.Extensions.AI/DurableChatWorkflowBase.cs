@@ -31,6 +31,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private readonly DurableApprovalMixin _approvalMixin = new();
     private readonly Dictionary<string, TurnExecutionRecord> _terminalTurns =
         new(StringComparer.Ordinal);
+    private readonly List<string> _terminalTurnOrder = [];
+    private long _terminalTurnLedgerBytes;
+    private int _maxTerminalOutcomeCount = 128;
+    private int _maxTerminalOutcomeBytes = 1024 * 1024;
     private TurnExecutionRecord? _activeTurn;
     private bool _isProcessing;
     private bool _shutdownRequested;
@@ -52,6 +56,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         public TOutput? Output { get; set; }
 
         public DurableSessionResponse? ResponseEntry { get; set; }
+
+        public JsonElement? SerializedOutput { get; set; }
+
+        public JsonElement? SerializedResponseEntry { get; set; }
+
+        public int SerializedSizeBytes { get; set; }
 
         public TurnFailure? Failure { get; set; }
     }
@@ -111,10 +121,23 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     {
         ArgumentNullException.ThrowIfNull(input);
         var firstInitialization = Input is null;
+        ValidateTerminalOutcomeLimits(input);
+        var sessionEpoch = input.SessionEpoch ?? Input?.SessionEpoch;
+        if (sessionEpoch is null)
+        {
+            input = input with { SessionEpoch = Workflow.NewGuid().ToString("N") };
+        }
+        else if (input.SessionEpoch is null)
+        {
+            input = input with { SessionEpoch = sessionEpoch };
+        }
+        _maxTerminalOutcomeCount = input.MaxTerminalOutcomeCount;
+        _maxTerminalOutcomeBytes = input.MaxTerminalOutcomeBytes;
         Input = input;
         if (firstInitialization)
         {
             _approvalMixin.RestoreResolvedApprovals(input.ApprovalResolutionHistory);
+            RestoreTerminalTurnOutcomes(input.CarriedTerminalOutcomes);
         }
     }
 
@@ -156,6 +179,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// <see cref="InitializeTurnCount"/>.
     /// </summary>
     protected int CurrentTurnNumber => _turnCount;
+
+    /// <summary>The opaque epoch identifying the current session lineage.</summary>
+    protected string CurrentSessionEpoch =>
+        RequiredInput.SessionEpoch
+        ?? throw new InvalidOperationException("The session epoch has not been initialized.");
 
     /// <summary>
     /// The current conversation history, available to subclass overrides that need to
@@ -243,6 +271,34 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// </param>
     protected virtual int InitializeTurnCount(IReadOnlyList<DurableSessionEntry> carriedHistory) =>
         carriedHistory.Count(e => e is DurableSessionResponse);
+
+    /// <summary>
+    /// Serializes a terminal turn output for bounded deduplication across continue-as-new.
+    /// Override when a derived workflow requires a specialized serializer.
+    /// </summary>
+    protected virtual JsonElement SerializeTurnOutput(TOutput output) =>
+        JsonSerializer.SerializeToElement(output, DurableAIJsonUtilities.DefaultOptions);
+
+    /// <summary>Restores an output serialized by <see cref="SerializeTurnOutput"/>.</summary>
+    protected virtual TOutput DeserializeTurnOutput(JsonElement output) =>
+        output.Deserialize<TOutput>(DurableAIJsonUtilities.DefaultOptions)!;
+
+    /// <summary>
+    /// Serializes a response entry using its polymorphic durable-entry contract.
+    /// </summary>
+    protected virtual JsonElement SerializeTurnResponseEntry(DurableSessionResponse responseEntry) =>
+        JsonSerializer.SerializeToElement<DurableSessionEntry>(
+            responseEntry, DurableAIJsonUtilities.DefaultOptions);
+
+    /// <summary>Restores a response entry serialized by <see cref="SerializeTurnResponseEntry"/>.</summary>
+    protected virtual DurableSessionResponse DeserializeTurnResponseEntry(JsonElement responseEntry) =>
+        responseEntry.Deserialize<DurableSessionEntry>(DurableAIJsonUtilities.DefaultOptions)
+            as DurableSessionResponse
+        ?? throw new InvalidOperationException("The retained turn outcome has no response entry.");
+
+    /// <summary>JSON options used to measure the serialized terminal outcome ledger.</summary>
+    protected virtual JsonSerializerOptions TerminalOutcomeJsonSerializerOptions =>
+        DurableAIJsonUtilities.DefaultOptions;
 
     /// <summary>
     /// Hook invoked after the base upserts the standard <c>TurnCount</c> and
@@ -346,6 +402,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     protected virtual async Task RunAsync(DurableChatWorkflowInput input)
     {
         InitializeInput(input);
+        input = RequiredInput;
 
         // Restore history carried forward from a previous run (continue-as-new).
         if (input.CarriedHistory is { Count: > 0 })
@@ -358,7 +415,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         // Re-derive the turn count from carried history so search attributes and per-turn
         // diagnostics stay monotonic across continue-as-new transitions. Subclasses override
         // InitializeTurnCount for different semantics.
-        _turnCount = InitializeTurnCount(_history);
+        _turnCount = input.CompletedTurnCount ?? InitializeTurnCount(_history);
 
         // Capture the original creation time on the first run; carry it forward on CAN transitions.
         var sessionCreatedAt = input.OriginalCreatedAt ?? Workflow.UtcNow;
@@ -436,7 +493,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             {
                 // Preserve the original snapshot timing when replaying pre-patch histories.
                 carriedInput = CreateContinueAsNewInput(
-                    input, carriedHistory, _approvalMixin.GetResolvedApprovals(), sessionCreatedAt);
+                    input,
+                    carriedHistory,
+                    _approvalMixin.GetResolvedApprovals(),
+                    sessionCreatedAt,
+                    SnapshotTerminalTurnOutcomes(),
+                    _turnCount);
             }
             if (!drainBeforeSnapshot)
             {
@@ -463,7 +525,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         : DefaultBoundedTrim(_history, input.MaxEntryCount);
                 }
                 carriedInput = CreateContinueAsNewInput(
-                    input, carriedHistory, _approvalMixin.GetResolvedApprovals(), sessionCreatedAt);
+                    input,
+                    carriedHistory,
+                    _approvalMixin.GetResolvedApprovals(),
+                    sessionCreatedAt,
+                    SnapshotTerminalTurnOutcomes(),
+                    _turnCount);
             }
             throw CreateContinueAsNewException(carriedInput!);
         }
@@ -492,11 +559,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         DurableChatWorkflowInput input,
         List<DurableSessionEntry> carriedHistory,
         IReadOnlyList<DurableApprovalDecision> approvalResolutionHistory,
-        DateTimeOffset originalCreatedAt)
+        DateTimeOffset originalCreatedAt,
+        IReadOnlyList<Internal.DurableTerminalTurnOutcome> terminalTurnOutcomes,
+        int completedTurnCount)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(carriedHistory);
         ArgumentNullException.ThrowIfNull(approvalResolutionHistory);
+        ArgumentNullException.ThrowIfNull(terminalTurnOutcomes);
 
         Internal.DurableToolsetAuthority.Resolve(input);
 
@@ -505,6 +575,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             CarriedHistory = carriedHistory,
             ApprovalResolutionHistory = approvalResolutionHistory,
             OriginalCreatedAt = originalCreatedAt,
+            CompletedTurnCount = completedTurnCount,
+            CarriedTerminalOutcomes = terminalTurnOutcomes,
         };
     }
 
@@ -756,15 +828,163 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private static ApplicationFailureException TurnAdmissionFailure(string message, string errorType) =>
         new(message, errorType: errorType, nonRetryable: true);
 
+    private static void ValidateTerminalOutcomeLimits(DurableChatWorkflowInput input)
+    {
+        if (input.MaxTerminalOutcomeCount <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(input.MaxTerminalOutcomeCount)} must be positive.");
+        }
+
+        if (input.MaxTerminalOutcomeBytes <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(input.MaxTerminalOutcomeBytes)} must be positive.");
+        }
+    }
+
+    private void RestoreTerminalTurnOutcomes(
+        IReadOnlyList<Internal.DurableTerminalTurnOutcome>? outcomes)
+    {
+        if (outcomes is null)
+        {
+            return;
+        }
+
+        foreach (var outcome in outcomes)
+        {
+            var record = new TurnExecutionRecord(outcome.RequestId, outcome.AdmissionFingerprint)
+            {
+                TurnInputFingerprint = outcome.TurnInputFingerprint,
+                IsTerminal = true,
+                Failure = outcome.Failure is { } failure
+                    ? new TurnFailure(failure.ErrorType, failure.Message, failure.NonRetryable)
+                    : null,
+            };
+            if (outcome.Output is { } serializedOutput)
+            {
+                record.SerializedOutput = serializedOutput;
+                record.Output = DeserializeTurnOutput(serializedOutput);
+            }
+
+            if (outcome.ResponseEntry is { } serializedResponse)
+            {
+                record.SerializedResponseEntry = serializedResponse;
+                record.ResponseEntry = DeserializeTurnResponseEntry(serializedResponse);
+            }
+
+            if (record.Failure is null
+                && (record.SerializedOutput is null || record.SerializedResponseEntry is null))
+            {
+                throw new InvalidOperationException(
+                    $"Carried terminal outcome '{outcome.RequestId}' is incomplete.");
+            }
+
+            if (_terminalTurns.ContainsKey(record.RequestId))
+            {
+                throw new InvalidOperationException(
+                    $"Carried terminal outcomes contain duplicate request ID '{record.RequestId}'.");
+            }
+
+            AddTerminalTurnRecord(record, enforceBounds: false);
+        }
+
+        EnforceTerminalTurnLedgerBounds();
+    }
+
+    private IReadOnlyList<Internal.DurableTerminalTurnOutcome> SnapshotTerminalTurnOutcomes()
+    {
+        var outcomes = new List<Internal.DurableTerminalTurnOutcome>(_terminalTurnOrder.Count);
+        foreach (var requestId in _terminalTurnOrder)
+        {
+            if (!_terminalTurns.TryGetValue(requestId, out var record))
+            {
+                continue;
+            }
+
+            outcomes.Add(new Internal.DurableTerminalTurnOutcome
+            {
+                RequestId = record.RequestId,
+                AdmissionFingerprint = record.AdmissionFingerprint,
+                TurnInputFingerprint = record.TurnInputFingerprint,
+                Output = record.SerializedOutput,
+                ResponseEntry = record.SerializedResponseEntry,
+                Failure = record.Failure is { } failure
+                    ? new Internal.DurableTerminalTurnFailure
+                    {
+                        ErrorType = failure.ErrorType,
+                        Message = failure.Message,
+                        NonRetryable = failure.NonRetryable,
+                    }
+                    : null,
+            });
+        }
+
+        return outcomes;
+    }
+
+    private void AddTerminalTurnRecord(
+        TurnExecutionRecord record,
+        bool enforceBounds = true)
+    {
+        var outcome = new Internal.DurableTerminalTurnOutcome
+        {
+            RequestId = record.RequestId,
+            AdmissionFingerprint = record.AdmissionFingerprint,
+            TurnInputFingerprint = record.TurnInputFingerprint,
+            Output = record.SerializedOutput,
+            ResponseEntry = record.SerializedResponseEntry,
+            Failure = record.Failure is { } failure
+                ? new Internal.DurableTerminalTurnFailure
+                {
+                    ErrorType = failure.ErrorType,
+                    Message = failure.Message,
+                    NonRetryable = failure.NonRetryable,
+                }
+                : null,
+        };
+        record.SerializedSizeBytes =
+            JsonSerializer.SerializeToUtf8Bytes(outcome, TerminalOutcomeJsonSerializerOptions).Length;
+
+        if (record.SerializedSizeBytes > _maxTerminalOutcomeBytes)
+        {
+            return;
+        }
+
+        _terminalTurns[record.RequestId] = record;
+        _terminalTurnOrder.Add(record.RequestId);
+        _terminalTurnLedgerBytes += record.SerializedSizeBytes;
+        if (enforceBounds)
+        {
+            EnforceTerminalTurnLedgerBounds();
+        }
+    }
+
+    private void EnforceTerminalTurnLedgerBounds()
+    {
+        while (_terminalTurnOrder.Count > _maxTerminalOutcomeCount
+               || _terminalTurnLedgerBytes > _maxTerminalOutcomeBytes)
+        {
+            var oldestRequestId = _terminalTurnOrder[0];
+            _terminalTurnOrder.RemoveAt(0);
+            if (_terminalTurns.Remove(oldestRequestId, out var evicted))
+            {
+                _terminalTurnLedgerBytes -= evicted.SerializedSizeBytes;
+            }
+        }
+    }
+
     private void CompleteTurnSuccess(
         TurnExecutionRecord record,
         TOutput output,
         DurableSessionResponse responseEntry)
     {
+        record.SerializedOutput = SerializeTurnOutput(output);
+        record.SerializedResponseEntry = SerializeTurnResponseEntry(responseEntry);
         record.Output = output;
         record.ResponseEntry = responseEntry;
         record.IsTerminal = true;
-        _terminalTurns[record.RequestId] = record;
+        AddTerminalTurnRecord(record);
         if (ReferenceEquals(_activeTurn, record))
         {
             _activeTurn = null;
@@ -779,7 +999,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             : (exception.GetType().FullName ?? exception.GetType().Name, exception.Message, false);
         record.Failure = new TurnFailure(errorType, message, nonRetryable);
         record.IsTerminal = true;
-        _terminalTurns[record.RequestId] = record;
+        AddTerminalTurnRecord(record);
         if (ReferenceEquals(_activeTurn, record))
         {
             _activeTurn = null;
@@ -924,6 +1144,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// </summary>
     [WorkflowQuery("GetHistory")]
     public IReadOnlyList<DurableSessionEntry> GetHistory() => _history;
+
+    /// <summary>Returns the opaque epoch identifying this session lineage.</summary>
+    [WorkflowQuery("GetSessionEpoch")]
+    public string GetSessionEpoch() => CurrentSessionEpoch;
+
+    /// <summary>Returns the cumulative completed-turn count across continue-as-new runs.</summary>
+    [WorkflowQuery("GetCompletedTurnCount")]
+    public int GetCompletedTurnCount() => _turnCount;
 
     // ── Signals ─────────────────────────────────────────────────────────────
 

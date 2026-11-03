@@ -74,7 +74,9 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     /// <remarks>
     /// Retrying after an ambiguous timeout or lost response can submit another turn (at-least-once
     /// submission). Correlation IDs provide observability, not deduplication. Effectful tools need
-    /// downstream business idempotency to suppress repeated external effects.
+    /// downstream business idempotency to suppress repeated external effects. If the library
+    /// generated the logical request ID and submission fails,
+    /// <see cref="DurableChatRequestException.RequestId"/> exposes it for recovery.
     /// </remarks>
     /// <param name="conversationId">A unique identifier for the conversation.</param>
     /// <param name="messages">The messages to send.</param>
@@ -101,6 +103,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
         ArgumentNullException.ThrowIfNull(messages);
+        var requestIdWasGenerated = requestId is null;
         var effectiveRequestId = Internal.DurableRequestFingerprint.ResolveRequestId(requestId);
 
         if (options?.Tools is { Count: > 0 })
@@ -168,12 +171,26 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         // by workflow-id, so it follows the continue-as-new chain like the previous run-less handle.
         // SDK caveat: this call may fail while the workflow still gets started (same partial-failure
         // window that the prior two-RPC sequence had).
-        var responseEntry = await _client.ExecuteUpdateWithStartWorkflowAsync<DurableChatWorkflow, DurableSessionResponse>(
-            wf => wf.ChatAsync(input),
-            new WorkflowUpdateWithStartOptions(startOp)
+        DurableSessionResponse responseEntry;
+        try
+        {
+            responseEntry = await _client.ExecuteUpdateWithStartWorkflowAsync<
+                DurableChatWorkflow, DurableSessionResponse>(
+                wf => wf.ChatAsync(input),
+                new WorkflowUpdateWithStartOptions(startOp)
+                {
+                    Rpc = new RpcOptions { CancellationToken = cancellationToken },
+                }).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            if (requestIdWasGenerated)
             {
-                Rpc = new RpcOptions { CancellationToken = cancellationToken },
-            }).ConfigureAwait(false);
+                throw new DurableChatRequestException(effectiveRequestId, exception);
+            }
+
+            throw;
+        }
 
         span?.SetTag(DurableChatTelemetry.InputTokensAttribute, responseEntry.Usage?.InputTokenCount);
         span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, responseEntry.Usage?.OutputTokenCount);

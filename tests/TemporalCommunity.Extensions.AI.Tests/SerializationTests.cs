@@ -258,6 +258,26 @@ public class SerializationTests
             HeartbeatTimeout = TimeSpan.FromMinutes(3),
             ApprovalTimeout = TimeSpan.FromDays(2),
             MaxEntryCount = 99,
+            SessionEpoch = "epoch-1",
+            CompletedTurnCount = 23,
+            MaxTerminalOutcomeCount = 15,
+            MaxTerminalOutcomeBytes = 12345,
+            CarriedTerminalOutcomes =
+            [
+                new global::TemporalCommunity.Extensions.AI.Internal.DurableTerminalTurnOutcome
+                {
+                    RequestId = "request-1",
+                    AdmissionFingerprint = "fingerprint",
+                    Output = JsonDocument.Parse("\"response\"").RootElement.Clone(),
+                    ResponseEntry = JsonSerializer.SerializeToElement<DurableSessionEntry>(
+                        new DurableSessionResponse
+                        {
+                            CorrelationId = "request-1",
+                            CreatedAt = DateTimeOffset.UnixEpoch,
+                        },
+                        DurableAIJsonUtilities.DefaultOptions),
+                },
+            ],
             MaxToolCallsPerTurn = 7,
             MaximumConsecutiveErrorsPerRequest = 1,
         };
@@ -271,6 +291,11 @@ public class SerializationTests
         Assert.Equal(TimeSpan.FromMinutes(3), deserialized.HeartbeatTimeout);
         Assert.Equal(TimeSpan.FromDays(2), deserialized.ApprovalTimeout);
         Assert.Equal(99, deserialized.MaxEntryCount);
+        Assert.Equal("epoch-1", deserialized.SessionEpoch);
+        Assert.Equal(23, deserialized.CompletedTurnCount);
+        Assert.Equal(15, deserialized.MaxTerminalOutcomeCount);
+        Assert.Equal(12345, deserialized.MaxTerminalOutcomeBytes);
+        Assert.Equal("request-1", Assert.Single(deserialized.CarriedTerminalOutcomes!).RequestId);
         Assert.Equal(7, deserialized.MaxToolCallsPerTurn);
         Assert.Equal(1, deserialized.MaximumConsecutiveErrorsPerRequest);
     }
@@ -288,6 +313,8 @@ public class SerializationTests
         Assert.Equal(TimeSpan.FromMinutes(2), restored.HeartbeatTimeout);
         Assert.Equal(TimeSpan.FromDays(7), restored.ApprovalTimeout);
         Assert.Equal(1000, restored.MaxEntryCount);
+        Assert.Equal(128, restored.MaxTerminalOutcomeCount);
+        Assert.Equal(1024 * 1024, restored.MaxTerminalOutcomeBytes);
         Assert.Equal(20, restored.MaxToolCallsPerTurn);
         Assert.Equal(3, restored.MaximumConsecutiveErrorsPerRequest);
     }

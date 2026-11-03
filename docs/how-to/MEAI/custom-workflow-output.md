@@ -50,8 +50,9 @@ validator cannot await and must not depend on state that may not be initialized.
 performs authoritative validation. For typed turns, `ValidateDurableTurnAdmission` rejects malformed
 requests, `Busy`, and `Conflict` before Temporal accepts the Update; matching request IDs and input
 fingerprints join the active turn or return its recorded terminal result within that workflow run.
-The terminal ledger is not yet bounded or carried through Continue-as-New; those guarantees are
-added in Phase 2.3.
+Up to 128 terminal outcomes / 1 MiB of serialized outcomes are retained by default and carried
+through Continue-as-New. Evicted and oversized outcomes end their deduplication window and may
+execute again if retried.
 
 The protected baseline is resolved once and is the workflow's maximum tool authority. A turn may
 deterministically narrow it without carrying schemas or implementations in the Update:

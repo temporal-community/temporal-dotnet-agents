@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.Session;
@@ -47,6 +48,10 @@ public class ContinueAsNewInputTests
         var original = new DurableChatWorkflowInput
         {
             TimeToLive = TimeSpan.FromDays(3),
+            SessionEpoch = "session-epoch",
+            CompletedTurnCount = 41,
+            MaxTerminalOutcomeCount = 17,
+            MaxTerminalOutcomeBytes = 8192,
             CarriedHistory =
             [
                 new DurableSessionRequest
@@ -86,10 +91,27 @@ public class ContinueAsNewInputTests
         };
         IReadOnlyList<DurableApprovalDecision> approvals =
             [new DurableApprovalDecision { RequestId = "new" }];
+        IReadOnlyList<global::TemporalCommunity.Extensions.AI.Internal.DurableTerminalTurnOutcome>
+            terminalOutcomes =
+            [
+                new()
+                {
+                    RequestId = "request-1",
+                    AdmissionFingerprint = "fingerprint-1",
+                    Output = JsonDocument.Parse("\"output\"").RootElement.Clone(),
+                    ResponseEntry = JsonSerializer.SerializeToElement<DurableSessionEntry>(
+                        new DurableSessionResponse
+                        {
+                            CorrelationId = "request-1",
+                            CreatedAt = DateTimeOffset.UnixEpoch,
+                        },
+                        DurableAIJsonUtilities.DefaultOptions),
+                },
+            ];
         var createdAt = new DateTimeOffset(2026, 8, 10, 1, 2, 3, TimeSpan.Zero);
 
         var actual = DurableChatWorkflowBase<ChatResponse>.CreateContinueAsNewInput(
-            original, carriedHistory, approvals, createdAt);
+            original, carriedHistory, approvals, createdAt, terminalOutcomes, completedTurnCount: 42);
 
         Assert.NotSame(original, actual);
         Assert.Equal(original.TimeToLive, actual.TimeToLive);
@@ -104,6 +126,11 @@ public class ContinueAsNewInputTests
         Assert.Equal("reducer-v2", actual.HistoryReducerKey);
         Assert.Equal("profile-v1", actual.DefaultChatClientKey);
         Assert.Equal(createdAt, actual.OriginalCreatedAt);
+        Assert.Equal("session-epoch", actual.SessionEpoch);
+        Assert.Equal(42, actual.CompletedTurnCount);
+        Assert.Equal(17, actual.MaxTerminalOutcomeCount);
+        Assert.Equal(8192, actual.MaxTerminalOutcomeBytes);
+        Assert.Same(terminalOutcomes, actual.CarriedTerminalOutcomes);
         Assert.Same(toolOptions, actual.ToolActivityOptions);
         Assert.Same(interceptorOptions, actual.InterceptorActivityOptions);
         Assert.Same(interceptorToolOptions, actual.InterceptorToolActivityOptions);

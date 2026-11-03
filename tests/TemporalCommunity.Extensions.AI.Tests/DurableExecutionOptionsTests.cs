@@ -16,6 +16,8 @@ public class DurableExecutionOptionsTests
         Assert.Equal("chat-", options.WorkflowIdPrefix);
         Assert.Equal(TimeSpan.FromDays(14), options.SessionTimeToLive);
         Assert.Equal(TimeSpan.FromMinutes(2), options.HeartbeatTimeout);
+        Assert.Equal(128, options.MaxTerminalOutcomeCount);
+        Assert.Equal(1024 * 1024, options.MaxTerminalOutcomeBytes);
     }
 
     [Fact]
@@ -178,6 +180,27 @@ public class DurableExecutionOptionsTests
 
         var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
         Assert.Contains("MaxEntryCount", ex.Message);
+    }
+
+    [Theory]
+    [InlineData(0, 1024)]
+    [InlineData(-1, 1024)]
+    [InlineData(1, 0)]
+    [InlineData(1, -1)]
+    public void Validate_RejectsInvalidTerminalOutcomeLedgerBounds(int count, int bytes)
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "q",
+            MaxTerminalOutcomeCount = count,
+            MaxTerminalOutcomeBytes = bytes,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains(
+            count <= 0 ? nameof(options.MaxTerminalOutcomeCount) : nameof(options.MaxTerminalOutcomeBytes),
+            exception.Message);
     }
 
     // ── MaxToolCallsPerTurn (S-T1-1) ───────────────────────────────────

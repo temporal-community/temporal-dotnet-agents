@@ -85,8 +85,9 @@ The `Turn` Update has a paired synchronous validator that calls
 return its terminal outcome; another request is rejected as `Busy`, and changed input under the
 same ID is rejected as `Conflict` before the Update is accepted. `RunDurableTurnAsync` also checks
 admission defensively and rejects a second managed turn from the same Update before scheduling
-another model or tool activity. The terminal ledger is currently run-local and unbounded; its
-Continue-as-New retention and bounds are Phase 2.3 work.
+another model or tool activity. Terminal outcomes are bounded to 128 entries / 1 MiB by default
+and carried through Continue-as-New with the session epoch and cumulative completed-turn count.
+Evicted or oversized outcomes are outside the deduplication window and may execute again if retried.
 Malformed turn input (a null request, empty messages, or null options) fails promptly as the
 non-retryable `DurableTurnInvalidRequest` failure and schedules no model or tool activity.
 

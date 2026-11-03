@@ -82,6 +82,7 @@ internal class AgentWorkflow :
     {
         ArgumentNullException.ThrowIfNull(input);
         InitializeInput(input);
+        input = (AgentWorkflowInput)RequiredInput;
         _input = input;
         _currentStateBag = input.CarriedStateBag;
         RestoreResolvedAgentApprovals(input.AgentApprovalResolutionHistory);
@@ -404,6 +405,11 @@ internal class AgentWorkflow :
             MaxEntryCount = input.MaxEntryCount,
             HistoryReducerKey = input.HistoryReducerKey,
             OriginalCreatedAt = input.OriginalCreatedAt,
+            SessionEpoch = input.SessionEpoch,
+            CompletedTurnCount = input.CompletedTurnCount,
+            CarriedTerminalOutcomes = input.CarriedTerminalOutcomes,
+            MaxTerminalOutcomeCount = input.MaxTerminalOutcomeCount,
+            MaxTerminalOutcomeBytes = input.MaxTerminalOutcomeBytes,
             ActivityTimeout = input.ActivityTimeout,
             HeartbeatTimeout = input.HeartbeatTimeout,
             AgentApprovalResolutionHistory = _resolvedAgentApprovals.ToList(),
@@ -433,6 +439,25 @@ internal class AgentWorkflow :
         return Workflow.CreateContinueAsNewException(
             (AgentWorkflow wf) => wf.RunAsync(carriedInput));
     }
+
+    protected override JsonElement SerializeTurnOutput(AgentResponse output) =>
+        JsonSerializer.SerializeToElement(output, TemporalAgentJsonUtilities.DefaultOptions);
+
+    protected override AgentResponse DeserializeTurnOutput(JsonElement output) =>
+        output.Deserialize<AgentResponse>(TemporalAgentJsonUtilities.DefaultOptions)
+        ?? throw new InvalidOperationException("The retained agent outcome has no response.");
+
+    protected override JsonElement SerializeTurnResponseEntry(DurableSessionResponse responseEntry) =>
+        JsonSerializer.SerializeToElement<DurableSessionEntry>(
+            responseEntry, TemporalAgentJsonUtilities.DefaultOptions);
+
+    protected override DurableSessionResponse DeserializeTurnResponseEntry(JsonElement responseEntry) =>
+        responseEntry.Deserialize<DurableSessionEntry>(TemporalAgentJsonUtilities.DefaultOptions)
+            as DurableSessionResponse
+        ?? throw new InvalidOperationException("The retained agent outcome has no response entry.");
+
+    protected override JsonSerializerOptions TerminalOutcomeJsonSerializerOptions =>
+        TemporalAgentJsonUtilities.DefaultOptions;
 
     /// <inheritdoc/>
     protected override void UpsertCustomSearchAttributes()

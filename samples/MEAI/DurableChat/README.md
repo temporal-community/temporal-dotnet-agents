@@ -18,13 +18,15 @@ finish reason, provider response/model IDs, and serializable provider metadata. 
 is not a deduplication key. The first demo turn supplies a caller-known request ID separately from
 correlation metadata; persist that ID before submission when the caller must retry an ambiguous
 RPC. Phase 2.1 records the ID and canonical input fingerprint. Phase 2.2 lets a matching ID and
-fingerprint join an active turn or return its terminal outcome in
-the current workflow run; different IDs are `Busy`, and changed input under the same ID is
-`Conflict`. The terminal ledger is not yet bounded or carried through Continue-as-New, which is
-Phase 2.3 work. Phase 0 documented pinned reducer and replay prerequisites. Phase 1.0 removed the
-durable embedding wrapper; request epochs, bounded cross-run ledger retention, safe interrupted-turn
-recovery, and independent context/history budgets are still pending. The ledger does not make
-external tool effects exactly-once.
+fingerprint join an active turn or return its terminal outcome; different IDs are `Busy`, and
+changed input under the same ID is `Conflict`. The bounded terminal ledger (128 outcomes / 1 MiB by
+default) and the session epoch are carried through Continue-as-New. An evicted or oversized outcome
+is outside the deduplication window, so a later retry can execute again; the ledger does not make
+external tool effects exactly-once. If `SendAsync` fails after generating a request ID, its
+`DurableChatRequestException.RequestId` exposes that ID; callers needing recovery across process
+failure should persist their own ID before submission. Phase 0 documented pinned reducer and replay
+prerequisites. Phase 1.0 removed the durable embedding wrapper; safe interrupted-turn recovery and
+independent context/history budgets are still pending.
 
 Two `AddDurableToolset` registrations provide weather and service-status capabilities.
 `DefaultToolsetIds` composes them in a stable order as the stock workflow's worker-owned baseline.

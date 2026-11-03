@@ -39,6 +39,8 @@ public class DurableChatWorkflowInputFactoryTests
         Assert.Equal("history-v1", actual.HistoryReducerKey);
         Assert.Equal(13, actual.MaxToolCallsPerTurn);
         Assert.Equal(4, actual.MaximumConsecutiveErrorsPerRequest);
+        Assert.Equal(options.MaxTerminalOutcomeCount, actual.MaxTerminalOutcomeCount);
+        Assert.Equal(options.MaxTerminalOutcomeBytes, actual.MaxTerminalOutcomeBytes);
         Assert.True(actual.IncludeDetailedErrors);
 
         Assert.Equal(2, actual.ToolActivityOptions!.Count);
@@ -176,6 +178,8 @@ public class DurableChatWorkflowInputFactoryTests
         ApprovalTimeout = TimeSpan.FromHours(7),
         EnableSearchAttributes = true,
         MaxEntryCount = 123,
+        MaxTerminalOutcomeCount = 37,
+        MaxTerminalOutcomeBytes = 98_765,
         DefaultHistoryReducerKey = "history-v1",
         DefaultChatClientKey = "primary-profile",
         MaxToolCallsPerTurn = 13,
@@ -196,6 +200,8 @@ public class DurableChatWorkflowInputFactoryTests
         Assert.Equal(expected.ApprovalTimeout, actual.ApprovalTimeout);
         Assert.Equal(expected.EnableSearchAttributes, actual.EnableSearchAttributes);
         Assert.Equal(expected.MaxEntryCount, actual.MaxEntryCount);
+        Assert.Equal(expected.MaxTerminalOutcomeCount, actual.MaxTerminalOutcomeCount);
+        Assert.Equal(expected.MaxTerminalOutcomeBytes, actual.MaxTerminalOutcomeBytes);
         Assert.Equal(expected.HistoryReducerKey, actual.HistoryReducerKey);
         Assert.Equal(expected.MaxToolCallsPerTurn, actual.MaxToolCallsPerTurn);
         Assert.Equal(

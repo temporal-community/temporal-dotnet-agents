@@ -166,8 +166,9 @@ var response = await agentProxy.RunAsync(
 Within one workflow run, a matching request ID and fingerprint joins an active turn or returns
 its recorded terminal outcome. A different request is rejected as `Busy`; reusing the ID with
 changed effect-bearing input is rejected as `Conflict`, before the update is accepted into history.
-The current terminal ledger is run-local and unbounded, so this retry window does not yet survive
-Continue-as-New; Phase 2.3 adds bounded retention and carry-forward. Request IDs do not make
+Up to 128 terminal outcomes / 1 MiB of serialized outcomes are retained by default and carried
+through Continue-as-New, along with the opaque session epoch and cumulative completed-turn count.
+Evicted or oversized outcomes are outside the deduplication window. Request IDs do not make
 downstream tool effects exactly-once.
 
 The fingerprint covers messages, the configured model route and tool authority, tool selection,

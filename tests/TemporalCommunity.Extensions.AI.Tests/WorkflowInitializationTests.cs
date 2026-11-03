@@ -14,7 +14,11 @@ public sealed class WorkflowInitializationTests
     public void InitializeInput_MakesRequiredInputAvailableSynchronously()
     {
         var workflow = new TestWorkflow();
-        var input = new DurableChatWorkflowInput { ApprovalTimeout = TimeSpan.FromMinutes(3) };
+        var input = new DurableChatWorkflowInput
+        {
+            ApprovalTimeout = TimeSpan.FromMinutes(3),
+            SessionEpoch = "epoch-1",
+        };
 
         workflow.Initialize(input);
 

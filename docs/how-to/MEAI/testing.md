@@ -26,6 +26,16 @@ terminal failure replay: the failed turn leaves no partial history, and retrying
 not start another turn. Activity retry attempts within the original turn are still governed by the
 configured Temporal retry policy. Turn cancellation is a later Phase 3.5 capability.
 
+## Phase 2.3 bounded-ledger and continue-as-new verification
+
+`DurableChatLifecycleRegressionTests.KeyedReducer_ContinueAsNew_RetainsLaterSuccessfullyCompletedTurn`
+also retries the completed request after Continue-as-New and verifies the model is not called again.
+It checks that the session epoch and cumulative completed-turn count survive the transition.
+`TerminalOutcomeLedger_EvictsOldestOutcomeAtConfiguredCount` and
+`TerminalOutcomeLedger_DoesNotRetainAnEntryLargerThanByteLimit` exercise both configured ledger
+bounds and confirm that eviction ends the deduplication window. Unit tests cover option validation,
+workflow-input serialization, and preservation of the ledger settings and epoch in Continue-as-New.
+
 Custom workflows based on `DurableToolWorkflowBase<TRequestData, TTurnState>` must call
 `ValidateDurableTurnAdmission` from the validator paired with each turn Update. Handler-side checks
 remain defensive, but only a validator can reject a request before the Update is recorded. The

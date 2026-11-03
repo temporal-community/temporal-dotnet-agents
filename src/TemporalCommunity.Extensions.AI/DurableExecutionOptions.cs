@@ -198,6 +198,18 @@ public sealed class DurableExecutionOptions
     public int MaxEntryCount { get; set; } = 1000;
 
     /// <summary>
+    /// Gets or sets the maximum number of terminal turn outcomes retained for request-ID
+    /// deduplication. Defaults to 128. Pending turns are never evicted.
+    /// </summary>
+    public int MaxTerminalOutcomeCount { get; set; } = 128;
+
+    /// <summary>
+    /// Gets or sets the maximum serialized size, in bytes, of the terminal outcome ledger.
+    /// Defaults to 1 MiB. An individual outcome larger than this budget is not retained.
+    /// </summary>
+    public int MaxTerminalOutcomeBytes { get; set; } = 1024 * 1024;
+
+    /// <summary>
     /// Gets or sets a factory that creates a worker-level
     /// <see cref="IDurableToolInterceptor{TContext}"/> for intercepting tool calls before
     /// dispatch in the durable tool loop. When <see langword="null"/> (default), no
@@ -250,6 +262,18 @@ public sealed class DurableExecutionOptions
         {
             throw new InvalidOperationException(
                 $"{nameof(MaxEntryCount)} must be at least 4 in {nameof(DurableExecutionOptions)} to retain a complete request/response turn.");
+        }
+
+        if (MaxTerminalOutcomeCount <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(MaxTerminalOutcomeCount)} must be positive in {nameof(DurableExecutionOptions)}.");
+        }
+
+        if (MaxTerminalOutcomeBytes <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(MaxTerminalOutcomeBytes)} must be positive in {nameof(DurableExecutionOptions)}.");
         }
 
         if (MaxToolCallsPerTurn <= 0)

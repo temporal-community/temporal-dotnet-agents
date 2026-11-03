@@ -51,6 +51,10 @@ namespace TemporalCommunity.Extensions.AI;
 [JsonSerializable(typeof(Internal.DurableToolsetManifest))]
 [JsonSerializable(typeof(Internal.DurableToolsetManifestMember))]
 [JsonSerializable(typeof(IReadOnlyList<Internal.DurableToolsetManifestMember>))]
+[JsonSerializable(typeof(Internal.DurableTerminalTurnOutcome))]
+[JsonSerializable(typeof(IReadOnlyList<Internal.DurableTerminalTurnOutcome>))]
+[JsonSerializable(typeof(Internal.DurableTerminalTurnFailure))]
+[JsonSerializable(typeof(DurableManagedLoopResult))]
 internal partial class DurableAIJsonContext : JsonSerializerContext;
 
 /// <summary>

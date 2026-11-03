@@ -9,6 +9,7 @@ using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Session;
 using Xunit;
 
@@ -421,10 +422,9 @@ public class DurableChatSessionIntegrationTests
         // Pass an empty message list — ValidateChat throws ArgumentException
         // ("At least one message is required.") which the SDK surfaces as
         // WorkflowUpdateFailedException.
-        await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
-            _fixture.SessionClient.SendAsync(
-                conversationId,
-                messages: []));
+        var requestFailure = await Assert.ThrowsAsync<DurableChatRequestException>(() =>
+            _fixture.SessionClient.SendAsync(conversationId, messages: []));
+        Assert.IsType<WorkflowUpdateFailedException>(requestFailure.InnerException);
 
         // The workflow was still started atomically before the validator ran.
         // DescribeAsync throws RpcException("not found") when the workflow does not

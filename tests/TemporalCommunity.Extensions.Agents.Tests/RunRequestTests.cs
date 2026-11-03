@@ -199,4 +199,26 @@ public class RunRequestTests
         Assert.Equal(ts, deserialized!.OriginalCreatedAt);
     }
 
+    [Fact]
+    public void AgentWorkflowInput_CarriesSessionEpochAndLedgerPolicy()
+    {
+        var input = new AgentWorkflowInput
+        {
+            AgentName = "test",
+            TaskQueue = "q",
+            SessionEpoch = "epoch-1",
+            CompletedTurnCount = 27,
+            MaxTerminalOutcomeCount = 12,
+            MaxTerminalOutcomeBytes = 3456,
+        };
+
+        var deserialized = JsonSerializer.Deserialize<AgentWorkflowInput>(
+            JsonSerializer.Serialize(input));
+
+        Assert.Equal("epoch-1", deserialized!.SessionEpoch);
+        Assert.Equal(27, deserialized.CompletedTurnCount);
+        Assert.Equal(12, deserialized.MaxTerminalOutcomeCount);
+        Assert.Equal(3456, deserialized.MaxTerminalOutcomeBytes);
+    }
+
 }

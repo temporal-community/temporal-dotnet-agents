@@ -21,10 +21,10 @@ how-to reference for all of them:
 
 ## Durable-chat redesign target contracts
 
-**Implementation status:** Phases 0, 1, and 2.1–2.2 are implemented. The current API supports
-request identity, active-turn admission, matching retries, and retained terminal outcomes within
-one workflow run. Ledger bounds and Continue-as-New preservation arrive in Phase 2.3; do not rely
-on deduplication surviving Continue-as-New yet. Other rows below describe later target behavior.
+**Implementation status:** Phases 0, 1, and 2.1–2.3 are implemented. The current API supports
+request identity, active-turn admission, bounded terminal outcomes carried through
+Continue-as-New, and an opaque epoch and cumulative turn count preserved across the lineage.
+Expected-epoch validation, idle-deadline renewal, and event-history budgeting are later work.
 In particular, `correlationId` is not an idempotency key and current Continue-as-New can trim history.
 
 | Boundary | Selected target contract |
@@ -253,18 +253,39 @@ registration and dispatch contract, and [HITL patterns](hitl-patterns.md) for pa
 tool approval.
 
 `requestId` is the logical identity for a turn; `correlationId` is only for observability, and
-Temporal's workflow-update ID is a separate transport identity. The optional `requestId` is
-generated before the RPC when omitted, but callers that must recover an ambiguous submission need
-to supply and persist their own ID before calling `SendAsync`. The workflow records a canonical
-fingerprint covering messages, model options, the pinned profile, and recorded tool authority.
-While a turn is active, the same request ID and fingerprint joins it; another request ID is
-rejected as `Busy`, while changed input under the same ID is rejected as `Conflict`. A matching
-retry after completion returns its recorded success or failure within the current workflow run.
-Busy and Conflict are rejected by the update validator, before Temporal records an accepted update.
-The terminal ledger is currently run-local and unbounded; Phase 2.3 adds limits and carries it
-through Continue-as-New. These guarantees do not make external tool effects exactly-once. Make
-effectful tools idempotent with an application-level business-operation ID when duplicate external
-effects must be suppressed.
+Temporal's workflow-update ID is a separate transport identity. Persist a caller-supplied request ID
+before calling `SendAsync` when you need recovery across a client crash. If the library generated
+the ID and the submission fails, `DurableChatRequestException.RequestId` exposes it for recovery.
+The workflow records a canonical fingerprint covering messages, model options, the pinned profile,
+and recorded tool authority. While a turn is active, the same request ID and fingerprint joins it;
+another request ID is rejected as `Busy`, while changed input under the same ID is rejected as
+`Conflict`. A matching retry after completion returns its recorded success or failure while the
+outcome remains in the bounded ledger, including across Continue-as-New.
+
+The ledger defaults to 128 outcomes and 1 MiB of serialized terminal outcomes; configure
+`MaxTerminalOutcomeCount` and `MaxTerminalOutcomeBytes` on `DurableExecutionOptions` to change those
+bounds. Pending turns are never evicted. When a bound is reached, the oldest terminal outcome is
+evicted; an individual outcome larger than the byte limit is not retained. Eviction ends the
+deduplication window for that request ID, so a later retry can execute again. This ledger does not
+make external tool effects exactly-once. Make effectful tools idempotent with an
+application-level business-operation ID when duplicate external effects must be suppressed.
+
+#### Recovering a generated request ID
+
+When the library generated the ID, retain it from `DurableChatRequestException` if the submission fails:
+
+```csharp
+try
+{
+    await sessionClient.SendAsync("customer-42", "What is the weather in Seattle?");
+}
+catch (DurableChatRequestException exception)
+{
+    var requestId = exception.RequestId; // Persist it before retrying the same input.
+    Console.WriteLine(requestId);
+    throw;
+}
+```
 
 ### Custom typed-turn admission
 

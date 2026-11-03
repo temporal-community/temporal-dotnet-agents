@@ -53,6 +53,64 @@ public record class DurableChatWorkflowInput
     public List<DurableSessionEntry>? CarriedHistory { get; init; }
 
     /// <summary>
+    /// Opaque identifier for this session lineage, preserved across continue-as-new.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionEpoch { get; init; }
+
+    /// <summary>
+    /// Cumulative completed-turn count carried across continue-as-new.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? CompletedTurnCount { get; init; }
+
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    internal IReadOnlyList<Internal.DurableTerminalTurnOutcome>? CarriedTerminalOutcomes { get; init; }
+
+    /// <summary>
+    /// Maximum number of terminal turn outcomes retained for request-ID deduplication.
+    /// Defaults to 128. Pending turns are never evicted.
+    /// </summary>
+    [JsonIgnore]
+    public int MaxTerminalOutcomeCount { get; init; } = 128;
+
+    [JsonInclude]
+    [JsonPropertyName("maxTerminalOutcomeCount")]
+    internal int? SerializedMaxTerminalOutcomeCount
+    {
+        get => this.MaxTerminalOutcomeCount;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.MaxTerminalOutcomeCount = value.Value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Maximum serialized size in bytes of the terminal outcome ledger.
+    /// Defaults to 1 MiB. An outcome larger than the budget is not retained.
+    /// </summary>
+    [JsonIgnore]
+    public int MaxTerminalOutcomeBytes { get; init; } = 1024 * 1024;
+
+    [JsonInclude]
+    [JsonPropertyName("maxTerminalOutcomeBytes")]
+    internal int? SerializedMaxTerminalOutcomeBytes
+    {
+        get => this.MaxTerminalOutcomeBytes;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.MaxTerminalOutcomeBytes = value.Value;
+            }
+        }
+    }
+
+    /// <summary>
     /// Activity timeout for LLM calls.
     /// </summary>
     [JsonIgnore]

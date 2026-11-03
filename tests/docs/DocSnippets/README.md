@@ -101,6 +101,7 @@ and carries that profile through Continue-as-New without serializing runtime pro
 Phase 2.1 adds a compiled MAF request-ID example so caller-known retry identity stays aligned with
 the usage guide and `TemporalAgentRunOptions`. Phase 2.2 adds a compiled custom typed-turn validator
 example showing pre-acceptance `Busy`/`Conflict` rejection through `ValidateDurableTurnAdmission`.
+Phase 2.3 adds a compiled managed-session recovery example for `DurableChatRequestException.RequestId`.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 

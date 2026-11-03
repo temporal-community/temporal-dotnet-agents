@@ -107,3 +107,10 @@ exception.
 Tool exposure is not business authorization. Unknown and unselected model calls receive the same
 safe blocked result and no tool activity is scheduled. For external writes, reauthorize using
 current authoritative application data inside the tool activity immediately before the effect.
+
+Managed sessions retain at most 128 terminal request outcomes or 1 MiB of serialized outcomes by
+default; configure `MaxTerminalOutcomeCount` and `MaxTerminalOutcomeBytes` on
+`DurableExecutionOptions` when a different recovery window is needed. The oldest terminal outcome
+is evicted first, while pending turns are never evicted. An oversized outcome is not retained.
+After eviction, retrying that request ID can execute the turn again, so tool-side business
+idempotency remains necessary even when request IDs are reused correctly.

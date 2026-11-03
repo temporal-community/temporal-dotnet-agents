@@ -17,17 +17,24 @@ public class ContinueAsNewInputTests
             AgentName = "support",
             TaskQueue = "agents",
             HistoryReducerKey = "agent-reducer",
+            SessionEpoch = "agent-epoch",
+            MaxTerminalOutcomeCount = 32,
+            MaxTerminalOutcomeBytes = 4096,
         };
         var history = new List<DurableSessionEntry>();
         IReadOnlyList<DurableApprovalDecision> approvals = [];
 
         var cloned = DurableChatWorkflowBase<ChatResponse>.CreateContinueAsNewInput(
-            original, history, approvals, DateTimeOffset.UnixEpoch);
+            original, history, approvals, DateTimeOffset.UnixEpoch, [], completedTurnCount: 5);
 
         var actual = Assert.IsType<AgentWorkflowInput>(cloned);
         Assert.Equal("support", actual.AgentName);
         Assert.Equal("agents", actual.TaskQueue);
         Assert.Equal("agent-reducer", actual.HistoryReducerKey);
+        Assert.Equal("agent-epoch", actual.SessionEpoch);
+        Assert.Equal(5, actual.CompletedTurnCount);
+        Assert.Equal(32, actual.MaxTerminalOutcomeCount);
+        Assert.Equal(4096, actual.MaxTerminalOutcomeBytes);
         Assert.Same(history, actual.CarriedHistory);
     }
 }

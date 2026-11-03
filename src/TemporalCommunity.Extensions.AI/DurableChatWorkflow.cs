@@ -40,6 +40,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     {
         ArgumentNullException.ThrowIfNull(input);
         InitializeInput(input);
+        input = RequiredInput;
         var authority = Internal.DurableToolsetAuthority.Resolve(input);
         // Legacy caller-owned histories serialized an empty ToolActivityOptions dictionary.
         // Current worker-owned starts omit that field and resolve their default toolsets once.
@@ -98,6 +99,9 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     [WorkflowUpdate("Chat")]
     public async Task<DurableSessionResponse> ChatAsync(DurableChatInput input)
     {
+        await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+        ValidateTurnAdmission(input);
+
         var requestId = input.RequestId ?? Workflow.NewGuid().ToString("N");
         var messages = input.Messages as IReadOnlyList<ChatMessage> ?? input.Messages.ToList();
         var requestEntry = DurableSessionRequest.FromMessages(
@@ -114,7 +118,6 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
         _perTurnMeta[requestEntry] = (input.ClientKey, input.ConversationId);
         try
         {
-            await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
             ValidateSessionProfile(input.ClientKey);
             requestEntry.InputFingerprint =
                 Internal.DurableRequestFingerprint.CreateChat(input, RequiredInput);

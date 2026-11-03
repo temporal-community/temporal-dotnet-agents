@@ -167,4 +167,24 @@ public class DurableChatSessionClientTests
 
         A.CallTo(client).Where(call => call.Method.Name.Contains("UpdateWithStart", StringComparison.Ordinal)).MustNotHaveHappened();
     }
+
+    [Fact]
+    public async Task SendAsync_GeneratedRequestIdIsIncludedWhenSubmissionFails()
+    {
+        var client = A.Fake<ITemporalClient>();
+        A.CallTo(client)
+            .Where(call => call.Method.Name.Contains("UpdateWithStart", StringComparison.Ordinal))
+            .Throws(new TimeoutException("submission response was lost"));
+        var sessionClient = new DurableChatSessionClient(
+            client,
+            new DurableExecutionOptions { TaskQueue = "test" });
+
+        var exception = await Assert.ThrowsAsync<DurableChatRequestException>(() =>
+            sessionClient.SendAsync(
+                "conversation",
+                [new ChatMessage(ChatRole.User, "hello")]));
+
+        Assert.Matches("^[0-9a-f]{32}$", exception.RequestId);
+        Assert.IsType<TimeoutException>(exception.InnerException);
+    }
 }
