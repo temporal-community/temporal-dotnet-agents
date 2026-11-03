@@ -87,7 +87,7 @@ public class TypedDurableTurnLifecycleTests
                 postCanHandle,
                 InvokeFunctionActivity));
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -127,7 +127,7 @@ public class TypedDurableTurnLifecycleTests
             new WorkflowUpdateOptions { Id = "different-update-2" });
         Assert.Equal(3, chatClient.CallCount);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -154,7 +154,7 @@ public class TypedDurableTurnLifecycleTests
         Assert.Equal(
             1,
             await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, GetChatStepActivity));
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -188,7 +188,7 @@ public class TypedDurableTurnLifecycleTests
         Assert.Equal(
             0,
             await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, GetChatStepActivity));
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -249,7 +249,7 @@ public class TypedDurableTurnLifecycleTests
         Assert.Equal("valid-after-rejections", result.Response.Messages[^1].Text);
         Assert.Equal(1, chatClient.CallCount);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
 
         static void AssertInvalidRequestFailure(Exception? exception, string scenario)
@@ -335,7 +335,7 @@ public class TypedDurableTurnLifecycleTests
             nextModelInput.SelectMany(message => message.Contents),
             content => content is FunctionCallContent or FunctionResultContent);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -400,7 +400,7 @@ public class TypedDurableTurnLifecycleTests
             chatClient.Calls[1].Messages.SelectMany(message => message.Contents),
             content => content is FunctionCallContent or FunctionResultContent);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -479,7 +479,7 @@ public class TypedDurableTurnLifecycleTests
             nextModelInput.SelectMany(message => message.Contents),
             content => content is FunctionCallContent or FunctionResultContent);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -565,7 +565,7 @@ public class TypedDurableTurnLifecycleTests
         Assert.Equal(ChatFinishReason.Stop, result.Response.FinishReason);
         Assert.Equal(DurableTurnCompletionReason.FinalResponse, result.CompletionReason);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 #pragma warning restore MEAI001

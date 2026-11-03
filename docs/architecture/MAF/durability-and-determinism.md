@@ -311,9 +311,9 @@ the serialization gate:
 - `Workflow.ContinueAsNewSuggested` — the SDK's own signal that history is approaching its limits
 - `_history.Count >= MaxEntryCount` — the library's entry-count trigger (default `1000`)
 
-**Shutdown is not a trigger.** The rollover branch is gated on `&& !_shutdownRequested`, so a
-`Shutdown` signal ends the run instead of rolling it over. TTL expiry likewise completes the
-workflow rather than continuing it.
+**Shutdown is not a trigger.** The rollover branch is gated on `&& !_shutdownRequested`, so the
+validated `RequestShutdown` update ends the run instead of rolling it over. TTL expiry likewise
+completes the workflow rather than continuing it.
 
 When a trigger fires, the base reduces the history, waits for `Workflow.AllHandlersFinished`, and
 invokes the `CreateContinueAsNewException` hook that `AgentWorkflow` overrides to build the
@@ -439,7 +439,7 @@ For unit-testing agent behaviour (as opposed to replay safety), see
 | Is the StateBag preserved when a turn fails? | ✅ Yes — rolled back to its pre-turn snapshot, retaining reserved approval-scope records |
 | Should activities be idempotent? | ✅ Yes — the body can run once per retry attempt. Use `opts.NoRetry()` for write tools |
 | What if an activity fails and is retried? | The workflow's `await` does not throw until the retry budget is exhausted (bounded to 5 attempts by default) |
-| Does a `Shutdown` signal cause a continue-as-new? | ❌ No — the rollover branch is gated on `!_shutdownRequested`; shutdown ends the run |
+| Does a `RequestShutdown` update cause a continue-as-new? | ❌ No — the rollover branch is gated on `!_shutdownRequested`; shutdown ends the run |
 
 ---
 

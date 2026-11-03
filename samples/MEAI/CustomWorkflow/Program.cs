@@ -105,7 +105,7 @@ var workflowInput = host.Services
     };
 
 // Start the ShoppingAssistantWorkflow. The base session loop runs until idle TTL elapses,
-// the Shutdown signal arrives, history reaches MaxEntryCount, or Workflow.ContinueAsNewSuggested
+// the RequestShutdown update arrives, history reaches MaxEntryCount, or Workflow.ContinueAsNewSuggested
 // fires — see DurableChatWorkflowBase.RunAsync (lines 213-247). The latter two exits
 // continue-as-new into a fresh run with carried history.
 var handle = await temporalClient.StartWorkflowAsync(
@@ -157,7 +157,7 @@ if (turn2.CartActions.Count > 0)
 Console.WriteLine();
 
 // ── Shutdown the session ──────────────────────────────────────────────────────
-await handle.SignalAsync(wf => wf.RequestShutdownAsync());
+await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync());
 
 Console.WriteLine("════════════════════════════════════════════════════════\n");
 

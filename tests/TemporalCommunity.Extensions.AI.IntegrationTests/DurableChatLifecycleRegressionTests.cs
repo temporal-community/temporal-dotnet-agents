@@ -2,6 +2,8 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Temporalio.Api.Enums.V1;
+using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.AI.Session;
@@ -298,7 +300,7 @@ public class DurableChatLifecycleRegressionTests
             if (newRunId is not null)
             {
                 var newRun = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId, newRunId);
-                await newRun.SignalAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+                await newRun.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
                 await newRun.GetResultAsync().WaitAsync(Deadline);
             }
             await host.StopAsync();
@@ -532,6 +534,16 @@ public class DurableChatLifecycleRegressionTests
                 [new ChatMessage(ChatRole.User, "success-2")],
                 requestId: "success-2");
             newRunId = await WaitForNewRunAsync(handle, oldRunId);
+            var newRun = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId, newRunId);
+            var start = Assert.Single((await newRun.FetchHistoryAsync()).Events,
+                ev => ev.WorkflowExecutionStartedEventAttributes is not null);
+            var carriedInput = Assert.IsType<DurableChatWorkflowInput>(
+                DurableAIDataConverter.Instance.PayloadConverter.ToValue(
+                    Assert.Single(start.WorkflowExecutionStartedEventAttributes.Input.Payloads_),
+                    typeof(DurableChatWorkflowInput)));
+            var carriedFailure = Assert.Single(carriedInput.CarriedTerminalOutcomes!,
+                outcome => outcome.RequestId == "retained-failure");
+            Assert.NotNull(carriedFailure.Failure);
 
             var callsBeforeRetry = model.Calls;
             await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
@@ -548,9 +560,288 @@ public class DurableChatLifecycleRegressionTests
             {
                 var run = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
                     workflowId, newRunId ?? oldRunId);
-                await run.SignalAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+                await run.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
                 await run.GetResultAsync().WaitAsync(Deadline);
             }
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task HistoryBudget_BlocksNewTurnsAndExposesUsage()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new GatedChatClient();
+        var taskQueue = $"history-budget-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            historyEventSoftLimit: 1,
+            historyEventReserveLimit: 2);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"history-budget-{Guid.NewGuid():N}";
+        var handle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+            session.GetWorkflowId(conversationId));
+
+        try
+        {
+            await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                session.SendAsync(
+                    conversationId,
+                    [new ChatMessage(ChatRole.User, "must not dispatch")],
+                    requestId: "history-budget-first"));
+            Assert.Equal(0, model.Calls);
+
+            var status = await session.GetHistoryBudgetAsync(conversationId).WaitAsync(Deadline);
+            Assert.True(status.IsAdmissionRestricted);
+            Assert.True(status.HistoryEventCount >= status.HistoryEventSoftLimit);
+
+            var acceptedUpdatesBeforeRetry = await CountAcceptedUpdatesAsync(handle);
+            await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                session.SendAsync(
+                    conversationId,
+                    [new ChatMessage(ChatRole.User, "must not dispatch")],
+                    requestId: "history-budget-retry"));
+            Assert.Equal(acceptedUpdatesBeforeRetry, await CountAcceptedUpdatesAsync(handle));
+            Assert.Equal(0, model.Calls);
+        }
+        finally
+        {
+            try
+            {
+                await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+                await handle.GetResultAsync().WaitAsync(Deadline);
+            }
+            catch (Exception) { /* Preserve the original assertion failure. */ }
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task UnhandledRawSignal_IsStillRecordedOutsideLibraryAdmissionBudget()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var taskQueue = $"unhandled-signal-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, new TestChatClient());
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"unhandled-signal-{Guid.NewGuid():N}";
+        var workflowId = session.GetWorkflowId(conversationId);
+        var handle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        var rawHandle = env.Client.GetWorkflowHandle(workflowId);
+
+        try
+        {
+            await session.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "Start a session")]);
+            var before = await session.GetHistoryBudgetAsync(conversationId).WaitAsync(Deadline);
+
+            await rawHandle.SignalAsync("ExternalUnmatchedSignal", Array.Empty<object?>());
+            await WaitForHistoryEventAsync(
+                rawHandle,
+                historyEvent => historyEvent.WorkflowExecutionSignaledEventAttributes?.SignalName
+                                == "ExternalUnmatchedSignal");
+
+            var after = await session.GetHistoryBudgetAsync(conversationId).WaitAsync(Deadline);
+            Assert.True(after.HistoryEventCount > before.HistoryEventCount);
+        }
+        finally
+        {
+            await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync()).WaitAsync(Deadline);
+            await handle.GetResultAsync().WaitAsync(Deadline);
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task PendingApproval_ExpiresWhenHistoryReserveIsReached()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new GatedChatClient();
+        var taskQueue = $"approval-history-reserve-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            historyEventSoftLimit: 12,
+            historyEventReserveLimit: 18,
+            maxConcurrentTurnJoiners: 16);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"approval-history-reserve-{Guid.NewGuid():N}";
+        var workflowId = session.GetWorkflowId(conversationId);
+        var handle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        var approvalRequest = new DurableApprovalRequest
+        {
+            RequestId = $"approval-{Guid.NewGuid():N}",
+            FunctionName = "review",
+            Description = "Wait for history reserve test",
+        };
+        Task<DurableApprovalDecision>? approvalTask = null;
+        Task<DurableSessionResponse>? owner = null;
+        var joiners = new List<Task<DurableSessionResponse>>();
+
+        try
+        {
+            var input = new DurableChatWorkflowInput
+            {
+                TimeToLive = TimeSpan.FromMinutes(5),
+                ActivityTimeout = TimeSpan.FromSeconds(30),
+                HeartbeatTimeout = TimeSpan.FromSeconds(10),
+                ApprovalTimeout = TimeSpan.FromMinutes(1),
+                HistoryEventSoftLimit = 12,
+                HistoryEventReserveLimit = 18,
+                ToolActivityOptions = new Dictionary<string, Temporalio.Workflows.ActivityOptions>(),
+            };
+            var start = WithStartWorkflowOperation.Create(
+                (DurableChatWorkflow workflow) => workflow.RunAsync(input),
+                new WorkflowOptions(workflowId, taskQueue)
+                {
+                    IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+                });
+            approvalTask = env.Client.ExecuteUpdateWithStartWorkflowAsync<
+                DurableChatWorkflow, DurableApprovalDecision>(
+                workflow => workflow.RequestApprovalAsync(approvalRequest),
+                new WorkflowUpdateWithStartOptions(start));
+
+            var pending = await WaitForPendingApprovalAsync(handle);
+            Assert.Equal(approvalRequest.RequestId, pending.RequestId);
+            var initialStatus = await session.GetHistoryBudgetAsync(conversationId).WaitAsync(Deadline);
+            Assert.True(initialStatus.HistoryEventCount < initialStatus.HistoryEventSoftLimit);
+
+            owner = session.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "Reserve history")],
+                requestId: "reserve-trigger");
+            var turnStart = await Task.WhenAny(model.Entered, owner).WaitAsync(Deadline);
+            if (turnStart == owner)
+            {
+                await owner;
+            }
+            await model.Entered.WaitAsync(Deadline);
+            for (var i = 0; i < 12; i++)
+            {
+                joiners.Add(session.SendAsync(
+                    conversationId,
+                    [new ChatMessage(ChatRole.User, "Reserve history")],
+                    requestId: "reserve-trigger"));
+            }
+
+            var reserveStatus = await WaitForHistoryReserveAsync(session, conversationId);
+            Assert.True(reserveStatus.IsReserveReached);
+
+            var decision = await approvalTask.WaitAsync(Deadline);
+            Assert.False(decision.Approved);
+            Assert.Equal(DurableApprovalExpirationReason.HistoryBudget, decision.ExpirationReason);
+            model.Release();
+            await owner.WaitAsync(Deadline);
+            foreach (var joiner in joiners)
+            {
+                try { await joiner.WaitAsync(Deadline); }
+                catch (WorkflowUpdateFailedException) { /* Duplicate updates can lose admission races. */ }
+            }
+        }
+        finally
+        {
+            model.Release();
+            if (approvalTask is { IsCompleted: false })
+            {
+                try
+                {
+                    await handle.ExecuteUpdateAsync(workflow => workflow.ResolveApprovalAsync(
+                        new DurableApprovalDecision
+                        {
+                            RequestId = approvalRequest.RequestId,
+                            Approved = false,
+                            Reason = "Test cleanup",
+                        })).WaitAsync(Deadline);
+                }
+                catch (Exception) { /* Preserve the original assertion failure. */ }
+                try { await approvalTask.WaitAsync(Deadline); }
+                catch (Exception) { /* Drain the pending update. */ }
+            }
+            try
+            {
+                await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync()).WaitAsync(Deadline);
+                await handle.GetResultAsync().WaitAsync(Deadline);
+            }
+            catch (Exception) { /* Preserve the original assertion failure. */ }
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task MatchingTurnJoiners_AreCappedBeforeUpdateAcceptance()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new GatedChatClient();
+        var taskQueue = $"turn-joiner-cap-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            maxConcurrentTurnJoiners: 1);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"turn-joiner-cap-{Guid.NewGuid():N}";
+        var handle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+            session.GetWorkflowId(conversationId));
+        Task<DurableSessionResponse>? joined = null;
+        Task<DurableSessionResponse>? owner = null;
+
+        try
+        {
+            owner = session.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "one logical turn")],
+                requestId: "bounded-joiner");
+            await model.Entered.WaitAsync(Deadline);
+            joined = session.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "one logical turn")],
+                requestId: "bounded-joiner");
+
+            var joiners = await WaitForJoinerCountAsync(session, conversationId, 1);
+            Assert.Equal(1, joiners);
+            var acceptedUpdatesBeforeRejection = await CountAcceptedUpdatesAsync(handle);
+            var rejected = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                session.SendAsync(
+                    conversationId,
+                    [new ChatMessage(ChatRole.User, "one logical turn")],
+                    requestId: "bounded-joiner"));
+            Assert.Contains("joiner limit", rejected.InnerException?.Message ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(acceptedUpdatesBeforeRejection, await CountAcceptedUpdatesAsync(handle));
+
+            model.Release();
+            var results = await Task.WhenAll(owner, joined).WaitAsync(Deadline);
+            Assert.Equal(results[0].RequestId, results[1].RequestId);
+            Assert.Equal(1, model.Calls);
+        }
+        finally
+        {
+            model.Release();
+            if (owner is not null)
+            {
+                try { await owner.WaitAsync(Deadline); } catch (Exception) { }
+            }
+            if (joined is not null)
+            {
+                try { await joined.WaitAsync(Deadline); } catch (Exception) { }
+            }
+            try
+            {
+                await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+                await handle.GetResultAsync().WaitAsync(Deadline);
+            }
+            catch (Exception) { /* Preserve the original assertion failure. */ }
             await host.StopAsync();
         }
     }
@@ -590,7 +881,7 @@ public class DurableChatLifecycleRegressionTests
             Assert.NotNull(await handle.QueryAsync<DurableChatWorkflow, string>(
                 wf => wf.GetSessionEpoch()).WaitAsync(Deadline));
 
-            await handle.SignalAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+            await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
             await handle.GetResultAsync().WaitAsync(Deadline);
         }
         finally
@@ -651,7 +942,7 @@ public class DurableChatLifecycleRegressionTests
                 expectedSessionEpoch: newEpoch).WaitAsync(Deadline);
             Assert.Equal(callsBeforeStaleRequest + 1, model.CallCount);
 
-            await handle.SignalAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+            await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
             await handle.GetResultAsync().WaitAsync(Deadline);
             currentRunCompleted = true;
         }
@@ -661,7 +952,7 @@ public class DurableChatLifecycleRegressionTests
             {
                 try
                 {
-                    await handle.SignalAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+                    await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
                     await handle.GetResultAsync().WaitAsync(Deadline);
                 }
                 catch (Exception) { /* Preserve the original assertion failure. */ }
@@ -691,10 +982,14 @@ public class DurableChatLifecycleRegressionTests
             await WaitForHistoryEventAsync(handle,
                 e => e.WorkflowExecutionUpdateAcceptedEventAttributes is not null);
 
-            await handle.SignalAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
-            // A signal-written event alone does not prove the workflow has processed it:
-            // require a subsequently completed workflow task while the model stays gated.
-            await WaitForProcessedShutdownAsync(handle);
+            await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+            var acceptedUpdatesBeforeRetry = await CountAcceptedUpdatesAsync(handle);
+            var repeatedShutdown = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()));
+            Assert.Contains("already been requested",
+                repeatedShutdown.InnerException?.Message ?? string.Empty,
+                StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(acceptedUpdatesBeforeRetry, await CountAcceptedUpdatesAsync(handle));
             model.Release();
 
             var response = await pending.WaitAsync(Deadline);
@@ -726,7 +1021,10 @@ public class DurableChatLifecycleRegressionTests
         int maxTerminalOutcomeCount = 128,
         int maxTerminalOutcomeBytes = 1024 * 1024,
         TimeSpan? sessionTimeToLive = null,
-        int maximumTransportPayloadSizeBytes = 1024 * 1024)
+        int maximumTransportPayloadSizeBytes = 1024 * 1024,
+        int historyEventSoftLimit = 40_000,
+        int historyEventReserveLimit = 45_000,
+        int maxConcurrentTurnJoiners = 32)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
@@ -737,6 +1035,9 @@ public class DurableChatLifecycleRegressionTests
             options.MaxTerminalOutcomeCount = maxTerminalOutcomeCount;
             options.MaxTerminalOutcomeBytes = maxTerminalOutcomeBytes;
             options.MaximumTransportPayloadSizeBytes = maximumTransportPayloadSizeBytes;
+            options.HistoryEventSoftLimit = historyEventSoftLimit;
+            options.HistoryEventReserveLimit = historyEventReserveLimit;
+            options.MaxConcurrentTurnJoiners = maxConcurrentTurnJoiners;
             options.ActivityTimeout = TimeSpan.FromSeconds(60);
             options.SessionTimeToLive = sessionTimeToLive ?? TimeSpan.FromMinutes(5);
             options.DefaultHistoryReducerKey = reducerKey;
@@ -781,6 +1082,62 @@ public class DurableChatLifecycleRegressionTests
         return count;
     }
 
+    private static async Task<DurableApprovalRequest> WaitForPendingApprovalAsync(
+        WorkflowHandle<DurableChatWorkflow> handle)
+    {
+        var until = DateTime.UtcNow + Deadline;
+        while (DateTime.UtcNow < until)
+        {
+            try
+            {
+                var pending = await handle.QueryAsync(workflow => workflow.GetPendingApproval())
+                    .WaitAsync(Deadline);
+                if (pending is not null)
+                    return pending;
+            }
+            catch (RpcException exception) when (exception.Code == RpcException.StatusCode.NotFound)
+            {
+                // Update-with-start may not have created the workflow yet.
+            }
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+        throw new TimeoutException("Approval request did not become pending.");
+    }
+
+    private static async Task<int> WaitForJoinerCountAsync(
+        DurableChatSessionClient session,
+        string conversationId,
+        int expectedCount)
+    {
+        var until = DateTime.UtcNow + Deadline;
+        DurableChatHistoryBudgetStatus? latest = null;
+        while (DateTime.UtcNow < until)
+        {
+            latest = await session.GetHistoryBudgetAsync(conversationId).WaitAsync(Deadline);
+            if (latest.ConcurrentTurnJoiners == expectedCount)
+                return latest.ConcurrentTurnJoiners;
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+        throw new TimeoutException(
+            $"Expected {expectedCount} active turn joiner(s); observed {latest?.ConcurrentTurnJoiners}. " +
+            $"History events: {latest?.HistoryEventCount}; reserve: {latest?.HistoryEventReserveLimit}.");
+    }
+
+    private static async Task<DurableChatHistoryBudgetStatus> WaitForHistoryReserveAsync(
+        DurableChatSessionClient session,
+        string conversationId)
+    {
+        var until = DateTime.UtcNow + Deadline;
+        while (DateTime.UtcNow < until)
+        {
+            var status = await session.GetHistoryBudgetAsync(conversationId).WaitAsync(Deadline);
+            if (status.IsReserveReached)
+                return status;
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+        throw new TimeoutException("Workflow history did not reach the approval reserve.");
+    }
+
     private static async Task<string> WaitForNewRunAsync(
         WorkflowHandle handle, string oldRunId)
     {
@@ -792,29 +1149,6 @@ public class DurableChatLifecycleRegressionTests
             await Task.Delay(TimeSpan.FromMilliseconds(75));
         }
         throw new TimeoutException("Continue-as-new did not create a new run.");
-    }
-
-    private static async Task WaitForProcessedShutdownAsync(WorkflowHandle handle)
-    {
-        var until = DateTime.UtcNow + Deadline;
-        while (DateTime.UtcNow < until)
-        {
-            long signalEventId = 0;
-            long completedTaskAfterSignal = 0;
-            await foreach (var ev in handle.FetchHistoryEventsAsync())
-            {
-                if (ev.WorkflowExecutionSignaledEventAttributes is not null)
-                    signalEventId = ev.EventId;
-                if (signalEventId > 0 &&
-                    ev.EventId > signalEventId &&
-                    ev.WorkflowTaskCompletedEventAttributes is not null)
-                    completedTaskAfterSignal = ev.EventId;
-            }
-            if (completedTaskAfterSignal > signalEventId && signalEventId > 0)
-                return;
-            await Task.Delay(TimeSpan.FromMilliseconds(75));
-        }
-        throw new TimeoutException("Shutdown signal was not processed by a completed workflow task.");
     }
 
     private sealed class GatedChatClient : IChatClient

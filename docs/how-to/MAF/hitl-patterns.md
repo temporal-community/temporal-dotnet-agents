@@ -261,8 +261,7 @@ while (!turn.IsCompleted)
         },
         cancellationToken);
 
-    if (resolution.Status is not (DurableApprovalResolutionStatus.Accepted
-                              or DurableApprovalResolutionStatus.AlreadyResolved))
+    if (resolution.Status is not DurableApprovalResolutionStatus.Accepted)
     {
         throw new InvalidOperationException(
             $"Approval was not accepted: {resolution.Status}.");
@@ -274,9 +273,10 @@ var response = await turn;
 
 `GetPendingApprovalAsync` is a workflow query: it never blocks and adds no history, so poll freely.
 
-Resolution is retry-safe, but the equivalence check compares **both** `Approved` and `Reason` as
-exact strings — resubmitting the same decision with re-typed reason text returns `Conflict`, not
-`AlreadyResolved`. A reviewer UI must handle all five statuses; they are defined in
+Only a matching pending decision is accepted. Unknown, mismatched, already-resolved, or conflicting
+decisions fail update validation before Temporal records them. After an ambiguous RPC result, inspect
+the pending request and reconcile through application-owned review state; do not assume retrying
+the update will return the original result. The result/status types are defined in
 [Durable approvals](../../concepts/durable-approvals.md#one-call-decisions).
 
 ### What the reviewer can be shown

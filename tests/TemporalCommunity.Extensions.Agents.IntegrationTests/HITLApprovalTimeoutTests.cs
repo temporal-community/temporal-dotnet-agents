@@ -121,24 +121,27 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
                 wf => wf.GetPendingApproval());
             Assert.Null(pending);
 
-            // Timeout decisions are retained, so identical retries are idempotent.
-            var timeoutRetry = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-                wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
-                {
-                    RequestId = decision.RequestId,
-                    Approved = false,
-                    Reason = decision.Reason,
-                }));
-            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, timeoutRetry.Status);
+            await AssertRejectedWithoutAcceptanceAsync(
+                handle,
+                () => handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                    wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
+                    {
+                        RequestId = decision.RequestId,
+                        Approved = false,
+                        Reason = decision.Reason,
+                    })),
+                DurableApprovalMixin.ResolutionAlreadyResolvedErrorType);
 
-            var timeoutConflict = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-                wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
-                {
-                    RequestId = decision.RequestId,
-                    Approved = true,
-                    Reason = decision.Reason,
-                }));
-            Assert.Equal(DurableApprovalResolutionStatus.Conflict, timeoutConflict.Status);
+            await AssertRejectedWithoutAcceptanceAsync(
+                handle,
+                () => handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                    wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
+                    {
+                        RequestId = decision.RequestId,
+                        Approved = true,
+                        Reason = decision.Reason,
+                    })),
+                DurableApprovalMixin.ResolutionConflictErrorType);
         }
         finally
         {
@@ -147,7 +150,7 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
     }
 
     [Fact]
-    public async Task ResolveApproval_RetryAndConflict_ReturnExpectedStatuses()
+    public async Task ResolveApproval_RetryAndConflict_AreRejectedBeforeAcceptance()
     {
         // Verify the happy path still works: approval submitted before timeout elapses.
         var taskQueue = $"hitl-approve-{Guid.NewGuid():N}";
@@ -202,29 +205,33 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
             Assert.Equal(approvalRequest.RequestId, decision.RequestId);
             Assert.Equal("Looks good!", decision.Reason);
 
-            // The same decision is retry-safe; a changed decision conflicts.
-            var typedRetry = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-                wf => wf.ResolveApprovalAsync(approvalDecision));
-            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, typedRetry.Status);
+            await AssertRejectedWithoutAcceptanceAsync(
+                handle,
+                () => handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                    wf => wf.ResolveApprovalAsync(approvalDecision)),
+                DurableApprovalMixin.ResolutionAlreadyResolvedErrorType);
 
-            var changedScope = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-                wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
-                {
-                    RequestId = approvalRequest.RequestId,
-                    Approved = false,
-                    Reason = "Looks good!",
-                }));
-            Assert.Equal(DurableApprovalResolutionStatus.Conflict, changedScope.Status);
+            await AssertRejectedWithoutAcceptanceAsync(
+                handle,
+                () => handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                    wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
+                    {
+                        RequestId = approvalRequest.RequestId,
+                        Approved = false,
+                        Reason = "Looks good!",
+                    })),
+                DurableApprovalMixin.ResolutionConflictErrorType);
 
-            // Shared dashboards can retry the same core decision.
-            var genericRetry = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-                wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
-                {
-                    RequestId = approvalRequest.RequestId,
-                    Approved = true,
-                    Reason = "Looks good!",
-                }));
-            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, genericRetry.Status);
+            await AssertRejectedWithoutAcceptanceAsync(
+                handle,
+                () => handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                    wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
+                    {
+                        RequestId = approvalRequest.RequestId,
+                        Approved = true,
+                        Reason = "Looks good!",
+                    })),
+                DurableApprovalMixin.ResolutionAlreadyResolvedErrorType);
 
             // Resolve a second request through the same shared endpoint.
             var genericFirstRequest = new DurableApprovalRequest
@@ -246,23 +253,27 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
             Assert.Equal(DurableApprovalResolutionStatus.Accepted, genericAccepted.Status);
             await genericFirstTask;
 
-            var typedAfterGeneric = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-                wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
-                {
-                    RequestId = genericFirstRequest.RequestId,
-                    Approved = true,
-                    Reason = "Approved generically.",
-                }));
-            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, typedAfterGeneric.Status);
+            await AssertRejectedWithoutAcceptanceAsync(
+                handle,
+                () => handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                    wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
+                    {
+                        RequestId = genericFirstRequest.RequestId,
+                        Approved = true,
+                        Reason = "Approved generically.",
+                    })),
+                DurableApprovalMixin.ResolutionAlreadyResolvedErrorType);
 
-            var typedScopeAfterGeneric = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-                wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
-                {
-                    RequestId = genericFirstRequest.RequestId,
-                    Approved = false,
-                    Reason = "Approved generically.",
-                }));
-            Assert.Equal(DurableApprovalResolutionStatus.Conflict, typedScopeAfterGeneric.Status);
+            await AssertRejectedWithoutAcceptanceAsync(
+                handle,
+                () => handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
+                    wf => wf.ResolveApprovalAsync(new DurableApprovalDecision
+                    {
+                        RequestId = genericFirstRequest.RequestId,
+                        Approved = false,
+                        Reason = "Approved generically.",
+                    })),
+                DurableApprovalMixin.ResolutionConflictErrorType);
 
             _output.WriteLine("Shared approval retry statuses verified.");
         }
@@ -278,6 +289,31 @@ public class HITLApprovalTimeoutTests : IClassFixture<IntegrationTestFixture>
         await foreach (var historyEvent in handle.FetchHistoryEventsAsync())
         {
             if (historyEvent.EventType == EventType.ActivityTaskScheduled)
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static async Task AssertRejectedWithoutAcceptanceAsync(
+        WorkflowHandle<AgentWorkflow> handle,
+        Func<Task<DurableApprovalResolutionResult>> update,
+        string expectedErrorType)
+    {
+        var acceptedBefore = await CountAcceptedUpdatesAsync(handle);
+        var failure = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(update);
+        var applicationFailure = Assert.IsType<ApplicationFailureException>(failure.InnerException);
+        Assert.Equal(expectedErrorType, applicationFailure.ErrorType);
+        Assert.Equal(acceptedBefore, await CountAcceptedUpdatesAsync(handle));
+    }
+
+    private static async Task<int> CountAcceptedUpdatesAsync(WorkflowHandle<AgentWorkflow> handle)
+    {
+        var count = 0;
+        await foreach (var historyEvent in handle.FetchHistoryEventsAsync())
+        {
+            if (historyEvent.EventType == EventType.WorkflowExecutionUpdateAccepted)
             {
                 count++;
             }

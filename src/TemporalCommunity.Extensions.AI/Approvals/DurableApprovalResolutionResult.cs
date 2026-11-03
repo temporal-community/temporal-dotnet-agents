@@ -1,7 +1,7 @@
 namespace TemporalCommunity.Extensions.AI.Approvals;
 
 /// <summary>
-/// Describes the outcome of resolving a durable approval request.
+/// Describes an accepted resolution of a durable approval request.
 /// </summary>
 public sealed class DurableApprovalResolutionResult
 {
@@ -13,14 +13,16 @@ public sealed class DurableApprovalResolutionResult
 }
 
 /// <summary>
-/// Outcomes returned when a reviewer resolves a durable approval request.
+/// Resolution classifications. Supported workflow-update APIs accept only a matching pending
+/// decision; non-progressing classifications are rejected by the update validator before
+/// acceptance rather than returned as successful update results.
 /// </summary>
 public enum DurableApprovalResolutionStatus
 {
     /// <summary>The decision was accepted for the currently pending request.</summary>
     Accepted,
 
-    /// <summary>The same decision was already accepted and the retry is safe.</summary>
+    /// <summary>The request was already resolved; a repeated workflow update is rejected.</summary>
     AlreadyResolved,
 
     /// <summary>No pending or retained approval request has the supplied request ID.</summary>

@@ -125,7 +125,7 @@ public class ExtensibleDurableTurnIntegrationTests
         Assert.Equal(["first_tool"], firstCall.Options!.Tools!.Select(tool => tool.Name));
         Assert.Equal(["second_tool"], secondCall.Options!.Tools!.Select(tool => tool.Name));
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -230,7 +230,7 @@ public class ExtensibleDurableTurnIntegrationTests
                 handle,
                 InvokeFunctionActivity));
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -277,7 +277,7 @@ public class ExtensibleDurableTurnIntegrationTests
             1,
             await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -315,7 +315,7 @@ public class ExtensibleDurableTurnIntegrationTests
             workflow => workflow.GetHistory());
         Assert.Empty(history);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -362,7 +362,7 @@ public class ExtensibleDurableTurnIntegrationTests
             1,
             await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -416,7 +416,7 @@ public class ExtensibleDurableTurnIntegrationTests
             entry => Assert.IsType<DurableSessionRequest>(entry),
             entry => Assert.IsType<DurableSessionResponse>(entry));
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -514,7 +514,7 @@ public class ExtensibleDurableTurnIntegrationTests
             2,
             await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -557,7 +557,7 @@ public class ExtensibleDurableTurnIntegrationTests
         Assert.Single(secondAttempt.Select(entry => entry.ScopeId).Distinct());
         Assert.NotEqual(firstAttempt[0].ScopeId, secondAttempt[0].ScopeId);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -598,7 +598,7 @@ public class ExtensibleDurableTurnIntegrationTests
             1,
             await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -684,7 +684,7 @@ public class ExtensibleDurableTurnIntegrationTests
         Assert.Equal(DurableApprovalResolutionStatus.Accepted, resolution.Status);
         Assert.Equal(DurableTurnCompletionReason.FinalResponse, result.CompletionReason);
         Assert.Single(observations);
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -716,7 +716,7 @@ public class ExtensibleDurableTurnIntegrationTests
             chatClient.Calls[1].Messages
                 .SelectMany(message => message.Contents.OfType<FunctionResultContent>())
                 .Select(content => content.Result?.ToString()));
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
         return new InterceptorOutcome(observations.ToArray(), secondModelInput);
     }

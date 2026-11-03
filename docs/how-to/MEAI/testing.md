@@ -109,9 +109,9 @@ expected-epoch restart behavior are covered by the Phase 2.4 lifecycle tests. Ap
 and complete MEAI dispatch (1.4/3.2) remain later-unit acceptance work; Phase 0 does not add
 placeholder passing tests for them.
 
-The target session declares **no signal handlers**. Current `Shutdown` is replaced by validated
-`RequestShutdown` in **2.6**, including both clients, samples, smoke tests, integration tests, and
-documentation; `ShutdownSignalName` is removed there, not during Phase 0.
+Session shutdown and queued fire-and-forget turns use validated updates. Session workflows declare
+no signal handlers, and tests cover update validation and shutdown draining without relying on
+signal events.
 
 ### Deterministic doubles and isolated environments
 

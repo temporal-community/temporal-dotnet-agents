@@ -23,6 +23,7 @@ using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
+using Temporalio.Exceptions;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -185,14 +186,21 @@ while (!agentTask.IsCompleted)
 
     // The reason explains the decision; it must never carry reviewer credentials or roles.
     // The external approval console authenticates reviewers, and the write tool must still
-    // authorize the effect against current state.
-    var duplicate = await agentClient.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
+    // authorize the effect against current state. A duplicate decision is rejected before acceptance.
+    try
     {
-        RequestId = pending.RequestId,
-        Approved = true,
-        Reason = "Demo auto-approve",
-    });
-    Console.WriteLine($"[Duplicate resolution: {duplicate.Status}]");
+        await agentClient.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
+        {
+            RequestId = pending.RequestId,
+            Approved = true,
+            Reason = "Demo auto-approve",
+        });
+        Console.WriteLine("[Duplicate resolution unexpectedly accepted]");
+    }
+    catch (WorkflowUpdateFailedException)
+    {
+        Console.WriteLine("[Duplicate resolution rejected before acceptance]");
+    }
 
     // Break so we don't loop and re-approve after the tool has already run.
     break;

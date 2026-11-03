@@ -20,13 +20,6 @@ namespace TemporalCommunity.Extensions.AI;
 /// <typeparam name="TOutput">The type returned from each completed chat turn.</typeparam>
 public abstract partial class DurableChatWorkflowBase<TOutput>
 {
-    /// <summary>
-    /// The name of the workflow signal used to request graceful shutdown of a session.
-    /// Use this constant when signalling shutdown externally rather than hard-coding the
-    /// string <c>"Shutdown"</c> — keeping caller and handler in sync if the name ever changes.
-    /// </summary>
-    /// <seealso cref="IDurableChatSessionClient.ShutdownAsync"/>
-    public const string ShutdownSignalName = "Shutdown";
     private List<DurableSessionEntry> _history = new(16);
     private readonly DurableApprovalMixin _approvalMixin = new();
     private readonly Dictionary<string, TurnExecutionRecord> _terminalTurns =
@@ -50,6 +43,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         public string RequestId { get; } = requestId;
 
         public string AdmissionFingerprint { get; } = admissionFingerprint;
+
+        public int JoinerCount { get; set; }
 
         public string? TurnInputFingerprint { get; set; }
 
@@ -77,18 +72,26 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     {
         internal object RecordState { get; }
 
-        private TurnAdmission(object recordState, string requestId, bool isOwner)
+        private TurnAdmission(object recordState, string requestId, bool isOwner, bool isJoiner)
         {
             RecordState = recordState;
             RequestId = requestId;
             IsOwner = isOwner;
+            IsJoiner = isJoiner;
         }
 
-        internal static TurnAdmission Create(object recordState, string requestId, bool isOwner) =>
-            new(recordState, requestId, isOwner);
+        internal static TurnAdmission Create(
+            object recordState,
+            string requestId,
+            bool isOwner,
+            bool isJoiner = false) =>
+            new(recordState, requestId, isOwner, isJoiner);
 
         /// <summary>Whether this handler owns execution of the admitted turn.</summary>
         public bool IsOwner { get; }
+
+        /// <summary>Whether this handler occupies a concurrent joiner slot.</summary>
+        internal bool IsJoiner { get; }
 
         /// <summary>The logical request ID associated with this admission.</summary>
         public string RequestId { get; }
@@ -124,6 +127,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         ArgumentNullException.ThrowIfNull(input);
         var firstInitialization = Input is null;
         ValidateTerminalOutcomeLimits(input);
+        ValidateHistoryBudgetLimits(input);
         var sessionEpoch = input.SessionEpoch ?? Input?.SessionEpoch;
         if (sessionEpoch is null)
         {
@@ -255,7 +259,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     }
 
     /// <summary>
-    /// Returns <see langword="true"/> once a <c>Shutdown</c> signal has been received.
+    /// Returns <see langword="true"/> once a shutdown update has been accepted.
     /// Subclass update validators can use this to reject new turns after shutdown.
     /// </summary>
     protected bool IsShutdownRequested => _shutdownRequested;
@@ -562,6 +566,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             {
                 conditionMet = await Workflow.WaitConditionAsync(
                     () => _shutdownRequested
+                          || IsHistoryAdmissionRestricted
                           || (!_isProcessing && Workflow.ContinueAsNewSuggested)
                           || (!_isProcessing && _history.Count >= input.MaxEntryCount)
                           || _sessionIdleDeadline != waitingDeadline,
@@ -570,7 +575,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
             var canContinueAsNew = !_isProcessing
                                    && (Workflow.ContinueAsNewSuggested
-                                       || _history.Count >= input.MaxEntryCount);
+                                       || _history.Count >= input.MaxEntryCount
+                                       || IsHistoryAdmissionRestricted);
             if (conditionMet
                 && _sessionIdleDeadline != waitingDeadline
                 && !_shutdownRequested
@@ -597,7 +603,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             _sessionAdmissionClosed = false;
         }
 
-        if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount) && !_shutdownRequested)
+        if ((Workflow.ContinueAsNewSuggested
+             || _history.Count >= input.MaxEntryCount
+             || IsHistoryAdmissionRestricted)
+            && !_shutdownRequested)
         {
             // Reducer selection:
             //
@@ -632,13 +641,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             // The reducer can yield while another admitted turn completes. Stop accepting new
             // turns, drain those already admitted, then reduce again until history is stable.
             // Patching keeps the old command sequence for histories recorded before this fix.
+            _sessionAdmissionClosed = true;
+            _continueAsNewPending = true;
             var drainBeforeSnapshot = Workflow.Patched("meai-can-drain-before-snapshot");
             DurableChatWorkflowInput? carriedInput = null;
-            if (drainBeforeSnapshot)
-            {
-                _continueAsNewPending = true;
-            }
-            else
+            if (!drainBeforeSnapshot)
             {
                 // Preserve the original snapshot timing when replaying pre-patch histories.
                 carriedInput = CreateContinueAsNewInput(
@@ -812,18 +819,25 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(admissionFingerprint);
 
-        if (_sessionAdmissionClosed)
-        {
-            throw TurnAdmissionFailure(
-                "The session is idle-expiring and no longer admits new turns.",
-                "DurableSessionAdmissionClosed");
-        }
-
         if (requestId is not null
             && _terminalTurns.TryGetValue(requestId, out var terminal))
         {
             EnsureAdmissionFingerprint(terminal, requestId, admissionFingerprint);
             return;
+        }
+
+        var matchesActiveTurn = _activeTurn is not null
+                                && string.Equals(requestId, _activeTurn.RequestId, StringComparison.Ordinal);
+        if (_sessionAdmissionClosed && !matchesActiveTurn)
+        {
+            throw TurnAdmissionFailure(
+                "The session is closing admission and no longer accepts new turns.",
+                "DurableSessionAdmissionClosed");
+        }
+
+        if (IsHistoryAdmissionRestricted && !matchesActiveTurn)
+        {
+            throw HistoryBudgetFailure();
         }
 
         if (_activeTurn is null)
@@ -839,6 +853,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         }
 
         EnsureAdmissionFingerprint(_activeTurn, requestId, admissionFingerprint);
+        if (_activeTurn.JoinerCount >= (Input?.MaxConcurrentTurnJoiners ?? 32))
+        {
+            throw PendingJoinerFailure();
+        }
     }
 
     /// <summary>
@@ -902,13 +920,73 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         if (_activeTurn is { } active)
         {
-            return TurnAdmission.Create(active, requestId, isOwner: false);
+            active.JoinerCount++;
+            return TurnAdmission.Create(active, requestId, isOwner: false, isJoiner: true);
         }
 
         var record = new TurnExecutionRecord(requestId, admissionFingerprint);
         _activeTurn = record;
         _isProcessing = true;
         return TurnAdmission.Create(record, requestId, isOwner: true);
+    }
+
+    /// <summary>
+    /// Reconciles an early update admission after workflow input has initialized. An update-with-
+    /// start may reserve a request before a Continue-as-New ledger is restored.
+    /// </summary>
+    protected TurnAdmission RefreshTurnAdmission(
+        TurnAdmission admission,
+        string requestId,
+        string admissionFingerprint)
+    {
+        ArgumentNullException.ThrowIfNull(admission);
+        if (!_terminalTurns.TryGetValue(requestId, out var terminal))
+        {
+            return admission;
+        }
+
+        var current = GetTurnRecord(admission);
+        if (!string.Equals(
+            terminal.AdmissionFingerprint,
+            admissionFingerprint,
+            StringComparison.Ordinal))
+        {
+            RejectTurnAdmission(
+                admission,
+                TurnAdmissionFailure(
+                    $"Request ID '{requestId}' was already used with different effect-bearing input.",
+                    "DurableTurnConflict"));
+            throw TurnAdmissionFailure(
+                $"Request ID '{requestId}' was already used with different effect-bearing input.",
+                "DurableTurnConflict");
+        }
+
+        if (admission.IsOwner && ReferenceEquals(_activeTurn, current))
+        {
+            _activeTurn = null;
+            _isProcessing = false;
+        }
+        else if (admission.IsJoiner && current.JoinerCount > 0)
+        {
+            current.JoinerCount--;
+        }
+
+        return TurnAdmission.Create(terminal, requestId, isOwner: false);
+    }
+
+    /// <summary>
+    /// Applies initialization-dependent restrictions to a turn admitted by update-with-start
+    /// before the workflow input was available to its validator.
+    /// </summary>
+    protected void ValidateInitializedTurnAdmission(TurnAdmission admission)
+    {
+        ArgumentNullException.ThrowIfNull(admission);
+        if (admission.IsOwner && IsHistoryAdmissionRestricted)
+        {
+            var failure = HistoryBudgetFailure();
+            RejectTurnAdmission(admission, failure);
+            throw failure;
+        }
     }
 
     /// <summary>
@@ -954,18 +1032,28 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     {
         ArgumentNullException.ThrowIfNull(admission);
         RenewSessionIdleDeadline();
-        await Workflow.WaitConditionAsync(() => GetTurnRecord(admission).IsTerminal).ConfigureAwait(true);
-
-        var record = GetTurnRecord(admission);
-        if (record.Failure is { } failure)
+        try
         {
-            throw new ApplicationFailureException(
-                failure.Message,
-                errorType: failure.ErrorType,
-                nonRetryable: failure.NonRetryable);
-        }
+            await Workflow.WaitConditionAsync(() => GetTurnRecord(admission).IsTerminal).ConfigureAwait(true);
 
-        return (record.Output!, record.ResponseEntry!);
+            var record = GetTurnRecord(admission);
+            if (record.Failure is { } failure)
+            {
+                throw new ApplicationFailureException(
+                    failure.Message,
+                    errorType: failure.ErrorType,
+                    nonRetryable: failure.NonRetryable);
+            }
+
+            return (record.Output!, record.ResponseEntry!);
+        }
+        finally
+        {
+            if (admission.IsJoiner && GetTurnRecord(admission).JoinerCount > 0)
+            {
+                GetTurnRecord(admission).JoinerCount--;
+            }
+        }
     }
 
     /// <summary>
@@ -980,7 +1068,33 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             return;
         }
 
-        CompleteTurnFailure(GetTurnRecord(admission), exception);
+        var record = GetTurnRecord(admission);
+        if (exception is ApplicationFailureException
+            {
+                ErrorType: Exceptions.DurableChatSessionEpochMismatchException.ErrorType,
+            })
+        {
+            RejectTurnAdmission(admission, exception);
+            return;
+        }
+
+        CompleteTurnFailure(record, exception);
+    }
+
+    private void RejectTurnAdmission(TurnAdmission admission, Exception exception)
+    {
+        var record = GetTurnRecord(admission);
+        var errorType = exception is ApplicationFailureException failure
+            ? failure.ErrorType ?? "DurableTurnRejected"
+            : exception.GetType().FullName ?? exception.GetType().Name;
+        var nonRetryable = exception is ApplicationFailureException { NonRetryable: true };
+        record.Failure = new TurnFailure(errorType, exception.Message, nonRetryable);
+        record.IsTerminal = true;
+        if (ReferenceEquals(_activeTurn, record))
+        {
+            _activeTurn = null;
+        }
+        _isProcessing = false;
     }
 
     private static TurnExecutionRecord GetTurnRecord(TurnAdmission admission) =>
@@ -1016,6 +1130,53 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 $"{nameof(input.MaxTerminalOutcomeBytes)} must be positive.");
         }
     }
+
+    private static void ValidateHistoryBudgetLimits(DurableChatWorkflowInput input)
+    {
+        if (input.HistoryEventSoftLimit <= 0
+            || input.HistoryEventReserveLimit <= input.HistoryEventSoftLimit)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(input.HistoryEventSoftLimit)} must be positive and smaller than " +
+                $"{nameof(input.HistoryEventReserveLimit)}.");
+        }
+
+        if (input.HistorySizeSoftLimitBytes <= 0
+            || input.HistorySizeReserveLimitBytes <= input.HistorySizeSoftLimitBytes)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(input.HistorySizeSoftLimitBytes)} must be positive and smaller than " +
+                $"{nameof(input.HistorySizeReserveLimitBytes)}.");
+        }
+
+        if (input.MaxConcurrentTurnJoiners <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(input.MaxConcurrentTurnJoiners)} must be positive.");
+        }
+    }
+
+    private bool IsHistoryAdmissionRestricted =>
+        Input is { } input
+        && (Workflow.CurrentHistoryLength >= input.HistoryEventSoftLimit
+            || Workflow.CurrentHistorySize >= input.HistorySizeSoftLimitBytes);
+
+    private bool IsHistoryReserveReached =>
+        Input is { } input
+        && (Workflow.CurrentHistoryLength >= input.HistoryEventReserveLimit
+            || Workflow.CurrentHistorySize >= input.HistorySizeReserveLimitBytes);
+
+    private static ApplicationFailureException HistoryBudgetFailure() =>
+        new(
+            "The workflow history budget is restricting admission. Retry after the session continues as new.",
+            errorType: "DurableHistoryBudgetBlocked",
+            nonRetryable: true);
+
+    private static ApplicationFailureException PendingJoinerFailure() =>
+        new(
+            "The active turn has reached its concurrent joiner limit. Observe the request status and retry later.",
+            errorType: "DurableTurnPending",
+            nonRetryable: true);
 
     private void RestoreTerminalTurnOutcomes(
         IReadOnlyList<Internal.DurableTerminalTurnOutcome>? outcomes)
@@ -1357,15 +1518,52 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     [WorkflowQuery("GetCompletedTurnCount")]
     public int GetCompletedTurnCount() => _turnCount;
 
-    // ── Signals ─────────────────────────────────────────────────────────────
+    /// <summary>Returns current Temporal event-history usage and admission thresholds.</summary>
+    [WorkflowQuery("GetHistoryBudget")]
+    public DurableChatHistoryBudgetStatus GetHistoryBudget()
+    {
+        var input = RequiredInput;
+        var eventCount = Workflow.CurrentHistoryLength;
+        var sizeBytes = Workflow.CurrentHistorySize;
+        return new DurableChatHistoryBudgetStatus
+        {
+            HistoryEventCount = eventCount,
+            HistorySizeBytes = sizeBytes,
+            IsAdmissionRestricted = eventCount >= input.HistoryEventSoftLimit
+                                   || sizeBytes >= input.HistorySizeSoftLimitBytes,
+            IsReserveReached = eventCount >= input.HistoryEventReserveLimit
+                               || sizeBytes >= input.HistorySizeReserveLimitBytes,
+            HistoryEventSoftLimit = input.HistoryEventSoftLimit,
+            HistoryEventReserveLimit = input.HistoryEventReserveLimit,
+            HistorySizeSoftLimitBytes = input.HistorySizeSoftLimitBytes,
+            HistorySizeReserveLimitBytes = input.HistorySizeReserveLimitBytes,
+            MaxConcurrentTurnJoiners = input.MaxConcurrentTurnJoiners,
+            ConcurrentTurnJoiners = _activeTurn?.JoinerCount ?? 0,
+        };
+    }
+
+    // ── Updates ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Requests graceful shutdown of this session.
+    /// Validates and requests graceful shutdown of this session.
     /// </summary>
-    [WorkflowSignal(ShutdownSignalName)]
+    [WorkflowUpdateValidator(nameof(RequestShutdownAsync))]
+    public void ValidateRequestShutdown()
+    {
+        if (_shutdownRequested)
+        {
+            throw new ApplicationFailureException(
+                "Shutdown has already been requested.",
+                errorType: "DurableSessionShutdownAlreadyRequested",
+                nonRetryable: true);
+        }
+    }
+
+    [WorkflowUpdate("RequestShutdown")]
     public Task RequestShutdownAsync()
     {
         _shutdownRequested = true;
+        _sessionAdmissionClosed = true;
         return Task.CompletedTask;
     }
 
@@ -1393,6 +1591,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 Input.PayloadCodecExpansionAllowanceBytes,
                 "approval update input");
         }
+        if (IsHistoryAdmissionRestricted && _activeTurn is null)
+        {
+            throw HistoryBudgetFailure();
+        }
         _approvalMixin.ValidateRequestApproval(request);
     }
 
@@ -1400,6 +1602,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     public async Task<DurableApprovalDecision> RequestApprovalAsync(DurableApprovalRequest request)
     {
         var input = await WaitForInputAsync().ConfigureAwait(true);
+        ValidateRequestApproval(request);
         if (input.EnableTransportPayloadGuard)
         {
             Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
@@ -1417,7 +1620,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 Workflow.Info.WorkflowId, req.RequestId, req.Description ?? req.RequestId),
             onResolved: d => Workflow.Logger.LogInformation(
                 "[{ConversationId}] Approval resolved (RequestId: {RequestId}, Approved: {Approved})",
-                Workflow.Info.WorkflowId, d.RequestId, d.Approved));
+                Workflow.Info.WorkflowId, d.RequestId, d.Approved),
+            historyBudgetReserveReached: () => IsHistoryReserveReached);
 
         if (input.EnableTransportPayloadGuard)
         {
@@ -1435,6 +1639,27 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// <summary>
     /// Resolves a pending approval request and returns a retry-safe result.
     /// </summary>
+    [WorkflowUpdateValidator(nameof(ResolveApprovalAsync))]
+    public void ValidateResolveApproval(DurableApprovalDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        if (Input is null)
+        {
+            return;
+        }
+
+        if (Input.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                decision,
+                Input.MaximumTransportPayloadSizeBytes,
+                Input.PayloadCodecExpansionAllowanceBytes,
+                "approval-resolution update input");
+        }
+        _approvalMixin.ValidateResolveApproval(decision);
+    }
+
     [WorkflowUpdate("ResolveApproval")]
     public async Task<DurableApprovalResolutionResult> ResolveApprovalAsync(DurableApprovalDecision decision)
     {
@@ -1446,6 +1671,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             await Workflow.WaitConditionAsync(() => Input is not null).ConfigureAwait(true);
         }
         var input = RequiredInput;
+        ValidateResolveApproval(decision);
         if (input.EnableTransportPayloadGuard)
         {
             Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
@@ -1556,7 +1782,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             request,
             approvalTimeout,
             onRequested,
-            onResolved);
+            onResolved,
+            historyBudgetReserveReached: () => IsHistoryReserveReached);
 
         OnApprovalRequestResolved(decision);
         return decision;

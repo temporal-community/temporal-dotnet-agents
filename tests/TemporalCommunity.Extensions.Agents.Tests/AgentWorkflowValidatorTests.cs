@@ -1,7 +1,9 @@
+using System.Reflection;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
+using Temporalio.Workflows;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.Tests;
@@ -69,6 +71,18 @@ public class AgentWorkflowValidatorTests
 
         // Should not throw.
         workflow.ValidateRequestApproval(request);
+    }
+
+    [Fact]
+    public void AgentSessionWorkflow_DeclaresNoSignalHandlers()
+    {
+        var signalHandlers = typeof(AgentWorkflow)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(method => method.GetCustomAttribute<WorkflowSignalAttribute>() is not null)
+            .Select(method => method.Name)
+            .ToArray();
+
+        Assert.Empty(signalHandlers);
     }
 
 }

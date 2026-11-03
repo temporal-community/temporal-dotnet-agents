@@ -72,18 +72,18 @@ public class DurableApprovalIntegrationTests
             Assert.True(result.Approved);
             Assert.Equal(request.RequestId, result.RequestId);
 
-            var retry = await _fixture.SessionClient.ResolveApprovalAsync(conversationId, decision);
-            Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, retry.Status);
+            await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                _fixture.SessionClient.ResolveApprovalAsync(conversationId, decision));
 
-            var conflict = await _fixture.SessionClient.ResolveApprovalAsync(
-                conversationId,
-                new DurableApprovalDecision
-                {
-                    RequestId = request.RequestId,
-                    Approved = false,
-                    Reason = "Conflicting retry",
-                });
-            Assert.Equal(DurableApprovalResolutionStatus.Conflict, conflict.Status);
+            await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                _fixture.SessionClient.ResolveApprovalAsync(
+                    conversationId,
+                    new DurableApprovalDecision
+                    {
+                        RequestId = request.RequestId,
+                        Approved = false,
+                        Reason = "Conflicting retry",
+                    }));
         }
         finally
         {

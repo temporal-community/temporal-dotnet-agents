@@ -184,23 +184,25 @@ public class WorkflowReplayTests
     {
         var history = LoadHistory("shutdown-drain-handlers-v1.json");
         AssertPatchMarker(history, "meai-shutdown-drain-handlers");
-        var admitted = Assert.Single(history.Events,
-            ev => ev.WorkflowExecutionUpdateAcceptedEventAttributes is not null);
-        var signal = Assert.Single(history.Events,
-            ev => ev.WorkflowExecutionSignaledEventAttributes is not null);
-        var processed = history.Events.First(ev => ev.EventId > signal.EventId &&
-            ev.WorkflowTaskCompletedEventAttributes is not null);
+        var acceptedUpdates = history.Events
+            .Where(ev => ev.WorkflowExecutionUpdateAcceptedEventAttributes is not null)
+            .ToArray();
+        Assert.Equal(2, acceptedUpdates.Length);
+        var admitted = acceptedUpdates[0];
+        var shutdown = acceptedUpdates[1];
+        Assert.DoesNotContain(history.Events, ev =>
+            ev.WorkflowExecutionSignaledEventAttributes is not null);
         var modelScheduled = Assert.Single(history.Events, ev => ev.ActivityTaskScheduledEventAttributes?
             .ActivityType.Name == "TemporalCommunity.Extensions.AI.GetChatStep");
         var modelCompletion = Assert.Single(history.Events,
             ev => ev.ActivityTaskCompletedEventAttributes?.ScheduledEventId == modelScheduled.EventId);
-        var updateCompletion = Assert.Single(history.Events,
-            ev => ev.WorkflowExecutionUpdateCompletedEventAttributes is not null);
+        var updateCompletion = history.Events.Single(ev =>
+            ev.WorkflowExecutionUpdateCompletedEventAttributes is not null
+            && ev.EventId > modelCompletion.EventId);
         var workflowCompletion = Assert.Single(history.Events,
             ev => ev.WorkflowExecutionCompletedEventAttributes is not null);
-        Assert.Equal("Shutdown", signal.WorkflowExecutionSignaledEventAttributes.SignalName);
-        Assert.True(admitted.EventId < signal.EventId);
-        Assert.True(processed.EventId < modelCompletion.EventId);
+        Assert.True(admitted.EventId < shutdown.EventId);
+        Assert.True(shutdown.EventId < modelCompletion.EventId);
         Assert.True(modelCompletion.EventId < updateCompletion.EventId);
         Assert.True(updateCompletion.EventId < workflowCompletion.EventId);
 

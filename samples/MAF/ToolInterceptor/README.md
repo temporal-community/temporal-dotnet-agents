@@ -78,7 +78,7 @@ User : Please refund $29.99 for order ORD-001
 [Approval requested] Apply refund of $29.99 for Jane Doe — MacBook Pro, Order ORD-001
 [Auto-approving for demo]
 [Approval resolution: Accepted]
-[Duplicate resolution: AlreadyResolved]
+[Duplicate resolution rejected before acceptance]
 Agent: The refund of $29.99 for order ORD-001 has been successfully applied.
 
 Done.

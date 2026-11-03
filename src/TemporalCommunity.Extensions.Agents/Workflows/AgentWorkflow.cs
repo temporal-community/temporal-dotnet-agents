@@ -88,6 +88,11 @@ internal class AgentWorkflow :
         RestoreResolvedAgentApprovals(input.AgentApprovalResolutionHistory);
 
         Workflow.Logger.LogWorkflowStarted(input.AgentName, Workflow.Info.WorkflowId, input.TimeToLive);
+        if (input.InitialFireAndForgetRequest is { } initialRequest)
+        {
+            ValidateFireAndForgetRequest(initialRequest);
+            QueueFireAndForget(initialRequest);
+        }
 
         await base.RunAsync(input).ConfigureAwait(true);
     }
@@ -160,10 +165,13 @@ internal class AgentWorkflow :
     public async Task<AgentResponse> RunAgentAsync(RunRequest request)
     {
         var requestId = request.RequestId ?? Workflow.NewGuid().ToString("N");
-        var admission = BeginTurnAdmission(requestId, CreateAgentAdmissionFingerprint(request));
+        var admissionFingerprint = CreateAgentAdmissionFingerprint(request);
+        var admission = BeginTurnAdmission(requestId, admissionFingerprint);
         try
         {
             await WaitForAgentInputAsync().ConfigureAwait(true);
+            admission = RefreshTurnAdmission(admission, requestId, admissionFingerprint);
+            ValidateInitializedTurnAdmission(admission);
 
             var requestEntry = CreateAgentRequestEntry(request, requestId);
 
@@ -181,14 +189,43 @@ internal class AgentWorkflow :
     }
 
     /// <summary>
+    /// Validates a queued fire-and-forget run before it enters workflow history.
+    /// </summary>
+    [WorkflowUpdateValidator(nameof(RunAgentFireAndForgetAsync))]
+    public void ValidateRunAgentFireAndForget(RunRequest request)
+    {
+        ValidateFireAndForgetRequest(request);
+        ValidateTurnAdmission(
+            request.RequestId,
+            CreateAgentAdmissionFingerprint(request));
+    }
+
+    private void ValidateFireAndForgetRequest(RunRequest request)
+    {
+        if (IsShutdownRequested)
+            throw new InvalidOperationException("Session has been shut down.");
+        if (IsContinueAsNewPending)
+            throw new InvalidOperationException("Session is continuing as new. Retry the turn.");
+        if (request?.Messages is null || request.Messages.Count == 0)
+            throw new ArgumentException("At least one message is required.");
+        if (request.RequestId is not null && string.IsNullOrWhiteSpace(request.RequestId))
+            throw new ArgumentException("Request ID cannot be empty or whitespace.");
+    }
+
+    /// <summary>
     /// Queues a fire-and-forget run. The workflow does not wait for this to complete.
     /// </summary>
-    [WorkflowSignal("RunFireAndForget")]
+    [WorkflowUpdate("RunFireAndForget")]
     public Task RunAgentFireAndForgetAsync(RunRequest request)
+    {
+        QueueFireAndForget(request);
+        return Task.CompletedTask;
+    }
+
+    private void QueueFireAndForget(RunRequest request)
     {
         _pendingFireAndForgetTurns++;
         _ = ProcessFireAndForgetAsync(request);
-        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -397,6 +434,7 @@ internal class AgentWorkflow :
         var carriedInput = _input with
         {
             CarriedStateBag = _currentStateBag,
+            InitialFireAndForgetRequest = null,
             // Base class CAN fields — sourced from the base DurableChatWorkflowInput arg.
             TimeToLive = input.TimeToLive,
             CarriedHistory = input.CarriedHistory,
@@ -1188,10 +1226,13 @@ internal class AgentWorkflow :
         try
         {
             var requestId = request.RequestId ?? Workflow.NewGuid().ToString("N");
+            var admissionFingerprint = CreateAgentAdmissionFingerprint(request);
             admission = BeginTurnAdmission(
                 requestId,
-                CreateAgentAdmissionFingerprint(request));
+                admissionFingerprint);
             await WaitForAgentInputAsync().ConfigureAwait(true);
+            admission = RefreshTurnAdmission(admission, requestId, admissionFingerprint);
+            ValidateInitializedTurnAdmission(admission);
 
             var requestEntry = CreateAgentRequestEntry(request, requestId);
             await RunTurnAsync(requestEntry, admission, chatOptions: null).ConfigureAwait(true);
@@ -1214,7 +1255,7 @@ internal class AgentWorkflow :
 
     /// <summary>
     /// Waits until the workflow run method has initialized the typed agent input.
-    /// Update-With-Start and Signal-With-Start handlers can be admitted before the run task
+    /// Update-With-Start handlers can be admitted before the run task
     /// executes its first user statement, so every first-turn handler must cross this barrier.
     /// </summary>
     private async Task WaitForAgentInputAsync()

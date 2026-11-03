@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.Approvals;
+using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.AI;
 using Temporalio.Workflows;
 
@@ -24,6 +25,13 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<DurableAgentApprovalDecision>? AgentApprovalResolutionHistory { get; init; }
+
+    /// <summary>
+    /// Optional first fire-and-forget request carried by a delayed workflow start.
+    /// This is cleared when creating the next run.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RunRequest? InitialFireAndForgetRequest { get; init; }
 
     /// <summary>Gets the name of the agent that this workflow manages.</summary>
     public required string AgentName { get; init; }

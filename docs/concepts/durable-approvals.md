@@ -32,15 +32,15 @@ if (pending is not null)
 
 MEAI uses its conversation ID; MAF uses `TemporalAgentSessionId`. The libraries intentionally do not expose a shared raw-workflow-ID control interface. A Temporal workflow ID or conversation ID is a routing locator, not proof that the caller may view or approve that resource.
 
-Resolution is retry-safe:
-
-- `Accepted`: the pending request was resolved;
-- `AlreadyResolved`: an equivalent decision was retained after an ambiguous client result;
-- `Conflict`: the same request ID was previously resolved differently;
-- `RequestMismatch`: another request is pending;
-- `NotPending`: no matching pending or retained request exists.
+Only a matching pending decision is accepted. `ResolveApprovalAsync` returns `Accepted` when the
+decision is applied; unknown, mismatched, already-resolved, or conflicting decisions fail update
+validation before Temporal records an accepted update. The result/status enum also names those
+non-progressing cases for internal classification, but callers should handle the update failure
+rather than expect an accepted result for them.
 
 The most recent 32 decisions are retained across Continue-As-New. A timeout resolves the request as rejected.
+If an update response is ambiguous, inspect the pending request and reconcile it with application-owned
+review state; do not assume blindly retrying the decision will return the original result.
 
 ## Invalid requests
 

@@ -114,7 +114,7 @@ public class DurableApprovalTests
             .OrderBy(name => name)
             .ToArray();
 
-        Assert.Equal(["Approved", "Reason", "RequestId"], properties);
+        Assert.Equal(["Approved", "ExpirationReason", "Reason", "RequestId"], properties);
         Assert.DoesNotContain(
             typeof(DurableApprovalDecision).Assembly.GetReferencedAssemblies(),
             assembly => string.Equals(

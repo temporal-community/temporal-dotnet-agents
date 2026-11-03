@@ -73,4 +73,4 @@ Console.WriteLine("Agent worker started. Listening on task queue 'agents'...");
 Console.WriteLine("Start the Client in another terminal, then press Ctrl+C here to stop.\n");
 
 var host = builder.Build();
-await host.RunAsync(); // blocks until shutdown signal
+await host.RunAsync(); // blocks until host shutdown

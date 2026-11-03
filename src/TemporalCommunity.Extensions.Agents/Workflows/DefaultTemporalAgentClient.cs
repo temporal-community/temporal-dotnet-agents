@@ -78,22 +78,22 @@ internal sealed class DefaultTemporalAgentClient(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var workflowOptions = new WorkflowOptions(sessionId.WorkflowId, taskQueue)
-        {
-            IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
-            IdReusePolicy = WorkflowIdReusePolicy.AllowDuplicate
-        };
+        var startOp = WithStartWorkflowOperation.Create(
+            (AgentWorkflow wf) => wf.RunAsync(BuildAgentWorkflowInput(sessionId.AgentName)),
+            new WorkflowOptions(sessionId.WorkflowId, taskQueue)
+            {
+                IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+                IdReusePolicy = WorkflowIdReusePolicy.AllowDuplicate,
+            });
 
         _logger.LogClientFireAndForget(sessionId.AgentName, sessionId.WorkflowId);
 
-        workflowOptions.Rpc = new RpcOptions { CancellationToken = cancellationToken };
-        // Signal-with-start atomically creates (or reuses) the workflow and queues the request.
-        // A separate SignalAsync after StartWorkflowAsync leaves a client-crash window where a
-        // newly started workflow has no request.
-        workflowOptions.SignalWithStart((AgentWorkflow wf) => wf.RunAgentFireAndForgetAsync(request));
-        await client.StartWorkflowAsync(
-            (AgentWorkflow wf) => wf.RunAsync(BuildAgentWorkflowInput(sessionId.AgentName)),
-            workflowOptions).ConfigureAwait(false);
+        await client.StartUpdateWithStartWorkflowAsync(
+            (AgentWorkflow wf) => wf.RunAgentFireAndForgetAsync(request),
+            new WorkflowStartUpdateWithStartOptions(startOp, WorkflowUpdateStage.Accepted)
+            {
+                Rpc = new RpcOptions { CancellationToken = cancellationToken },
+            }).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
@@ -104,6 +104,18 @@ internal sealed class DefaultTemporalAgentClient(
         var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
         return await handle.QueryAsync<AgentWorkflow, DurableApprovalRequest?>(
             wf => wf.GetPendingApproval(),
+            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async Task<DurableChatHistoryBudgetStatus> GetHistoryBudgetAsync(
+        TemporalAgentSessionId sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
+        return await handle.QueryAsync<AgentWorkflow, DurableChatHistoryBudgetStatus>(
+            workflow => workflow.GetHistoryBudget(),
             new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
             .ConfigureAwait(false);
     }
@@ -144,25 +156,30 @@ internal sealed class DefaultTemporalAgentClient(
 
         var workflowOptions = new WorkflowOptions(sessionId.WorkflowId, taskQueue)
         {
-            IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+            IdConflictPolicy = WorkflowIdConflictPolicy.Fail,
             IdReusePolicy = WorkflowIdReusePolicy.AllowDuplicate,
             StartDelay = delay,
         };
-
-        workflowOptions.Rpc = new RpcOptions { CancellationToken = cancellationToken };
-
-        // Attach the request signal atomically with the workflow start (signal-with-start).
-        // A separate SignalAsync after StartWorkflowAsync would create a crash window between the
-        // two RPCs where the workflow exists without its request. Signal-with-start is a single
-        // server round-trip: the workflow is created AND the signal is queued in one operation.
-        // The signal is buffered and delivered when execution begins after the StartDelay elapses.
-        workflowOptions.SignalWithStart((AgentWorkflow wf) => wf.RunAgentFireAndForgetAsync(request));
-
         try
         {
+            var input = BuildAgentWorkflowInput(sessionId.AgentName) with
+            {
+                InitialFireAndForgetRequest = request,
+            };
+            workflowOptions.Rpc = new RpcOptions { CancellationToken = cancellationToken };
             await client.StartWorkflowAsync(
-                (AgentWorkflow wf) => wf.RunAsync(BuildAgentWorkflowInput(sessionId.AgentName)),
+                (AgentWorkflow wf) => wf.RunAsync(input),
                 workflowOptions).ConfigureAwait(false);
+        }
+        catch (Temporalio.Exceptions.WorkflowAlreadyStartedException)
+        {
+            var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
+            await handle.ExecuteUpdateAsync(
+                workflow => workflow.RunAgentFireAndForgetAsync(request),
+                new WorkflowUpdateOptions
+                {
+                    Rpc = new RpcOptions { CancellationToken = cancellationToken },
+                }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -226,11 +243,10 @@ internal sealed class DefaultTemporalAgentClient(
         TemporalAgentSessionId sessionId,
         CancellationToken cancellationToken = default)
     {
-        var handle = client.GetWorkflowHandle(sessionId.WorkflowId);
-        await handle.SignalAsync(
-            DurableChatWorkflowBase<AgentResponse>.ShutdownSignalName,
-            Array.Empty<object>(),
-            new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+        var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
+        await handle.ExecuteUpdateAsync(
+            workflow => workflow.RequestShutdownAsync(),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
             .ConfigureAwait(false);
     }
 

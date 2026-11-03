@@ -223,9 +223,9 @@ application knows the work is finished and no follow-up messages are needed, rel
 await agentClient.ShutdownAsync(sessionId);
 ```
 
-Do not call `RunAgentDelayedAsync` twice with the same session ID before its delay expires. A second
-signal-with-start can dispatch the workflow early. If the session is already running, the request
-is delivered to it and no new delay is applied.
+Do not call `RunAgentDelayedAsync` twice with the same session ID before its delay expires. If the
+session already exists, the request is delivered through the validated fire-and-forget update, so
+the second call can dispatch work before the original delay expires.
 
 ## Output, approval, and data boundaries
 

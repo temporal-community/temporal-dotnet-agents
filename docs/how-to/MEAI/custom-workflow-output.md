@@ -425,7 +425,7 @@ By extending `DurableChatWorkflowBase<TOutput>` you get the following shared wor
 - **Continue-as-new** — retained history, search attributes, and the complete frozen session configuration are carried forward when the entry limit or Temporal's history suggestion triggers a new run.
 - **Search attributes** — optional `TurnCount` and `SessionCreatedAt` upserts via `DurableSessionAttributes` when `input.EnableSearchAttributes` is `true`.
 - **`[WorkflowQuery("GetHistory")]`** — returns the current conversation history.
-- **`[WorkflowSignal("Shutdown")]`** — sets `IsShutdownRequested` and unblocks the session loop.
+- **`[WorkflowUpdate("RequestShutdown")]`** — validates and closes session admission, then unblocks the session loop.
 
 The base's default `MaxEntryCount` is 1000 session entries. Without a keyed history reducer, a
 count-triggered Continue-as-New carries a recent complete-turn suffix of about half that limit so

@@ -89,8 +89,9 @@ public class MissingToolInterceptorRegressionTests
 
             if (originalSessionRequiresInterceptor)
             {
-                var updateFailure = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(
+                var requestFailure = await Assert.ThrowsAsync<DurableChatRequestException>(
                     () => turn.WaitAsync(TimeSpan.FromSeconds(30)));
+                var updateFailure = Assert.IsType<WorkflowUpdateFailedException>(requestFailure.InnerException);
                 var activityFailure = Assert.IsType<ActivityFailureException>(updateFailure.InnerException);
                 var failure = Assert.IsType<ApplicationFailureException>(activityFailure.InnerException);
                 Assert.Equal(nameof(DurableConfigurationException), failure.ErrorType);

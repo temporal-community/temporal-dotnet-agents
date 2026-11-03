@@ -20,8 +20,8 @@ and a safe point at which current authorization is evaluated.
 evidence, but it is not a reusable deferred-work coordinator:
 
 - it permits one pending approval and parks through `Workflow.WaitConditionAsync`;
-- it accepts retry-safe resolutions and distinguishes accepted, already-resolved, conflicting,
-  mismatched, and not-pending decisions;
+- it classifies accepted, already-resolved, conflicting, mismatched, and not-pending decisions;
+  supported update validators reject every non-progressing decision before acceptance;
 - it retains the last 32 resolutions across Continue-as-New; and
 - its request, decision, timeout message, and public workflow handlers all encode approval
   semantics.

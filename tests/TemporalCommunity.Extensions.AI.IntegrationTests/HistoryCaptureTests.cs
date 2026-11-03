@@ -237,7 +237,7 @@ public class HistoryCaptureTests
         var history = await handle.FetchHistoryAsync();
         await SaveHistoryAsync("typed-durable-turn-v1.json", history);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 
@@ -280,7 +280,7 @@ public class HistoryCaptureTests
         var history = await handle.FetchHistoryAsync();
         await SaveHistoryAsync("typed-worker-owned-toolset-v1.json", history);
 
-        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
     }
 

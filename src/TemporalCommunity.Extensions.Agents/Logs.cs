@@ -77,7 +77,7 @@ internal static partial class Logs
         this ILogger logger, string agentName, string workflowId);
 
     [LoggerMessage(EventId = 13, Level = LogLevel.Debug,
-        Message = "[{AgentName}/{WorkflowId}] Dispatching fire-and-forget signal to agent workflow")]
+        Message = "[{AgentName}/{WorkflowId}] Dispatching fire-and-forget update to agent workflow")]
     public static partial void LogClientFireAndForget(
         this ILogger logger, string agentName, string workflowId);
 

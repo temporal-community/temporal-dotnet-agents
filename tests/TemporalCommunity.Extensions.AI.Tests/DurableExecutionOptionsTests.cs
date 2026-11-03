@@ -20,6 +20,11 @@ public class DurableExecutionOptionsTests
         Assert.Equal(1024 * 1024, options.MaxTerminalOutcomeBytes);
         Assert.Equal(1024 * 1024, options.MaximumTransportPayloadSizeBytes);
         Assert.Equal(0, options.PayloadCodecExpansionAllowanceBytes);
+        Assert.Equal(40_000, options.HistoryEventSoftLimit);
+        Assert.Equal(45_000, options.HistoryEventReserveLimit);
+        Assert.Equal(40 * 1024 * 1024, options.HistorySizeSoftLimitBytes);
+        Assert.Equal(45 * 1024 * 1024, options.HistorySizeReserveLimitBytes);
+        Assert.Equal(32, options.MaxConcurrentTurnJoiners);
     }
 
     [Fact]
@@ -180,6 +185,54 @@ public class DurableExecutionOptionsTests
 
         Assert.Contains(nameof(options.RetryPolicy), exception.Message);
         Assert.Contains("positive MaximumAttempts", exception.Message);
+    }
+
+    [Theory]
+    [InlineData(0, 5)]
+    [InlineData(5, 5)]
+    public void Validate_RejectsInvalidHistoryEventThresholds(int softLimit, int reserveLimit)
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "q",
+            HistoryEventSoftLimit = softLimit,
+            HistoryEventReserveLimit = reserveLimit,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains(nameof(options.HistoryEventSoftLimit), exception.Message);
+    }
+
+    [Theory]
+    [InlineData(0, 5)]
+    [InlineData(5, 5)]
+    public void Validate_RejectsInvalidHistorySizeThresholds(int softLimit, int reserveLimit)
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "q",
+            HistorySizeSoftLimitBytes = softLimit,
+            HistorySizeReserveLimitBytes = reserveLimit,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains(nameof(options.HistorySizeSoftLimitBytes), exception.Message);
+    }
+
+    [Fact]
+    public void Validate_RejectsNonPositiveTurnJoinerLimit()
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "q",
+            MaxConcurrentTurnJoiners = 0,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains(nameof(options.MaxConcurrentTurnJoiners), exception.Message);
     }
 
     [Fact]

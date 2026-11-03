@@ -120,6 +120,20 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
         Assert.Equal(2, (await handle.QueryAsync(workflow => workflow.GetHistory())).Count);
     }
 
+    [Fact]
+    public async Task HistoryBudgetQuery_ReturnsConfiguredThresholds()
+    {
+        var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
+        await _fixture.AgentProxy.RunAsync("Initialize history status.", session);
+
+        var status = await _fixture.AgentClient.GetHistoryBudgetAsync(session.SessionId);
+
+        Assert.True(status.HistoryEventCount > 0);
+        Assert.Equal(40_000, status.HistoryEventSoftLimit);
+        Assert.Equal(45_000, status.HistoryEventReserveLimit);
+        Assert.Equal(32, status.MaxConcurrentTurnJoiners);
+    }
+
     // ── Multi-turn / history ───────────────────────────────────────────────────
 
     [Fact]

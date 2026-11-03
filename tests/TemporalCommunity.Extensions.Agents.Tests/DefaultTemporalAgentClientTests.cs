@@ -49,14 +49,16 @@ public class DefaultTemporalAgentClientTests
     }
 
     [Fact]
-    public async Task RunAgentFireAndForgetAsync_UsesSignalWithStart()
+    public async Task RunAgentFireAndForgetAsync_UsesValidatedUpdateWithStart()
     {
-        WorkflowOptions? capturedOptions = null;
-        A.CallTo(() => _fakeClient.StartWorkflowAsync(
+        _options.AddAgentProxy("Agent");
+        WorkflowStartUpdateWithStartOptions? capturedOptions = null;
+        A.CallTo(() => _fakeClient.StartUpdateWithStartWorkflowAsync<AgentWorkflow>(
                 A<Expression<Func<AgentWorkflow, Task>>>._,
-                A<WorkflowOptions>._))
-            .Invokes((Expression<Func<AgentWorkflow, Task>> _, WorkflowOptions options) => capturedOptions = options)
-            .Returns(Task.FromResult<WorkflowHandle<AgentWorkflow>>(null!));
+                A<WorkflowStartUpdateWithStartOptions>._))
+            .Invokes((Expression<Func<AgentWorkflow, Task>> _, WorkflowStartUpdateWithStartOptions options) =>
+                capturedOptions = options)
+            .Returns(Task.FromResult<WorkflowUpdateHandle>(null!));
         var client = CreateClient();
         var sessionId = TemporalAgentSessionId.WithRandomKey("Agent");
         var request = new RunRequest("hello");
@@ -64,9 +66,9 @@ public class DefaultTemporalAgentClientTests
         await client.RunAgentFireAndForgetAsync(sessionId, request);
 
         Assert.NotNull(capturedOptions);
-        Assert.Equal("RunFireAndForget", capturedOptions!.StartSignal);
-        Assert.Single(capturedOptions.StartSignalArgs!);
-        Assert.Same(request, capturedOptions.StartSignalArgs!.Single());
+        Assert.Equal(WorkflowUpdateStage.Accepted, capturedOptions!.WaitForStage);
+        Assert.NotNull(capturedOptions.StartWorkflowOperation);
+        Assert.Equal(sessionId.WorkflowId, capturedOptions.StartWorkflowOperation!.Options.Id);
         A.CallTo(() => _fakeClient.GetWorkflowHandle<AgentWorkflow>(
                 A<string>._,
                 A<string?>._,

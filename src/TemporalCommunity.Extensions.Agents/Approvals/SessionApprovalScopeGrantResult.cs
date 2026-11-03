@@ -5,7 +5,7 @@ namespace TemporalCommunity.Extensions.Agents.Approvals;
 /// <summary>Result of a privileged session-scope grant request.</summary>
 public sealed class SessionApprovalScopeGrantResult
 {
-    /// <summary>The retry-safe approval resolution outcome.</summary>
+    /// <summary>The approval resolution outcome for this privileged scope-grant request.</summary>
     public required DurableApprovalResolutionResult Resolution { get; init; }
 
     /// <summary>

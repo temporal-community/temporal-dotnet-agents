@@ -103,14 +103,14 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
             throw new ArgumentException("At least one message is required.");
         if (input.RequestId is not null && string.IsNullOrWhiteSpace(input.RequestId))
             throw new ArgumentException("Request ID cannot be empty or whitespace.");
-        ValidateTurnAdmission(
-            input.RequestId,
-            Internal.DurableRequestFingerprint.CreateChatAdmission(input));
         if (_toolAuthorityReady)
         {
             ValidateExpectedSessionEpoch(input.ExpectedSessionEpoch);
             ValidateSessionProfile(input.ClientKey);
         }
+        ValidateTurnAdmission(
+            input.RequestId,
+            Internal.DurableRequestFingerprint.CreateChatAdmission(input));
     }
 
     /// <summary>
@@ -120,36 +120,38 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     [WorkflowUpdate("Chat")]
     public async Task<DurableSessionResponse> ChatAsync(DurableChatInput input)
     {
-        await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
-        if (RequiredInput.EnableTransportPayloadGuard)
-        {
-            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
-                Workflow.PayloadConverter,
-                input,
-                RequiredInput.MaximumTransportPayloadSizeBytes,
-                RequiredInput.PayloadCodecExpansionAllowanceBytes,
-                "workflow update input");
-        }
-        ValidateExpectedSessionEpoch(input.ExpectedSessionEpoch);
-        ValidateTurnAdmission(input);
-
         var requestId = input.RequestId ?? Workflow.NewGuid().ToString("N");
-        var messages = input.Messages as IReadOnlyList<ChatMessage> ?? input.Messages.ToList();
-        var requestEntry = DurableSessionRequest.FromMessages(
-            messages,
-            input.CorrelationId,
-            requestId: requestId);
+        var admissionFingerprint =
+            Internal.DurableRequestFingerprint.CreateChatAdmission(input);
         var admission = BeginTurnAdmission(
             requestId,
-            Internal.DurableRequestFingerprint.CreateChatAdmission(input));
-
-        // Store per-turn metadata keyed by the request entry object reference.
-        // Removed in the finally block so exceptions (cancellation, timeout, tool failure)
-        // do not leak the entry for the workflow's lifetime.
-        _perTurnMeta[requestEntry] = (input.ClientKey, input.ConversationId);
+            admissionFingerprint);
+        DurableSessionRequest? requestEntry = null;
         try
         {
+            await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+            if (RequiredInput.EnableTransportPayloadGuard)
+            {
+                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    input,
+                    RequiredInput.MaximumTransportPayloadSizeBytes,
+                    RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                    "workflow update input");
+            }
+            ValidateExpectedSessionEpoch(input.ExpectedSessionEpoch);
             ValidateSessionProfile(input.ClientKey);
+            admission = RefreshTurnAdmission(admission, requestId, admissionFingerprint);
+            ValidateInitializedTurnAdmission(admission);
+            var messages = input.Messages as IReadOnlyList<ChatMessage> ?? input.Messages.ToList();
+            requestEntry = DurableSessionRequest.FromMessages(
+                messages,
+                input.CorrelationId,
+                requestId: requestId);
+
+            // Store per-turn metadata keyed by the request entry object reference.
+            // Removed in the finally block so exceptions do not leak it for the workflow's lifetime.
+            _perTurnMeta[requestEntry] = (input.ClientKey, input.ConversationId);
             requestEntry.InputFingerprint =
                 Internal.DurableRequestFingerprint.CreateChat(input, RequiredInput);
 
@@ -174,7 +176,10 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
         }
         finally
         {
-            _perTurnMeta.Remove(requestEntry);
+            if (requestEntry is not null)
+            {
+                _perTurnMeta.Remove(requestEntry);
+            }
         }
     }
 

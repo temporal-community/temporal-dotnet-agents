@@ -120,6 +120,9 @@ public class CancelPendingApprovalTests
         public Task RunAgentFireAndForgetAsync(TemporalAgentSessionId sessionId, RunRequest request, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
+        public Task<TemporalCommunity.Extensions.AI.DurableChatHistoryBudgetStatus> GetHistoryBudgetAsync(TemporalAgentSessionId sessionId, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
         public Task RunAgentDelayedAsync(TemporalAgentSessionId sessionId, RunRequest request, TimeSpan delay, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 

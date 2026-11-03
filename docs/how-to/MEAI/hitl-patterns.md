@@ -54,8 +54,7 @@ if (pending is not null)
         Reason = "Approved by the review service.",
     });
 
-    if (resolution.Status is not DurableApprovalResolutionStatus.Accepted and
-        not DurableApprovalResolutionStatus.AlreadyResolved)
+    if (resolution.Status is not DurableApprovalResolutionStatus.Accepted)
     {
         throw new InvalidOperationException($"Approval was not accepted: {resolution.Status}");
     }
@@ -64,8 +63,10 @@ if (pending is not null)
 
 `GetPendingApprovalAsync` returns `null` when no request is pending. A timed-out approval is
 treated as denied and the workflow supplies a denial result to the model rather than running the
-tool. `ResolveApprovalAsync` is safe to retry after an ambiguous update-RPC result: an identical
-retry returns `AlreadyResolved`; a conflicting decision returns `Conflict`.
+tool. `ResolveApprovalAsync` accepts only a matching pending decision. Unknown, mismatched,
+already-resolved, or conflicting decisions fail validation before Temporal records an accepted
+update. If the RPC result is ambiguous, inspect the pending request again and reconcile through
+your application's review state rather than treating a retry as a successful resolution.
 
 Every pending request includes `ExpiresAt`, the workflow-time deadline used for automatic denial.
 Set a tool-specific deadline when approval urgency differs by operation:

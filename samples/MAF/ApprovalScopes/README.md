@@ -37,4 +37,6 @@ Do not expose that service directly to an untrusted caller. The application must
 
 The grant lives in workflow state, survives Continue-As-New, expires according to workflow time, and can be revoked by its returned `GrantId`. It does not cross sessions. A matching grant skips the human gate, but it is not effect-time authorization: the tool must still re-check current tenant, ownership, and authorization data immediately before performing an external effect.
 
-`RequestId` resolution is retry-safe. An identical retry reports `AlreadyResolved`; a changed retry reports `Conflict`.
+`RequestId` resolution accepts only a matching pending decision. Unknown, mismatched,
+already-resolved, or conflicting decisions are rejected before acceptance; after an ambiguous
+response, reconcile through application-owned review state rather than retrying blindly.

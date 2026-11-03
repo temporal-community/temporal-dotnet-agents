@@ -221,7 +221,7 @@ try
     Assert(deniedResult.CompletionReason == DurableTurnCompletionReason.FinalResponse,
         "Denied turn did not return a final model response.");
     Assert(scopes.Observed.Count == 2, "Denied tool call reached the implementation.");
-    await deniedHandle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+    await deniedHandle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
 
     var callsBeforeInvalid = scripted.CallCount;
     var invalidRequest = new DurableTurnRequest<PackedRequestData, PackedTurnState>
@@ -245,7 +245,7 @@ try
     Assert(scripted.CallCount == callsBeforeInvalid + 1,
         "A second managed turn in one Update reached the model.");
 
-    await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+    await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
 }
 finally
 {

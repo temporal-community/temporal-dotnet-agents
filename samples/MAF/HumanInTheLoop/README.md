@@ -7,7 +7,7 @@ Demonstrates how to pause an agent mid-turn and wait for a human decision before
 This sample demonstrates:
 - `TemporalAgentContext.Current.RequestApprovalAsync()` suspending a tool inside an activity
 - `ITemporalAgentClient.GetPendingApprovalAsync()` polling for pending approvals from outside the workflow
-- `ITemporalAgentClient.ResolveApprovalAsync()` resolving the workflow with a retry-safe decision
+- `ITemporalAgentClient.ResolveApprovalAsync()` resolving the workflow with a matching pending decision
 - Timeout budget sized for an attended review: 20-minute activity, 15-minute worker-level
   approval window, 10-minute per-agent override, 1-minute heartbeat
 
@@ -62,7 +62,9 @@ proxy.RunAsync(messages, session)            ← [WorkflowUpdate] to AgentWorkfl
 
 - **Suspension without polling.** The workflow blocks on `WaitConditionAsync` — no spin-wait, no timer. The worker thread is released and other workflows continue normally while waiting.
 - **`GetPendingApprovalAsync` is a `[WorkflowQuery]`.** Queries never block the workflow and are safe to call as frequently as needed. This sample polls every second from outside the workflow while the agent task is in-flight.
-- **`ResolveApprovalAsync` is a retry-safe `[WorkflowUpdate]`.** It reports `Accepted`, `AlreadyResolved`, or a non-success status so a reviewer can safely retry after an ambiguous client response.
+- **`ResolveApprovalAsync` accepts only a matching pending decision.** Unknown, mismatched,
+  already-resolved, and conflicting decisions fail validation before Temporal records an accepted
+  update; after an ambiguous response, reconcile through application-owned review state.
 - **`ActivityTimeout` must exceed `ApprovalTimeout`.** An in-tool approval is held open by a live activity, so the activity has to outlive the window it is holding. This sample sets `DefaultActivityTimeout = 20 min`, `DefaultApprovalTimeout = 15 min`, and a per-agent `agent.ApprovalTimeout = 10 min`; the heartbeat timeout is 1 minute and the package heartbeats at a third of it for the whole wait. Get this backwards and the activity expires while the workflow still holds an open approval: ordinary turns keep working, but the next approval request fails with `DurableApprovalAlreadyPending` until the stale one is resolved or its own `ApprovalTimeout` expires. **Note the shipped defaults do not satisfy this rule** — `DefaultActivityTimeout` is 5 minutes and `DefaultApprovalTimeout` is 7 days, so in-tool approval always requires setting them explicitly.
 - **`send_email` is registered with `opts.NoRetry()`.** The tool delivers an email after the human approves. Without `NoRetry()`, a transient failure immediately after delivery (before the activity reports success) would cause Temporal to retry the activity — re-entering the approval gate, issuing a second approval request, and potentially sending the email a second time. Write-style tools that produce side effects must set `MaximumAttempts = 1`.
 

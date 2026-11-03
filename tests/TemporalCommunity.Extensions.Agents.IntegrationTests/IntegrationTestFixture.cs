@@ -2,6 +2,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using Temporalio.Testing;
 using Xunit;
@@ -34,6 +35,9 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
     /// <summary>The <see cref="AIAgent"/> proxy for the registered <c>EchoAgent</c>.</summary>
     public AIAgent AgentProxy { get; private set; } = null!;
 
+    /// <summary>The client for the registered agent session workflows.</summary>
+    public ITemporalAgentClient AgentClient { get; private set; } = null!;
+
     /// <summary>Starts the local Temporal server and the hosted Temporal worker.</summary>
     public async Task InitializeAsync()
     {
@@ -48,6 +52,7 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
         _host = BuildHost();
         await _host.StartAsync();
 
+        AgentClient = _host.Services.GetRequiredService<ITemporalAgentClient>();
         AgentProxy = _host.Services.GetTemporalAgentProxy("EchoAgent");
     }
 

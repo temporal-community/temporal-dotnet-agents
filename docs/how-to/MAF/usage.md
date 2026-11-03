@@ -110,9 +110,11 @@ Console.WriteLine(response.Messages[0].Text);
 ```
 
 For a new session, the built-in client delivers the first call with Temporal Update-With-Start. The
-workflow waits deterministically for its typed input before processing that Update. Fire-and-forget
-and delayed starts use the equivalent Signal-With-Start path and share the same readiness guarantee;
-callers do not need a separate start or retry step.
+workflow waits deterministically for its typed input before processing that Update. Immediate
+fire-and-forget uses a validated Update-With-Start. Delayed starts carry their initial request in
+workflow input because the pinned SDK does not combine `WorkflowStartDelay` with Update-With-Start;
+if the session already exists, the request is delivered immediately. Callers do not need a separate
+start step.
 
 If you author a custom workflow, keep Update validators synchronous. Validators cannot await workflow
 initialization; put checks that depend on initialized workflow input in the Update handler after a
@@ -800,11 +802,25 @@ var result = await client.ResolveApprovalAsync(
 Console.WriteLine($"Decision status: {result.Status}");
 ```
 
-`ResolveApprovalAsync` unblocks the tool when its result is `Accepted`; an identical retry returns
-`AlreadyResolved`, while a changed retry returns `Conflict`. `RequestApprovalAsync` in the tool returns a generic
-`DurableApprovalDecision`.
+`ResolveApprovalAsync` unblocks the tool when its result is `Accepted`. Unknown, mismatched,
+already-resolved, or conflicting decisions fail update validation before Temporal records an
+accepted update. After an ambiguous RPC result, inspect the pending request and reconcile through
+application-owned review state rather than treating a retry as a successful resolution.
+`RequestApprovalAsync` in the tool returns a generic `DurableApprovalDecision`.
 
-Use `ITemporalAgentClient.CancelPendingApprovalAsync(sessionId)` and `ShutdownAsync(sessionId)` for lifecycle operations. The typed session ID keeps application resource lookup at the caller boundary. It is still a routing locator, not authorization: authenticate and authorize the application resource before constructing or accepting a session ID.
+Use `ITemporalAgentClient.CancelPendingApprovalAsync(sessionId)` and `ShutdownAsync(sessionId)` for lifecycle operations. `GetHistoryBudgetAsync(sessionId)` reports the workflow's current history event/size usage and configured admission thresholds without adding history. The typed session ID keeps application resource lookup at the caller boundary. It is still a routing locator, not authorization: authenticate and authorize the application resource before constructing or accepting a session ID.
+The history budget covers library-validated update operations, not arbitrary Temporal signals
+sent directly by other clients. Temporal records an accepted signal even when the workflow has no
+matching handler; restrict direct workflow access and use application/deployment access controls.
+
+### Inspecting workflow history budget
+
+The history-budget query is read-only and adds no workflow history:
+
+```csharp
+var status = await client.GetHistoryBudgetAsync(sessionId);
+Console.WriteLine($"History events: {status.HistoryEventCount}/{status.HistoryEventSoftLimit}");
+```
 
 ### Workflow-Parked Approval (compute-free, multi-day waits)
 

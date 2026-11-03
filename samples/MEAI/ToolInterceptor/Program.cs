@@ -88,7 +88,7 @@ builder.Services.AddSingleton(fs);
 // DurableAIDataConverter.Instance wraps the payload converter with
 // AIJsonUtilities.DefaultOptions so MEAI's polymorphic AIContent subclasses
 // ($type discriminators) survive round-trips through Temporal history.
-// Registered as ITemporalClient so it can be resolved for shutdown signals.
+// Registered as ITemporalClient so it can be resolved for shutdown updates.
 var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions(temporalAddress)
 {
     DataConverter = DurableAIDataConverter.Instance,
@@ -143,7 +143,7 @@ Console.WriteLine("Worker started.\n");
 var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
 // temporalClient was connected and registered above; resolve it for workflow signals.
 
-// Track conversation IDs so we can signal Shutdown before the host exits.
+// Track conversation IDs so we can request Shutdown before the host exits.
 var conversationIds = new List<string>();
 
 // ── System prompt ─────────────────────────────────────────────────────────────
@@ -292,7 +292,7 @@ Console.WriteLine(" (delete_file ran after human approval — file is now gone f
 Console.WriteLine("════════════════════════════════════════════════════════\n");
 
 // ── Shutdown ──────────────────────────────────────────────────────────────────
-// Signal Shutdown to each running workflow so it exits its main loop cleanly
+// Request Shutdown on each running workflow so it exits its main loop cleanly
 // instead of sitting parked for SessionTimeToLive (10 minutes above).
 foreach (var conversationId in conversationIds)
 {

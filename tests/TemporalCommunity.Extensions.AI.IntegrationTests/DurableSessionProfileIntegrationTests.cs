@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using Temporalio.Extensions.Hosting;
@@ -11,17 +12,17 @@ using Xunit;
 namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 
 /// <summary>
-/// Managed-session profile policy and concurrent queued-turn integration tests.
+/// Managed-session profile policy and single-active-turn integration tests.
 /// A session captures one worker-side profile at creation; every admitted turn uses that profile,
-/// including turns queued while another turn is active.
+/// while a different request is rejected during an active turn.
 /// </summary>
 public class DurableSessionProfileIntegrationTests
 {
-    // ── Pattern 3: queued turn while a tool call is in flight ───────────────
+    // ── Pattern 3: reject a new turn while a tool call is in flight ────────
 
     /// <summary>
-    /// Two turns use the same captured profile. Turn 1 blocks during a tool call while Turn 2
-    /// queues; both model steps for Turn 1 and the later Turn 2 call use the pinned client.
+    /// Turn 1 uses the captured profile. While it blocks during a tool call, a different
+    /// request is rejected; both model steps for Turn 1 use the pinned client.
     /// </summary>
     [Fact]
     public async Task Pattern3_ConcurrentTurns_UsePinnedProfile()
@@ -33,7 +34,7 @@ public class DurableSessionProfileIntegrationTests
         var client1 = new RecordingChatClient("key-1");
         var client2 = new RecordingChatClient("key-2");
 
-        // The tool gate keeps Turn 1 active while Turn 2 is admitted and queued.
+        // The tool gate keeps Turn 1 active while the second request is rejected.
         var toolGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -47,7 +48,7 @@ public class DurableSessionProfileIntegrationTests
             "blocking_race_tool",
             "Blocks until released.");
 
-        // The pinned client handles both model steps for Turn 1 and the queued Turn 2.
+        // The pinned client handles both model steps for Turn 1.
         client1.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant,
             [new FunctionCallContent("call-race", "blocking_race_tool")])));
         client1.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-1-final-answer")));
@@ -76,39 +77,32 @@ public class DurableSessionProfileIntegrationTests
         // Wait until the tool activity has started (Turn 1 is now inside the tool fan-out).
         await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // Queue Turn 2 while Turn 1 is blocked, using the session's pinned route.
+        // A different request cannot start while Turn 1 is active, even on the pinned route.
         var turn2Options = new ChatOptions().WithChatClientKey("key-1");
-        var turn2Task = Task.Run(async () =>
-            await sessionClient.SendAsync(
+        await Assert.ThrowsAsync<DurableChatRequestException>(() =>
+            sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-2")],
                 turn2Options));
 
-        // Wait until Turn 2's update has been accepted while Turn 1 remains active.
-        var workflowHandle = env.Client.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
-        await PollUntilUpdateCountAsync(workflowHandle, minAcceptedCount: 2, TimeSpan.FromSeconds(30));
-
         // Release the tool gate so Turn 1 can proceed to its second LLM step.
         toolGate.TrySetResult();
 
-        // Both turns must complete successfully.
+        // The admitted turn completes successfully; a conflicting active turn was rejected.
         var response1 = await turn1Task.WaitAsync(TimeSpan.FromSeconds(60));
-        var response2 = await turn2Task.WaitAsync(TimeSpan.FromSeconds(60));
-
         Assert.NotNull(response1);
-        Assert.NotNull(response2);
 
-        Assert.Equal(3, client1.CallCount);
+        Assert.Equal(2, client1.CallCount);
         Assert.Equal(0, client2.CallCount);
 
         await host.StopAsync();
     }
 
-    // ── Pattern 1: multiple turns queued behind a model call ────────────────
+    // ── Pattern 1: a second turn is rejected while a model call is active ──
 
     /// <summary>
-    /// Three turns use one profile. Turn 0 blocks at the model call while Turns 1 and 2 queue;
-    /// all are then dispatched to the session's pinned client.
+    /// Turn 0 blocks at the model call. A different request is rejected until it completes,
+    /// and the admitted turn uses the session's pinned client.
     /// </summary>
     [Fact]
     public async Task Pattern1_ConcurrentTurns_UsePinnedProfile()
@@ -127,8 +121,6 @@ public class DurableSessionProfileIntegrationTests
 
         client0.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-0-answer")));
         client0.BlockOnNextCall(client0Gate, client0Started);
-        client0.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-1-answer")));
-        client0.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-2-answer")));
 
         var taskQueue = $"crit3-p1-{Guid.NewGuid():N}";
         using var host = BuildHostWithKeyedClients(
@@ -154,37 +146,21 @@ public class DurableSessionProfileIntegrationTests
         // Wait until Turn 0's activity has started (LLM call in progress).
         await client0Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // Queue Turn 1 and Turn 2 while Turn 0 is blocking, using its pinned profile.
+        // A different request while Turn 0 is blocking is rejected, not queued.
         var turn1Options = new ChatOptions().WithChatClientKey("key-0");
-        var turn1Task = Task.Run(async () =>
-            await sessionClient.SendAsync(
+        await Assert.ThrowsAsync<DurableChatRequestException>(() =>
+            sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-1")],
                 turn1Options));
 
-        var turn2Options = new ChatOptions().WithChatClientKey("key-0");
-        var turn2Task = Task.Run(async () =>
-            await sessionClient.SendAsync(
-                conversationId,
-                [new ChatMessage(ChatRole.User, "turn-2")],
-                turn2Options));
-
-        // Wait until Turn 1 and Turn 2 have both been accepted by the workflow.
-        var workflowHandleP1 = env.Client.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
-        await PollUntilUpdateCountAsync(workflowHandleP1, minAcceptedCount: 3, TimeSpan.FromSeconds(30));
-
         // Release Turn 0's LLM call.
         client0Gate.TrySetResult();
 
-        // All three turns must complete successfully.
+        // The one admitted turn completes successfully.
         await turn0Task.WaitAsync(TimeSpan.FromSeconds(60));
-        var response1 = await turn1Task.WaitAsync(TimeSpan.FromSeconds(60));
-        var response2 = await turn2Task.WaitAsync(TimeSpan.FromSeconds(60));
 
-        Assert.NotNull(response1);
-        Assert.NotNull(response2);
-
-        Assert.Equal(3, client0.CallCount);
+        Assert.Equal(1, client0.CallCount);
         Assert.Equal(0, client1.CallCount);
         Assert.Equal(0, client2.CallCount);
 
@@ -256,45 +232,6 @@ public class DurableSessionProfileIntegrationTests
         (string Key, IChatClient Client) pair3,
         Action<ITemporalWorkerServiceOptionsBuilder> registerTools) =>
         BuildHostWithKeyedClients(client, taskQueue, registerTools, pair1, pair2, pair3);
-
-    // ── Deterministic coordination helpers ────────────────────────────────────
-
-    /// <summary>
-    /// Polls <paramref name="handle"/>'s history until at least
-    /// <paramref name="minAcceptedCount"/> <c>WorkflowExecutionUpdateAccepted</c> events
-    /// have been recorded, or <paramref name="timeout"/> elapses.
-    ///
-    /// <para>
-    /// Each <c>SendAsync</c> call issues a <c>WorkflowExecutionUpdate</c> (via
-    /// <c>ExecuteUpdateAsync</c>). Once the workflow accepts an update it appends a
-    /// <c>WorkflowExecutionUpdateAccepted</c> event to the history. Polling for N such
-    /// events is a deterministic alternative to a fixed-duration sleep: it confirms
-    /// the queued turns have been accepted and their metadata written before releasing
-    /// the gate that advances the in-flight turn.
-    /// </para>
-    /// </summary>
-    private static async Task PollUntilUpdateCountAsync(
-        WorkflowHandle handle,
-        int minAcceptedCount,
-        TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            var count = 0;
-            await foreach (var ev in handle.FetchHistoryEventsAsync().ConfigureAwait(false))
-            {
-                if (ev.WorkflowExecutionUpdateAcceptedEventAttributes is not null)
-                    count++;
-            }
-            if (count >= minAcceptedCount)
-                return;
-            await Task.Delay(TimeSpan.FromMilliseconds(100)).ConfigureAwait(false);
-        }
-        throw new TimeoutException(
-            $"Expected at least {minAcceptedCount} WorkflowExecutionUpdateAccepted events " +
-            $"within {timeout}, but did not observe them.");
-    }
 
     // ── Chat client helpers ─────────────────────────────────────────────────
 

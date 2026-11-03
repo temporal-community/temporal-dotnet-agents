@@ -225,8 +225,8 @@ while (true)
             if (string.IsNullOrWhiteSpace(comment)) comment = null;
         }
 
-        // ResolveApprovalAsync is retry-safe: the returned status distinguishes an
-        // accepted decision from a duplicate delivery or a conflicting retry.
+        // The resolver only accepts a matching pending decision. Reconcile an
+        // ambiguous response through the application's review state instead of retrying blindly.
         var resolution = await client.ResolveApprovalAsync(sessionId, new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
@@ -238,7 +238,6 @@ while (true)
         {
             DurableApprovalResolutionStatus.Accepted when choice == "approve" => "\n  ✓ Approved — agent is resuming...",
             DurableApprovalResolutionStatus.Accepted => "\n  ✗ Rejected — agent is resuming...",
-            DurableApprovalResolutionStatus.AlreadyResolved => "\n  ✓ This decision was already recorded.",
             _ => $"\n  Approval was not applied: {resolution.Status}.",
         });
         Console.WriteLine();

@@ -266,6 +266,11 @@ public class SerializationTests
             MaximumTransportPayloadSizeBytes = 16384,
             PayloadCodecExpansionAllowanceBytes = 512,
             EnableTransportPayloadGuard = true,
+            HistoryEventSoftLimit = 12_000,
+            HistoryEventReserveLimit = 14_000,
+            HistorySizeSoftLimitBytes = 12 * 1024 * 1024,
+            HistorySizeReserveLimitBytes = 14 * 1024 * 1024,
+            MaxConcurrentTurnJoiners = 8,
             CarriedTerminalOutcomes =
             [
                 new global::TemporalCommunity.Extensions.AI.Internal.DurableTerminalTurnOutcome
@@ -303,6 +308,11 @@ public class SerializationTests
         Assert.Equal(16384, deserialized.MaximumTransportPayloadSizeBytes);
         Assert.Equal(512, deserialized.PayloadCodecExpansionAllowanceBytes);
         Assert.True(deserialized.EnableTransportPayloadGuard);
+        Assert.Equal(12_000, deserialized.HistoryEventSoftLimit);
+        Assert.Equal(14_000, deserialized.HistoryEventReserveLimit);
+        Assert.Equal(12 * 1024 * 1024, deserialized.HistorySizeSoftLimitBytes);
+        Assert.Equal(14 * 1024 * 1024, deserialized.HistorySizeReserveLimitBytes);
+        Assert.Equal(8, deserialized.MaxConcurrentTurnJoiners);
         Assert.Equal("request-1", Assert.Single(deserialized.CarriedTerminalOutcomes!).RequestId);
         Assert.Equal(7, deserialized.MaxToolCallsPerTurn);
         Assert.Equal(1, deserialized.MaximumConsecutiveErrorsPerRequest);
@@ -326,6 +336,11 @@ public class SerializationTests
         Assert.Equal(1024 * 1024, restored.MaximumTransportPayloadSizeBytes);
         Assert.Equal(0, restored.PayloadCodecExpansionAllowanceBytes);
         Assert.False(restored.EnableTransportPayloadGuard);
+        Assert.Equal(40_000, restored.HistoryEventSoftLimit);
+        Assert.Equal(45_000, restored.HistoryEventReserveLimit);
+        Assert.Equal(40 * 1024 * 1024, restored.HistorySizeSoftLimitBytes);
+        Assert.Equal(45 * 1024 * 1024, restored.HistorySizeReserveLimitBytes);
+        Assert.Equal(32, restored.MaxConcurrentTurnJoiners);
         Assert.Equal(20, restored.MaxToolCallsPerTurn);
         Assert.Equal(3, restored.MaximumConsecutiveErrorsPerRequest);
     }

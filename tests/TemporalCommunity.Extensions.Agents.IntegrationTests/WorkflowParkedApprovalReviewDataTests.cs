@@ -215,12 +215,29 @@ public sealed class WorkflowParkedApprovalReviewDataTests
             Approved = true,
             Reason = "Approved by reviewer.",
         };
-        var outcomes = await Task.WhenAll(
+        var resolutionTasks = new[]
+        {
             client.ResolveApprovalAsync(session.SessionId, decision),
-            client.ResolveApprovalAsync(session.SessionId, decision));
+            client.ResolveApprovalAsync(session.SessionId, decision),
+        };
+        var acceptedCount = 0;
+        var rejectedCount = 0;
+        foreach (var resolutionTask in resolutionTasks)
+        {
+            try
+            {
+                var result = await resolutionTask;
+                Assert.Equal(DurableApprovalResolutionStatus.Accepted, result.Status);
+                acceptedCount++;
+            }
+            catch (WorkflowUpdateFailedException)
+            {
+                rejectedCount++;
+            }
+        }
 
-        Assert.Contains(outcomes, outcome => outcome.Status == DurableApprovalResolutionStatus.Accepted);
-        Assert.Contains(outcomes, outcome => outcome.Status == DurableApprovalResolutionStatus.AlreadyResolved);
+        Assert.Equal(1, acceptedCount);
+        Assert.Equal(1, rejectedCount);
         await runTask.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Equal(1, Volatile.Read(ref invocations));
         await host.StopAsync();

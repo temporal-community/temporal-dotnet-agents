@@ -23,13 +23,20 @@ public interface ITemporalAgentClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Runs an agent by sending a fire-and-forget signal.
+    /// Runs an agent by submitting a validated fire-and-forget update.
     /// Starts the workflow if it is not already running.
     /// Returns immediately without waiting for the agent response.
     /// </summary>
     Task RunAgentFireAndForgetAsync(
         TemporalAgentSessionId sessionId,
         RunRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Queries current Temporal event-history usage and the session's configured admission thresholds.
+    /// </summary>
+    Task<DurableChatHistoryBudgetStatus> GetHistoryBudgetAsync(
+        TemporalAgentSessionId sessionId,
         CancellationToken cancellationToken = default);
 
     // ── Human-in-the-Loop (GAP 3) ────────────────────────────────────────────
@@ -43,10 +50,10 @@ public interface ITemporalAgentClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Resolves one pending agent-tool approval.
-    /// An identical retry returns <see cref="DurableApprovalResolutionStatus.AlreadyResolved"/>;
-    /// a retry that changes the decision returns
-    /// <see cref="DurableApprovalResolutionStatus.Conflict"/>.
+    /// Resolves one matching pending agent-tool approval. Unknown, mismatched, already-resolved,
+    /// or conflicting decisions fail update validation before Temporal records an accepted update.
+    /// After an ambiguous RPC result, reconcile with application-owned review state rather than
+    /// retrying the decision blindly.
     /// </summary>
     Task<DurableApprovalResolutionResult> ResolveApprovalAsync(
         TemporalAgentSessionId sessionId,
@@ -94,23 +101,19 @@ public interface ITemporalAgentClient
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <remarks>
     /// <para>
-    /// Internally uses signal-with-start to atomically create the workflow and queue the initial
-    /// request signal in a single server RPC. This prevents a crash window between workflow
-    /// creation and signal delivery.
+    /// The initial request is carried in the delayed workflow's start input. If the session is
+    /// already running, the request is submitted as a validated fire-and-forget update instead.
     /// </para>
     /// <para>
-    /// <b>Duplicate-call behaviour within the delay window:</b> if this method is called more
-    /// than once with the same <paramref name="sessionId"/> before the delay elapses, each call
-    /// sends another <c>SignalWithStartWorkflow</c> RPC. Temporal's <c>StartDelay</c>
-    /// documentation specifies that the first workflow task is dispatched immediately when a
-    /// <c>SignalWithStart</c> arrives for a not-yet-started workflow — so the second call will
-    /// cause the workflow to start early and the delay to be ignored for the rest of its
-    /// duration. Callers should not schedule the same session twice before its delay expires.
+    /// <b>Duplicate-call behaviour within the delay window:</b> a repeated call submits another
+    /// validated update to the existing execution and can cause the workflow to begin before the
+    /// original delay elapses. Callers should not schedule the same session twice before its delay
+    /// expires.
     /// </para>
     /// <para>
     /// <b>Already-running session:</b> if a workflow with the same <paramref name="sessionId"/>
-    /// is already running (due to <c>UseExisting</c> conflict policy), the request signal is
-    /// delivered to the running workflow; no new workflow is started.
+    /// is already running, the request is delivered as a validated update; no new workflow is
+    /// started.
     /// </para>
     /// </remarks>
     Task RunAgentDelayedAsync(
@@ -166,14 +169,14 @@ public interface ITemporalAgentClient
     ScheduleHandle GetAgentScheduleHandle(string scheduleId);
 
     /// <summary>
-    /// Sends a graceful shutdown signal to the agent session workflow, causing it to exit its
+    /// Sends a validated graceful-shutdown update to the agent session workflow, causing it to exit its
     /// session loop rather than sitting parked until the configured <c>TimeToLive</c>.
     /// </summary>
     /// <param name="sessionId">The agent session ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <remarks>
-    /// Equivalent to signalling <c>"Shutdown"</c> on the workflow handle directly, but
-    /// keeps the caller free of the raw workflow ID and signal name details.
+    /// Equivalent to executing the <c>RequestShutdown</c> update on the workflow handle directly,
+    /// but keeps the caller free of the raw workflow ID and update name details.
     /// </remarks>
     Task ShutdownAsync(TemporalAgentSessionId sessionId, CancellationToken cancellationToken = default);
 }

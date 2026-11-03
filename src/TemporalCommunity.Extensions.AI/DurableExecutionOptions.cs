@@ -234,6 +234,36 @@ public sealed class DurableExecutionOptions
     public int PayloadCodecExpansionAllowanceBytes { get; set; }
 
     /// <summary>
+    /// Gets or sets the history event count at which new turns stop being admitted and the
+    /// workflow prepares to continue as new. Defaults to 40,000 events.
+    /// </summary>
+    public int HistoryEventSoftLimit { get; set; } = 40_000;
+
+    /// <summary>
+    /// Gets or sets the history event count at which pending approvals expire to preserve
+    /// headroom for the active turn to finish. Defaults to 45,000 events.
+    /// </summary>
+    public int HistoryEventReserveLimit { get; set; } = 45_000;
+
+    /// <summary>
+    /// Gets or sets the history size in bytes at which new turns stop being admitted and the
+    /// workflow prepares to continue as new. Defaults to 40 MiB.
+    /// </summary>
+    public int HistorySizeSoftLimitBytes { get; set; } = 40 * 1024 * 1024;
+
+    /// <summary>
+    /// Gets or sets the history size in bytes at which pending approvals expire to preserve
+    /// headroom for the active turn to finish. Defaults to 45 MiB.
+    /// </summary>
+    public int HistorySizeReserveLimitBytes { get; set; } = 45 * 1024 * 1024;
+
+    /// <summary>
+    /// Gets or sets the maximum number of matching duplicate requests allowed to join one active
+    /// turn. Additional joiners are rejected with a typed Pending error. Defaults to 32.
+    /// </summary>
+    public int MaxConcurrentTurnJoiners { get; set; } = 32;
+
+    /// <summary>
     /// Gets or sets a factory that creates a worker-level
     /// <see cref="IDurableToolInterceptor{TContext}"/> for intercepting tool calls before
     /// dispatch in the durable tool loop. When <see langword="null"/> (default), no
@@ -312,6 +342,28 @@ public sealed class DurableExecutionOptions
             throw new InvalidOperationException(
                 $"{nameof(PayloadCodecExpansionAllowanceBytes)} must be non-negative and smaller than " +
                 $"{nameof(MaximumTransportPayloadSizeBytes)} in {nameof(DurableExecutionOptions)}.");
+        }
+
+        if (HistoryEventSoftLimit <= 0
+            || HistoryEventReserveLimit <= HistoryEventSoftLimit)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(HistoryEventSoftLimit)} must be positive and smaller than " +
+                $"{nameof(HistoryEventReserveLimit)} in {nameof(DurableExecutionOptions)}.");
+        }
+
+        if (HistorySizeSoftLimitBytes <= 0
+            || HistorySizeReserveLimitBytes <= HistorySizeSoftLimitBytes)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(HistorySizeSoftLimitBytes)} must be positive and smaller than " +
+                $"{nameof(HistorySizeReserveLimitBytes)} in {nameof(DurableExecutionOptions)}.");
+        }
+
+        if (MaxConcurrentTurnJoiners <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(MaxConcurrentTurnJoiners)} must be positive in {nameof(DurableExecutionOptions)}.");
         }
 
         Internal.DurableTransportPayloadGuard.EnsureBoundedRetryPolicy(

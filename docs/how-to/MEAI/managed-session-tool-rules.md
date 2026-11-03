@@ -15,8 +15,9 @@ model, and dispatches each enabled invocation as an `InvokeFunction` Temporal ac
 3. Keep function names and schemas stable across workers serving the same task queue.
 4. Use `NoRetry()` for a side-effecting function when an activity retry would be unsafe; otherwise
    make the function idempotent.
-5. Use `ResolveApprovalAsync(...)` for managed-session approval decisions when the caller needs a
-   retry-safe resolution status.
+5. Use `ResolveApprovalAsync(...)` to submit matching pending approval decisions. Non-progressing
+   decisions are rejected before acceptance; reconcile ambiguous outcomes with application-owned
+   review state instead of retrying blindly.
 
 The minimal shape for step 2 — a bare chat client plus one worker-owned tool:
 
@@ -100,9 +101,10 @@ var result = await sessionClient.ResolveApprovalAsync(
     new DurableApprovalDecision { RequestId = requestId, Approved = true });
 ```
 
-`ResolveApprovalAsync` returns a `DurableApprovalResolutionResult` so the caller can distinguish a
-successful resolution from a stale or already-resolved request instead of guessing from a thrown
-exception.
+`ResolveApprovalAsync` returns a `DurableApprovalResolutionResult` for an accepted decision.
+Unknown, stale, already-resolved, and conflicting decisions are rejected by the workflow update
+validator before they enter history; handle the resulting update failure and reconcile using
+application-owned review state.
 
 Tool exposure is not business authorization. Unknown and unselected model calls receive the same
 safe blocked result and no tool activity is scheduled. For external writes, reauthorize using

@@ -11,7 +11,7 @@ using Xunit.Abstractions;
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 
 /// <summary>
-/// Tests for workflow lifecycle management: shutdown signals, concurrent update
+/// Tests for workflow lifecycle management: shutdown updates, concurrent update
 /// serialization, and worker restart / history replay.
 /// </summary>
 [Trait("Category", "Integration")]
@@ -26,29 +26,29 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
         _output = output;
     }
 
-    // ── Shutdown signal ────────────────────────────────────────────────────────
+    // ── Shutdown update ────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Shutdown_Signal_CompletesWorkflow()
+    public async Task Shutdown_Update_CompletesWorkflow()
     {
         // Establish a session with one turn so the workflow is running.
         var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
         var r1 = await _fixture.AgentProxy.RunAsync("Before shutdown", session);
         Assert.Contains("Echo [1]:", r1.Messages[0].Text);
 
-        // Get a typed handle and send the Shutdown signal.
+        // Get a typed handle and submit the validated shutdown update.
         var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(
             session.SessionId.WorkflowId);
-        await handle.SignalAsync(wf => wf.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync());
 
-        // Wait for the workflow to complete (should be near-instant after signal).
+        // Wait for the workflow to complete (should be near-instant after update).
         await handle.GetResultAsync();
 
         // Confirm the workflow is actually completed.
         var desc = await handle.DescribeAsync();
         Assert.Equal(WorkflowExecutionStatus.Completed, desc.Status);
 
-        _output.WriteLine($"Workflow {session.SessionId.WorkflowId} completed after shutdown signal.");
+        _output.WriteLine($"Workflow {session.SessionId.WorkflowId} completed after shutdown update.");
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
         // Shutdown the workflow.
         var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(
             session.SessionId.WorkflowId);
-        await handle.SignalAsync(wf => wf.RequestShutdownAsync());
+        await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync());
         await handle.GetResultAsync();
 
         // Send another request to the SAME session ID.
@@ -172,12 +172,12 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
     }
 
     [Fact]
-    public async Task SignalWithStart_FirstFireAndForgetTurnInitializesBeforeProcessing()
+    public async Task UpdateWithStart_FirstFireAndForgetTurnInitializesBeforeProcessing()
     {
         var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
 
         var response = await _fixture.AgentProxy.RunAsync(
-            "First signal-with-start",
+            "First update-with-start",
             session,
             new TemporalAgentRunOptions { IsFireAndForget = true });
 
@@ -192,21 +192,21 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
     }
 
     [Fact]
-    public async Task DelayedSignalWithStart_FirstTurnInitializesBeforeProcessing()
+    public async Task DelayedWorkflowStart_FirstFireAndForgetTurnInitializesBeforeProcessing()
     {
         var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
         var proxy = Assert.IsType<TemporalAIAgentProxy>(_fixture.AgentProxy);
 
         await proxy.RunDelayedAsync(
-            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "Delayed first signal")],
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "Delayed first update")],
             session,
             TimeSpan.FromMilliseconds(100));
 
         var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
         await WaitForHistoryEntriesAsync(handle, expectedCount: 2);
 
-        var followUp = await _fixture.AgentProxy.RunAsync("After delayed signal", session);
-        Assert.Contains("Echo [2]: After delayed signal", followUp.Messages[0].Text);
+        var followUp = await _fixture.AgentProxy.RunAsync("After delayed update", session);
+        Assert.Contains("Echo [2]: After delayed update", followUp.Messages[0].Text);
         await AssertNoWorkflowTaskFailuresAsync(handle);
     }
 

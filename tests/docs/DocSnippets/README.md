@@ -103,7 +103,8 @@ the usage guide and `TemporalAgentRunOptions`. Phase 2.2 adds a compiled custom 
 example showing pre-acceptance `Busy`/`Conflict` rejection through `ValidateDurableTurnAdmission`.
 Phase 2.3 adds a compiled managed-session recovery example for `DurableChatRequestException.RequestId`.
 Phase 2.5 keeps the compiled MEAI registration example aligned with the per-payload transport
-budget and codec-expansion reserve.
+budget and codec-expansion reserve. Phase 2.6 adds a compiled MAF history-budget query example
+so the read-only status API remains aligned with the usage guide.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 

@@ -162,6 +162,96 @@ public record class DurableChatWorkflowInput
         }
     }
 
+    /// <summary>History event threshold for restricting new work.</summary>
+    [JsonIgnore]
+    public int HistoryEventSoftLimit { get; init; } = 40_000;
+
+    [JsonInclude]
+    [JsonPropertyName("historyEventSoftLimit")]
+    internal int? SerializedHistoryEventSoftLimit
+    {
+        get => this.HistoryEventSoftLimit;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.HistoryEventSoftLimit = value.Value;
+            }
+        }
+    }
+
+    /// <summary>History event threshold for expiring approval waits.</summary>
+    [JsonIgnore]
+    public int HistoryEventReserveLimit { get; init; } = 45_000;
+
+    [JsonInclude]
+    [JsonPropertyName("historyEventReserveLimit")]
+    internal int? SerializedHistoryEventReserveLimit
+    {
+        get => this.HistoryEventReserveLimit;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.HistoryEventReserveLimit = value.Value;
+            }
+        }
+    }
+
+    /// <summary>History size threshold in bytes for restricting new work.</summary>
+    [JsonIgnore]
+    public int HistorySizeSoftLimitBytes { get; init; } = 40 * 1024 * 1024;
+
+    [JsonInclude]
+    [JsonPropertyName("historySizeSoftLimitBytes")]
+    internal int? SerializedHistorySizeSoftLimitBytes
+    {
+        get => this.HistorySizeSoftLimitBytes;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.HistorySizeSoftLimitBytes = value.Value;
+            }
+        }
+    }
+
+    /// <summary>History size threshold in bytes for expiring approval waits.</summary>
+    [JsonIgnore]
+    public int HistorySizeReserveLimitBytes { get; init; } = 45 * 1024 * 1024;
+
+    [JsonInclude]
+    [JsonPropertyName("historySizeReserveLimitBytes")]
+    internal int? SerializedHistorySizeReserveLimitBytes
+    {
+        get => this.HistorySizeReserveLimitBytes;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.HistorySizeReserveLimitBytes = value.Value;
+            }
+        }
+    }
+
+    /// <summary>Maximum concurrent matching duplicate-update joiners for one active turn.</summary>
+    [JsonIgnore]
+    public int MaxConcurrentTurnJoiners { get; init; } = 32;
+
+    [JsonInclude]
+    [JsonPropertyName("maxConcurrentTurnJoiners")]
+    internal int? SerializedMaxConcurrentTurnJoiners
+    {
+        get => this.MaxConcurrentTurnJoiners;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.MaxConcurrentTurnJoiners = value.Value;
+            }
+        }
+    }
+
     [JsonInclude]
     [JsonPropertyName("maxTerminalOutcomeBytes")]
     internal int? SerializedMaxTerminalOutcomeBytes

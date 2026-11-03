@@ -134,7 +134,7 @@ Console.WriteLine("--- spans ---\n");
 
 var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
 
-// Track every conversation we start so we can signal Shutdown to each running
+// Track every conversation we start so we can request Shutdown on each running
 // workflow before the host exits (see "Shutdown" block below).
 var conversationIds = new List<string>();
 
@@ -144,9 +144,9 @@ conversationIds.AddRange(await RunMultiTurnDemoAsync(sessionClient));
 // ── Shutdown ──────────────────────────────────────────────────────────────────
 // Each demo starts a Temporal workflow that survives host.StopAsync() — the host
 // only stops the worker process, not the workflows running on the Temporal
-// server. Without an explicit Shutdown signal, those workflows sit parked for
+// server. Without an explicit Shutdown update, those workflows sit parked for
 // SessionTimeToLive (1h above) burning workflow slots and cluttering the UI on
-// re-runs. Signal each one so DurableChatWorkflowBase.RequestShutdownAsync
+// re-runs. Request shutdown on each one so DurableChatWorkflowBase.RequestShutdownAsync
 // triggers a clean completion of the workflow loop.
 foreach (var conversationId in conversationIds)
 {

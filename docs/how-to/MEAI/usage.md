@@ -21,10 +21,11 @@ how-to reference for all of them:
 
 ## Durable-chat redesign target contracts
 
-**Implementation status:** Phases 0, 1, and 2.1–2.5 are implemented. The current API supports
+**Implementation status:** Phases 0, 1, and 2.1–2.6 are implemented. The current API supports
 request identity, active-turn admission, bounded terminal outcomes, epoch-aware idle deadlines,
-and conservative per-payload transport guards. Event-history budgeting is still later work.
-In particular, `correlationId` is not an idempotency key and current Continue-as-New can trim history.
+per-payload transport guards, bounded turn joiners, event-history thresholds, and validated
+session shutdown. In particular, `correlationId` is not an idempotency key and current
+Continue-as-New can trim history.
 
 | Boundary | Selected target contract |
 |---|---|
@@ -32,8 +33,8 @@ In particular, `correlationId` is not an idempotency key and current Continue-as
 | Admission | One active turn. Matching request ID and effect-bearing fingerprint joins it or returns its terminal result; another request gets `Busy`; changed input under the same ID gets `Conflict`. Success, failure, and cancellation are terminal ledger outcomes. |
 | Deduplication | Bound terminal entry count and serialized bytes; never evict pending requests. Cap pending joiners (`Pending` beyond the cap). Neither a ledger nor a single activity attempt guarantees exactly-once external effects. |
 | Payload transport | Measure complete payloads with the configured Temporal payload converter; reserve an explicit codec-expansion allowance. Guard workflow/update inputs and results, query results, activity inputs, and CAN input. The default per-payload budget is 1 MiB. |
-| Approval and CAN | Close admission before draining; defer CAN until admitted handlers and the active turn finish. Approvals have finite deadlines. Declare no signal handlers: unit 2.6 replaces current `Shutdown` with validated `RequestShutdown` and removes `ShutdownSignalName`. Unknown, mismatched, and resolved decisions are rejected before admission. |
-| Event history | Use `Workflow.CurrentHistoryLength` and `CurrentHistorySize` (bytes, updated at workflow-task boundaries). Soft thresholds admit only completion, approval resolution, cancellation, and recovery. Near approval reserve exhaustion, expire deterministically as `Expired(HistoryBudget)`. Bound recovery per run and across CAN; a finite timer does not bound request volume. |
+| Approval and CAN | Close admission before draining; defer CAN until admitted handlers and the active turn finish. Approvals have finite deadlines. Session shutdown uses the validated `RequestShutdown` update; unknown, mismatched, and already-resolved approval decisions are rejected before admission. |
+| Event history | Use `Workflow.CurrentHistoryLength` and `CurrentHistorySize` (bytes, updated at workflow-task boundaries). Defaults are 40,000/45,000 events and 40/45 MiB soft/reserve thresholds; use `GetHistoryBudgetAsync` to inspect current usage. At the soft threshold, reject new turns while allowing completion and recovery work. Near reserve exhaustion, expire approvals as `Expired(HistoryBudget)`. A finite timer does not bound request volume. |
 | Failure and cancellation | With no dispatched tool effect, roll back the turn. After an effect, retain a bounded interrupted-turn record: completed call/result pairs, `unknown` for uncertain effects, `not executed` for undispatched calls, and a redacted bounded terminal marker. Drop partial assistant text and project protocol-valid model messages. |
 | Retained history | `GetHistory` is retained state, not an archive. Opt-in complete-turn trimming and a library-selected-prefix summarizer are separate from `IChatReducer`, which only shapes protected ephemeral model context. Without a configured compaction strategy, preserve history and enter `HistoryBlocked`; summarizer failure must never silently fall back to trimming. |
 | Model budget | Optional input-token limit plus output reserve, with a replaceable heuristic estimator counting instructions, tool declarations, output schema, context, active turn, and reserve. This is independent of Temporal payload limits. Protected content or reducer output that cannot fit gives `ContextBudgetExceeded`; unconfigured provider overflow maps to a typed non-retryable outcome. Summarization has its own budget. |
@@ -390,6 +391,10 @@ explicit rejection: an ambiguously completed update may already have applied its
 Turns admitted before the boundary still finish, and history is reduced again if they changed it.
 `ShutdownAsync` likewise rejects new turns, but the workflow completes only after admitted turns
 finish, so expect shutdown to take as long as any in-flight turn, including one paused for approval.
+The history budget covers the library's validated update operations, not arbitrary Temporal
+signals sent directly by other clients. Temporal records an accepted signal even when the workflow
+has no matching handler; restrict direct workflow access and use application/deployment access
+controls rather than relying on the absence of a signal handler to bound history.
 
 ## Durable tool calls with `AIFunction.AsDurable()`
 

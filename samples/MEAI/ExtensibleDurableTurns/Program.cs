@@ -117,7 +117,7 @@ Console.WriteLine($"Completion: {result.CompletionReason}; revision: {result.Fin
 if (result.CompletionReason != DurableTurnCompletionReason.FinalResponse)
 {
     Console.WriteLine("The non-final turn state is diagnostic only and will not be applied.");
-    await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+    await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
     await host.StopAsync();
     return;
 }
@@ -192,8 +192,8 @@ if (!deniedTurnFailed)
     throw new InvalidOperationException("The denied sample turn unexpectedly succeeded.");
 }
 
-await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
-await deniedHandle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
+await deniedHandle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
 await host.StopAsync();
 
 void RegisterStatefulTool(

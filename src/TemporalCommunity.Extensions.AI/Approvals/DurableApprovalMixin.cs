@@ -24,6 +24,10 @@ internal sealed class DurableApprovalMixin
 {
     internal const string InvalidRequestErrorType = "DurableApprovalInvalidRequest";
     internal const string AlreadyPendingErrorType = "DurableApprovalAlreadyPending";
+    internal const string ResolutionNotPendingErrorType = "DurableApprovalNotPending";
+    internal const string ResolutionRequestMismatchErrorType = "DurableApprovalRequestMismatch";
+    internal const string ResolutionAlreadyResolvedErrorType = "DurableApprovalAlreadyResolved";
+    internal const string ResolutionConflictErrorType = "DurableApprovalResolutionConflict";
     private const string AlreadyPendingMessage =
         "An approval request is already pending. Submit or timeout the current request before sending another.";
     private const int MaxRetainedResolutions = 32;
@@ -89,7 +93,8 @@ internal sealed class DurableApprovalMixin
         DurableApprovalRequest request,
         TimeSpan approvalTimeout,
         Action<DurableApprovalRequest>? onRequested = null,
-        Action<DurableApprovalDecision>? onResolved = null)
+        Action<DurableApprovalDecision>? onResolved = null,
+        Func<bool>? historyBudgetReserveReached = null)
     {
         // Guard against invalid and concurrent requests. ValidateRequestApproval runs this check on the
         // [WorkflowUpdateValidator] path (update arrives over the wire), but direct turn-loop
@@ -116,16 +121,24 @@ internal sealed class DurableApprovalMixin
         onRequested?.Invoke(request);
 
         var conditionMet = await Workflow.WaitConditionAsync(
-            () => _approvalDecision is not null && _approvalDecision.RequestId == request.RequestId,
+            () => (_approvalDecision is not null && _approvalDecision.RequestId == request.RequestId)
+                  || historyBudgetReserveReached?.Invoke() == true,
             timeout: approvalTimeout);
 
-        if (!conditionMet)
+        var expiredForHistoryBudget = _approvalDecision is null
+                                      && historyBudgetReserveReached?.Invoke() == true;
+        if (!conditionMet || expiredForHistoryBudget)
         {
             var timedOutDecision = new DurableApprovalDecision
             {
                 RequestId = request.RequestId,
                 Approved = false,
-                Reason = $"Approval timed out after {DescribeDuration(approvalTimeout)} with no human response.",
+                Reason = expiredForHistoryBudget
+                    ? "Approval expired because the workflow history reserve was reached."
+                    : $"Approval timed out after {DescribeDuration(approvalTimeout)} with no human response.",
+                ExpirationReason = expiredForHistoryBudget
+                    ? DurableApprovalExpirationReason.HistoryBudget
+                    : DurableApprovalExpirationReason.Timeout,
             };
 
             onResolved?.Invoke(timedOutDecision);   // callback first
@@ -150,7 +163,43 @@ internal sealed class DurableApprovalMixin
     public DurableApprovalResolutionResult ResolveApproval(DurableApprovalDecision decision)
     {
         ArgumentNullException.ThrowIfNull(decision);
+        var status = GetResolutionStatus(decision);
+        if (status == DurableApprovalResolutionStatus.Accepted)
+        {
+            _approvalDecision = decision;
+        }
 
+        return Result(status, decision.RequestId);
+    }
+
+    /// <summary>
+    /// Rejects decisions that cannot resolve the current approval before Temporal records the
+    /// update. Only a matching, not-yet-resolved decision is admitted.
+    /// </summary>
+    public void ValidateResolveApproval(DurableApprovalDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        var status = GetResolutionStatus(decision);
+        if (status != DurableApprovalResolutionStatus.Accepted)
+        {
+            var (errorType, description) = status switch
+            {
+                DurableApprovalResolutionStatus.NotPending =>
+                    (ResolutionNotPendingErrorType, "No approval is pending for this request ID."),
+                DurableApprovalResolutionStatus.RequestMismatch =>
+                    (ResolutionRequestMismatchErrorType, "A different approval request is pending."),
+                DurableApprovalResolutionStatus.AlreadyResolved =>
+                    (ResolutionAlreadyResolvedErrorType, "This approval request is already resolved."),
+                DurableApprovalResolutionStatus.Conflict =>
+                    (ResolutionConflictErrorType, "The decision conflicts with the accepted decision."),
+                _ => throw new InvalidOperationException($"Unexpected approval status: {status}."),
+            };
+            throw Failure(description, errorType);
+        }
+    }
+
+    private DurableApprovalResolutionStatus GetResolutionStatus(DurableApprovalDecision decision)
+    {
         var retained = _resolvedApprovals.LastOrDefault(
             existing => string.Equals(existing.RequestId, decision.RequestId, StringComparison.Ordinal));
 
@@ -158,41 +207,34 @@ internal sealed class DurableApprovalMixin
         {
             if (retained is null)
             {
-                return Result(DurableApprovalResolutionStatus.NotPending, decision.RequestId);
+                return DurableApprovalResolutionStatus.NotPending;
             }
 
-            return Result(
-                IsEquivalent(retained, decision)
-                    ? DurableApprovalResolutionStatus.AlreadyResolved
-                    : DurableApprovalResolutionStatus.Conflict,
-                decision.RequestId);
+            return IsEquivalent(retained, decision)
+                ? DurableApprovalResolutionStatus.AlreadyResolved
+                : DurableApprovalResolutionStatus.Conflict;
         }
 
         if (!string.Equals(_pendingApproval.RequestId, decision.RequestId, StringComparison.Ordinal))
         {
             if (retained is not null)
             {
-                return Result(
-                    IsEquivalent(retained, decision)
-                        ? DurableApprovalResolutionStatus.AlreadyResolved
-                        : DurableApprovalResolutionStatus.Conflict,
-                    decision.RequestId);
+                return IsEquivalent(retained, decision)
+                    ? DurableApprovalResolutionStatus.AlreadyResolved
+                    : DurableApprovalResolutionStatus.Conflict;
             }
 
-            return Result(DurableApprovalResolutionStatus.RequestMismatch, decision.RequestId);
+            return DurableApprovalResolutionStatus.RequestMismatch;
         }
 
         if (_approvalDecision is not null)
         {
-            return Result(
-                IsEquivalent(_approvalDecision, decision)
-                    ? DurableApprovalResolutionStatus.AlreadyResolved
-                    : DurableApprovalResolutionStatus.Conflict,
-                decision.RequestId);
+            return IsEquivalent(_approvalDecision, decision)
+                ? DurableApprovalResolutionStatus.AlreadyResolved
+                : DurableApprovalResolutionStatus.Conflict;
         }
 
-        _approvalDecision = decision;
-        return Result(DurableApprovalResolutionStatus.Accepted, decision.RequestId);
+        return DurableApprovalResolutionStatus.Accepted;
     }
 
     /// <summary>

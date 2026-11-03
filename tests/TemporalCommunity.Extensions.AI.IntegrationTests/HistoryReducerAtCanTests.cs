@@ -85,7 +85,7 @@ public class HistoryReducerAtCanTests
                 {
                     await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, $"turn {i}")]);
                 }
-                catch (Temporalio.Exceptions.WorkflowUpdateFailedException)
+                catch (TemporalCommunity.Extensions.AI.Exceptions.DurableChatRequestException)
                 {
                     // CAN in flight — expected.
                 }

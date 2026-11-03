@@ -118,7 +118,10 @@ When `DefaultTemporalAgentClient` receives a session ID it issues a single atomi
   update is delivered
 - **Targeting**: the operation targets the workflow *ID*, so it follows the continue-as-new chain
 
-Fire-and-forget turns (immediate and delayed) use the equivalent **Signal-With-Start** shape.
+Immediate fire-and-forget turns use a validated `RunAgentFireAndForget` Update-With-Start.
+Delayed starts carry the initial request in workflow input because the pinned SDK does not support
+combining `WorkflowStartDelay` with Update-With-Start; if the session already exists, a delayed
+request is delivered immediately through the validated update.
 
 The session effectively *is* the workflow. Creating a session doesn't start the workflow; the first `RunAsync` call does.
 
@@ -131,14 +134,11 @@ The session effectively *is* the workflow. Creating a session doesn't start the 
 `AgentWorkflow` inherits from `DurableChatWorkflowBase<AgentResponse>` (declared in
 `TemporalCommunity.Extensions.AI`). The base class owns the session-loop body — the turn
 turn admission, rollback, continue-as-new triggering, history reduction, the
-`[WorkflowQuery("GetHistory")]` handler, the `[WorkflowSignal("Shutdown")]` handler, and the
+`[WorkflowQuery("GetHistory")]` handler, the validated `[WorkflowUpdate("RequestShutdown")]` handler, and the
 generic HITL approval handlers (`RequestApproval`, `ResolveApproval`, `GetPendingApproval`).
 
-**Wire names.** The turn Update is named `Run`; the graceful-shutdown signal is named `Shutdown`.
-These are the strings a raw Temporal client must send. Prefer
-`ITemporalAgentClient.ShutdownAsync`, or the
-`DurableChatWorkflowBase<AgentResponse>.ShutdownSignalName` constant, over hard-coding the signal
-name.
+**Wire names.** The turn Update is named `Run`; the graceful-shutdown Update is named
+`RequestShutdown`. Prefer `ITemporalAgentClient.ShutdownAsync` over hard-coding the update name.
 
 The shared shape:
 
@@ -147,7 +147,7 @@ DurableChatWorkflowBase<TOutput>           ← in TemporalCommunity.Extensions.A
     ├─ _history: List<DurableSessionEntry> (private)
     ├─ session-loop body (turn admission, rollback, CAN trigger, history reducer)
     ├─ [WorkflowQuery("GetHistory")]
-    ├─ [WorkflowSignal("Shutdown")]        ← ShutdownSignalName
+    ├─ [WorkflowUpdate("RequestShutdown")] ← validated graceful shutdown
     ├─ [WorkflowUpdate("RequestApproval")] + [WorkflowUpdateValidator]
     ├─ [WorkflowUpdate("ResolveApproval")]
     ├─ [WorkflowQuery("GetPendingApproval")]
@@ -164,7 +164,7 @@ AgentWorkflow : DurableChatWorkflowBase<AgentResponse>     ← in TemporalCommun
     ├─ [WorkflowUpdate("Run")] + [WorkflowUpdateValidator]
     ├─ [WorkflowUpdate("GrantSessionApprovalScope")]   ← opt-in scope administration
     ├─ [WorkflowUpdate("RevokeSessionApprovalScope")]  ← opt-in scope administration
-    ├─ [WorkflowSignal("RunFireAndForget")]
+    ├─ [WorkflowUpdate("RunFireAndForget")] + [WorkflowUpdateValidator]
     ├─ IDurableTurnRollbackParticipant (StateBag capture/restore per turn)
     ├─ override BuildResponseEntry → AgentSessionResponse.FromAgentResponse(...)
     ├─ override ExecuteTurnAsync   → drives ExecuteDurableAgentTurnAsync (the durable loop)
@@ -194,14 +194,14 @@ shared fields (`MaxEntryCount`, `HistoryReducerKey`, `EnableSearchAttributes`, `
 4. **Accumulates** conversation history as workflow state
 5. **Continues-as-new** when the SDK suggests it *or* when `_history.Count` reaches
    `MaxEntryCount` (default `1000`)
-6. **Shuts down** when a `Shutdown` signal arrives or the TTL expires
+6. **Shuts down** when the validated `RequestShutdown` update arrives or the TTL expires
 
 Steps 2, 4, 5, and 6 are implemented by the base class. Step 3 is the
 subclass's `ExecuteTurnAsync` override (which dispatches `AgentActivities`
 rather than `DurableChatActivities`).
 
 Shutdown and continue-as-new are mutually exclusive: the CAN branch is gated on
-`!_shutdownRequested`, so a shutdown signal ends the run rather than rolling it over.
+`!_shutdownRequested`, so a shutdown update ends the run rather than rolling it over.
 
 ### The Main Run Loop
 
@@ -288,7 +288,7 @@ if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount)
 
 This is **not** a tight polling loop. `WaitConditionAsync` is an event-driven primitive that parks the workflow until one of these conditions becomes true:
 
-- `_shutdownRequested` — set by the `Shutdown` signal (handler is on the base). This is a
+- `_shutdownRequested` — set by the validated `RequestShutdown` update (handler is on the base). This is a
   **terminal** condition: it exits the run; it does not trigger continue-as-new.
 - `Workflow.ContinueAsNewSuggested` — set by Temporal when history approaches size limits
 - `_history.Count >= input.MaxEntryCount` — the library's own entry-count trigger
@@ -397,17 +397,18 @@ The overrides on `AgentWorkflow`:
 The fire-and-forget path is unique to MAF and stays on the subclass:
 
 ```csharp
-[WorkflowSignal("RunFireAndForget")]
+[WorkflowUpdate("RunFireAndForget")]
+[WorkflowUpdateValidator(nameof(RunAgentFireAndForgetAsync))]
 public Task RunAgentFireAndForgetAsync(RunRequest request) { /* ... */ }
 ```
 
-Signals do not return a value to the caller, so this handler kicks off a
-detached task that follows the same pattern as `RunAgentAsync` but with no
+The update validates admission before history records it, then kicks off a detached task
+that follows the same pattern as `RunAgentAsync` but with no
 return path. It uses the same `RunTurnAsync` helper internally.
 
-The default client starts new sessions atomically: synchronous turns use
-Update-With-Start, while immediate and delayed fire-and-forget turns use
-Signal-With-Start. Temporal may admit those first handlers before the workflow run task has
+The default client starts new sessions atomically: synchronous and immediate fire-and-forget turns
+use Update-With-Start; a delayed fire-and-forget start carries its initial request in workflow input.
+Temporal may admit those first handlers before the workflow run task has
 initialized `AgentWorkflowInput`, so both handler paths cross an internal deterministic readiness
 barrier before reading or changing turn state. The barrier completes synchronously for established
 sessions and does not schedule a timer or activity.
@@ -716,17 +717,16 @@ await proxy.RunAsync("Do this in the background", session,
     new TemporalAgentRunOptions { IsFireAndForget = true });
 ```
 
-This uses the `RunFireAndForget` signal instead of the `Run` update. For a brand-new session the
-client fuses start and signal into one **Signal-With-Start** RPC, the same way `SendAsync` fuses
-start and update:
+This uses the `RunFireAndForget` update instead of the `Run` update. For a brand-new session the
+client fuses start and update into one **Update-With-Start** RPC:
 
 ```
-Client → Signal-With-Start(RunFireAndForget) → Workflow receives signal
+Client → Update-With-Start(RunFireAndForget) → Workflow validates and accepts the update
                                              → Kicks off ProcessFireAndForgetAsync as detached task
-                                             → Returns immediately (no response to caller)
+                                             → Returns after acceptance (no agent response to caller)
 ```
 
-The signal handler starts a detached task inside the workflow that crosses the same input-readiness
+The update handler starts a detached task inside the workflow that crosses the same input-readiness
 barrier and then calls the same `RunTurnAsync` helper (serialize via `_isProcessing`, dispatch the
 durable loop, record history) with no return value. Because there is no caller to surface a failure
 to, `ProcessFireAndForgetAsync` logs and **swallows** any exception so one failed background turn

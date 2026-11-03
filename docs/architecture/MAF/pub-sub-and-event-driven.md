@@ -22,7 +22,7 @@ This gives you:
 
 | Pub/Sub capability | Temporal equivalent |
 |---|---|
-| Fire-and-forget to N subscribers | `RunAgentFireAndForgetAsync` × N (fire-and-forget signal) |
+| Fire-and-forget to N subscribers | `RunAgentFireAndForgetAsync` × N (validated update) |
 | Wait for all subscribers to respond | `ExecuteAgentsInParallelAsync` (WhenAll) |
 | Wait for the first subscriber to respond | `Workflow.WhenAnyAsync(tasks)` |
 | Fan-out with aggregation | Parallel agents + result aggregation in workflow code |
@@ -116,8 +116,8 @@ foreach (var name in subscriberNames)
 {
     var sessionId = TemporalAgentSessionId.WithRandomKey(name);
     // Equivalent to publishing to a topic: fire-and-forget, no reply needed.
-    // StartWorkflowAsync + SignalAsync under the hood — returns as soon as the
-    // signal is accepted; the agent session workflow processes the event asynchronously.
+    // Update-With-Start under the hood — returns once the update is accepted;
+    // the agent session workflow processes the event asynchronously.
     await agentClient.RunAgentFireAndForgetAsync(sessionId, new RunRequest(eventPayload));
 }
 ```

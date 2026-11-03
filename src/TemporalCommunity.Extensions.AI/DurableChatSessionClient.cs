@@ -367,19 +367,32 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
     }
 
+    /// <summary>Returns current Temporal event-history usage and admission thresholds.</summary>
+    public async Task<DurableChatHistoryBudgetStatus> GetHistoryBudgetAsync(
+        string conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+
+        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
+        return await handle.QueryAsync<DurableChatWorkflow, DurableChatHistoryBudgetStatus>(
+            wf => wf.GetHistoryBudget(),
+            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
     /// <summary>
-    /// Sends a graceful shutdown signal to the session workflow so it exits its session loop
+    /// Sends a graceful shutdown update to the session workflow so it exits its session loop
     /// rather than sitting parked until <see cref="DurableExecutionOptions.SessionTimeToLive"/>.
     /// </summary>
     public async Task ShutdownAsync(string conversationId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
 
-        var handle = _client.GetWorkflowHandle(GetWorkflowId(conversationId));
-        await handle.SignalAsync(
-            DurableChatWorkflowBase<ChatResponse>.ShutdownSignalName,
-            Array.Empty<object>(),
-            new WorkflowSignalOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
+        await handle.ExecuteUpdateAsync(
+            wf => wf.RequestShutdownAsync(),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
             .ConfigureAwait(false);
     }
 

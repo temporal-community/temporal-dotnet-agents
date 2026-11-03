@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
@@ -553,12 +554,29 @@ public class DurableToolInterceptorIntegrationTests
             Approved = true,
             Reason = "Approved by reviewer.",
         };
-        var outcomes = await Task.WhenAll(
+        var resolutionTasks = new[]
+        {
             sessionClient.ResolveApprovalAsync(conversationId, decision),
-            sessionClient.ResolveApprovalAsync(conversationId, decision));
+            sessionClient.ResolveApprovalAsync(conversationId, decision),
+        };
+        var acceptedCount = 0;
+        var rejectedCount = 0;
+        foreach (var resolutionTask in resolutionTasks)
+        {
+            try
+            {
+                var result = await resolutionTask;
+                Assert.Equal(DurableApprovalResolutionStatus.Accepted, result.Status);
+                acceptedCount++;
+            }
+            catch (WorkflowUpdateFailedException)
+            {
+                rejectedCount++;
+            }
+        }
 
-        Assert.Contains(outcomes, outcome => outcome.Status == DurableApprovalResolutionStatus.Accepted);
-        Assert.Contains(outcomes, outcome => outcome.Status == DurableApprovalResolutionStatus.AlreadyResolved);
+        Assert.Equal(1, acceptedCount);
+        Assert.Equal(1, rejectedCount);
         await chatTask.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Equal(1, harness.GetInvocationCount("write_record"));
         await host.StopAsync();
@@ -569,7 +587,7 @@ public class DurableToolInterceptorIntegrationTests
     /// new run. This protects a reviewer retry whose first update response was lost.
     /// </summary>
     [Fact]
-    public async Task ApprovalResolution_RetryAfterContinueAsNew_ReturnsAlreadyResolved()
+    public async Task ApprovalResolution_RetryAfterContinueAsNew_IsRejectedBeforeAcceptance()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
@@ -670,9 +688,11 @@ public class DurableToolInterceptorIntegrationTests
         Assert.Contains(
             continuedInput.ApprovalResolutionHistory!,
             retained => retained.RequestId == decision.RequestId && retained.Approved);
-        var retry = await continuedHandle.ExecuteUpdateAsync<DurableChatWorkflow, DurableApprovalResolutionResult>(
-            workflow => workflow.ResolveApprovalAsync(decision));
-        Assert.Equal(DurableApprovalResolutionStatus.AlreadyResolved, retry.Status);
+        var retry = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            continuedHandle.ExecuteUpdateAsync<DurableChatWorkflow, DurableApprovalResolutionResult>(
+                workflow => workflow.ResolveApprovalAsync(decision)));
+        var failure = Assert.IsType<ApplicationFailureException>(retry.InnerException);
+        Assert.Equal(DurableApprovalMixin.ResolutionAlreadyResolvedErrorType, failure.ErrorType);
 
         await host.StopAsync();
     }

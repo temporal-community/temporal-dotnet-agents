@@ -21,4 +21,10 @@ public sealed class DurableApprovalDecision
     /// </summary>
     public string? Reason { get; init; }
 
+    /// <summary>
+    /// The deterministic reason an approval wait expired, or <see langword="null"/> when a
+    /// reviewer supplied the decision.
+    /// </summary>
+    public DurableApprovalExpirationReason? ExpirationReason { get; init; }
+
 }
