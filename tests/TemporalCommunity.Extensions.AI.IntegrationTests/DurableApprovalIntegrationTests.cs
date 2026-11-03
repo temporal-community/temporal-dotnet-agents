@@ -268,6 +268,33 @@ public class DurableApprovalIntegrationTests
     }
 
     [Fact]
+    public async Task ApprovalUpdate_RejectsOversizedReviewProjectionBeforeAcceptance()
+    {
+        var conversationId = $"approval-oversized-review-{Guid.NewGuid():N}";
+        await _fixture.SessionClient.SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, "Hello")]);
+
+        var workflowId = _fixture.SessionClient.GetWorkflowId(conversationId);
+        var handle = _fixture.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        var request = new DurableApprovalRequest
+        {
+            RequestId = $"req-{Guid.NewGuid():N}",
+            ReviewData = new Dictionary<string, string>
+            {
+                ["review"] = new string('x', 16 * 1024),
+            },
+        };
+        var failure = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            handle.ExecuteUpdateAsync(workflow => workflow.RequestApprovalAsync(request)));
+
+        Assert.Equal(
+            "DurableApprovalReviewProjectionTooLarge",
+            Assert.IsType<ApplicationFailureException>(failure.InnerException).ErrorType);
+        Assert.Null(await _fixture.SessionClient.GetPendingApprovalAsync(conversationId));
+    }
+
+    [Fact]
     public async Task ApprovalUpdateWithStart_InitializesBeforeResolverAwait_AndSessionRemainsHealthy()
     {
         var conversationId = $"approval-early-{Guid.NewGuid():N}";

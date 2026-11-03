@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using TemporalCommunity.Extensions.AI.Approvals;
 
 namespace TemporalCommunity.Extensions.AI.Tools;
 
@@ -17,8 +18,22 @@ internal sealed class DurableToolInterceptorResult
     /// </summary>
     /// <param name="decision">The interceptor decision to convert.</param>
     /// <returns>A populated <see cref="DurableToolInterceptorResult"/>.</returns>
-    internal static DurableToolInterceptorResult FromDecision(DurableToolDecision decision) =>
-        decision switch
+    internal static DurableToolInterceptorResult FromDecision(DurableToolDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        var (description, metadata) = decision switch
+        {
+            DurableToolDecision.ProceedDecision proceed =>
+                (proceed.EnrichedDescription, proceed.Metadata),
+            DurableToolDecision.ApprovalRequiredDecision approval =>
+                (approval.Description, approval.Metadata),
+            DurableToolDecision.SkipDecision skip => (null, skip.Metadata),
+            DurableToolDecision.BlockDecision block => (null, block.Metadata),
+            _ => (null, null),
+        };
+        DurableApprovalReviewDataGuard.EnsureWithinLimit(description, metadata);
+
+        return decision switch
         {
             DurableToolDecision.ProceedDecision p => new DurableToolInterceptorResult
             {
@@ -58,7 +73,7 @@ internal sealed class DurableToolInterceptorResult
             },
             _ => new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed },
         };
-
+    }
 
     /// <summary>The outcome decided by the interceptor.</summary>
     public DurableToolOutcome Outcome { get; init; }

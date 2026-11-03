@@ -103,6 +103,9 @@ override use `DurableExecutionOptions.ApprovalTimeout`.
 `DurableApprovalRequest.ReviewData` contains only explicit metadata supplied by a durable tool
 interceptor. The workflow never copies raw model-produced function arguments into the approval
 request. This avoids exposing secrets or unreviewed payloads to an approval UI.
+Review metadata is empty unless the interceptor opts in. The combined description and metadata are
+limited to 64 metadata entries and 16 KiB of serialized JSON; an oversized projection fails with
+the non-retryable `DurableApprovalReviewProjectionTooLarge` error before the approval is accepted.
 
 ```csharp
 // Inside a durable tool interceptor's BeforeToolCallAsync — runs as a Temporal activity
@@ -119,6 +122,7 @@ The reviewer receives these values in `pending.ReviewData`; include only informa
 and useful for the reviewer. `ReviewData` is not a reviewer identity, credential, or authorization
 grant. Authenticate the reviewer in the external approval UI and authorize the tool against current
 authoritative state immediately before it performs an effect.
+The same bounds apply to approval requests created through the MAF in-tool API.
 
 ## Interceptors
 

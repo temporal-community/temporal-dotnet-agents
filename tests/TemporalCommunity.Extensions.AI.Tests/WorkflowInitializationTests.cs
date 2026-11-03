@@ -51,6 +51,57 @@ public sealed class WorkflowInitializationTests
     }
 
     [Fact]
+    public void ApprovalReviewProjection_RejectsOversizedDirectRequest()
+    {
+        var mixin = new DurableApprovalMixin();
+
+        var exception = Assert.Throws<ApplicationFailureException>(() =>
+            mixin.ValidateRequestApproval(new DurableApprovalRequest
+            {
+                RequestId = "review-oversized",
+                ReviewData = new Dictionary<string, string> { ["context"] = new string('x', 16 * 1024) },
+            }));
+
+        Assert.True(exception.NonRetryable);
+        Assert.Equal("DurableApprovalReviewProjectionTooLarge", exception.ErrorType);
+    }
+
+    [Fact]
+    public void ApprovalReviewProjection_AllowsBoundedOptInContext()
+    {
+        var mixin = new DurableApprovalMixin();
+        var request = new DurableApprovalRequest
+        {
+            RequestId = "review-bounded",
+            Description = "Review this operation.",
+            ReviewData = Enumerable.Range(0, 64).ToDictionary(
+                index => $"field-{index}",
+                _ => "selected reviewer-safe value"),
+        };
+
+        mixin.ValidateRequestApproval(request);
+    }
+
+    [Fact]
+    public void ApprovalReviewProjection_RejectsTooManyMetadataEntries()
+    {
+        var mixin = new DurableApprovalMixin();
+        var request = new DurableApprovalRequest
+        {
+            RequestId = "review-too-many",
+            ReviewData = Enumerable.Range(0, 65).ToDictionary(
+                index => $"field-{index}",
+                _ => "value"),
+        };
+
+        var exception = Assert.Throws<ApplicationFailureException>(() =>
+            mixin.ValidateRequestApproval(request));
+
+        Assert.True(exception.NonRetryable);
+        Assert.Equal("DurableApprovalReviewProjectionTooLarge", exception.ErrorType);
+    }
+
+    [Fact]
     public void StripMessages_Response_PreservesCompletionMetadata()
     {
         var usage = new UsageDetails

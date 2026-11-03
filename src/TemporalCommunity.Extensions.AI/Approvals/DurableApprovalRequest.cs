@@ -36,7 +36,8 @@ public sealed class DurableApprovalRequest
     /// an account identifier, operation summary, or policy reference. This data is not a
     /// trusted actor identity, credential, or authorization claim. The approval UI must
     /// authenticate its reviewer independently, and the tool must authorize the effect against
-    /// current authoritative state immediately before executing it.
+    /// current authoritative state immediately before executing it. The combined description
+    /// and review data are limited to 16 KiB of serialized JSON and 64 metadata entries.
     /// </remarks>
     public IReadOnlyDictionary<string, string>? ReviewData { get; init; }
 

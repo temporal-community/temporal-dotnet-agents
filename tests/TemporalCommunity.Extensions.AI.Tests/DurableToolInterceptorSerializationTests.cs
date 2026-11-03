@@ -1,5 +1,6 @@
 using System.Text.Json;
 using TemporalCommunity.Extensions.AI.Tools;
+using Temporalio.Exceptions;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -112,6 +113,27 @@ public class DurableToolInterceptorSerializationTests
         Assert.Equal(DurableToolOutcome.PauseForApproval, rt!.Outcome);
         Assert.Equal("Approve refund for Jane Doe", rt.EnrichedDescription);
         Assert.Equal("Approve refund for Jane Doe", rt.Message);
+    }
+
+    [Fact]
+    public void DurableToolInterceptorResult_ApprovalReviewProjectionIsEmptyByDefault()
+    {
+        var result = DurableToolInterceptorResult.FromDecision(
+            DurableToolDecision.PauseForApproval("Review the operation."));
+
+        Assert.Null(result.Metadata);
+    }
+
+    [Fact]
+    public void DurableToolInterceptorResult_RejectsOversizedApprovalReviewProjection()
+    {
+        var failure = Assert.Throws<ApplicationFailureException>(() =>
+            DurableToolInterceptorResult.FromDecision(DurableToolDecision.PauseForApproval(
+                "Review the operation.",
+                new Dictionary<string, string> { ["review"] = new string('x', 16 * 1024) })));
+
+        Assert.Equal("DurableApprovalReviewProjectionTooLarge", failure.ErrorType);
+        Assert.True(failure.NonRetryable);
     }
 
     [Fact]

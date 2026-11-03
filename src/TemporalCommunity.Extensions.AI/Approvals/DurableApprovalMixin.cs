@@ -75,6 +75,7 @@ internal sealed class DurableApprovalMixin
                 "A tool approval call identity must include a non-empty call ID and function name.",
                 InvalidRequestErrorType);
         }
+        DurableApprovalReviewDataGuard.EnsureWithinLimit(request.Description, request.ReviewData);
         if (_pendingApproval is not null)
             throw Failure(AlreadyPendingMessage, AlreadyPendingErrorType);
     }

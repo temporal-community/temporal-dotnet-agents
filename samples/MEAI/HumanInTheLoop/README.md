@@ -56,6 +56,8 @@ immediately before deletion. See the repository [security boundary](../../../doc
 - An approval decision records permission to attempt the operation; it is not reviewer identity
   or authorization. Authenticate the reviewer in the external UI and authorize the write against
   current authoritative state immediately before the effect.
+- Reviewer metadata is opt-in and bounded to 64 fields and 16 KiB of serialized projection data.
+  Raw model arguments are not copied into the approval request.
 - `ChatOptions.Tools` and `UseFunctionInvocation()` are not used. Managed sessions obtain both
   the model-visible schema and the worker implementation from `AddDurableTools`.
 

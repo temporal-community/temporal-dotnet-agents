@@ -42,6 +42,12 @@ The most recent 32 decisions are retained across Continue-As-New. A timeout reso
 If an update response is ambiguous, inspect the pending request and reconcile it with application-owned
 review state; do not assume blindly retrying the decision will return the original result.
 
+Reviewer metadata is empty by default: model-supplied tool arguments are not copied into
+`ReviewData`. Applications may opt in to a reviewer-safe description and metadata. The combined
+serialized JSON projection is limited to 16 KiB and at most 64 metadata entries; requests exceeding
+either bound fail non-retryably before acceptance. Descriptions remain caller-authored and can
+contain model-influenced text, so sanitize them for the reviewer surface.
+
 ## Invalid requests
 
 `RequestApproval` requires a non-empty, non-whitespace `RequestId`. A malformed request fails that

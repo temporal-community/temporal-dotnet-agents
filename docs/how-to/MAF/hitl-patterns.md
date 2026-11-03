@@ -298,6 +298,11 @@ the update will return the original result. The result/status types are defined 
 invocation of tool 'issue_refund'" and shows no amount.** Authoring the description and metadata is
 the work; it is the difference between a demo and a product.
 
+Reviewer projection is empty unless explicitly supplied. The combined description and metadata are
+limited to 64 metadata entries and 16 KiB of serialized JSON. Oversized requests fail with the
+non-retryable `DurableApprovalReviewProjectionTooLarge` error before the workflow accepts them,
+including requests made through the in-tool `RequestApprovalAsync` API.
+
 Raw model arguments are never copied into `ReviewData` automatically — that is a deliberate
 injection-surface decision. **This hygiene does not extend to `Description`:** the built-in
 interceptor installed by `UseApprovalScopes()` formats the raw tool arguments into the description
