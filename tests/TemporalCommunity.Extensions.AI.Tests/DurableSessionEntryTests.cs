@@ -88,6 +88,34 @@ public class DurableSessionEntryTests
         Assert.Equal(150, roundTripped.Usage.TotalTokenCount);
     }
 
+    [Fact]
+    public void DurableSessionResponse_FromChatResponse_PreservesProviderMetadata()
+    {
+        var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, "hello"))
+        {
+            ResponseId = "provider-response-1",
+            ModelId = "model-1",
+            FinishReason = ChatFinishReason.Stop,
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                ["provider.trace"] = "trace-1",
+                ["provider.count"] = 42,
+            },
+        };
+
+        var entry = DurableSessionResponse.FromChatResponse(
+            "corr-provider-metadata",
+            response,
+            DateTimeOffset.UtcNow);
+        var restored = RoundTrip(entry);
+
+        Assert.Equal("provider-response-1", restored.ResponseId);
+        Assert.Equal("model-1", restored.ModelId);
+        Assert.Equal(ChatFinishReason.Stop, restored.FinishReason);
+        Assert.Equal("trace-1", restored.ResponseAdditionalProperties!["provider.trace"].GetString());
+        Assert.Equal(42, restored.ResponseAdditionalProperties["provider.count"].GetInt32());
+    }
+
     // ─── DurableSessionResponse.Text accessor ───────────────────────────────
 
     [Fact]

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Exceptions;
 
 namespace TemporalCommunity.Extensions.AI.Internal;
 
@@ -12,8 +13,9 @@ internal static class ChatOptionsSanitizer
     private const string LegacyChatClientFactoryKey = "temporal.chatClientFactoryKey";
 
     /// <summary>
-    /// Clones options for durable transport, retaining serializable routing metadata while
-    /// removing provider-owned state that cannot be safely resumed across an activity boundary.
+    /// Validates and clones options for durable transport, retaining serializable routing
+    /// metadata while rejecting provider-owned state that cannot be resumed across an
+    /// activity boundary.
     /// </summary>
     internal static ChatOptions? PrepareForDurableTransport(ChatOptions? options)
     {
@@ -22,10 +24,28 @@ internal static class ChatOptionsSanitizer
             return null;
         }
 
-        var prepared = options.Clone();
-        prepared.RawRepresentationFactory = null;
-        prepared.ContinuationToken = null;
-        return prepared;
+        if (options.ConversationId is not null)
+        {
+            throw new DurableConfigurationException(
+                $"ChatOptions.{nameof(ChatOptions.ConversationId)} is not supported for durable chat. " +
+                "Use the application conversation ID passed to DurableChatSessionClient instead.");
+        }
+
+        if (options.RawRepresentationFactory is not null)
+        {
+            throw new DurableConfigurationException(
+                $"ChatOptions.{nameof(ChatOptions.RawRepresentationFactory)} cannot cross the " +
+                "durable workflow/activity boundary. Remove it before sending the request.");
+        }
+
+        if (options.ContinuationToken is not null)
+        {
+            throw new DurableConfigurationException(
+                $"ChatOptions.{nameof(ChatOptions.ContinuationToken)} is provider-owned state and " +
+                "cannot be resumed through a durable workflow. Start a new durable turn instead.");
+        }
+
+        return options.Clone();
     }
 
     /// <summary>

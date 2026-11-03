@@ -40,6 +40,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         List<ChatMessage> allTurnMessages = [];
         UsageDetails? totalUsage = null;
+        string? responseId = null;
+        string? modelId = null;
+        AdditionalPropertiesDictionary? additionalProperties = null;
         var consecutiveErrors = 0;
         var currentTurnState = initialTurnState;
         var toolsetManifest = effectiveToolsetManifest ?? RequiredInput.ToolsetManifest;
@@ -117,6 +120,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 totalUsage ??= new UsageDetails();
                 totalUsage.Add(stepResult.Usage);
             }
+            responseId = stepResult.ResponseId;
+            modelId = stepResult.ModelId;
+            additionalProperties = stepResult.AdditionalProperties;
 
             accumulated.Add(stepResult.AssistantMessage);
             allTurnMessages.Add(stepResult.AssistantMessage);
@@ -128,6 +134,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     {
                         Usage = totalUsage,
                         FinishReason = stepResult.FinishReason,
+                        ResponseId = responseId,
+                        ModelId = modelId,
+                        AdditionalProperties = additionalProperties,
                     },
                     DurableTurnCompletionReason.IncompleteResponse,
                     currentTurnState);
@@ -140,6 +149,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     {
                         Usage = totalUsage,
                         FinishReason = stepResult.FinishReason,
+                        ResponseId = responseId,
+                        ModelId = modelId,
+                        AdditionalProperties = additionalProperties,
                     },
                     DurableTurnCompletionReason.FinalResponse,
                     currentTurnState);
@@ -558,6 +570,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 Usage = totalUsage,
                 // The library, not the provider, terminated this aggregate turn.
                 FinishReason = null,
+                ResponseId = responseId,
+                ModelId = modelId,
+                AdditionalProperties = additionalProperties,
             },
             DurableTurnCompletionReason.IterationLimitReached,
             currentTurnState);

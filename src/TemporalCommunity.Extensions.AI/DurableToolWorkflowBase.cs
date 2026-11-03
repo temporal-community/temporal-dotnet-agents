@@ -216,6 +216,10 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
             historyResponse = new ChatResponse([output.Response.Messages[^1]])
             {
                 Usage = output.Response.Usage,
+                ResponseId = output.Response.ResponseId,
+                ModelId = output.Response.ModelId,
+                AdditionalProperties = output.Response.AdditionalProperties,
+                FinishReason = output.Response.FinishReason,
             };
         }
 

@@ -242,6 +242,9 @@ internal sealed class DurableChatActivities(
                 : null,
             Usage = response.Usage,
             FinishReason = response.FinishReason,
+            ResponseId = response.ResponseId,
+            ModelId = response.ModelId,
+            AdditionalProperties = response.AdditionalProperties,
             CompletionReason = completionReason,
         };
     }

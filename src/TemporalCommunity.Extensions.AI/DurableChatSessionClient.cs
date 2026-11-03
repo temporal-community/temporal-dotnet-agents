@@ -183,6 +183,31 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     }
 
     /// <summary>
+    /// Sends a user text message to a durable chat session.
+    /// </summary>
+    /// <param name="conversationId">A unique application conversation identifier.</param>
+    /// <param name="message">User text to append to the conversation.</param>
+    /// <param name="options">Optional supported MEAI chat options.</param>
+    /// <param name="correlationId">Optional observability identifier for the turn.</param>
+    /// <param name="cancellationToken">Cancellation token for this RPC wait.</param>
+    /// <returns>The durable response entry for the turn.</returns>
+    public Task<DurableSessionResponse> SendAsync(
+        string conversationId,
+        string message,
+        ChatOptions? options = null,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        return SendAsync(
+            conversationId,
+            [new ChatMessage(ChatRole.User, message)],
+            options,
+            correlationId,
+            cancellationToken);
+    }
+
+    /// <summary>
     /// Retrieves the conversation history for a session as a list of
     /// <see cref="DurableSessionEntry"/> instances. Each turn appears as a request entry
     /// followed by a response entry.

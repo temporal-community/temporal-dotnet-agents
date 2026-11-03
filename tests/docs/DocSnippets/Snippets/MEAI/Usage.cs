@@ -108,9 +108,7 @@ internal static class Usage
         // BEGIN SNIPPET docs/how-to/MEAI/usage.md#send-a-turn-and-read-history
         var sessionClient = services.GetRequiredService<DurableChatSessionClient>();
 
-        var response = await sessionClient.SendAsync(
-            "customer-42",
-            [new ChatMessage(ChatRole.User, "What is the weather in Seattle?")]);
+        var response = await sessionClient.SendAsync("customer-42", "What is the weather in Seattle?");
 
         Console.WriteLine(response.Text);
 

@@ -10,8 +10,12 @@ see [split client and worker hosting](../../../docs/how-to/MEAI/usage.md#split-c
 
 This sample demonstrates the **current** API, not the
 [durable-chat redesign target](../../../docs/how-to/MEAI/usage.md#durable-chat-redesign-target-contracts).
-Its application conversation ID is not the provider's `ChatOptions.ConversationId`, and its
-correlation ID is not a deduplication key. Phase 0 documented pinned reducer and replay
+The string overload accepts one user message directly, while the message overload accepts MEAI
+`ChatMessage` history. Its application conversation ID is the durable identity; provider
+`ChatOptions.ConversationId`, `RawRepresentationFactory`, and `ContinuationToken` are rejected
+because they cannot safely resume across durable activity boundaries. Responses retain usage,
+finish reason, provider response/model IDs, and serializable provider metadata. Its correlation ID
+is not a deduplication key. Phase 0 documented pinned reducer and replay
 prerequisites. Phase 1.0 removed the durable embedding wrapper; request epochs, terminal ledgers,
 safe interrupted-turn recovery, and independent context/history budgets are still pending. Do not
 retry an ambiguously completed effectful turn assuming the library will suppress duplicate

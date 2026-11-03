@@ -42,6 +42,18 @@ internal sealed class DurableChatStepResult
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ChatFinishReason? FinishReason { get; init; }
 
+    /// <summary>The provider response ID returned for this model step, when available.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResponseId { get; init; }
+
+    /// <summary>The model ID reported for this model step, when available.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModelId { get; init; }
+
+    /// <summary>Serializable additional metadata returned for this model step, when available.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AdditionalPropertiesDictionary? AdditionalProperties { get; init; }
+
     /// <summary>
     /// Gets the terminal completion reason when this step must end the managed loop. The default
     /// preserves legacy activity payloads that predate this field.

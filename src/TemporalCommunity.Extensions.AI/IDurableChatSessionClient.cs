@@ -30,6 +30,9 @@ public interface IDurableChatSessionClient
     /// Retrying after an ambiguous timeout or lost response can submit another turn (at-least-once
     /// submission). Correlation IDs provide observability, not deduplication. Effectful tools need
     /// downstream business idempotency to suppress repeated external effects.
+    /// <see cref="ChatOptions.ConversationId"/>, <see cref="ChatOptions.RawRepresentationFactory"/>,
+    /// and <see cref="ChatOptions.ContinuationToken"/> are rejected because provider-owned
+    /// conversation state cannot be resumed across durable activity boundaries.
     /// </remarks>
     /// <param name="conversationId">A unique identifier for the conversation.</param>
     /// <param name="messages">The messages to send.</param>
@@ -40,10 +43,32 @@ public interface IDurableChatSessionClient
     /// workflow auto-generates one via <c>Workflow.NewGuid()</c>.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The response entry from the LLM, including per-turn <see cref="UsageDetails"/>.</returns>
+    /// <returns>
+    /// The response entry from the LLM, including per-turn <see cref="UsageDetails"/>, provider
+    /// response/model IDs, finish reason, and serializable response metadata.
+    /// </returns>
     Task<DurableSessionResponse> SendAsync(
         string conversationId,
         IEnumerable<ChatMessage> messages,
+        ChatOptions? options = null,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends one user text message to a durable chat session.
+    /// </summary>
+    /// <param name="conversationId">A unique application conversation identifier.</param>
+    /// <param name="message">User text to append to the conversation.</param>
+    /// <param name="options">Optional supported MEAI chat options.</param>
+    /// <param name="correlationId">Optional observability identifier for the turn.</param>
+    /// <param name="cancellationToken">Cancellation token for this RPC wait.</param>
+    /// <returns>
+    /// The durable response entry for the turn, including provider response/model IDs, finish
+    /// reason, and serializable response metadata.
+    /// </returns>
+    Task<DurableSessionResponse> SendAsync(
+        string conversationId,
+        string message,
         ChatOptions? options = null,
         string? correlationId = null,
         CancellationToken cancellationToken = default);

@@ -204,11 +204,8 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
     var turnOptions = new ChatOptions()
         .WithChatClientTag("sample", "multi-turn")
         .WithChatClientTag("conversation_id", conversationId);
-    var r1 = await sessionClient.SendAsync(
-        conversationId,
-        [new ChatMessage(ChatRole.User, q1)],
-        turnOptions);
-    Console.WriteLine($" Agent: {r1.Text}\n");
+    var r1 = await sessionClient.SendAsync(conversationId, q1, turnOptions);
+    Console.WriteLine($" Agent: {r1.Text} (model: {r1.ModelId ?? "provider default"})\n");
 
     // The workflow's history already contains the previous exchange, so the
     // model can answer this pronoun reference without being told explicitly.

@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Reflection;
 using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Internal;
 using Xunit;
 
@@ -23,7 +24,7 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 ///     <description>
 ///       A reflection guard asserts every <i>settable</i> public property on MEAI's
 ///       <see cref="ChatOptions"/> is accounted for — either copied by transport preparation
-///       (the allow-list) or in the documented deny-list. A future MEAI-added property
+///       (the allow-list) or in the documented unsupported list. A future MEAI-added property
 ///       then fails CI instead of being silently dropped across the durable boundary.
 ///     </description>
 ///   </item>
@@ -32,14 +33,17 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 public class ChatOptionsPreservationTests
 {
     /// <summary>
-    /// Properties intentionally NOT copied by <c>PrepareForDurableTransport</c>.
+    /// Properties rejected by <c>PrepareForDurableTransport</c> because they are provider-owned
+    /// state or conflict with the application-owned session identity.
     /// <list type="bullet">
+    ///   <item><description><c>ConversationId</c> — the application owns durable session identity.</description></item>
     ///   <item><description><c>RawRepresentationFactory</c> — a delegate; not serializable.</description></item>
-    ///   <item><description><c>ContinuationToken</c> — provider-specific opaque token, not meaningful to replay.</description></item>
+    ///   <item><description><c>ContinuationToken</c> — provider-specific opaque state, not resumable.</description></item>
     /// </list>
     /// </summary>
-    private static readonly string[] DenyList =
+    private static readonly string[] UnsupportedProperties =
     {
+        nameof(ChatOptions.ConversationId),
         nameof(ChatOptions.RawRepresentationFactory),
         nameof(ChatOptions.ContinuationToken),
     };
@@ -49,8 +53,7 @@ public class ChatOptionsPreservationTests
     {
         var original = new ChatOptions
         {
-            ContinuationToken = ResponseContinuationToken.FromBytes(new byte[] { 1, 2, 3 }),
-            RawRepresentationFactory = _ => null,
+            ModelId = "gpt-4o",
         }
             .WithChatClientTag("tenant", "acme")
             .WithChatClientTag("request", "req-1");
@@ -61,8 +64,6 @@ public class ChatOptionsPreservationTests
         Assert.NotNull(prepared);
         Assert.Equal(2, prepared!.GetChatClientTags().Count);
         Assert.Equal("keep", prepared.AdditionalProperties!["user.custom"]);
-        Assert.Null(prepared.ContinuationToken);
-        Assert.Null(prepared.RawRepresentationFactory);
         Assert.NotSame(original, prepared);
         Assert.NotSame(original.AdditionalProperties, prepared.AdditionalProperties);
 
@@ -78,6 +79,27 @@ public class ChatOptionsPreservationTests
 
         Assert.Equal(2, roundTrippedOptions.GetChatClientTags().Count);
         Assert.Equal("keep", roundTrippedOptions.AdditionalProperties!["user.custom"]?.ToString());
+    }
+
+    [Fact]
+    public void PrepareForDurableTransport_RejectsProviderOwnedOrConflictingOptions()
+    {
+        var unsupported = new[]
+        {
+            (new ChatOptions { ConversationId = "provider-conversation" }, nameof(ChatOptions.ConversationId)),
+            (new ChatOptions { RawRepresentationFactory = _ => null }, nameof(ChatOptions.RawRepresentationFactory)),
+            (new ChatOptions
+            {
+                ContinuationToken = ResponseContinuationToken.FromBytes(new byte[] { 1, 2, 3 }),
+            }, nameof(ChatOptions.ContinuationToken)),
+        };
+
+        foreach (var (options, propertyName) in unsupported)
+        {
+            var exception = Assert.Throws<DurableConfigurationException>(
+                () => ChatOptionsSanitizer.PrepareForDurableTransport(options));
+            Assert.Contains(propertyName, exception.Message, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -134,10 +156,10 @@ public class ChatOptionsPreservationTests
     }
 
     [Fact]
-    public void PrepareForDurableTransport_CopiesEverySettableProperty_ExceptDocumentedDenyList()
+    public void PrepareForDurableTransport_CopiesEverySettableProperty_ExceptUnsupportedProperties()
     {
         // Durable canary for X-4: enumerate every settable public property on ChatOptions and
-        // assert each is either copied by transport preparation or in the deny-list.
+        // assert each is either copied or intentionally unsupported.
         // If MEAI adds a new settable ChatOptions property in a future bump, this fails CI —
         // forcing a conscious decision (copy it, or document why it is dropped) instead of a
         // silent loss across the durable boundary.
@@ -153,10 +175,10 @@ public class ChatOptionsPreservationTests
             .Where(p => p.GetSetMethod(nonPublic: false) is not null)
             .ToArray();
 
-        // Sanity: the deny-list names must be real settable properties (catches a rename).
-        foreach (var denied in DenyList)
+        // Sanity: unsupported names must be real settable properties (catches a rename).
+        foreach (var unsupported in UnsupportedProperties)
         {
-            Assert.Contains(settable, p => p.Name == denied);
+            Assert.Contains(settable, p => p.Name == unsupported);
         }
 
         foreach (var prop in settable)
@@ -175,22 +197,19 @@ public class ChatOptionsPreservationTests
                 continue;
             }
 
-            if (DenyList.Contains(prop.Name))
+            if (UnsupportedProperties.Contains(prop.Name))
             {
-                // Deny-listed: the clone must NOT carry it forward (stays null/default).
-                Assert.True(
-                    strippedValue is null,
-                    $"ChatOptions.{prop.Name} is on the deny-list but transport preparation copied it. " +
-                    "Either it is now serializable (move it to the allow-list) or the deny intent is broken.");
+                Assert.Null(originalValue);
+                Assert.Null(strippedValue);
             }
             else
             {
                 // Allow-listed (everything else): the clone must carry it forward.
                 Assert.True(
                     AreEquivalent(originalValue, strippedValue),
-                    $"ChatOptions.{prop.Name} is settable and not on the deny-list, but the " +
+                    $"ChatOptions.{prop.Name} is settable and not unsupported, but the " +
                     "transport clone did not copy it. A new MEAI property would be silently dropped " +
-                    "across the durable boundary — handle it or add it to the documented deny-list.");
+                    "across the durable boundary — handle it or explicitly mark it unsupported.");
             }
         }
     }
@@ -209,14 +228,14 @@ public class ChatOptionsPreservationTests
             AdditionalProperties = new AdditionalPropertiesDictionary { ["k"] = "v" },
             AllowBackgroundResponses = true,
             AllowMultipleToolCalls = true,
-            ContinuationToken = ResponseContinuationToken.FromBytes(new byte[] { 1, 2, 3 }),
-            ConversationId = "conv-1",
+            ContinuationToken = null,
+            ConversationId = null,
             FrequencyPenalty = 0.1f,
             Instructions = "instr",
             MaxOutputTokens = 256,
             ModelId = "model-x",
             PresencePenalty = 0.2f,
-            RawRepresentationFactory = _ => null, // deny-listed delegate.
+            RawRepresentationFactory = null,
             Reasoning = new ReasoningOptions { Effort = ReasoningEffort.Low },
             ResponseFormat = ChatResponseFormat.Text,
             Seed = 7,

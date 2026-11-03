@@ -93,6 +93,12 @@ public class DurableChatSessionIntegrationTests
             new ChatResponse(new ChatMessage(ChatRole.Assistant, []))
             {
                 FinishReason = ChatFinishReason.Length,
+                ResponseId = "incomplete-response-1",
+                ModelId = "incomplete-model",
+                AdditionalProperties = new AdditionalPropertiesDictionary
+                {
+                    ["provider.trace"] = "incomplete-trace",
+                },
                 Usage = new UsageDetails { OutputTokenCount = 4000 },
             },
             new ChatResponse(new ChatMessage(ChatRole.Assistant, "recovered next turn"))
@@ -125,6 +131,9 @@ public class DurableChatSessionIntegrationTests
 
             Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, incomplete.CompletionReason);
             Assert.Equal(ChatFinishReason.Length, incomplete.FinishReason);
+            Assert.Equal("incomplete-response-1", incomplete.ResponseId);
+            Assert.Equal("incomplete-model", incomplete.ModelId);
+            Assert.Equal("incomplete-trace", incomplete.ResponseAdditionalProperties!["provider.trace"].GetString());
             Assert.Equal(4000, incomplete.Usage!.OutputTokenCount);
             Assert.Empty(Assert.Single(incomplete.Messages).Contents);
 
@@ -132,6 +141,9 @@ public class DurableChatSessionIntegrationTests
             var stored = Assert.IsType<DurableSessionResponse>(history[1]);
             Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, stored.CompletionReason);
             Assert.Equal(ChatFinishReason.Length, stored.FinishReason);
+            Assert.Equal("incomplete-response-1", stored.ResponseId);
+            Assert.Equal("incomplete-model", stored.ModelId);
+            Assert.Equal("incomplete-trace", stored.ResponseAdditionalProperties!["provider.trace"].GetString());
             Assert.Equal(
                 DurableManagedLoopHistory.IncompleteResponseSentinelText,
                 Assert.Single(stored.Messages).Text);
@@ -150,6 +162,64 @@ public class DurableChatSessionIntegrationTests
             Assert.DoesNotContain(
                 scripted.Calls[1].Messages.SelectMany(message => message.Contents),
                 content => content is FunctionCallContent or FunctionResultContent);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ManagedSession_StringInputAndProviderMetadata_RoundTrip()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "hello back"))
+            {
+                ResponseId = "provider-response-1",
+                ModelId = "model-1",
+                FinishReason = ChatFinishReason.Stop,
+                AdditionalProperties = new AdditionalPropertiesDictionary
+                {
+                    ["provider.trace"] = "trace-1",
+                },
+            },
+        ]);
+        var taskQueue = $"managed-response-metadata-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options =>
+            {
+                options.ActivityTimeout = TimeSpan.FromSeconds(30);
+                options.SessionTimeToLive = TimeSpan.FromMinutes(5);
+            });
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var sessionClient = host.Services.GetRequiredService<IDurableChatSessionClient>();
+            var conversationId = $"managed-response-metadata-{Guid.NewGuid():N}";
+            var response = await sessionClient.SendAsync(conversationId, "hello");
+
+            Assert.Equal("hello back", response.Text);
+            Assert.Equal("provider-response-1", response.ResponseId);
+            Assert.Equal("model-1", response.ModelId);
+            Assert.Equal(ChatFinishReason.Stop, response.FinishReason);
+            Assert.Equal("trace-1", response.ResponseAdditionalProperties!["provider.trace"].GetString());
+            Assert.Equal("hello", scripted.Calls.Single().Messages.Single().Text);
+
+            var stored = Assert.IsType<DurableSessionResponse>(
+                (await sessionClient.GetHistoryAsync(conversationId))[1]);
+            Assert.Equal("provider-response-1", stored.ResponseId);
+            Assert.Equal("model-1", stored.ModelId);
+            Assert.Equal("trace-1", stored.ResponseAdditionalProperties!["provider.trace"].GetString());
         }
         finally
         {

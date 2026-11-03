@@ -118,4 +118,35 @@ public class DurableChatSessionClientTests
         Assert.Contains("AddDurableTools", exception.Message, StringComparison.Ordinal);
         A.CallTo(client).Where(call => call.Method.Name.Contains("UpdateWithStart", StringComparison.Ordinal)).MustNotHaveHappened();
     }
+
+    [Theory]
+    [InlineData(nameof(ChatOptions.ConversationId))]
+    [InlineData(nameof(ChatOptions.RawRepresentationFactory))]
+    [InlineData(nameof(ChatOptions.ContinuationToken))]
+    public async Task SendAsync_UnsupportedProviderOption_ThrowsBeforeWorkflowDispatch(string propertyName)
+    {
+        var client = A.Fake<ITemporalClient>();
+        var sessionClient = new DurableChatSessionClient(
+            client,
+            new DurableExecutionOptions { TaskQueue = "test" });
+        var options = propertyName switch
+        {
+            nameof(ChatOptions.ConversationId) => new ChatOptions { ConversationId = "provider-id" },
+            nameof(ChatOptions.RawRepresentationFactory) => new ChatOptions { RawRepresentationFactory = _ => null },
+            nameof(ChatOptions.ContinuationToken) => new ChatOptions
+            {
+                ContinuationToken = ResponseContinuationToken.FromBytes(new byte[] { 1, 2, 3 }),
+            },
+            _ => throw new ArgumentOutOfRangeException(nameof(propertyName)),
+        };
+
+        var exception = await Assert.ThrowsAsync<DurableConfigurationException>(
+            () => sessionClient.SendAsync(
+                "conversation",
+                [new ChatMessage(ChatRole.User, "hello")],
+                options));
+
+        Assert.Contains(propertyName, exception.Message, StringComparison.Ordinal);
+        A.CallTo(client).Where(call => call.Method.Name.Contains("UpdateWithStart", StringComparison.Ordinal)).MustNotHaveHappened();
+    }
 }

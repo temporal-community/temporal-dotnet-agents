@@ -221,17 +221,24 @@ workerBuilder.Services
 ```csharp
 var sessionClient = services.GetRequiredService<DurableChatSessionClient>();
 
-var response = await sessionClient.SendAsync(
-    "customer-42",
-    [new ChatMessage(ChatRole.User, "What is the weather in Seattle?")]);
+var response = await sessionClient.SendAsync("customer-42", "What is the weather in Seattle?");
 
 Console.WriteLine(response.Text);
 
 var history = await sessionClient.GetHistoryAsync("customer-42");
 ```
 
-`SendAsync` returns a `DurableSessionResponse` (per-turn `Usage`, `FinishReason`, and completion
-reason included); `GetHistoryAsync` returns the currently retained
+`SendAsync` accepts either one user string or an enumerable of MEAI `ChatMessage` instances.
+The application conversation ID is the durable session identity; provider-owned
+`ChatOptions.ConversationId` is rejected. `RawRepresentationFactory` and `ContinuationToken` are
+also rejected because delegates and opaque provider continuation state cannot safely cross the
+workflow/activity boundary.
+
+The returned `DurableSessionResponse` preserves per-turn usage, finish and completion reasons,
+provider response/model IDs, and serializable provider `AdditionalProperties`. The
+`ResponseAdditionalProperties` values are represented as `JsonElement`, not as the provider's
+original CLR types. For a managed tool loop, provider IDs and metadata come from its terminal model
+step. `GetHistoryAsync` returns the currently retained
 `IReadOnlyList<DurableSessionEntry>`. Tool
 calls are recorded as `TemporalCommunity.Extensions.AI.InvokeFunction` activities. Streaming is not
 supported for durable sessions — there is no `GetStreamingResponseAsync` equivalent on

@@ -20,6 +20,8 @@ namespace TemporalCommunity.Extensions.AI;
 [JsonSerializable(typeof(DurableApprovalRequest))]
 [JsonSerializable(typeof(DurableApprovalDecision))]
 [JsonSerializable(typeof(IReadOnlyDictionary<string, string>))]
+[JsonSerializable(typeof(IReadOnlyDictionary<string, JsonElement>))]
+[JsonSerializable(typeof(Dictionary<string, JsonElement>))]
 [JsonSerializable(typeof(ChatMessage))]
 [JsonSerializable(typeof(ChatResponse))]
 [JsonSerializable(typeof(ChatOptions))]

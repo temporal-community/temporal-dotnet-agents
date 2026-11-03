@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 
@@ -5,7 +6,8 @@ namespace TemporalCommunity.Extensions.AI.Session;
 
 /// <summary>
 /// Concrete <see cref="DurableSessionEntry"/> representing a response turn — the outbound
-/// messages produced by a model / agent invocation, plus optional <see cref="UsageDetails"/>.
+/// messages produced by a model / agent invocation, optional <see cref="UsageDetails"/>, and
+/// serializable provider response metadata.
 /// </summary>
 public class DurableSessionResponse : DurableSessionEntry
 {
@@ -13,6 +15,21 @@ public class DurableSessionResponse : DurableSessionEntry
     /// Token-usage details reported by the model for this turn, when available.
     /// </summary>
     public UsageDetails? Usage { get; init; }
+
+    /// <summary>The provider's response ID, when supplied.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ResponseId { get; init; }
+
+    /// <summary>The model ID reported by the provider, when supplied.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModelId { get; init; }
+
+    /// <summary>
+    /// Serializable provider metadata from <see cref="ChatResponse.AdditionalProperties"/>.
+    /// Values are represented as JSON so their original CLR runtime types are not implied.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, JsonElement>? ResponseAdditionalProperties { get; init; }
 
     /// <summary>Gets the provider-reported reason the terminal model step stopped.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -90,8 +107,28 @@ public class DurableSessionResponse : DurableSessionEntry
             CreatedAt = createdAt,
             Messages = response.Messages.ToList(),
             Usage = response.Usage,
+            ResponseId = response.ResponseId,
+            ModelId = response.ModelId,
+            ResponseAdditionalProperties = SerializeAdditionalProperties(response.AdditionalProperties),
             FinishReason = response.FinishReason,
             CompletionReason = completionReason,
         };
+    }
+
+    private static IReadOnlyDictionary<string, JsonElement>? SerializeAdditionalProperties(
+        AdditionalPropertiesDictionary? properties)
+    {
+        if (properties is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var result = new Dictionary<string, JsonElement>(properties.Count, StringComparer.Ordinal);
+        foreach (var (key, value) in properties)
+        {
+            result.Add(key, JsonSerializer.SerializeToElement(value, DurableAIJsonUtilities.DefaultOptions));
+        }
+
+        return result;
     }
 }
