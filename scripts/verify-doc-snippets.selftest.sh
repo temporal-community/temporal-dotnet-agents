@@ -174,6 +174,18 @@ custom_workflow_snippet='// BEGIN SNIPPET docs/how-to/MEAI/custom-workflow-outpu
 run_case meai-custom-workflow-uncovered reject "$custom_workflow_doc" '' '' 'docs/how-to/MEAI/custom-workflow-output.md'
 run_case meai-custom-workflow-covered pass "$custom_workflow_doc" "$custom_workflow_snippet" '' 'docs/how-to/MEAI/custom-workflow-output.md'
 
+payload_codec_doc='# Payload codecs
+
+## Configure every client and worker
+
+```csharp
+var converter = DurableAIDataConverter.CreateDataConverter(applicationPayloadCodec);
+```'
+payload_codec_snippet='// BEGIN SNIPPET docs/how-to/MEAI/payload-codecs.md#configure-every-client-and-worker
+// END SNIPPET docs/how-to/MEAI/payload-codecs.md#configure-every-client-and-worker'
+run_case meai-payload-codec-uncovered reject "$payload_codec_doc" '' '' 'docs/how-to/MEAI/payload-codecs.md'
+run_case meai-payload-codec-covered pass "$payload_codec_doc" "$payload_codec_snippet" '' 'docs/how-to/MEAI/payload-codecs.md'
+
 phase_doc='# Testing
 
 ### Phase 0 timer harness

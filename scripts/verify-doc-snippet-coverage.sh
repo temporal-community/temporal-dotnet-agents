@@ -106,6 +106,9 @@ scan_docs() {
                 (FILENAME == "docs/how-to/MEAI/custom-workflow-output.md" &&
                  heading == "package-managed-typed-turns" &&
                  body ~ /DurableToolWorkflowBase/) ||
+                (FILENAME == "docs/how-to/MEAI/payload-codecs.md" &&
+                 heading == "configure-every-client-and-worker" &&
+                 body ~ /applicationPayloadCodec/) ||
                 (FILENAME == "docs/how-to/MEAI/testing.md" && heading ~ /^phase-[0-9]+-/))) {
                 print FILENAME "#" (heading == "" ? "-no-heading-" : heading)
             }

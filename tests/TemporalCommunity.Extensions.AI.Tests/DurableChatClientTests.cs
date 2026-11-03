@@ -239,8 +239,15 @@ public class DurableChatClientTests
     [Fact]
     public void BuildActivitySummary_ReturnsModelId_WhenSet()
     {
-        var opts = new ChatOptions { ModelId = "gpt-4o-mini" };
-        Assert.Equal("gpt-4o-mini", DurableChatClient.BuildActivitySummary(opts));
+        var opts = new ChatOptions
+        {
+            ModelId = "gpt-4o-mini",
+            Instructions = "private instruction text",
+        };
+
+        var summary = DurableChatClient.BuildActivitySummary(opts);
+        Assert.Equal("gpt-4o-mini", summary);
+        Assert.DoesNotContain("private instruction text", summary, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -371,6 +371,19 @@ public class SerializationTests
     }
 
     [Fact]
+    public void TypedDurableTurn_RejectsUnsupportedApplicationPayloadValues()
+    {
+        var request = new DurableTurnRequest<UnsupportedApplicationData, object>
+        {
+            Messages = [new ChatMessage(ChatRole.User, "run")],
+            RequestData = new UnsupportedApplicationData(() => { }),
+        };
+
+        Assert.Throws<NotSupportedException>(
+            () => JsonSerializer.SerializeToUtf8Bytes(request, Options));
+    }
+
+    [Fact]
     public void DurableAIDataConverter_UsesSourceGenContext_ForDurableChatInput()
     {
         // Round trips do not distinguish source-generated metadata from a reflection fallback.
@@ -392,4 +405,6 @@ public class SerializationTests
         Assert.NotNull(typeInfo);
         Assert.Same(DurableAIJsonContext.Default, typeInfo.OriginatingResolver);
     }
+
+    private sealed record UnsupportedApplicationData(Action Callback);
 }

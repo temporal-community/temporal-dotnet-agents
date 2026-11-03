@@ -65,6 +65,13 @@ application-owned orchestration path.
 - An OpenAI-compatible base URL (`OPENAI_API_BASE_URL`) — required; `Program.cs` throws `InvalidOperationException` if missing
 - Optionally, `OPENAI_MODEL` to override the default (`gpt-4o-mini`)
 
+The API key is read by the host and used to construct the worker-side `IChatClient`; it is not
+included in `DurableChatWorkflowInput` or sent as workflow UI metadata. If you split the client and
+worker into separate processes or add a payload codec, configure compatible `DurableAIDataConverter`
+instances on both sides. See
+[Durable AI payload codecs](../../../docs/how-to/MEAI/payload-codecs.md) for codec and metadata
+guidance.
+
 ### Configure API credentials
 
 ```bash

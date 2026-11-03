@@ -17,7 +17,45 @@ var codec = new DurableAIGzipPayloadCodec(new DurableAIGzipPayloadCodecOptions
 var dataConverter = DurableAIDataConverter.CreateDataConverter(codec);
 ```
 
-Set that converter on every participating Temporal client and worker. The codec passes through
+## Configure every client and worker
+
+The client that starts or updates the workflow and the worker that handles it must use compatible
+converters. Configure both explicitly when using a custom codec; `AddDurableAI` only supplies the
+default MEAI converter when the worker converter is still the SDK default. In split deployments,
+use the same codec composition, key material, version, and size limits in every process:
+
+```csharp
+static async Task ConfigureAsync(
+    HostApplicationBuilder builder,
+    string temporalAddress,
+    string temporalNamespace,
+    string taskQueue,
+    IPayloadCodec applicationPayloadCodec)
+{
+    var converter = DurableAIDataConverter.CreateDataConverter(applicationPayloadCodec);
+    var client = await TemporalClient.ConnectAsync(
+        new TemporalClientConnectOptions(temporalAddress)
+        {
+            Namespace = temporalNamespace,
+            DataConverter = converter,
+        });
+    builder.Services.AddSingleton<ITemporalClient>(client);
+
+    var worker = builder.Services.AddHostedTemporalWorker(
+        temporalAddress,
+        temporalNamespace,
+        taskQueue);
+    worker.ConfigureOptions(
+        options => options.ClientOptions!.DataConverter = converter);
+}
+```
+
+In split processes, create a compatible converter in each process rather than sharing an in-memory
+instance. Compression or encryption keys and codec ordering must match. This example configures the
+worker's owned Temporal client separately from the application client; if the host intentionally
+shares one `ITemporalClient`, configure that client's converter before the worker starts.
+
+The codec passes through
 small payloads and payloads whose compressed representation does not meet the requested savings.
 Decode rejects unsupported versions, corrupt data, and payloads that cross either configured bound.
 
@@ -56,12 +94,27 @@ compatible codec server to display encoded payloads.
 
 Temporal exposes one `IPayloadCodec` slot. If encryption or another transformation is required,
 the application owns a small composite codec: apply codecs in declared order during encode and in
-reverse order during decode, then pass that composite to `CreateDataConverter`. The library does not
-replace or wrap an existing codec automatically.
+reverse order during decode (for example, compress then encrypt on encode; decrypt then decompress
+on decode), then pass that composite to `CreateDataConverter`. The library does not replace or wrap
+an existing codec automatically.
 
 Compression is neither encryption nor authentication. Encrypt secrets with an appropriate
 authenticated encryption codec and apply normal Temporal namespace, transport, and application
 authorization controls.
+
+The codec protects serialized Temporal payloads; it does not encrypt workflow IDs, activity
+summaries, search attributes, or memo fields. Keep prompts, tool arguments/results, credentials, and
+other sensitive content out of those UI-visible metadata fields. The built-in activity summary
+contains only `ChatOptions.ModelId` when configured; managed search attributes contain session
+creation time and completed-turn count. Custom workflows remain responsible for keeping their own
+IDs, summaries, memo, and custom search attributes content-free.
+
+Worker configuration snapshots contain routing keys and execution policy, not provider clients or
+credentials. `DurableChatWorkflowInput.DefaultChatClientKey` is a worker-side DI route name, not a
+secret store. Keep API keys in worker-owned secret configuration and inject the provider-backed
+`IChatClient` on the worker; do not place credentials in workflow input, tool arguments, or model
+messages. Any future history-summary wire types must use the same `DurableAIDataConverter` and
+payload-codec path as other session entries.
 
 The codec is opt-in, threshold-gated (it only stores the compressed form when it is smaller than
 the original payload, so incompressible data isn't stored compressed), and requires a decoder-first
