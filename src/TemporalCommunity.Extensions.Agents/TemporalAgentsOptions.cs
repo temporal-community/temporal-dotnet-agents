@@ -119,12 +119,31 @@ public sealed class TemporalAgentsOptions
     /// </summary>
     public int DefaultMaxEntryCount { get; set; } = 1000;
 
+    /// <summary>
+    /// Optional maximum estimated model-context size in tokens, including the output reserve.
+    /// Defaults to no local limit.
+    /// </summary>
+    public int? DefaultMaxModelContextTokens { get; set; }
+
+    /// <summary>
+    /// Default token reserve for model output when a context limit is configured.
+    /// </summary>
+    public int DefaultModelOutputTokenReserve { get; set; } = 1024;
+
     internal void Validate()
     {
         if (DefaultMaxEntryCount < 4)
         {
             throw new InvalidOperationException(
                 $"{nameof(DefaultMaxEntryCount)} must be at least 4 in {nameof(TemporalAgentsOptions)} to retain a complete request/response turn.");
+        }
+
+        if (DefaultMaxModelContextTokens is <= 0
+            || DefaultModelOutputTokenReserve < 0
+            || (DefaultMaxModelContextTokens is { } modelLimit
+                && DefaultModelOutputTokenReserve >= modelLimit))
+        {
+            throw new InvalidOperationException("The default model-context token budget is invalid.");
         }
 
         var duplicateScheduleId = _scheduledRuns

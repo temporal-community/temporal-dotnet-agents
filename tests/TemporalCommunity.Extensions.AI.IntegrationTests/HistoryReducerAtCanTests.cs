@@ -20,10 +20,10 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// worker's DI container. The workflow dispatches an activity to resolve and execute it.
 /// </para>
 /// <para>
-/// This test uses a keep-last-1 sentinel reducer: if the reducer fires, the carried
-/// history after CAN must have exactly 1 entry (ignoring any turns added after the CAN
+/// This test uses a keep-last-turn sentinel reducer: if the reducer fires, the carried
+/// history after CAN must begin with that complete request/response pair (ignoring turns added after the CAN
 /// but before the query). With <c>maxEntryCount = 6</c>, <c>DefaultBoundedTrim</c> retains the
-/// final complete request/response pair — so the assertion <c>carried.Count == 1</c> cleanly distinguishes
+/// final complete request/response pair, so checking the carried pair cleanly distinguishes
 /// reducer-fired from reducer-dropped.
 /// </para>
 /// </summary>
@@ -35,7 +35,7 @@ public class HistoryReducerAtCanTests
     public HistoryReducerAtCanTests(ITestOutputHelper output) => _output = output;
 
     /// <summary>
-    /// A keep-last-1 reducer fires at CAN and the carried history has exactly 1 entry.
+    /// A keep-last-turn reducer fires at CAN and the carried history has a complete final turn.
     /// Before the fix this fails because the reducer was silently stripped on the wire
     /// and DefaultBoundedTrim produced the final completed turn instead.
     /// </summary>
@@ -43,7 +43,7 @@ public class HistoryReducerAtCanTests
     public async Task ConfiguredReducer_ViaKey_AcrossCan_CarriesExactlyOneEntry()
     {
         const int maxEntryCount = 6; // DefaultBoundedTrim retains the final pair; reducer produces 1.
-        const string reducerKey = "keep-last-1-test";
+        const string reducerKey = "keep-last-turn-test";
 
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
@@ -54,11 +54,11 @@ public class HistoryReducerAtCanTests
 
         var taskQueue = $"reducer-test-{Guid.NewGuid():N}";
 
-        // Keep-last-1 sentinel: if the reducer fires, carried.Count == 1.
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> keepLast1 =
-            entries => entries.Count > 0 ? [entries[^1]] : [];
+        // Keep-last-turn sentinel: projections must retain complete request/response pairs.
+        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> keepLastTurn =
+            entries => entries.TakeLast(2).ToList();
 
-        using var host = BuildHost(env.Client, scripted, taskQueue, maxEntryCount, reducerKey, keepLast1);
+        using var host = BuildHost(env.Client, scripted, taskQueue, maxEntryCount, reducerKey, keepLastTurn);
         await host.StartAsync();
 
         try
@@ -111,17 +111,19 @@ public class HistoryReducerAtCanTests
 
             _output.WriteLine($"Carried history count after CAN: {carried.Count}");
 
-            // Assert on CONTENT, not count. Even with the query pinned to the first-CAN run,
+            // Assert on CONTENT, not total count. Even with the query pinned to the first-CAN run,
             // a turn dispatched via the run-less session handle can straddle onto the new run
             // (the server resolves the run at update-admission time, after CAN commits), appending
             // a req/resp pair. That is a benign timing artifact, not a reducer failure.
             //
-            // The reducer carries a response; the bounded-trim fallback starts with a
-            // request. A fourth turn may finish while the reducer runs, so the last
-            // pre-CAN response is not necessarily response 3.
+            // The reducer carries one complete pair. A fourth turn may finish while the
+            // reducer runs, so the retained pair need not be response 3.
             Assert.NotEmpty(carried);
-            var reducedBase = Assert.IsType<DurableSessionResponse>(carried[0]);
+            var reducedRequest = Assert.IsType<DurableSessionRequest>(carried[0]);
+            var reducedBase = Assert.IsType<DurableSessionResponse>(carried[1]);
+            Assert.Equal(reducedRequest.CorrelationId, reducedBase.CorrelationId);
             Assert.StartsWith("response ", reducedBase.Text);
+            Assert.Equal(reducedRequest.TurnId, reducedBase.TurnId);
             Assert.False(string.IsNullOrWhiteSpace(reducedBase.EntryId));
             Assert.False(string.IsNullOrWhiteSpace(reducedBase.TurnId));
 

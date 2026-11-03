@@ -362,6 +362,28 @@ public record class DurableChatWorkflowInput
     [JsonIgnore]
     public int MaxEntryCount { get; init; } = 1000;
 
+    /// <summary>Maximum estimated model-context size, including the output reserve.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? MaxModelContextTokens { get; init; }
+
+    /// <summary>Token reserve for model output when a context limit is configured.</summary>
+    [JsonIgnore]
+    public int ModelOutputTokenReserve { get; init; } = 1024;
+
+    [JsonInclude]
+    [JsonPropertyName("modelOutputTokenReserve")]
+    internal int? SerializedModelOutputTokenReserve
+    {
+        get => this.ModelOutputTokenReserve;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.ModelOutputTokenReserve = value.Value;
+            }
+        }
+    }
+
     [JsonInclude]
     [JsonPropertyName("maxEntryCount")]
     internal int? SerializedMaxEntryCount

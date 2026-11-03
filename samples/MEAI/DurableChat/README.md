@@ -45,6 +45,12 @@ oversized model result fails bounded and non-retryably; an oversized successful 
 reported to the model as `ResultTooLarge` without rerunning the completed tool effect. Failure
 details and stack traces are not transported to workflow code.
 
+The sample also configures an estimated 8192-token model-context limit with a 1024-token output
+reserve. This is separate from Temporal payload limits: only eligible complete prior turns may be
+trimmed, and instructions, tools, structured-output schema, active-turn content, and provider
+context are included in the final check. The built-in deterministic heuristic is not an exact
+provider tokenizer; applications can register a model-specific `IDurableChatTokenEstimator`.
+
 Two `AddDurableToolset` registrations provide weather and service-status capabilities.
 `DefaultToolsetIds` composes them in a stable order as the stock workflow's worker-owned baseline.
 The client sends only its conversation ID, messages, and chat options; it does not construct or

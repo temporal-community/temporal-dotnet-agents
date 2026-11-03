@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Workflows;
+using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;
 
 namespace TemporalCommunity.Extensions.Agents.State;
@@ -27,6 +28,7 @@ namespace TemporalCommunity.Extensions.Agents.State;
 [JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionSnapshot))]
 // Activity I/O types — workflow ↔ activity boundary
 [JsonSerializable(typeof(AgentStepInput))]
+[JsonSerializable(typeof(DurableChatTurnRange))]
 [JsonSerializable(typeof(AgentStepResult))]
 [JsonSerializable(typeof(InvokeAgentToolInput))]
 [JsonSerializable(typeof(InvokeAgentToolResult))]

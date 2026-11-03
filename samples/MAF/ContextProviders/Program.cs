@@ -61,6 +61,8 @@ builder.Services
                 "in this session and report that information when asked.";
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
             agent.MaxToolCallsPerTurn = 3; // no tools needed — providers supply all context
+            agent.MaxModelContextTokens = 8192;
+            agent.ModelOutputTokenReserve = 1024;
             agent.TimeToLive = TimeSpan.FromHours(1); // shortened for demo
 
             // TurnCounterProvider: increments a session counter in StateBag and injects it

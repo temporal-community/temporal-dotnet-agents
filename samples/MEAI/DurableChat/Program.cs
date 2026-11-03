@@ -120,6 +120,8 @@ var durableWorker = builder.Services
     {
         opts.SessionTimeToLive = TimeSpan.FromHours(1);
         opts.DefaultToolsetIds = ["information", "operations"];
+        opts.MaxModelContextTokens = 8192;
+        opts.ModelOutputTokenReserve = 1024;
         opts.MaximumTransportPayloadSizeBytes = 1024 * 1024;
         opts.PayloadCodecExpansionAllowanceBytes = 0;
 

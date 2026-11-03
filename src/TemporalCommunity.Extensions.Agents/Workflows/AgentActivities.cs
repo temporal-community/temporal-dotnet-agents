@@ -18,6 +18,7 @@ using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
+using TemporalCommunity.Extensions.AI;
 using Temporalio.Workflows;
 
 namespace TemporalCommunity.Extensions.Agents.Workflows;
@@ -193,6 +194,8 @@ internal sealed class AgentActivities(
         chatOptions.Tools = selectedTools.Count > 0 ? [.. selectedTools] : null;
         chatOptions.ResponseFormat = input.Request.ResponseFormat;
 
+        messagesForLlm = FitModelContext(input, messagesForLlm, chatOptions, scopedServices).ToList();
+
         // LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
         // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire
         // around the call. The agent is built fresh per call via BuildLiveAgentPipeline above.
@@ -292,6 +295,8 @@ internal sealed class AgentActivities(
                     firstToolProviderType, firstToolCount, input.AgentName);
             }
         }
+
+        EnsureModelContextFits(input, augmentedMessages, chatOptions, scopedServices);
 
         var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, scopedServices);
         TemporalAgentContext.SetCurrent(temporalContext);
@@ -746,6 +751,58 @@ internal sealed class AgentActivities(
 
         return resolved;
     }
+
+    private static IList<ChatMessage> FitModelContext(
+        AgentStepInput input,
+        IReadOnlyList<ChatMessage> messages,
+        ChatOptions options,
+        IServiceProvider scopedServices)
+    {
+        try
+        {
+            return TemporalCommunity.Extensions.AI.Internal.DurableModelContextBudget.Fit(
+                messages,
+                input.CurrentTurnStartIndex,
+                input.PreviousTurnRanges ?? [],
+                options,
+                input.MaxModelContextTokens,
+                input.ModelOutputTokenReserve,
+                scopedServices.GetService<IDurableChatTokenEstimator>());
+        }
+        catch (DurableContextBudgetExceededException exception)
+        {
+            throw CreateContextBudgetFailure(exception);
+        }
+    }
+
+    private static void EnsureModelContextFits(
+        AgentStepInput input,
+        IReadOnlyList<ChatMessage> messages,
+        ChatOptions options,
+        IServiceProvider scopedServices)
+    {
+        try
+        {
+            TemporalCommunity.Extensions.AI.Internal.DurableModelContextBudget.EnsureFits(
+                messages,
+                options,
+                input.MaxModelContextTokens,
+                input.ModelOutputTokenReserve,
+                scopedServices.GetService<IDurableChatTokenEstimator>());
+        }
+        catch (DurableContextBudgetExceededException exception)
+        {
+            throw CreateContextBudgetFailure(exception);
+        }
+    }
+
+    private static ApplicationFailureException CreateContextBudgetFailure(
+        DurableContextBudgetExceededException exception) =>
+        new(
+            exception.Message,
+            exception,
+            errorType: "DurableContextBudgetExceeded",
+            nonRetryable: true);
 
     private AgentPipelineLease BuildLiveAgentPipeline(
         AgentBlueprint blueprint,

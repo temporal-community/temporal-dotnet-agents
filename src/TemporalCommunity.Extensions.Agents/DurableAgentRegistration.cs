@@ -26,6 +26,8 @@ internal sealed record DurableAgentRegistration(
     TimeSpan? HeartbeatTimeout,
     RetryPolicy? RetryPolicy,
     int? MaxEntryCount,
+    int? MaxModelContextTokens,
+    int? ModelOutputTokenReserve,
     int MaxToolCallsPerTurn,
     string? HistoryReducerKey,
     Action<AIAgentBuilder>? ConfigureAgentPipeline,

@@ -299,6 +299,35 @@ At continue-as-new, the workflow dispatches a Temporal activity that resolves th
 passes it the full history. The activity result becomes the initial history for the new run and is
 recorded in workflow history. Without a configured key, the library applies its bounded default trim.
 
+### 5c. Bound the Estimated Model Context
+
+History-entry limits and model-context limits protect different resources. Configure an optional
+estimated input-token limit and reserve output tokens per agent or as worker defaults:
+
+```csharp
+builder.Services
+    .AddHostedTemporalWorker("agents")
+    .AddTemporalAgents(opts =>
+    {
+        opts.AddDurableAgent("Assistant", agent =>
+        {
+            agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+            agent.MaxModelContextTokens = 8192;
+            agent.ModelOutputTokenReserve = 1024;
+        });
+    });
+```
+
+The total limit includes the output reserve. Before each model call, the worker may remove only
+complete, eligible prior turns; it preserves the current turn, approvals, interrupted records, and
+other protected content. Context-provider messages and final instructions, tools, and response
+schema are checked before dispatch too. If those additions or protected content do not fit, the
+activity returns a non-retryable `DurableContextBudgetExceeded` failure rather than dropping more
+content. The default estimator is a deterministic byte-based heuristic and is not an exact count
+for a provider tokenizer. Register an `IDurableChatTokenEstimator` in worker DI to replace it with
+a model-specific estimate. This limit does not constrain Temporal payload sizes or the already
+recorded event history.
+
 ### 5. Use ResponseFormat to Get Structured Output
 
 Structured output (JSON) is typically more token-efficient than natural language:

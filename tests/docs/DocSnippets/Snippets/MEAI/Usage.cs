@@ -30,6 +30,8 @@ internal static class Usage
                 options.ActivityTimeout = TimeSpan.FromMinutes(5);
                 options.SessionTimeToLive = TimeSpan.FromHours(24);
                 options.MaxToolCallsPerTurn = 10;
+                options.MaxModelContextTokens = 8192;
+                options.ModelOutputTokenReserve = 1024;
                 options.MaximumTransportPayloadSizeBytes = 1024 * 1024;
                 options.PayloadCodecExpansionAllowanceBytes = 0;
             })

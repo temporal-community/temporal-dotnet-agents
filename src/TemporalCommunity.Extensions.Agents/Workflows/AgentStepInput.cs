@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.AI;
 
 namespace TemporalCommunity.Extensions.Agents.Workflows;
 
@@ -27,6 +28,18 @@ internal sealed class AgentStepInput
     /// assistant tool-call message and the prior <see cref="FunctionResultContent"/> messages.
     /// </summary>
     public required List<ChatMessage> AccumulatedMessages { get; init; }
+
+    /// <summary>Start of the active turn in the flattened model-message list.</summary>
+    public int CurrentTurnStartIndex { get; init; }
+
+    /// <summary>Prior complete turns eligible for budget-driven trimming.</summary>
+    public IReadOnlyList<DurableChatTurnRange>? PreviousTurnRanges { get; init; }
+
+    /// <summary>Maximum estimated model-context size, including the output reserve.</summary>
+    public int? MaxModelContextTokens { get; init; }
+
+    /// <summary>Token reserve for model output.</summary>
+    public int ModelOutputTokenReserve { get; init; } = 1024;
 
     /// <summary>
     /// Gets the serialized <see cref="State.AgentSessionStateBag"/> from the previous step

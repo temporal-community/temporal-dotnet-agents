@@ -109,11 +109,22 @@ builder.Services
         options.ActivityTimeout = TimeSpan.FromMinutes(5);
         options.SessionTimeToLive = TimeSpan.FromHours(24);
         options.MaxToolCallsPerTurn = 10;
+        options.MaxModelContextTokens = 8192;
+        options.ModelOutputTokenReserve = 1024;
         options.MaximumTransportPayloadSizeBytes = 1024 * 1024;
         options.PayloadCodecExpansionAllowanceBytes = 0;
     })
     .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
 ```
+
+The optional model-context limit is independent of Temporal payload limits. The default
+deterministic heuristic estimates messages, instructions, tools and response schema; register an
+`IDurableChatTokenEstimator` in worker DI to replace it with a provider/model-specific estimator.
+The output reserve is included in `MaxModelContextTokens`. When over budget, the activity removes
+only complete, eligible prior turns, preserving the active turn and protected approval or
+interrupted history. If the protected request still cannot fit, it fails with
+`DurableContextBudgetExceededException` rather than silently dropping content. In split hosting,
+configure matching limits for client and worker so the workflow input and activity policy agree.
 
 `AddTemporalClient` auto-wires `DurableAIDataConverter.Instance` so durable AI payloads round-trip
 correctly. `AddDurableAI()` validates the registered client can preserve those payloads before the

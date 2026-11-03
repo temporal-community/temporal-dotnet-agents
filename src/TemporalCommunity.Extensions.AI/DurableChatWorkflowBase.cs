@@ -36,6 +36,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private bool _sessionAdmissionClosed;
     private DateTimeOffset? _sessionIdleDeadline;
     private int _turnCount;
+    private int _currentTurnStartIndex;
+    private IReadOnlyList<DurableChatTurnRange> _previousTurnRanges = [];
 
     private sealed class TurnExecutionRecord
     {
@@ -193,6 +195,13 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         var firstInitialization = Input is null;
         ValidateTerminalOutcomeLimits(input);
         ValidateHistoryBudgetLimits(input);
+        if (input.MaxModelContextTokens is <= 0
+            || input.ModelOutputTokenReserve < 0
+            || (input.MaxModelContextTokens is { } modelLimit
+                && input.ModelOutputTokenReserve >= modelLimit))
+        {
+            throw new InvalidOperationException("The configured model-context token budget is invalid.");
+        }
         var sessionEpoch = input.SessionEpoch ?? Input?.SessionEpoch;
         if (sessionEpoch is null)
         {
@@ -382,6 +391,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// </summary>
     protected IReadOnlyList<DurableSessionEntry> History => _history;
 
+    /// <summary>Start of the active turn in the flattened model-message list.</summary>
+    protected int CurrentTurnStartIndex => _currentTurnStartIndex;
+
+    /// <summary>Prior complete turns, in message order, that may be trimmed from model context.</summary>
+    protected IReadOnlyList<DurableChatTurnRange> PreviousTurnRanges => _previousTurnRanges;
+
     // ── Abstract / virtual hooks ────────────────────────────────────────────
 
     /// <summary>
@@ -546,6 +561,62 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         };
     }
 
+    private (int CurrentTurnStartIndex, IReadOnlyList<DurableChatTurnRange> PreviousTurnRanges)
+        BuildModelContextTurnRanges(DurableSessionRequest currentRequest)
+    {
+        var ranges = new List<DurableChatTurnRange>();
+        var messageIndex = 0;
+        var currentStart = 0;
+
+        for (var index = 0; index < _history.Count; index++)
+        {
+            var entry = _history[index];
+            var start = messageIndex;
+            messageIndex += entry.Messages.Count;
+
+            if (ReferenceEquals(entry, currentRequest)
+                || string.Equals(entry.EntryId, currentRequest.EntryId, StringComparison.Ordinal))
+            {
+                currentStart = start;
+                break;
+            }
+
+            if (entry is DurableSessionRequest request
+                && index + 1 < _history.Count
+                && _history[index + 1] is DurableSessionResponse response
+                && SameLogicalTurn(request, response))
+            {
+                var end = messageIndex + response.Messages.Count;
+                var isProtected = response.CompletionReason == DurableTurnCompletionReason.Interrupted
+                    || ContainsApprovalContent(request.Messages)
+                    || ContainsApprovalContent(response.Messages);
+                if (end > start)
+                {
+                    ranges.Add(new DurableChatTurnRange(start, end, isProtected));
+                }
+                messageIndex = end;
+                index++;
+                continue;
+            }
+
+            if (messageIndex > start)
+            {
+                ranges.Add(new DurableChatTurnRange(start, messageIndex, IsProtected: true));
+            }
+        }
+
+        return (currentStart, ranges);
+    }
+
+    private static bool SameLogicalTurn(DurableSessionRequest request, DurableSessionResponse response) =>
+        request.TurnId is not null && response.TurnId is not null
+            ? string.Equals(request.TurnId, response.TurnId, StringComparison.Ordinal)
+            : string.Equals(request.CorrelationId, response.CorrelationId, StringComparison.Ordinal);
+
+    private static bool ContainsApprovalContent(IReadOnlyList<ChatMessage> messages) =>
+        messages.SelectMany(message => message.Contents)
+            .Any(content => content is ToolApprovalRequestContent or ToolApprovalResponseContent);
+
     /// <summary>
     /// Dispatches a durable activity to apply a keyed history reducer at continue-as-new time.
     /// Implemented by concrete subclasses to invoke the library-specific activity type
@@ -691,7 +762,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             //    making this a harmless no-op there.
             List<DurableSessionEntry> carriedHistory;
             ActivityOptions? reducerActivityOptions = null;
-            var historyCountAtReduction = _history.Count;
+            List<DurableSessionEntry> historySnapshotAtReduction = _history.ToList();
+            var historyCountAtReduction = historySnapshotAtReduction.Count;
             if (input.HistoryReducerKey is not null)
             {
                 reducerActivityOptions = new ActivityOptions
@@ -700,19 +772,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     HeartbeatTimeout = input.HeartbeatTimeout,
                 };
                 carriedHistory = await ApplyKeyedHistoryReducerAsync(
-                    input.HistoryReducerKey, _history, reducerActivityOptions).ConfigureAwait(true);
+                    input.HistoryReducerKey, historySnapshotAtReduction, reducerActivityOptions).ConfigureAwait(true);
             }
             else
             {
-                carriedHistory = DefaultBoundedTrim(_history, input.MaxEntryCount);
+                carriedHistory = DefaultBoundedTrim(historySnapshotAtReduction, input.MaxEntryCount);
             }
-
             // The reducer can yield while another admitted turn completes. Stop accepting new
             // turns, drain those already admitted, then reduce again until history is stable.
             // Patching keeps the old command sequence for histories recorded before this fix.
             _sessionAdmissionClosed = true;
             _continueAsNewPending = true;
             var drainBeforeSnapshot = Workflow.Patched("meai-can-drain-before-snapshot");
+            ValidateHistoryProjection(historySnapshotAtReduction, carriedHistory);
             DurableChatWorkflowInput? carriedInput = null;
             if (!drainBeforeSnapshot)
             {
@@ -744,11 +816,13 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     if (_history.Count == historyCountAtReduction)
                         break;
 
-                    historyCountAtReduction = _history.Count;
+                    historySnapshotAtReduction = _history.ToList();
+                    historyCountAtReduction = historySnapshotAtReduction.Count;
                     carriedHistory = input.HistoryReducerKey is not null
                         ? await ApplyKeyedHistoryReducerAsync(
-                            input.HistoryReducerKey, _history, reducerActivityOptions!).ConfigureAwait(true)
-                        : DefaultBoundedTrim(_history, input.MaxEntryCount);
+                            input.HistoryReducerKey, historySnapshotAtReduction, reducerActivityOptions!).ConfigureAwait(true)
+                        : DefaultBoundedTrim(historySnapshotAtReduction, input.MaxEntryCount);
+                    ValidateHistoryProjection(historySnapshotAtReduction, carriedHistory);
                 }
                 carriedInput = CreateContinueAsNewInput(
                     input,
@@ -870,12 +944,30 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         if (firstRetainedIndex > 0 &&
             history[firstRetainedIndex - 1] is DurableSessionRequest request &&
             trimmed[0] is DurableSessionResponse response &&
-            string.Equals(request.CorrelationId, response.CorrelationId, StringComparison.Ordinal))
+            SameLogicalTurn(request, response))
         {
             trimmed.RemoveAt(0);
         }
 
         return trimmed;
+    }
+
+    private static void ValidateHistoryProjection(
+        IReadOnlyList<DurableSessionEntry> source,
+        IReadOnlyList<DurableSessionEntry> projection)
+    {
+        try
+        {
+            Internal.DurableHistoryProjectionValidator.Validate(source, projection);
+        }
+        catch (Exceptions.DurableHistoryProjectionException exception)
+        {
+            throw new ApplicationFailureException(
+                exception.Message,
+                exception,
+                errorType: "DurableHistoryProjectionInvalid",
+                nonRetryable: true);
+        }
     }
 
     /// <summary>
@@ -1509,6 +1601,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 ? (DurableSessionRequest)StripMessagesFromEntry(requestEntry)
                 : requestEntry;
             _history.Add(requestEntryToAppend);
+            (_currentTurnStartIndex, _previousTurnRanges) = BuildModelContextTurnRanges(requestEntryToAppend);
 
             _turnCount++;
 

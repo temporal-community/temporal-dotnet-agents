@@ -65,6 +65,9 @@ internal sealed class DurableChatActivities(
 
         EnsureNoCallerSuppliedTools(input.Options);
         var resolvedOptions = input.Options;
+        var messagesForModel = FitModelContext(
+            input,
+            resolvedOptions ?? new ChatOptions());
 
         var chatClient = ResolveChatClient(input.ClientKey);
 
@@ -78,7 +81,7 @@ internal sealed class DurableChatActivities(
         Internal.ChatClientActivityTags.Apply(resolvedOptions, _logger);
 
         var response = await StreamAndCollectAsync(
-            chatClient, input.Messages, resolvedOptions, input, span, ctx)
+            chatClient, messagesForModel, resolvedOptions, input, span, ctx)
             .ConfigureAwait(false);
         EnsureActivityOutputFits(response, input, ctx, "chat activity result");
 
@@ -202,20 +205,21 @@ internal sealed class DurableChatActivities(
             effectiveOptions.Tools = null;
         }
 
+        var messagesForModel = FitModelContext(input, effectiveOptions);
         var chatClient = ResolveChatClient(input.ClientKey);
         EnsureMixedPatternCheck(chatClient);
         chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
         Internal.ChatClientActivityTags.Apply(effectiveOptions, _logger);
 
         var response = await StreamAndCollectAsync(
-            chatClient, input.Messages, effectiveOptions, input, span, ctx)
+            chatClient, messagesForModel, effectiveOptions, input, span, ctx)
             .ConfigureAwait(false);
 
         // Keep the provider's original message sequence intact. Tool-call inspection operates on
         // those messages, while the workflow appends the same protocol content for the next step.
         var messages = response.Messages.ToList();
         var toolCallResolution = Internal.DurableToolCallResolver.Resolve(
-            input.Messages,
+            messagesForModel,
             messages);
         var toolCalls = toolCallResolution.ActionableCalls;
         var classification = toolCallResolution.Failure is null
@@ -444,6 +448,29 @@ internal sealed class DurableChatActivities(
             throw Internal.DurableActivityFailurePolicy.CreateBounded(
                 exception,
                 "DurableModelResultSerializationFailed",
+                nonRetryable: true);
+        }
+    }
+
+    private IList<ChatMessage> FitModelContext(DurableChatInput input, ChatOptions options)
+    {
+        try
+        {
+            return Internal.DurableModelContextBudget.Fit(
+                input.Messages.ToList(),
+                input.CurrentTurnStartIndex,
+                input.PreviousTurnRanges ?? [],
+                options,
+                input.MaxModelContextTokens,
+                input.ModelOutputTokenReserve,
+                services.GetService<IDurableChatTokenEstimator>());
+        }
+        catch (DurableContextBudgetExceededException exception)
+        {
+            throw new ApplicationFailureException(
+                exception.Message,
+                exception,
+                errorType: "DurableContextBudgetExceeded",
                 nonRetryable: true);
         }
     }

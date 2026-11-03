@@ -171,6 +171,18 @@ public sealed class DurableAgentBuilder
     public int? MaxEntryCount { get; set; }
 
     /// <summary>
+    /// Gets or sets this agent's maximum estimated model-context size in tokens, including its
+    /// output reserve. When unset, inherits the worker-level limit.
+    /// </summary>
+    public int? MaxModelContextTokens { get; set; }
+
+    /// <summary>
+    /// Gets or sets this agent's model-output token reserve. When unset, inherits the worker-level
+    /// reserve.
+    /// </summary>
+    public int? ModelOutputTokenReserve { get; set; }
+
+    /// <summary>
     /// Gets or sets the maximum number of LLM-step iterations within a single agent turn. Each
     /// iteration may dispatch a parallel batch of tool activities. When the cap is exceeded the
     /// workflow returns a structured error response. Defaults to <c>20</c>.
@@ -767,6 +779,16 @@ public sealed class DurableAgentBuilder
                 $"DurableAgentBuilder.MaxEntryCount for agent '{Name}' must be at least 4 when set (null inherits the worker-level default) to retain a complete request/response turn.");
         }
 
+        if (MaxModelContextTokens is <= 0
+            || ModelOutputTokenReserve is < 0
+            || (MaxModelContextTokens is { } modelLimit
+                && ModelOutputTokenReserve is { } outputReserve
+                && outputReserve >= modelLimit))
+        {
+            throw new InvalidOperationException(
+                $"DurableAgentBuilder model-context token budget for agent '{Name}' is invalid.");
+        }
+
         return new DurableAgentRegistration(
             Name: Name,
             Description: Description,
@@ -781,6 +803,8 @@ public sealed class DurableAgentBuilder
             HeartbeatTimeout: HeartbeatTimeout,
             RetryPolicy: RetryPolicy,
             MaxEntryCount: MaxEntryCount,
+            MaxModelContextTokens: MaxModelContextTokens,
+            ModelOutputTokenReserve: ModelOutputTokenReserve,
             MaxToolCallsPerTurn: MaxToolCallsPerTurn,
             HistoryReducerKey: HistoryReducerKey,
             ConfigureAgentPipeline: ConfigureAgentPipeline,

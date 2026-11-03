@@ -65,6 +65,18 @@ public sealed class DurableChatInput
     /// </summary>
     public string? ExpectedSessionEpoch { get; init; }
 
+    [JsonInclude]
+    internal int CurrentTurnStartIndex { get; init; }
+
+    [JsonInclude]
+    internal IReadOnlyList<DurableChatTurnRange>? PreviousTurnRanges { get; init; }
+
+    [JsonInclude]
+    internal int? MaxModelContextTokens { get; init; }
+
+    [JsonInclude]
+    internal int ModelOutputTokenReserve { get; init; } = 1024;
+
     [JsonIgnore]
     internal int MaximumTransportPayloadSizeBytes { get; init; } = 1024 * 1024;
 

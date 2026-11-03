@@ -43,6 +43,8 @@ internal static class ReducingTheLlmContextWindow
                 {
                     agent.Instructions = "You are a helpful assistant.";
                     agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
+                    agent.MaxModelContextTokens = 8192;
+                    agent.ModelOutputTokenReserve = 1024;
                 });
             });
 #pragma warning restore MEAI001

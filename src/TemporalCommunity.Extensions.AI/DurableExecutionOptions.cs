@@ -199,6 +199,18 @@ public sealed class DurableExecutionOptions
     public int MaxEntryCount { get; set; } = 1000;
 
     /// <summary>
+    /// Gets or sets the maximum estimated model context size in tokens. The output reserve is
+    /// included in this total. When null, no local context limit is enforced.
+    /// </summary>
+    public int? MaxModelContextTokens { get; set; }
+
+    /// <summary>
+    /// Gets or sets the number of tokens reserved for model output when
+    /// <see cref="MaxModelContextTokens"/> is configured. Defaults to 1024.
+    /// </summary>
+    public int ModelOutputTokenReserve { get; set; } = 1024;
+
+    /// <summary>
     /// Gets or sets the maximum number of terminal turn outcomes retained for request-ID
     /// deduplication. Defaults to 128. Pending turns are never evicted.
     /// </summary>
@@ -316,6 +328,19 @@ public sealed class DurableExecutionOptions
         {
             throw new InvalidOperationException(
                 $"{nameof(MaxEntryCount)} must be at least 4 in {nameof(DurableExecutionOptions)} to retain a complete request/response turn.");
+        }
+
+        if (MaxModelContextTokens is <= 0)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(MaxModelContextTokens)} must be positive when set.");
+        }
+
+        if (ModelOutputTokenReserve < 0
+            || (MaxModelContextTokens is { } contextLimit && ModelOutputTokenReserve >= contextLimit))
+        {
+            throw new InvalidOperationException(
+                $"{nameof(ModelOutputTokenReserve)} must be non-negative and smaller than the configured context limit.");
         }
 
         if (MaxTerminalOutcomeCount <= 0)

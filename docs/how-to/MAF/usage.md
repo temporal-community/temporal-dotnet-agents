@@ -252,6 +252,8 @@ builder.Services
         {
             agent.Instructions = "You are a helpful assistant.";
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
+            agent.MaxModelContextTokens = 8192;
+            agent.ModelOutputTokenReserve = 1024;
         });
     });
 #pragma warning restore MEAI001
@@ -264,6 +266,15 @@ With this configuration:
   restarts and continue-as-new transitions.
 - The reducer passes only the most recent 20 messages to the LLM on each turn.
 - Querying `_history` (e.g., for audit) still returns the full unreduced log.
+- `MaxModelContextTokens` optionally bounds estimated input plus `ModelOutputTokenReserve`.
+  The worker trims only complete eligible prior turns before context providers run, then validates
+  the final messages, instructions, tools, and response schema after provider contributions. If
+  provider-added or protected content still exceeds the limit, the model activity fails with a
+  non-retryable `DurableContextBudgetExceeded` outcome instead of silently omitting content.
+
+The default estimator is a deterministic provider-independent heuristic, not an exact tokenizer.
+Register `IDurableChatTokenEstimator` in worker DI for model-specific estimates. In split or
+profiled deployments, the estimator and configured limit should match the worker-side model route.
 
 > **Design rationale:** Conversation history lives on the workflow itself, where
 > it is replay-safe via Temporal event history. Reducers shape only what is sent
@@ -1128,6 +1139,7 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
 | `RetryPolicy` | Agent-level retry policy. Applies to the `RunDurableAgentStep` (LLM) activity **and** to every tool and interceptor activity on this agent that does not override it — not LLM-only. A tool overrides it via `DurableToolOptions.RetryPolicy`. |
 | `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
+| `MaxModelContextTokens`, `ModelOutputTokenReserve` | Optional per-agent estimated model-context limit and output reserve. Inherit worker defaults when unset. |
 | `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached on the `TemporalAIAgent` instance for its lifetime — it describes the agent, not the conversation, so every session that instance drives shares the resolved value. Changes to the builder value after worker startup do not affect agents already resolved. |
 | `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
 
@@ -1155,6 +1167,8 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.HeartbeatTimeout` | `opts.DefaultHeartbeatTimeout` |
 | `agent.RetryPolicy` | `opts.DefaultRetryPolicy` |
 | `agent.MaxEntryCount` | `opts.DefaultMaxEntryCount` |
+| `agent.MaxModelContextTokens` | `opts.DefaultMaxModelContextTokens` |
+| `agent.ModelOutputTokenReserve` | `opts.DefaultModelOutputTokenReserve` |
 | `agent.HistoryReducerKey` | `opts.DefaultHistoryReducerKey` |
 | `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
 | `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |

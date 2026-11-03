@@ -80,6 +80,8 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         ApprovalTimeout = _options.ApprovalTimeout,
         EnableSearchAttributes = _options.EnableSearchAttributes,
         MaxEntryCount = _options.MaxEntryCount,
+        MaxModelContextTokens = _options.MaxModelContextTokens,
+        ModelOutputTokenReserve = _options.ModelOutputTokenReserve,
         MaxTerminalOutcomeCount = _options.MaxTerminalOutcomeCount,
         MaxTerminalOutcomeBytes = _options.MaxTerminalOutcomeBytes,
         MaximumTransportPayloadSizeBytes = _options.MaximumTransportPayloadSizeBytes,
