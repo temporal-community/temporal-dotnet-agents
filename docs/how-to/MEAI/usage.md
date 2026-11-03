@@ -48,7 +48,7 @@ require old-history patching or backward compatibility.
 
 ### Pinned reducer prerequisites
 
-Contract tests execute the repository-pinned MEAI **10.10.0** and Temporalio **1.20.0**, not a
+Contract tests execute the repository-pinned MEAI **10.10.0** and Temporalio **1.21.1**, not a
 floating source checkout. `IChatReducer`, `MessageCountingChatReducer`, and
 `SummarizingChatReducer` are experimental (`MEAI001`).
 
