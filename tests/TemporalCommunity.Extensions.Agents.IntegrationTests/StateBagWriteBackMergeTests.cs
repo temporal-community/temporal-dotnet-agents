@@ -15,6 +15,7 @@ using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Tools;
 using Temporalio.Testing;
+using Temporalio.Worker;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -365,9 +366,18 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             Assert.False(provider.ThirdTurnObservedFailedState,
                 "The queued failed turn's StateBag value must be rolled back.");
 
+            var history = await workflowHandle.FetchHistoryAsync();
+            var replayOptions = new WorkflowReplayerOptions
+            {
+                DataConverter = TemporalAgentDataConverter.Instance,
+            };
+            replayOptions.AddWorkflow<AgentWorkflow>();
+            var replay = await new WorkflowReplayer(replayOptions)
+                .ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+            Assert.Null(replay.ReplayFailure);
+
             if (captureHistory)
             {
-                var history = await workflowHandle.FetchHistoryAsync();
                 await SaveAgentHistoryAsync("failed-turn-statebag-rollback.json", history);
             }
         }
