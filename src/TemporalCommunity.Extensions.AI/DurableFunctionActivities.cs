@@ -137,10 +137,14 @@ internal sealed class DurableFunctionActivities(
 
         using var span = DurableChatTelemetry.ActivitySource.StartActivity(
             $"{DurableChatTelemetry.ExecuteToolOperationName} {input.FunctionName}",
-            ActivityKind.Client);
+            ActivityKind.Internal);
 
         span?.SetTag(DurableChatTelemetry.OperationNameAttribute, DurableChatTelemetry.ExecuteToolOperationName);
         span?.SetTag(DurableChatTelemetry.ToolNameAttribute, input.FunctionName);
+        span?.SetTag(DurableChatTelemetry.ToolTypeAttribute, "function");
+        SetBoundedTag(span, DurableChatTelemetry.ToolCallIdAttribute, input.ToolCallId, 128);
+        SetBoundedTag(span, DurableChatTelemetry.GenAiConversationIdAttribute, input.ConversationId, 128);
+        SetBoundedTag(span, DurableChatTelemetry.ToolDescriptionAttribute, input.Declaration?.Description, 256);
 
         _logger.LogFunctionInvoking(input.FunctionName);
 
@@ -234,9 +238,28 @@ internal sealed class DurableFunctionActivities(
         }
         catch (Exception ex)
         {
-            span?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            span?.SetStatus(ActivityStatusCode.Error);
+            span?.SetTag(DurableChatTelemetry.ErrorTypeAttribute, GetBoundedErrorType(ex));
             throw;
         }
+    }
+
+    private static void SetBoundedTag(Activity? activity, string name, string? value, int maximumLength)
+    {
+        if (!string.IsNullOrEmpty(value))
+        {
+            activity?.SetTag(name, value.Length <= maximumLength
+                ? value
+                : value[..maximumLength]);
+        }
+    }
+
+    private static string GetBoundedErrorType(Exception exception)
+    {
+        var errorType = exception is ApplicationFailureException { ErrorType: { Length: > 0 } type }
+            ? type
+            : exception.GetType().Name;
+        return errorType.Length <= 64 ? errorType : errorType[..64];
     }
 
     private void ValidateWorkerOwnedBinding(DurableFunctionInput input)

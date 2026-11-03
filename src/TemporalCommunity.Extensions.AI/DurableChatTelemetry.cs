@@ -39,6 +39,23 @@ public static class DurableChatTelemetry
             description: "Serialized bytes in the once-per-session durable toolset manifest.");
     internal static readonly Counter<long> ToolsetValidationRejections = Meter.CreateCounter<long>(
         "temporal.ai.toolset.validation.rejections");
+    /// <summary>Counter for completed durable turn outcomes.</summary>
+    public const string TurnOutcomesMetricName = "temporal.ai.turn.outcomes";
+
+    /// <summary>Counter for durable turn-admission rejections.</summary>
+    public const string TurnAdmissionRejectionsMetricName = "temporal.ai.turn.admission.rejections";
+
+    /// <summary>Counter for completed durable approval outcomes.</summary>
+    public const string ApprovalOutcomesMetricName = "temporal.ai.approval.outcomes";
+
+    /// <summary>Counter for approval-resolution update outcomes.</summary>
+    public const string ApprovalResolutionsMetricName = "temporal.ai.approval.resolutions";
+
+    /// <summary>Counter for deterministic approval expirations.</summary>
+    public const string ApprovalExpiriesMetricName = "temporal.ai.approval.expiries";
+
+    /// <summary>Counter for retained-history compaction outcomes.</summary>
+    public const string HistoryCompactionOutcomesMetricName = "temporal.ai.history.compaction.outcomes";
     // ── Span names ───────────────────────────────────────────────────────────
 
     /// <summary>
@@ -78,4 +95,16 @@ public static class DurableChatTelemetry
 
     /// <summary>The call ID of the tool invocation.</summary>
     public const string ToolCallIdAttribute = "gen_ai.tool.call.id";
+
+    /// <summary>The type of tool being invoked.</summary>
+    public const string ToolTypeAttribute = "gen_ai.tool.type";
+
+    /// <summary>The registered description of the tool being invoked.</summary>
+    public const string ToolDescriptionAttribute = "gen_ai.tool.description";
+
+    /// <summary>The GenAI conversation identifier for the durable session.</summary>
+    public const string GenAiConversationIdAttribute = "gen_ai.conversation.id";
+
+    /// <summary>The bounded exception type associated with a failed tool invocation.</summary>
+    public const string ErrorTypeAttribute = "error.type";
 }

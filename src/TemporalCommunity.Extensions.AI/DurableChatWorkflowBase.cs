@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
+using Temporalio.Common;
 using Temporalio.Exceptions;
 using Temporalio.Workflows;
 
@@ -25,6 +26,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private readonly Dictionary<string, TurnExecutionRecord> _terminalTurns =
         new(StringComparer.Ordinal);
     private readonly List<string> _terminalTurnOrder = [];
+    private readonly Dictionary<string, MetricCounter<long>> _workflowMetrics =
+        new(StringComparer.Ordinal);
     private readonly List<InterruptedToolBatch> _interruptedToolBatches = [];
     private long _terminalTurnLedgerBytes;
     private int _maxTerminalOutcomeCount = 128;
@@ -397,6 +400,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         if (expectedSessionEpoch is not null
             && !string.Equals(expectedSessionEpoch, CurrentSessionEpoch, StringComparison.Ordinal))
         {
+            RecordWorkflowMetric(
+                DurableChatTelemetry.TurnAdmissionRejectionsMetricName,
+                "reason",
+                "epoch_mismatch");
             throw new ApplicationFailureException(
                 $"Expected session epoch '{expectedSessionEpoch}' does not match the active session epoch.",
                 errorType: Exceptions.DurableChatSessionEpochMismatchException.ErrorType,
@@ -1138,6 +1145,29 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private async Task<List<DurableSessionEntry>> ApplyConfiguredHistoryCompactionAsync(
         List<DurableSessionEntry> history)
     {
+        try
+        {
+            var projection = await ApplyConfiguredHistoryCompactionCoreAsync(history)
+                .ConfigureAwait(true);
+            RecordWorkflowMetric(
+                DurableChatTelemetry.HistoryCompactionOutcomesMetricName,
+                "outcome",
+                "success");
+            return projection;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            RecordWorkflowMetric(
+                DurableChatTelemetry.HistoryCompactionOutcomesMetricName,
+                "outcome",
+                "failure");
+            throw;
+        }
+    }
+
+    private async Task<List<DurableSessionEntry>> ApplyConfiguredHistoryCompactionCoreAsync(
+        List<DurableSessionEntry> history)
+    {
         var input = RequiredInput;
         var activityOptions = new ActivityOptions
         {
@@ -1497,6 +1527,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         if (_historyRecovery.IsBlocked && !matchesActiveTurn)
         {
+            RecordWorkflowMetric(
+                DurableChatTelemetry.TurnAdmissionRejectionsMetricName,
+                "reason",
+                "history_blocked");
             throw new ApplicationFailureException(
                 "The session is blocked until retained history is compacted or explicitly trimmed.",
                 errorType: "DurableHistoryBlocked",
@@ -1792,7 +1826,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private static TurnExecutionRecord GetTurnRecord(TurnAdmission admission) =>
         (TurnExecutionRecord)admission.RecordState;
 
-    private static void EnsureAdmissionFingerprint(
+    private void EnsureAdmissionFingerprint(
         TurnExecutionRecord record,
         string? requestId,
         string admissionFingerprint)
@@ -1805,8 +1839,62 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         }
     }
 
-    private static ApplicationFailureException TurnAdmissionFailure(string message, string errorType) =>
-        new(message, errorType: errorType, nonRetryable: true);
+    private ApplicationFailureException TurnAdmissionFailure(string message, string errorType)
+    {
+        var reason = errorType switch
+        {
+            "DurableTurnConflict" => "conflict",
+            "DurableTurnBusy" => "busy",
+            "DurableSessionAdmissionClosed" or "DurableSessionShutdown" => "admission_closed",
+            "DurableHistoryBlocked" => "history_blocked",
+            "DurableHistoryBudgetBlocked" => "history_budget",
+            "DurableTurnPending" => "pending_limit",
+            _ => null,
+        };
+        if (reason is not null)
+        {
+            RecordWorkflowMetric(
+                DurableChatTelemetry.TurnAdmissionRejectionsMetricName,
+                "reason",
+                reason);
+        }
+
+        return new ApplicationFailureException(message, errorType: errorType, nonRetryable: true);
+    }
+
+    private void RecordApprovalOutcome(DurableApprovalDecision decision)
+    {
+        var outcome = decision.ExpirationReason.HasValue
+            ? "expired"
+            : decision.Approved ? "approved" : "rejected";
+        RecordWorkflowMetric(
+            DurableChatTelemetry.ApprovalOutcomesMetricName,
+            "outcome",
+            outcome);
+        if (decision.ExpirationReason is { } expirationReason)
+        {
+            RecordWorkflowMetric(
+                DurableChatTelemetry.ApprovalExpiriesMetricName,
+                "reason",
+                expirationReason == DurableApprovalExpirationReason.HistoryBudget
+                    ? "history_budget"
+                    : "timeout");
+        }
+    }
+
+    private void RecordWorkflowMetric(string name, string tagName, string tagValue)
+    {
+        var key = $"{name}\0{tagName}\0{tagValue}";
+        if (!_workflowMetrics.TryGetValue(key, out var counter))
+        {
+            counter = Workflow.MetricMeter
+                .CreateCounter<long>(name)
+                .WithTags([new KeyValuePair<string, object>(tagName, tagValue)]);
+            _workflowMetrics.Add(key, counter);
+        }
+
+        counter.Add(1);
+    }
 
     private static void ValidateTerminalOutcomeLimits(DurableChatWorkflowInput input)
     {
@@ -1858,17 +1946,29 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         && (Workflow.CurrentHistoryLength >= input.HistoryEventReserveLimit
             || Workflow.CurrentHistorySize >= input.HistorySizeReserveLimitBytes);
 
-    private static ApplicationFailureException HistoryBudgetFailure() =>
-        new(
+    private ApplicationFailureException HistoryBudgetFailure()
+    {
+        RecordWorkflowMetric(
+            DurableChatTelemetry.TurnAdmissionRejectionsMetricName,
+            "reason",
+            "history_budget");
+        return new(
             "The workflow history budget is restricting admission. Retry after the session continues as new.",
             errorType: "DurableHistoryBudgetBlocked",
             nonRetryable: true);
+    }
 
-    private static ApplicationFailureException PendingJoinerFailure() =>
-        new(
+    private ApplicationFailureException PendingJoinerFailure()
+    {
+        RecordWorkflowMetric(
+            DurableChatTelemetry.TurnAdmissionRejectionsMetricName,
+            "reason",
+            "pending_limit");
+        return new(
             "The active turn has reached its concurrent joiner limit. Observe the request status and retry later.",
             errorType: "DurableTurnPending",
             nonRetryable: true);
+    }
 
     private void RestoreTerminalTurnOutcomes(
         IReadOnlyList<Internal.DurableTerminalTurnOutcome>? outcomes)
@@ -2007,6 +2107,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         TOutput output,
         DurableSessionResponse responseEntry)
     {
+        RecordWorkflowMetric(
+            DurableChatTelemetry.TurnOutcomesMetricName,
+            "outcome",
+            "completed");
         record.SerializedOutput = SerializeTurnOutput(output);
         record.SerializedResponseEntry = SerializeTurnResponseEntry(responseEntry);
         record.Output = output;
@@ -2023,6 +2127,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
     private void CompleteTurnFailure(TurnExecutionRecord record, Exception exception)
     {
+        RecordWorkflowMetric(
+            DurableChatTelemetry.TurnOutcomesMetricName,
+            "outcome",
+            exception is ApplicationFailureException { ErrorType: "DurableTurnCancelled" }
+                ? "cancelled"
+                : "failed");
         var (errorType, message, nonRetryable) = exception is ApplicationFailureException failure
             ? (failure.ErrorType ?? "DurableTurnFailure", failure.Message, failure.NonRetryable)
             : (exception.GetType().FullName ?? exception.GetType().Name, exception.Message, false);
@@ -2902,6 +3012,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             historyBudgetReserveReached: () => IsHistoryReserveReached,
             cancellationToken: CurrentTurnCancellationToken,
             turnCancellationRequested: IsCurrentTurnCancellationRequested);
+        RecordApprovalOutcome(decision);
 
         if (input.EnableTransportPayloadGuard)
         {
@@ -2937,7 +3048,18 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 Input.PayloadCodecExpansionAllowanceBytes,
                 "approval-resolution update input");
         }
-        _approvalMixin.ValidateResolveApproval(decision);
+        try
+        {
+            _approvalMixin.ValidateResolveApproval(decision);
+        }
+        catch (ApplicationFailureException)
+        {
+            RecordWorkflowMetric(
+                DurableChatTelemetry.ApprovalResolutionsMetricName,
+                "outcome",
+                "rejected");
+            throw;
+        }
     }
 
     [WorkflowUpdate("ResolveApproval")]
@@ -2975,6 +3097,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         var result = _approvalMixin.ResolveApproval(decision);
         if (result.Status == DurableApprovalResolutionStatus.Accepted)
         {
+            RecordWorkflowMetric(
+                DurableChatTelemetry.ApprovalResolutionsMetricName,
+                "outcome",
+                "accepted");
             OnApprovalResolutionAccepted(decision);
             RenewSessionIdleDeadline();
         }
@@ -3067,6 +3193,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             cancellationToken: CurrentTurnCancellationToken,
             turnCancellationRequested: IsCurrentTurnCancellationRequested);
 
+        RecordApprovalOutcome(decision);
         OnApprovalRequestResolved(decision);
         return decision;
     }

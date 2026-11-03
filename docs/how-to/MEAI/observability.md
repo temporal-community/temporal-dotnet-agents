@@ -52,9 +52,51 @@ wrapper. The default `ApplicationOwned` mode leaves instrumentation entirely to 
 These modes verify configuration only; the library never wraps the provider client for inference
 telemetry.
 
-A tool span has `gen_ai.operation.name=execute_tool` and `gen_ai.tool.name`. The
-`durable_chat.send` span describes the Temporal update request, not the model inference, and uses
-Temporal-specific attributes rather than GenAI usage attributes.
+A tool span uses `ActivityKind.Internal` and includes `gen_ai.operation.name=execute_tool`,
+`gen_ai.tool.name`, `gen_ai.tool.type=function`, and the available
+`gen_ai.tool.call.id`, `gen_ai.tool.description`, and `gen_ai.conversation.id`. Call IDs,
+descriptions, conversation IDs, and error types are length-bounded. Tool arguments, results, and
+exception messages are not span attributes. Failed tool spans use a bounded `error.type` and an
+error status without an exception-message description.
+
+Workflow outcome counters use Temporal's replay-safe `Workflow.MetricMeter`; they are not emitted
+through `DurableChatTelemetry.MeterName`. Configure the Temporal runtime metrics sink separately
+if you need these counters exported. For example, the pinned SDK supports its runtime OpenTelemetry
+metrics exporter:
+
+```csharp
+using Temporalio.Runtime;
+
+var runtime = new TemporalRuntime(new TemporalRuntimeOptions(new TelemetryOptions
+{
+    Metrics = new MetricsOptions(new OpenTelemetryOptions("http://localhost:4318")
+    {
+        MetricsExportInterval = TimeSpan.FromSeconds(30),
+        Protocol = OpenTelemetryProtocol.Grpc,
+    }),
+}));
+
+var client = await TemporalClient.ConnectAsync(new("localhost:7233")
+{
+    Runtime = runtime,
+});
+```
+
+The workflow counters use only bounded outcome/reason values:
+
+| Instrument | Tags | Meaning |
+|---|---|---|
+| `temporal.ai.turn.outcomes` | `outcome=completed|failed|cancelled` | Terminal turn results |
+| `temporal.ai.turn.admission.rejections` | `reason=busy|conflict|epoch_mismatch|admission_closed|history_blocked|history_budget|pending_limit` | Supported turn-admission rejections |
+| `temporal.ai.approval.outcomes` | `outcome=approved|rejected|expired` | Completed approval waits |
+| `temporal.ai.approval.resolutions` | `outcome=accepted|rejected` | Reviewer resolution updates |
+| `temporal.ai.approval.expiries` | `reason=timeout|history_budget` | Deterministic approval expiry reasons |
+| `temporal.ai.history.compaction.outcomes` | `outcome=success|failure` | Compaction attempts, including explicit recovery attempts |
+
+These are operational workflow metrics, not durable audit or billing records. Temporal suppresses
+workflow metric recording during replay; Activity metrics may still be emitted again on an activity
+retry. The library `MeterName` remains the collection point for package-owned activity metrics such
+as toolset resolution and validation.
 
 MEAI's default content-capture behavior is controlled by
 `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (unset/false means redacted). Applications

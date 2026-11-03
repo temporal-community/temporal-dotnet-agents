@@ -15,6 +15,9 @@ protocol layers, down to the LLM inference span emitted by MEAI's application-co
   OpenAI SDK instrumentation adds its own source)
 - `DurableChatTelemetry.MeterName` must be registered with the meter provider to collect durable
   toolset resolver and validation measurements
+- Workflow outcome counters use Temporal's replay-safe workflow metric meter and require the
+  Temporal runtime's metrics exporter; this sample exposes them at
+  `http://127.0.0.1:9090/metrics`. Adding the library meter alone does not collect them
 - `TracingInterceptor` propagates the W3C `traceparent` header across gRPC boundaries
 
 ## Span Hierarchy
@@ -22,6 +25,8 @@ protocol layers, down to the LLM inference span emitted by MEAI's application-co
 The library and the Temporal SDK emit spans during a chat turn:
 
 - `TemporalCommunity.Extensions.AI` — Temporal update and toolset spans
+- `execute_tool {toolName}` — internal GenAI tool-operation span with bounded call/session
+  metadata and no tool arguments or result content
 - MEAI `OpenTelemetryChatClient` — provider inference spans and token metrics
 - `Temporalio-Client`, `Temporalio-Workflow`, `Temporalio-Activity` — Temporal SDK protocol spans
   (emitted by `TracingInterceptor`)
@@ -144,8 +149,9 @@ dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
 
 ### Expected Output
 
-Span and metric data are written to the console by `AddConsoleExporter()`. You will see one set of
-spans per chat turn (the sample makes two). Worker-owned toolset sessions additionally report the
+Spans and .NET `Meter` measurements are written to the console by `AddConsoleExporter()`. Temporal
+workflow metrics are available at `http://127.0.0.1:9090/metrics`. You will see one set of spans
+per chat turn (the sample makes two). Worker-owned toolset sessions additionally report the
 attempt-scoped `temporal.ai.toolset.*` instruments described in
 [`docs/how-to/MEAI/observability.md`](../../../docs/how-to/MEAI/observability.md). The workflow ID is
 `chat-otel-demo-<guid>` — the `chat-` prefix
@@ -204,7 +210,10 @@ This sample does not register durable tools, so every chat turn dispatches a sin
   (still wrapped in `RunActivity:...`, with an application-configured `chat {model}` span carrying
   `gen_ai.*` tags).
 - Each tool invocation produces a separate `RunActivity:TemporalCommunity.Extensions.AI.InvokeFunction`
-  span — one span per tool call.
+  span — one span per tool call — plus an `execute_tool {toolName}` internal span with
+  `gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.tool.type`, and available bounded call ID,
+  description, and conversation ID attributes. Failure spans have a bounded `error.type`; messages,
+  arguments, and results are not added as span attributes.
 
 See `docs/how-to/MEAI/tool-functions.md` for the managed durable-tool contract.
 

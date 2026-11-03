@@ -75,6 +75,65 @@ public sealed class DurableToolsetTelemetryTests
     }
 
     [Fact]
+    public async Task ToolInvocation_EmitsInternalGenAiSpanWithBoundedMetadata()
+    {
+        using var capture = new TelemetryCapture();
+        var description = new string('d', 300);
+        var conversationId = new string('c', 150);
+        var callId = new string('i', 150);
+        var function = AIFunctionFactory.Create(() => "ok", "safe_tool", description);
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [function.Name] = function });
+        var input = new DurableFunctionInput
+        {
+            FunctionName = function.Name,
+            Declaration = DurableFunctionDeclarationSnapshot.Create(function.AsDeclarationOnly()),
+            Arguments = new Dictionary<string, object?> { ["private"] = "value" },
+            ToolCallId = callId,
+            ConversationId = conversationId,
+        };
+
+        await new ActivityEnvironment().RunAsync(() => activities.InvokeFunctionAsync(input));
+
+        var span = Assert.Single(capture.Activities);
+        Assert.Equal(ActivityKind.Internal, span.Kind);
+        Assert.Equal("execute_tool", span.GetTagItem(DurableChatTelemetry.OperationNameAttribute));
+        Assert.Equal("safe_tool", span.GetTagItem(DurableChatTelemetry.ToolNameAttribute));
+        Assert.Equal("function", span.GetTagItem(DurableChatTelemetry.ToolTypeAttribute));
+        Assert.Equal(callId[..128], span.GetTagItem(DurableChatTelemetry.ToolCallIdAttribute));
+        Assert.Equal(
+            conversationId[..128],
+            span.GetTagItem(DurableChatTelemetry.GenAiConversationIdAttribute));
+        Assert.Equal(
+            description[..256],
+            span.GetTagItem(DurableChatTelemetry.ToolDescriptionAttribute));
+        Assert.DoesNotContain("private", string.Join("|", span.Tags.Select(tag => tag.Value)));
+    }
+
+    [Fact]
+    public async Task ToolInvocationFailure_UsesBoundedErrorTypeWithoutExceptionText()
+    {
+        using var capture = new TelemetryCapture();
+        Func<string> throwingDelegate = () => throw new InvalidOperationException("private details");
+        var function = AIFunctionFactory.Create(throwingDelegate, "safe_tool");
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [function.Name] = function });
+
+        await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(() =>
+            new ActivityEnvironment().RunAsync(() => activities.InvokeFunctionAsync(new()
+            {
+                FunctionName = function.Name,
+                Declaration = DurableFunctionDeclarationSnapshot.Create(function.AsDeclarationOnly()),
+            })));
+
+        var span = Assert.Single(capture.Activities);
+        Assert.Equal(ActivityStatusCode.Error, span.Status);
+        Assert.Equal("InvalidOperationException", span.GetTagItem(DurableChatTelemetry.ErrorTypeAttribute));
+        Assert.Null(span.StatusDescription);
+        Assert.DoesNotContain("private details", string.Join("|", span.Tags.Select(tag => tag.Value)));
+    }
+
+    [Fact]
     public async Task ResolverFailure_EmitsFailureAndRejectionWithoutCountHistograms()
     {
         using var capture = new TelemetryCapture();

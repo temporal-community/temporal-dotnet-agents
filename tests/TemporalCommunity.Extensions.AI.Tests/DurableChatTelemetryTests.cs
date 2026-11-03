@@ -35,6 +35,27 @@ public class DurableChatTelemetryTests
             DurableChatTelemetry.TurnCompletionReasonAttribute);
         Assert.Equal("gen_ai.tool.name", DurableChatTelemetry.ToolNameAttribute);
         Assert.Equal("gen_ai.tool.call.id", DurableChatTelemetry.ToolCallIdAttribute);
+        Assert.Equal("gen_ai.tool.type", DurableChatTelemetry.ToolTypeAttribute);
+        Assert.Equal("gen_ai.tool.description", DurableChatTelemetry.ToolDescriptionAttribute);
+        Assert.Equal("gen_ai.conversation.id", DurableChatTelemetry.GenAiConversationIdAttribute);
+        Assert.Equal("error.type", DurableChatTelemetry.ErrorTypeAttribute);
+    }
+
+    [Fact]
+    public void WorkflowMetricNames_AreStable()
+    {
+        Assert.Equal("temporal.ai.turn.outcomes", DurableChatTelemetry.TurnOutcomesMetricName);
+        Assert.Equal(
+            "temporal.ai.turn.admission.rejections",
+            DurableChatTelemetry.TurnAdmissionRejectionsMetricName);
+        Assert.Equal("temporal.ai.approval.outcomes", DurableChatTelemetry.ApprovalOutcomesMetricName);
+        Assert.Equal(
+            "temporal.ai.approval.resolutions",
+            DurableChatTelemetry.ApprovalResolutionsMetricName);
+        Assert.Equal("temporal.ai.approval.expiries", DurableChatTelemetry.ApprovalExpiriesMetricName);
+        Assert.Equal(
+            "temporal.ai.history.compaction.outcomes",
+            DurableChatTelemetry.HistoryCompactionOutcomesMetricName);
     }
 
     [Fact]

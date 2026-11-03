@@ -14,6 +14,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Temporalio.Client;
 using Temporalio.Common;
+using Temporalio.Runtime;
 using TemporalCommunity.Extensions.AI;
 using Temporalio.Extensions.OpenTelemetry;
 
@@ -83,11 +84,16 @@ builder.Services
 //   MEAI uses for polymorphic AIContent subclasses (TextContent, FunctionCallContent,
 //   etc.). Without it, type information is silently lost when types round-trip
 //   through workflow history, causing deserialization errors on replay.
+var temporalRuntime = new TemporalRuntime(new TemporalRuntimeOptions(new TelemetryOptions
+{
+    Metrics = new MetricsOptions(new PrometheusOptions("127.0.0.1:9090")),
+}));
 var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions(temporalAddress)
 {
     DataConverter = DurableAIDataConverter.Instance,
     Interceptors = [new TracingInterceptor()],
     Namespace = "default",
+    Runtime = temporalRuntime,
 });
 builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 
@@ -131,7 +137,8 @@ builder.Services
 var host = builder.Build();
 await host.StartAsync();
 
-Console.WriteLine("Worker started. OpenTelemetry console exporter is active.\n");
+Console.WriteLine("Worker started. OpenTelemetry console exporter is active.");
+Console.WriteLine("Temporal workflow metrics scrape endpoint: http://127.0.0.1:9090/metrics\n");
 Console.WriteLine("--- spans ---\n");
 
 var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
