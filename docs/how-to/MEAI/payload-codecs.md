@@ -63,8 +63,14 @@ Managed durable chat also checks the configured payload converter's complete ser
 against `DurableExecutionOptions.MaximumTransportPayloadSizeBytes` (1 MiB by default), reserving
 `PayloadCodecExpansionAllowanceBytes` for codec growth. The gzip codec is non-expanding and uses
 the default zero allowance. If a custom codec can expand payloads, declare a verified upper bound;
-the workflow cannot invoke the codec during deterministic preflight. This guard is per payload and
-does not replace the codec's own bounds or prove that aggregate Temporal request envelopes fit.
+the workflow cannot invoke the codec during deterministic preflight. For history summarization, the
+guard checks the complete summarizer activity input and result, the compacted retained-history
+projection (including its summary marker), and the complete Continue-as-New workflow input. An
+oversized summary input or result leaves the last valid retained history intact and blocks
+compaction with a queryable recovery reason; the library does not silently truncate the summary.
+The guard is per payload and does not replace the codec's own bounds or prove that aggregate
+Temporal request envelopes, later SDK encoding, or server/deployment limits fit. In particular,
+the expansion allowance is an application-supplied bound, not a measurement of the codec output.
 
 `CompressionLevel` defaults to `CompressionLevel.Fastest`. Faster compression generally spends less
 CPU but may produce larger payloads; denser levels may reduce stored bytes at higher CPU cost. Measure

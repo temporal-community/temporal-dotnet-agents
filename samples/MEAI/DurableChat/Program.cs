@@ -129,6 +129,8 @@ var durableWorker = builder.Services
         // is selected instead.
         opts.HistorySummarizerMaxContextTokens = 8192;
         opts.HistorySummarizerOutputTokenReserve = 1024;
+        // The per-payload guard also checks summarizer input/results, compacted history,
+        // and the full Continue-as-New input; it cannot guarantee aggregate service limits.
         opts.MaximumTransportPayloadSizeBytes = 1024 * 1024;
         opts.PayloadCodecExpansionAllowanceBytes = 0;
 

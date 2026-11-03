@@ -692,22 +692,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// <summary>Dispatches the library-owned summarizer activity from a workflow implementation.</summary>
     protected virtual Task<DurableHistorySummarizationResult> SummarizeHistoryPrefixAsync(
         DurableHistorySummarizationInput input,
-        ActivityOptions activityOptions)
-    {
-        if (RequiredInput.EnableTransportPayloadGuard)
-        {
-            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
-                Workflow.PayloadConverter,
-                input,
-                RequiredInput.MaximumTransportPayloadSizeBytes,
-                RequiredInput.PayloadCodecExpansionAllowanceBytes,
-                "history summarizer activity input");
-        }
-
-        return Workflow.ExecuteActivityAsync(
+        ActivityOptions activityOptions) =>
+        Workflow.ExecuteActivityAsync(
             (DurableChatActivities activities) => activities.SummarizeHistoryPrefixAsync(input),
             activityOptions);
-    }
 
     /// <summary>
     /// When <see langword="true"/>, response entries appended to the in-workflow history have
@@ -1331,15 +1319,40 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 nonRetryable: true);
         }
 
-        var result = await SummarizeHistoryPrefixAsync(
-            new DurableHistorySummarizationInput
+        var summarizationInput = new DurableHistorySummarizationInput
+        {
+            Turns = turns.Select(item => item.Turn).ToArray(),
+            ClientKey = RequiredInput.HistorySummarizerClientKey,
+            MaxContextTokens = RequiredInput.HistorySummarizerMaxContextTokens,
+            OutputTokenReserve = RequiredInput.HistorySummarizerOutputTokenReserve,
+            EnableTransportPayloadGuard = RequiredInput.EnableTransportPayloadGuard,
+            MaximumTransportPayloadSizeBytes = RequiredInput.MaximumTransportPayloadSizeBytes,
+            PayloadCodecExpansionAllowanceBytes = RequiredInput.PayloadCodecExpansionAllowanceBytes,
+        };
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
+            try
             {
-                Turns = turns.Select(item => item.Turn).ToArray(),
-                ClientKey = RequiredInput.HistorySummarizerClientKey,
-                MaxContextTokens = RequiredInput.HistorySummarizerMaxContextTokens,
-                OutputTokenReserve = RequiredInput.HistorySummarizerOutputTokenReserve,
-            },
-            activityOptions).ConfigureAwait(true);
+                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    summarizationInput,
+                    RequiredInput.MaximumTransportPayloadSizeBytes,
+                    RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                    "history summarizer activity input");
+            }
+            catch (ApplicationFailureException exception)
+                when (exception.ErrorType == "DurableTransportPayloadTooLarge")
+            {
+                throw new ApplicationFailureException(
+                    "The history summarizer input exceeded the configured transport payload budget.",
+                    exception,
+                    errorType: "DurableHistorySummaryInputTooLarge",
+                    nonRetryable: true);
+            }
+        }
+
+        var result = await SummarizeHistoryPrefixAsync(summarizationInput, activityOptions)
+            .ConfigureAwait(true);
         if (result.SummarizedTurnCount <= 0 || result.SummarizedTurnCount > turns.Count)
         {
             throw new ApplicationFailureException(
@@ -2592,12 +2605,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
     private void RecordHistoryRecoveryFailure(Exception exception, string outcome)
     {
+        var applicationFailure = FindApplicationFailure(exception);
         var reason = exception switch
         {
             Exceptions.DurableContextBudgetExceededException => "context-budget-exceeded",
-            ApplicationFailureException applicationFailure
-                when applicationFailure.ErrorType?.StartsWith("DurableHistory", StringComparison.Ordinal) == true =>
+            _ when applicationFailure?.ErrorType?.StartsWith("DurableHistory", StringComparison.Ordinal) == true =>
                 applicationFailure.ErrorType ?? "compaction-failed",
+            _ when applicationFailure?.ErrorType == "DurableTransportPayloadTooLarge" =>
+                "transport-payload-too-large",
             Exceptions.DurableConfigurationException => "configuration-invalid",
             _ => "compaction-failed",
         };
@@ -2616,6 +2631,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             Input = input with { HistoryRecovery = _historyRecovery };
         }
         _sessionAdmissionClosed = true;
+    }
+
+    private static ApplicationFailureException? FindApplicationFailure(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is ApplicationFailureException applicationFailure)
+            {
+                return applicationFailure;
+            }
+        }
+
+        return null;
     }
 
     private DurableHistoryRecoveryResult BuildHistoryRecoveryResult(string operationId) =>

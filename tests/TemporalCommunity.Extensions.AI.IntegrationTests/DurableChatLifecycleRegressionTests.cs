@@ -469,6 +469,48 @@ public class DurableChatLifecycleRegressionTests
     }
 
     [Fact]
+    public async Task HistorySummarizerPayloadGuard_RejectsOversizedActivityResult()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer one")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer two")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, new string('s', 6000))),
+        ]);
+        var taskQueue = $"history-summary-result-guard-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            maxEntryCount: 4,
+            maximumTransportPayloadSizeBytes: 4096,
+            historyCompactionStrategy: DurableHistoryCompactionStrategy.SummarizeOldestTurns);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        const string conversationId = "history-summary-result-guard";
+        var workflow = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+            session.GetWorkflowId(conversationId));
+
+        try
+        {
+            await session.SendAsync(conversationId, "first").WaitAsync(Deadline);
+            await session.SendAsync(conversationId, "second").WaitAsync(Deadline);
+
+            var status = await WaitForHistoryBlockedAsync(workflow);
+
+            Assert.Equal("DurableHistorySummaryResultTooLarge", status.HistoryBlockReason);
+            Assert.Equal(4, status.RetainedHistoryEntryCount);
+            Assert.Equal(3, model.CallCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task HistoryQuery_RejectsOversizedQueryResult()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();

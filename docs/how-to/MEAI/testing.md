@@ -91,7 +91,10 @@ calls/results as serialized data, and rejects protected turns, unsupported conte
 turn that cannot fit before invoking the provider. `DurableAIDataConverterTests` round-trips the
 summary activity's tool-bearing input and result through the configured converter. The summarizer
 returns text plus model/usage metadata; integration coverage verifies that configured summary
-compaction commits a bounded marker and projects it into later model requests.
+compaction commits a bounded marker and projects it into later model requests. Payload-guard tests
+exercise the serialized summarizer input, result, summary marker, and complete Continue-as-New input;
+a local-server test verifies an oversized activity result blocks compaction while preserving the
+last valid retained history.
 
 ## Retained-history recovery verification
 

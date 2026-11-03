@@ -501,7 +501,7 @@ internal sealed class DurableChatActivities(
                 nonRetryable: true);
         }
 
-        return new DurableHistorySummarizationResult
+        var result = new DurableHistorySummarizationResult
         {
             SummarizedTurnCount = selectedTurns.Count,
             Summary = new DurableSessionSummary
@@ -511,6 +511,34 @@ internal sealed class DurableChatActivities(
                 Usage = response.Usage,
             },
         };
+        if (input.EnableTransportPayloadGuard)
+        {
+            if (context is null)
+            {
+                throw new InvalidOperationException(
+                    "The history summarizer result guard requires an activity execution context.");
+            }
+
+            try
+            {
+                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    context.PayloadConverter,
+                    result,
+                    input.MaximumTransportPayloadSizeBytes,
+                    input.PayloadCodecExpansionAllowanceBytes,
+                    "history summarizer activity result");
+            }
+            catch (Exceptions.DurableTransportPayloadTooLargeException exception)
+            {
+                throw new ApplicationFailureException(
+                    "The history summary exceeded the configured transport payload budget.",
+                    exception,
+                    errorType: "DurableHistorySummaryResultTooLarge",
+                    nonRetryable: true);
+            }
+        }
+
+        return result;
     }
 
     private static string RenderHistorySummaryTurn(DurableHistorySummaryTurn turn)

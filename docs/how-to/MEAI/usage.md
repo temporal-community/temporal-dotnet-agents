@@ -386,7 +386,12 @@ workflow history; compaction does not erase prior events.
 
 The strategy is applied only at a safe Continue-as-New boundary when the entry-count trigger fires.
 The library validates the projection, stores a bounded compaction marker in retained history, and
-projects that summary into later model requests. Prior Temporal events are not erased.
+projects that summary into later model requests. When transport payload guards are enabled, they
+cover the summarizer activity input/result, the compacted history including its marker, and the
+complete Continue-as-New input. An oversized payload blocks compaction without replacing retained
+history; inspect the history-recovery status and adjust the payload or codec budget deliberately.
+These per-payload checks cannot prove that the codec's actual encoded bytes, aggregate Temporal
+request envelopes, or service/deployment limits will fit. Prior Temporal events are not erased.
 
 ### Retained-history compaction and recovery
 

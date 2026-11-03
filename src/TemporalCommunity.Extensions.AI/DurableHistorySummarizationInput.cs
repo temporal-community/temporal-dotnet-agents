@@ -37,6 +37,15 @@ public sealed class DurableHistorySummarizationInput
 
     /// <summary>Tokens reserved for the summary response.</summary>
     public int OutputTokenReserve { get; init; } = 1024;
+
+    /// <summary>Whether to preflight the complete activity input and result payloads.</summary>
+    public bool EnableTransportPayloadGuard { get; init; }
+
+    /// <summary>Maximum serialized payload size before the reserved codec expansion allowance.</summary>
+    public int MaximumTransportPayloadSizeBytes { get; init; } = 1024 * 1024;
+
+    /// <summary>Reserved bytes for payload-codec expansion.</summary>
+    public int PayloadCodecExpansionAllowanceBytes { get; init; }
 }
 
 /// <summary>
