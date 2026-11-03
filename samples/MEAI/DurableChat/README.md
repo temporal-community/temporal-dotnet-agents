@@ -21,7 +21,11 @@ Two `AddDurableToolset` registrations provide weather and service-status capabil
 `DefaultToolsetIds` composes them in a stable order as the stock workflow's worker-owned baseline.
 The client sends only its conversation ID, messages, and chat options; it does not construct or
 serialize tool schemas. The workflow resolves the baseline once, before the first model call, and
-Temporal records that versioned manifest for replay and Continue-as-New. The sample intentionally
+Temporal records that versioned declaration-and-policy manifest for replay and Continue-as-New.
+The session input also captures the configured chat-client profile key; managed sessions cannot
+switch profiles between turns. Provider clients, credentials, and executable tool services remain
+in worker DI and are resolved only when their activities execute. The recorded schema and policy
+do not freeze the implementation registered behind a stable worker-side activation key. The sample intentionally
 does not call `UseFunctionInvocation()` and never passes `ChatOptions.Tools`.
 
 ```
@@ -66,8 +70,10 @@ Open `http://localhost:8233` to inspect the one-time resolver, `GetChatStep` mod
 `InvokeFunction` tool activities. Configure per-tool timeouts and retry behavior through the
 toolset member callback; use `NoRetry()` for an unsafe non-idempotent operation.
 
-Changing the worker registration affects new sessions only. A running session continues to use its
-recorded manifest, including after Continue-as-New.
+The selected toolset manifest and profile key are carried through Continue-as-New, so changing
+toolset selection or client profile configuration affects newly created sessions only. Provider
+and tool implementations behind the recorded keys are still resolved at activity time, so
+deployments should preserve their expected behavior.
 
 Worker startup validates the configured default chat-client route, default toolset IDs, and
 cross-toolset function-name collisions. The chat-client check confirms the profile is registered

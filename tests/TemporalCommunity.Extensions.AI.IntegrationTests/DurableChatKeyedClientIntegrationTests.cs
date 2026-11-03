@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using TemporalCommunity.Extensions.AI.Session;
 using Temporalio.Testing;
 using Xunit;
 
@@ -59,17 +60,37 @@ public class DurableChatKeyedClientIntegrationTests
         // LabeledChatClient echoes "label: <message>" so we can assert which client replied.
         Assert.Contains("default", response.Messages[0].Text);
 
-        // --- Per-call override: should route to OtherKey client ---
+        // A caller bypassing the session client still cannot change the route through a raw
+        // workflow update.
+        var workflow = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+            sessionClient.GetWorkflowId(conversationId));
+        var updateException = await Record.ExceptionAsync(
+            () => workflow.ExecuteUpdateAsync<DurableChatWorkflow, DurableSessionResponse>(
+                wf => wf.ChatAsync(new DurableChatInput
+                {
+                    Messages = new List<ChatMessage>
+                    {
+                        new(ChatRole.User, "bypass"),
+                    },
+                    ConversationId = conversationId,
+                    ClientKey = OtherKey,
+                })));
+        Assert.NotNull(updateException);
+        Assert.Contains("fixed to 'default-client'", updateException.ToString());
+        Assert.Equal(1, defaultClient.CallCount);
+
+        // A managed session pins its selected profile. A per-turn change fails before
+        // the workflow update is sent, so the second keyed client is never invoked.
         var otherConversationId = $"keyed-other-{Guid.NewGuid():N}";
         var overrideOptions = new ChatOptions().WithChatClientKey(OtherKey);
 
-        var otherResponse = await sessionClient.SendAsync(
-            otherConversationId,
-            [new ChatMessage(ChatRole.User, "hello")],
-            overrideOptions);
-
-        Assert.NotNull(otherResponse);
-        Assert.Contains("other", otherResponse.Messages[0].Text);
+        var exception = await Assert.ThrowsAsync<TemporalCommunity.Extensions.AI.Exceptions.DurableConfigurationException>(
+            () => sessionClient.SendAsync(
+                otherConversationId,
+                [new ChatMessage(ChatRole.User, "hello")],
+                overrideOptions));
+        Assert.Contains("fixed to 'default-client'", exception.Message);
+        Assert.Equal(0, otherClient.CallCount);
 
         await host.StopAsync();
     }
@@ -80,11 +101,16 @@ public class DurableChatKeyedClientIntegrationTests
     /// </summary>
     private sealed class LabeledChatClient(string label) : IChatClient
     {
+        private int _callCount;
+
+        public int CallCount => Volatile.Read(ref _callCount);
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
+            Interlocked.Increment(ref _callCount);
             var lastMessage = messages
                 .LastOrDefault(m => m.Role == ChatRole.User)?.Text ?? "(empty)";
 

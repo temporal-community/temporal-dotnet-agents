@@ -6,10 +6,11 @@ namespace TemporalCommunity.Extensions.AI;
 /// Creates the canonical, replay-frozen start input for a managed durable chat workflow.
 /// </summary>
 /// <remarks>
-/// Resolve this service outside workflow code. For worker-owned toolsets it creates a thin input;
-/// the workflow resolves declarations and durable policy once on the worker. For the advanced
-/// caller-owned declaration mode it snapshots registered declarations and policy. Custom
-/// workflows should start from this factory rather than reconstructing session configuration.
+/// Resolve this service outside workflow code. It snapshots serializable session policy, including
+/// the selected chat-client profile and caller-owned declarations/options. For worker-owned
+/// toolsets it creates a thin input; the workflow resolves declarations and durable policy once on
+/// the worker. Runtime providers, credentials, and executable tool services are never included.
+/// Custom workflows should start from this factory rather than reconstructing session configuration.
 /// </remarks>
 public interface IDurableChatWorkflowInputFactory
 {
@@ -67,6 +68,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
 
     public DurableChatWorkflowInput Create() => new()
     {
+        DefaultChatClientKey = _options.DefaultChatClientKey,
         TimeToLive = _options.SessionTimeToLive,
         ActivityTimeout = _options.ActivityTimeout,
         HeartbeatTimeout = _options.HeartbeatTimeout,

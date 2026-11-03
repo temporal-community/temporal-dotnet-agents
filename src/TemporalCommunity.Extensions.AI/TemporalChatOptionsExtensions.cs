@@ -26,7 +26,11 @@ public static class TemporalChatOptionsExtensions
     /// <summary>Key for per-request heartbeat timeout override.</summary>
     public const string HeartbeatTimeoutKey = "temporal.heartbeat.timeout";
 
-    /// <summary>Key for per-request keyed DI service key for <see cref="IChatClient"/> resolution.</summary>
+    /// <summary>
+    /// Key for per-request keyed DI service key for <see cref="IChatClient"/> resolution.
+    /// Managed sessions accept only the profile captured at session start; custom workflows may
+    /// use this setting to select a profile per call.
+    /// </summary>
     public const string ChatClientKeySettingKey = "temporal.chatClientKey";
 
     /// <summary>
@@ -92,7 +96,9 @@ public static class TemporalChatOptionsExtensions
 
     /// <summary>
     /// Sets the keyed DI service key used to resolve <see cref="IChatClient"/> for this request.
-    /// Takes precedence over <see cref="DurableExecutionOptions.DefaultChatClientKey"/>.
+    /// For managed sessions, the key must match the profile captured from
+    /// <see cref="DurableExecutionOptions.DefaultChatClientKey"/> at session start. Custom workflows
+    /// using <see cref="DurableChatClient"/> can use the key as a per-call override.
     /// Overriding back to the unkeyed client is not supported; omit this call to use the worker default.
     /// </summary>
     /// <remarks>

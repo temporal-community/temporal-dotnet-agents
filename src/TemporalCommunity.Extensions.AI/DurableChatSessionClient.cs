@@ -117,6 +117,19 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         _logger.LogClientSendingChat(workflowId);
 
         var workflowInput = _workflowInputFactory.Create();
+        var requestedKey = options.GetChatClientKey();
+        if (requestedKey is not null
+            && !string.Equals(
+                requestedKey,
+                workflowInput.DefaultChatClientKey,
+                StringComparison.Ordinal))
+        {
+            throw new DurableConfigurationException(
+                $"Managed session chat-client profile is fixed to " +
+                $"'{workflowInput.DefaultChatClientKey ?? "<unkeyed>"}'. " +
+                $"Configure DefaultChatClientKey before starting the session; " +
+                "per-turn profile changes are not supported.");
+        }
 
         // Start the workflow if it doesn't exist, or reuse the existing one.
         // OriginalCreatedAt is intentionally omitted here — the workflow sets it to
@@ -129,16 +142,13 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
                 // Rpc is disallowed on the start operation — cancellation goes on the update options below.
             });
 
-        // Resolve effective client key: per-call override wins, then worker-level default.
-        var effectiveKey = options.GetChatClientKey() ?? _options.DefaultChatClientKey;
-
         // Send the chat turn via workflow update.
         var input = new DurableChatInput
         {
             Messages = messages as IList<ChatMessage> ?? messages.ToList(),
             Options = Internal.ChatOptionsSanitizer.PrepareForDurableTransport(options),
             ConversationId = conversationId,
-            ClientKey = effectiveKey,
+            ClientKey = workflowInput.DefaultChatClientKey,
             CorrelationId = string.IsNullOrEmpty(correlationId) ? null : correlationId,
         };
 

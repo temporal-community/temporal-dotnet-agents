@@ -11,61 +11,29 @@ using Xunit;
 namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 
 /// <summary>
-/// CRIT-3 regression tests: the instance-field bridge between <c>SendAsync</c> and
-/// <c>ExecuteTurnAsync</c> is unsafe under concurrent queued turns.
-///
-/// <para>
-/// Root cause: <c>DurableChatWorkflow._lastClientKey</c> and <c>_lastConversationId</c>
-/// are instance fields that <c>SendAsync</c> writes before the base session loop
-/// serializes turn execution. When a prior turn holds <c>_isProcessing == true</c>,
-/// subsequent concurrent <c>SendAsync</c> calls run, overwrite those fields, then
-/// suspend at <c>WaitConditionAsync</c>. The suspended turn resumes with corrupted
-/// per-turn metadata — most visibly, Turn N dispatches its LLM activity with Turn M's
-/// <see cref="IChatClient"/> key.
-/// </para>
-///
-/// <para>
-/// Fix (<see cref="DurableChatWorkflow"/>): remove the instance-field bridge and replace
-/// with a per-turn dictionary keyed by <c>DurableSessionRequest</c> object reference
-/// (reference equality).
-/// </para>
-///
-/// <para>
-/// Two test shapes — one per execution mode:
-/// <list type="bullet">
-///   <item><b>Pattern 3</b>: 2 turns. Turn 1 yields between tool-loop iterations
-///     (tool call blocks); Turn 2 queues during that yield. Assert no cross-routing.</item>
-///   <item><b>Pattern 1</b>: 3 turns. Turn 0 blocks at the LLM step itself
-///     (gate in the chat client); Turns 1 and 2 both queue and write their
-///     metadata before Turn 0 releases. Assert Turns 1 and 2 each get their
-///     own client, not each other's.</item>
-/// </list>
-/// </para>
+/// Managed-session profile policy and concurrent queued-turn integration tests.
+/// A session captures one worker-side profile at creation; every admitted turn uses that profile,
+/// including turns queued while another turn is active.
 /// </summary>
-public class DurablePerTurnMetadataRaceIntegrationTests
+public class DurableSessionProfileIntegrationTests
 {
-    // ── CRIT-3 Pattern 3: 2-turn shape ─────────────────────────────────────
+    // ── Pattern 3: queued turn while a tool call is in flight ───────────────
 
     /// <summary>
-    /// Pattern 3 test: two turns sent to the same session, each with a different
-    /// <c>WithChatClientKey</c>. Turn 1 has a tool call that blocks long enough for
-    /// Turn 2 to enter <c>SendAsync</c> and overwrite the instance fields.
-    ///
-    /// After the fix, Turn 1's SECOND LLM step (post tool result) must still use
-    /// <c>key-1-client</c>, not <c>key-2-client</c>.
+    /// Two turns use the same captured profile. Turn 1 blocks during a tool call while Turn 2
+    /// queues; both model steps for Turn 1 and the later Turn 2 call use the pinned client.
     /// </summary>
     [Fact]
-    public async Task Pattern3_ConcurrentTurns_ClientKeyNotCrossRouted()
+    public async Task Pattern3_ConcurrentTurns_UsePinnedProfile()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
-        // Two independently recording clients, one per key.
+        // The second client is registered but is not an allowed route for this session.
         var client1 = new RecordingChatClient("key-1");
         var client2 = new RecordingChatClient("key-2");
 
-        // The tool gate: blocks Turn 1 between its first and second GetChatStep
-        // activities, giving Turn 2 enough time to write _lastClientKey.
+        // The tool gate keeps Turn 1 active while Turn 2 is admitted and queued.
         var toolGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -79,13 +47,11 @@ public class DurablePerTurnMetadataRaceIntegrationTests
             "blocking_race_tool",
             "Blocks until released.");
 
-        // Turn 1 script: first LLM step returns a tool call; second returns the final answer.
-        // Turn 2 script: single LLM step returning a direct answer (no tool calls).
-        // Both clients share a scripted response queue — key-1 needs 2 responses, key-2 needs 1.
+        // The pinned client handles both model steps for Turn 1 and the queued Turn 2.
         client1.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant,
             [new FunctionCallContent("call-race", "blocking_race_tool")])));
         client1.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-1-final-answer")));
-        client2.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-2-answer")));
+        client1.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-2-answer")));
 
         var taskQueue = $"crit3-p3-{Guid.NewGuid():N}";
         using var host = BuildHostWithKeyedClients(
@@ -110,18 +76,15 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         // Wait until the tool activity has started (Turn 1 is now inside the tool fan-out).
         await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // Send Turn 2 while Turn 1 is blocked. Turn 2's SendAsync will write _lastClientKey
-        // to "key-2" and then suspend at WaitConditionAsync (because _isProcessing == true).
-        var turn2Options = new ChatOptions().WithChatClientKey("key-2");
+        // Queue Turn 2 while Turn 1 is blocked, using the session's pinned route.
+        var turn2Options = new ChatOptions().WithChatClientKey("key-1");
         var turn2Task = Task.Run(async () =>
             await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-2")],
                 turn2Options));
 
-        // Poll until Turn 2's update has been accepted by the workflow (it has reached
-        // WaitConditionAsync and written its metadata). A second WorkflowExecutionUpdateAccepted
-        // event in the history confirms the workflow has processed Turn 2's SendAsync call.
+        // Wait until Turn 2's update has been accepted while Turn 1 remains active.
         var workflowHandle = env.Client.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
         await PollUntilUpdateCountAsync(workflowHandle, minAcceptedCount: 2, TimeSpan.FromSeconds(30));
 
@@ -135,52 +98,37 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         Assert.NotNull(response1);
         Assert.NotNull(response2);
 
-        // key-1-client must have been called exactly twice: once before the tool call
-        // and once after the tool result was fed back (both GetChatStep activities for Turn 1).
-        Assert.Equal(2, client1.CallCount);
-
-        // key-2-client must have been called exactly once: Turn 2's single LLM step.
-        Assert.Equal(1, client2.CallCount);
+        Assert.Equal(3, client1.CallCount);
+        Assert.Equal(0, client2.CallCount);
 
         await host.StopAsync();
     }
 
-    // ── CRIT-3 Pattern 1: 3-turn shape ─────────────────────────────────────
+    // ── Pattern 1: multiple turns queued behind a model call ────────────────
 
     /// <summary>
-    /// Pattern 1 test: three turns queued against the same session. Turn 0 blocks
-    /// at the LLM call (keeping <c>_isProcessing == true</c>); Turns 1 and 2 both
-    /// enter <c>SendAsync</c>, each writing their <c>_lastClientKey</c>, and suspend.
-    ///
-    /// The write order is Turn 1 (writes "key-1") then Turn 2 (writes "key-2").
-    /// When Turn 0 finishes and Turn 1 resumes, the unfixed code reads <c>_lastClientKey = "key-2"</c>
-    /// (the last writer's value). After the fix, Turn 1 reads its own metadata.
-    ///
-    /// Pattern 1 requires 3 concurrent turns to create the overwrite window:
-    /// Turn 0 must be in-flight so both Turn 1 and Turn 2 can queue and write before
-    /// Turn 1 executes. A 2-turn scenario cannot create this window because Turn 1
-    /// would wait at <c>WaitConditionAsync</c> before Turn 2 has written anything.
+    /// Three turns use one profile. Turn 0 blocks at the model call while Turns 1 and 2 queue;
+    /// all are then dispatched to the session's pinned client.
     /// </summary>
     [Fact]
-    public async Task Pattern1_ConcurrentTurns_ClientKeyNotCrossRouted()
+    public async Task Pattern1_ConcurrentTurns_UsePinnedProfile()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
-        // Three independently recording clients.
+        // Other registered profiles are not used by this session.
         var client0 = new RecordingChatClient("key-0");
         var client1 = new RecordingChatClient("key-1");
         var client2 = new RecordingChatClient("key-2");
 
-        // Gate: Turn 0 blocks inside its LLM call until the test releases it,
-        // keeping _isProcessing == true while Turns 1 and 2 enter SendAsync.
+        // Gate: Turn 0 blocks inside its LLM call until the test releases it.
         var client0Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var client0Started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         client0.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-0-answer")));
         client0.BlockOnNextCall(client0Gate, client0Started);
-        client1.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-1-answer")));
-        client2.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-2-answer")));
+        client0.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-1-answer")));
+        client0.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "turn-2-answer")));
 
         var taskQueue = $"crit3-p1-{Guid.NewGuid():N}";
         using var host = BuildHostWithKeyedClients(
@@ -206,26 +154,22 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         // Wait until Turn 0's activity has started (LLM call in progress).
         await client0Started.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        // Queue Turn 1 and Turn 2 while Turn 0 is blocking. Both SendAsync calls
-        // will run on the Temporal task scheduler (FIFO), write their keys in order
-        // (key-1 then key-2), then suspend at WaitConditionAsync.
-        var turn1Options = new ChatOptions().WithChatClientKey("key-1");
+        // Queue Turn 1 and Turn 2 while Turn 0 is blocking, using its pinned profile.
+        var turn1Options = new ChatOptions().WithChatClientKey("key-0");
         var turn1Task = Task.Run(async () =>
             await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-1")],
                 turn1Options));
 
-        var turn2Options = new ChatOptions().WithChatClientKey("key-2");
+        var turn2Options = new ChatOptions().WithChatClientKey("key-0");
         var turn2Task = Task.Run(async () =>
             await sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-2")],
                 turn2Options));
 
-        // Poll until both Turn 1 and Turn 2 have been accepted by the workflow (both have
-        // reached WaitConditionAsync and written their metadata). Three accepted updates in the
-        // history (Turn 0 + Turn 1 + Turn 2) confirms both queued turns are suspended and waiting.
+        // Wait until Turn 1 and Turn 2 have both been accepted by the workflow.
         var workflowHandleP1 = env.Client.GetWorkflowHandle(sessionClient.GetWorkflowId(conversationId));
         await PollUntilUpdateCountAsync(workflowHandleP1, minAcceptedCount: 3, TimeSpan.FromSeconds(30));
 
@@ -240,10 +184,9 @@ public class DurablePerTurnMetadataRaceIntegrationTests
         Assert.NotNull(response1);
         Assert.NotNull(response2);
 
-        // Each keyed client must have been called exactly once, for its own turn.
-        Assert.Equal(1, client0.CallCount);
-        Assert.Equal(1, client1.CallCount);
-        Assert.Equal(1, client2.CallCount);
+        Assert.Equal(3, client0.CallCount);
+        Assert.Equal(0, client1.CallCount);
+        Assert.Equal(0, client2.CallCount);
 
         await host.StopAsync();
     }
@@ -251,15 +194,15 @@ public class DurablePerTurnMetadataRaceIntegrationTests
     // ── Test-host plumbing ──────────────────────────────────────────────────
 
     /// <summary>
-    /// Builds a Pattern 1 or Pattern 3 worker host with multiple keyed
-    /// <see cref="IChatClient"/> registrations. Pattern 1 vs Pattern 3 is determined
+    /// Builds a worker host with multiple keyed <see cref="IChatClient"/> registrations.
+    /// The first registration is the session's pinned profile. Pattern 1 vs Pattern 3 is determined
     /// by whether <paramref name="registerTools"/> registers any durable tools
     /// (Pattern 3 activates when the tool registry is non-empty).
     ///
     /// <para>
     /// Unlike the main <see cref="DurableToolDispatchIntegrationTests.BuildHost"/>,
     /// this helper registers named keyed clients — the unkeyed slot is deliberately
-    /// left empty so all resolution must go through the per-call key.
+    /// left empty so all resolution must go through the profile captured in workflow input.
     /// </para>
     /// </summary>
     private static IHost BuildHostWithKeyedClients(
@@ -288,6 +231,7 @@ public class DurablePerTurnMetadataRaceIntegrationTests
                 opts.ActivityTimeout = TimeSpan.FromSeconds(60);
                 opts.HeartbeatTimeout = TimeSpan.FromSeconds(15);
                 opts.SessionTimeToLive = TimeSpan.FromMinutes(5);
+                opts.DefaultChatClientKey = keyedClients[0].Key;
             });
 
         registerTools(workerBuilder);

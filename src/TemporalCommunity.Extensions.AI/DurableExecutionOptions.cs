@@ -85,12 +85,14 @@ public sealed class DurableExecutionOptions
     /// <summary>
     /// Default keyed DI service key used to resolve <see cref="IChatClient"/>.
     /// When null (default), the unkeyed registration is used.
-    /// Per-call overrides via <see cref="TemporalChatOptionsExtensions.WithChatClientKey"/> take precedence.
+    /// Managed sessions freeze this profile when they start; per-turn profile changes are rejected.
+    /// Custom workflows using <see cref="DurableChatClient"/> may still select a profile per call.
     /// </summary>
     /// <remarks>
     /// When the stock workflow is registered, worker startup checks that this default profile
-    /// (or the unkeyed client) is registered without constructing the provider. Per-call override
-    /// keys are resolved when the model activity runs.
+    /// (or the unkeyed client) is registered without constructing the provider. The key is
+    /// serialized in the session workflow input, while the actual provider is resolved by the
+    /// activity from worker DI.
     /// </remarks>
     public string? DefaultChatClientKey { get; set; }
 

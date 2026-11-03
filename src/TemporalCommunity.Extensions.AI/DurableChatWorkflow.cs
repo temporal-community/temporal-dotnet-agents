@@ -80,6 +80,10 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
             throw new InvalidOperationException("Session is continuing as new. Retry the turn.");
         if (input.Messages is null or { Count: 0 })
             throw new ArgumentException("At least one message is required.");
+        if (_toolAuthorityReady)
+        {
+            ValidateSessionProfile(input.ClientKey);
+        }
     }
 
     /// <summary>
@@ -90,6 +94,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     public async Task<DurableSessionResponse> ChatAsync(DurableChatInput input)
     {
         await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+        ValidateSessionProfile(input.ClientKey);
 
         // Build the request entry for this turn — the factory auto-generates the
         // correlation ID via Workflow.NewGuid() (deterministic, replay-safe) when the
@@ -174,4 +179,18 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
         DurableChatWorkflowInput input) =>
         Workflow.CreateContinueAsNewException(
             (DurableChatWorkflow wf) => wf.RunAsync(input));
+
+    private void ValidateSessionProfile(string? requestedKey)
+    {
+        if (!string.Equals(
+            requestedKey,
+            RequiredInput.DefaultChatClientKey,
+            StringComparison.Ordinal))
+        {
+            throw new Exceptions.DurableConfigurationException(
+                $"Managed session chat-client profile is fixed to " +
+                $"'{RequiredInput.DefaultChatClientKey ?? "<unkeyed>"}'. " +
+                "Per-turn profile changes are not supported.");
+        }
+    }
 }

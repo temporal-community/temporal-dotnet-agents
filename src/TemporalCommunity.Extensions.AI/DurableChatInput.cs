@@ -39,6 +39,8 @@ public sealed class DurableChatInput
     /// <summary>
     /// Optional DI service key used to resolve <see cref="IChatClient"/> on the worker.
     /// When null, the unkeyed <see cref="IChatClient"/> registration is used.
+    /// Managed chat sessions set this from the profile frozen in
+    /// <see cref="DurableChatWorkflowInput"/> and reject a different per-turn route.
     /// </summary>
     public string? ClientKey { get; init; }
 

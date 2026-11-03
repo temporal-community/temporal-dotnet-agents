@@ -1,7 +1,7 @@
 # Using TemporalCommunity.Extensions.AI
 
-`TemporalCommunity.Extensions.AI` makes a MEAI `IChatClient` (and `IEmbeddingGenerator`) durable
-with Temporal. It offers a few genuinely different ways to do this, and this doc is the deeper
+`TemporalCommunity.Extensions.AI` makes a MEAI `IChatClient` durable with Temporal. It offers a
+few genuinely different ways to do this, and this doc is the deeper
 how-to reference for all of them:
 
 - **Built-in managed session** — a stock Temporal workflow owns an entire multi-turn conversation
@@ -154,9 +154,13 @@ missing client is reported when `DurableChatSessionClient` is resolved.
 `AddDurableAIClient` validates the client process's task queue and validates its converter when
 `DurableChatSessionClient` is resolved; it cannot inspect a remote worker's provider registrations
 or toolsets. Worker startup validates the configured default chat-client profile and worker-owned
-default toolsets without constructing the provider client. A per-request `WithChatClientKey(...)`
-override is supplied later by the caller, so its keyed service is resolved when the model activity
-runs.
+default toolsets without constructing the provider client. A managed session pins the profile
+configured through `DefaultChatClientKey` when it starts; a per-turn `WithChatClientKey(...)`
+override must match that profile. The workflow input records only the profile key and serializable
+declarations/policies, never provider instances, credentials, or executable tool services.
+The recorded tool declarations and policies do not freeze the implementation registered behind a
+stable worker-side activation key; deployments must preserve the behavior expected by recorded
+declarations.
 
 For a co-hosted deployment, `AddDurableAI()` remains the concise combined registration shown in
 [Built-in managed session](#built-in-managed-session).
@@ -189,12 +193,16 @@ client and worker.
 ### Keyed client profiles
 
 For a keyed client, register it with `AddKeyedChatClient` and set
-`DurableExecutionOptions.DefaultChatClientKey` on both the session client and worker. The session
-client includes that profile key in new turn requests; the worker checks the same key resolves to a
-registered keyed client.
+`DurableExecutionOptions.DefaultChatClientKey` on both the session client and worker. The key is
+captured in the workflow input at session creation and carried through Continue-as-New, so a
+session stays on one profile. A `WithChatClientKey(...)` option on a managed session is accepted
+only when it matches the captured profile; choose a different profile by starting a different
+session with a new conversation ID and the corresponding client configuration. The worker resolves
+the keyed service from its DI container inside the model activity, not from workflow history.
 
 The worker checks that the configured default profile is registered at startup without invoking
-the provider factory:
+the provider factory. The profile key is frozen, but the client implementation and credentials
+behind that key remain worker-owned runtime services and are resolved for each model activity:
 
 ```csharp
 clientBuilder.Services.AddTemporalClient("localhost:7233", "default");

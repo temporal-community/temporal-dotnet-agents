@@ -164,7 +164,8 @@ Serializable Temporal tag values cross the workflow/activity boundary and are ap
 the current model-activity span. Immediately before the provider call, the library removes all
 Temporal-private keys while retaining ordinary MEAI options and user-owned `AdditionalProperties`.
 Use ordinary MEAI `IChatClient` middleware for retry, routing, logging, telemetry, caching, and
-shadowing; `WithChatClientKey(...)` selects among complete keyed client pipelines per call.
+shadowing. Managed sessions pin the `DefaultChatClientKey` selected at session start; custom
+workflows using `DurableChatClient` can use `WithChatClientKey(...)` to select a pipeline per call.
 
 Object-typed user properties preserve their JSON content across the default durable converter, but
 may arrive at the activity as `JsonElement`; their original CLR runtime type is not guaranteed.

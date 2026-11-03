@@ -17,6 +17,17 @@ public record class DurableChatWorkflowInput
     internal Internal.DurableToolsetManifest? ToolsetManifest { get; init; }
 
     /// <summary>
+    /// The chat-client profile selected when the session was created. Managed sessions retain
+    /// this route for their lifetime, including across continue-as-new transitions.
+    /// </summary>
+    /// <remarks>
+    /// This is a DI service key, not a provider instance or credential. A null value selects the
+    /// unkeyed worker registration. Per-turn requests must use this same route.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DefaultChatClientKey { get; init; }
+
+    /// <summary>
     /// The session time-to-live. The workflow completes when idle for this duration.
     /// </summary>
     [JsonIgnore]
