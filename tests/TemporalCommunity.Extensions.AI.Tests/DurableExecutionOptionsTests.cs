@@ -37,6 +37,15 @@ public class DurableExecutionOptionsTests
     }
 
     [Fact]
+    public void Validate_ThrowsWhenTaskQueueIsWhitespace()
+    {
+        var options = new DurableExecutionOptions { TaskQueue = "   " };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => options.Validate());
+        Assert.Contains("TaskQueue", ex.Message);
+    }
+
+    [Fact]
     public void Validate_SucceedsWhenTaskQueueIsSet()
     {
         var options = new DurableExecutionOptions { TaskQueue = "my-queue" };
@@ -78,6 +87,22 @@ public class DurableExecutionOptionsTests
     {
         var options = new DurableExecutionOptions { DefaultChatClientKey = "gpt-4o" };
         Assert.Equal("gpt-4o", options.DefaultChatClientKey);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Validate_RejectsEmptyDefaultChatClientProfile(string key)
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "queue",
+            DefaultChatClientKey = key,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains(nameof(DurableExecutionOptions.DefaultChatClientKey), exception.Message);
     }
 
     [Fact]

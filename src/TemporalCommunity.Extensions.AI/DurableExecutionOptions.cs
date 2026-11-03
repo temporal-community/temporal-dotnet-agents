@@ -87,6 +87,11 @@ public sealed class DurableExecutionOptions
     /// When null (default), the unkeyed registration is used.
     /// Per-call overrides via <see cref="TemporalChatOptionsExtensions.WithChatClientKey"/> take precedence.
     /// </summary>
+    /// <remarks>
+    /// When the stock workflow is registered, worker startup checks that this default profile
+    /// (or the unkeyed client) is registered without constructing the provider. Per-call override
+    /// keys are resolved when the model activity runs.
+    /// </remarks>
     public string? DefaultChatClientKey { get; set; }
 
     /// <summary>
@@ -213,7 +218,7 @@ public sealed class DurableExecutionOptions
 
     internal void Validate()
     {
-        if (string.IsNullOrEmpty(TaskQueue))
+        if (string.IsNullOrWhiteSpace(TaskQueue))
         {
             throw new InvalidOperationException(
                 $"{nameof(TaskQueue)} must be set in {nameof(DurableExecutionOptions)}.");
@@ -255,6 +260,12 @@ public sealed class DurableExecutionOptions
         {
             throw new InvalidOperationException(
                 $"{nameof(MaximumConsecutiveErrorsPerRequest)} cannot be negative in {nameof(DurableExecutionOptions)}.");
+        }
+
+        if (DefaultChatClientKey is not null && string.IsNullOrWhiteSpace(DefaultChatClientKey))
+        {
+            throw new InvalidOperationException(
+                $"{nameof(DefaultChatClientKey)} must be null or a non-empty profile key.");
         }
 
         if (DefaultToolsetIds is not null)

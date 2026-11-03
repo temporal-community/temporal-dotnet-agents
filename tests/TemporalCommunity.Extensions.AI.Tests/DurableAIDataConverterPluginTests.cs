@@ -1,6 +1,8 @@
 using FakeItEasy;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Client;
 using Temporalio.Converters;
 using Temporalio.Extensions.Hosting;
@@ -80,7 +82,9 @@ public class DurableAIDataConverterPluginTests
     public void DurableAIDataConverterPlugin_CustomConverter_IsPreserved()
     {
         var plugin = new DurableAIDataConverterPlugin();
-        var customConverter = new DataConverter(new DefaultPayloadConverter(), new DefaultFailureConverter());
+        var customConverter = new DataConverter(
+            DurableAIDataConverter.Instance.PayloadConverter,
+            new DefaultFailureConverter());
         var options = new TemporalClientOptions { DataConverter = customConverter };
 
         plugin.ConfigureClient(options);
@@ -117,7 +121,9 @@ public class DurableAIDataConverterPluginTests
         // If the user has already set a non-default converter, ConfigureClient must
         // never override it — neither on the first call nor on a repeated call.
         var plugin = new DurableAIDataConverterPlugin();
-        var userConverter = new DataConverter(new DefaultPayloadConverter(), new DefaultFailureConverter());
+        var userConverter = new DataConverter(
+            DurableAIDataConverter.Instance.PayloadConverter,
+            new DefaultFailureConverter());
         var options = new TemporalClientOptions { DataConverter = userConverter };
 
         plugin.ConfigureClient(options);
@@ -125,6 +131,23 @@ public class DurableAIDataConverterPluginTests
 
         plugin.ConfigureClient(options);
         Assert.Same(userConverter, options.DataConverter);
+    }
+
+    [Fact]
+    public void DurableAIDataConverterPlugin_IncompatibleCustomConverter_FailsValidation()
+    {
+        var plugin = new DurableAIDataConverterPlugin();
+        var options = new TemporalClientOptions
+        {
+            DataConverter = new DataConverter(
+                new RejectingPayloadConverter(),
+                new DefaultFailureConverter()),
+        };
+
+        var exception = Assert.Throws<DurableConfigurationException>(
+            () => plugin.ConfigureClient(options));
+
+        Assert.Contains("cannot preserve durable AI workflow data", exception.Message);
     }
 
     // ── AddDurableAI configurator registration ────────────────────────────
@@ -215,6 +238,7 @@ public class DurableAIDataConverterPluginTests
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton(CreateDurableClient());
+        services.AddSingleton<IChatClient>(A.Fake<IChatClient>());
         services.AddHostedTemporalWorker("localhost:7233", "default", "my-queue")
             .AddDurableAI();
 

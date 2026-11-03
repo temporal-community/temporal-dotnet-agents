@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TemporalCommunity.Extensions.AI.Internal;
 using Temporalio.Client;
 using Temporalio.Converters;
 using Temporalio.Extensions.Hosting;
@@ -35,6 +36,8 @@ internal sealed class DurableAIDataConverterPlugin : ITemporalClientPlugin
         {
             _logger?.LogConverterSkippedForClient(options.DataConverter.GetType().Name);
         }
+
+        DurableAIDataConverterValidator.ValidateConverter(options.DataConverter);
     }
 
     public Task<TemporalConnection> ConnectAsync(
@@ -58,6 +61,8 @@ internal sealed class DurableAIDataConverterPlugin : ITemporalClientPlugin
         {
             _logger?.LogConverterSkippedForConnectOptions(options.DataConverter.GetType().Name);
         }
+
+        DurableAIDataConverterValidator.ValidateConverter(options.DataConverter);
     }
 }
 

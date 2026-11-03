@@ -95,7 +95,8 @@ session send/history, direct durable tools, and timer/controlled-tool harnesses.
 snippets compile-check an application-owned Temporal activity using MEAI.
 
 Phase 1.1 adds a compiled split-hosting example so the client-only and worker-only registration
-overloads stay aligned with the MEAI usage guide.
+overloads stay aligned with the MEAI usage guide. Phase 1.2 adds a compiled keyed-profile example
+for worker-side registration validation.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 

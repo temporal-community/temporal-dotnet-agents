@@ -151,6 +151,13 @@ a DI `ITemporalClient`, and auto-configures the durable converter when it is cre
 same task queue. The client-only registration can be added before or after `AddTemporalClient`; a
 missing client is reported when `DurableChatSessionClient` is resolved.
 
+`AddDurableAIClient` validates the client process's task queue and validates its converter when
+`DurableChatSessionClient` is resolved; it cannot inspect a remote worker's provider registrations
+or toolsets. Worker startup validates the configured default chat-client profile and worker-owned
+default toolsets without constructing the provider client. A per-request `WithChatClientKey(...)`
+override is supplied later by the caller, so its keyed service is resolved when the model activity
+runs.
+
 For a co-hosted deployment, `AddDurableAI()` remains the concise combined registration shown in
 [Built-in managed session](#built-in-managed-session).
 
@@ -179,8 +186,27 @@ chosen independently by another process. A custom converter is preserved by the 
 but it must remain compatible with the MEAI and application payloads used by every participating
 client and worker.
 
+### Keyed client profiles
+
 For a keyed client, register it with `AddKeyedChatClient` and set
-`DurableExecutionOptions.DefaultChatClientKey`.
+`DurableExecutionOptions.DefaultChatClientKey` on both the session client and worker. The session
+client includes that profile key in new turn requests; the worker checks the same key resolves to a
+registered keyed client.
+
+The worker checks that the configured default profile is registered at startup without invoking
+the provider factory:
+
+```csharp
+clientBuilder.Services.AddTemporalClient("localhost:7233", "default");
+clientBuilder.Services.AddDurableAIClient(
+    "durable-chat",
+    options => options.DefaultChatClientKey = "primary");
+
+workerBuilder.Services.AddKeyedSingleton<IChatClient>("primary", innerChatClient);
+workerBuilder.Services
+    .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+    .AddDurableAIWorker(options => options.DefaultChatClientKey = "primary");
+```
 
 ### Send a turn and read history
 

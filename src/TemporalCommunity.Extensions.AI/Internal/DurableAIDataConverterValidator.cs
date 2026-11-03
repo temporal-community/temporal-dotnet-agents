@@ -9,8 +9,7 @@ using Temporalio.Extensions.Hosting;
 namespace TemporalCommunity.Extensions.AI.Internal;
 
 /// <summary>
-/// Verifies that the DI Temporal client preserves the durable AI wire contracts before the
-/// worker begins dispatching work.
+/// Verifies that a Temporal data converter preserves the durable AI wire contracts.
 /// </summary>
 /// <remarks>
 /// The check is behavioral instead of requiring <see cref="DurableAIDataConverter.Instance"/>,
@@ -38,7 +37,12 @@ internal sealed class DurableAIDataConverterValidator : IPostConfigureOptions<Te
             return;
         }
 
-        var converter = client.Options.DataConverter;
+        ValidateConverter(client.Options.DataConverter);
+    }
+
+    internal static void ValidateConverter(Temporalio.Converters.DataConverter converter)
+    {
+        ArgumentNullException.ThrowIfNull(converter);
 
         try
         {
@@ -95,9 +99,8 @@ internal sealed class DurableAIDataConverterValidator : IPostConfigureOptions<Te
 
     private static DurableConfigurationException CreateException(Exception? innerException = null) =>
         new(
-            "The ITemporalClient registered in DI uses a DataConverter that cannot preserve durable AI " +
-            "workflow data. Configure the client with DurableAIDataConverter.Instance, or compose its " +
-            "PayloadConverter with DurableAIDataConverter.Instance.PayloadConverter before calling " +
-            "AddDurableAI().",
+            "The Temporal DataConverter cannot preserve durable AI workflow data. Configure the client " +
+            "with DurableAIDataConverter.Instance, or compose its PayloadConverter with " +
+            "DurableAIDataConverter.Instance.PayloadConverter before using durable AI services.",
             innerException);
 }

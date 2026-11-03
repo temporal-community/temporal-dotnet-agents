@@ -69,9 +69,11 @@ toolset member callback; use `NoRetry()` for an unsafe non-idempotent operation.
 Changing the worker registration affects new sessions only. A running session continues to use its
 recorded manifest, including after Continue-as-New.
 
-The worker validates the configured default toolset IDs and cross-toolset function-name collisions
-during startup. If the model nevertheless returns an unknown or non-enabled function name, the
-workflow supplies a safe blocked result and schedules no interceptor, approval, or tool activity.
+Worker startup validates the configured default chat-client route, default toolset IDs, and
+cross-toolset function-name collisions. The chat-client check confirms the profile is registered
+without constructing the provider. If the model nevertheless returns an unknown or non-enabled
+function name, the workflow supplies a safe blocked result and schedules no interceptor, approval,
+or tool activity.
 
 The first multi-turn request also supplies two `WithChatClientTag(...)` values. The durable model
 activity applies them directly to its current span; the OpenAI provider receives the ordinary chat

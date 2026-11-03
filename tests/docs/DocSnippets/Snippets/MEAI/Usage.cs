@@ -85,6 +85,24 @@ internal static class Usage
         // END SNIPPET docs/how-to/MEAI/usage.md#split-client-and-worker-hosting
     }
 
+    internal static void WorkerSideValidation(
+        HostApplicationBuilder clientBuilder,
+        HostApplicationBuilder workerBuilder,
+        IChatClient innerChatClient)
+    {
+        // BEGIN SNIPPET docs/how-to/MEAI/usage.md#keyed-client-profiles
+        clientBuilder.Services.AddTemporalClient("localhost:7233", "default");
+        clientBuilder.Services.AddDurableAIClient(
+            "durable-chat",
+            options => options.DefaultChatClientKey = "primary");
+
+        workerBuilder.Services.AddKeyedSingleton<IChatClient>("primary", innerChatClient);
+        workerBuilder.Services
+            .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+            .AddDurableAIWorker(options => options.DefaultChatClientKey = "primary");
+        // END SNIPPET docs/how-to/MEAI/usage.md#keyed-client-profiles
+    }
+
     internal static async Task SendAsync(IServiceProvider services)
     {
         // BEGIN SNIPPET docs/how-to/MEAI/usage.md#send-a-turn-and-read-history

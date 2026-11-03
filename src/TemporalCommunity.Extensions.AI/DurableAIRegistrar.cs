@@ -89,6 +89,7 @@ internal static class DurableAIRegistrar
                 ?? throw new InvalidOperationException(
                     "No ITemporalClient registered in DI. Call services.AddTemporalClient(address, namespace) " +
                     "before resolving DurableChatSessionClient.");
+            Internal.DurableAIDataConverterValidator.ValidateConverter(client.Options.DataConverter);
             return new DurableChatSessionClient(
                 client,
                 options,
@@ -145,6 +146,10 @@ internal static class DurableAIRegistrar
         services.TryAddEnumerable(ServiceDescriptor.Singleton<
             IPostConfigureOptions<TemporalWorkerServiceOptions>,
             Internal.DurableToolsetConfigurationValidator>());
+
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<
+            IPostConfigureOptions<TemporalWorkerServiceOptions>,
+            Internal.DurableAIRequiredServicesValidator>());
     }
 
     private static WorkerRegistrationMarker? FindWorkerRegistration(

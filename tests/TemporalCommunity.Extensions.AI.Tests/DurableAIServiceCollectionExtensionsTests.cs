@@ -3,6 +3,7 @@ using FakeItEasy;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Client;
 using Temporalio.Converters;
 using Temporalio.Extensions.Hosting;
@@ -75,6 +76,10 @@ public class DurableAIServiceCollectionExtensionsTests
         var services = new ServiceCollection();
         services.AddLogging();
         var temporalClient = A.Fake<ITemporalClient>();
+        A.CallTo(() => temporalClient.Options).Returns(new TemporalClientOptions
+        {
+            DataConverter = DurableAIDataConverter.Instance,
+        });
 
         if (addTemporalClientFirst)
         {
@@ -114,6 +119,27 @@ public class DurableAIServiceCollectionExtensionsTests
         Assert.Contains("AddTemporalClient(address, namespace)", exception.Message);
     }
 
+    [Fact]
+    public void AddDurableAIClient_RejectsIncompatibleManualConverterBeforeSessionUse()
+    {
+        var temporalClient = A.Fake<ITemporalClient>();
+        A.CallTo(() => temporalClient.Options).Returns(new TemporalClientOptions
+        {
+            DataConverter = new DataConverter(
+                new RejectingPayloadConverter(),
+                new DefaultFailureConverter()),
+        });
+        var services = new ServiceCollection();
+        services.AddSingleton(temporalClient);
+        services.AddDurableAIClient("implementation-queue");
+
+        using var provider = services.BuildServiceProvider();
+        var exception = Assert.Throws<DurableConfigurationException>(
+            () => provider.GetRequiredService<DurableChatSessionClient>());
+
+        Assert.Contains("cannot preserve durable AI workflow data", exception.Message);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -145,7 +171,7 @@ public class DurableAIServiceCollectionExtensionsTests
     public void AddDurableAIClient_PreservesCustomConverter()
     {
         var customConverter = new DataConverter(
-            new DefaultPayloadConverter(),
+            DurableAIDataConverter.Instance.PayloadConverter,
             new DefaultFailureConverter());
         var services = new ServiceCollection();
         services.AddLogging();
@@ -588,7 +614,7 @@ public class DurableAIServiceCollectionExtensionsTests
     public void ClientOnlyRegistration_PreservesCustomConverter()
     {
         var customConverter = new DataConverter(
-            new DefaultPayloadConverter(),
+            DurableAIDataConverter.Instance.PayloadConverter,
             new DefaultFailureConverter());
         var services = new ServiceCollection();
         services.AddLogging();
