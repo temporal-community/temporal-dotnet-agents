@@ -74,6 +74,13 @@ turn.
 function. It is separate from managed chat sessions and does not make caller-supplied
 `ChatOptions.Tools` supported.
 
+Managed tool results are checked against `MaximumTransportPayloadSizeBytes` before the activity
+completes. If the function has returned successfully but the serialized result is too large, the
+activity records a bounded `ResultTooLarge` outcome and the model receives an error result with
+the same call ID; the tool is not retried just to obtain a smaller response. Return compact values
+or an external reference for large data. Activity failure messages are also bounded and do not
+carry original exception details or stack traces across the Temporal boundary.
+
 ### `NoRetry()` for side-effecting tools
 
 A tool with an external, non-idempotent effect (send email, charge a card, post a message) should

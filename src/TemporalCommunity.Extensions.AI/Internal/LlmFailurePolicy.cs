@@ -17,10 +17,9 @@ internal static class LlmFailurePolicy
     /// </summary>
     internal static ApplicationFailureException? CreateNonRetryableFailure(Exception exception) =>
         LlmErrorClassifier.IsNonRetryable(exception)
-            ? new ApplicationFailureException(
-                $"Non-retryable LLM error: {exception.Message}",
+            ? DurableActivityFailurePolicy.CreateBounded(
                 exception,
-                errorType: NonRetryableErrorType,
+                NonRetryableErrorType,
                 nonRetryable: true)
             : null;
 }

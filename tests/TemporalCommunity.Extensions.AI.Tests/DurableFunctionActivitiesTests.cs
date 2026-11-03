@@ -19,7 +19,7 @@ public class DurableFunctionActivitiesTests
     }
 
     [Fact]
-    public async Task InvokeFunctionAsync_ThrowsInvalidOperationException_WhenFunctionNotInRegistry()
+    public async Task InvokeFunctionAsync_BoundsMissingFunctionFailure()
     {
         var registry = new Dictionary<string, AIFunction>(StringComparer.OrdinalIgnoreCase);
         var activities = new DurableFunctionActivities(registry, null);
@@ -30,14 +30,16 @@ public class DurableFunctionActivitiesTests
         };
 
         var env = new ActivityEnvironment();
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(
             () => env.RunAsync(() => activities.InvokeFunctionAsync(input)));
 
-        Assert.Contains("nonexistent_tool", ex.Message);
+        Assert.Equal("DurableToolInvocationFailed", ex.ErrorType);
+        Assert.False(ex.NonRetryable);
+        Assert.DoesNotContain("nonexistent_tool", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task InvokeFunctionAsync_PropagatesException_WhenFunctionInvocationThrows()
+    public async Task InvokeFunctionAsync_BoundsFunctionFailureWithoutChangingRetryability()
     {
         // Use an explicit Func<string> to avoid delegate ambiguity with the throwing expression.
         Func<string> throwingDelegate = () => throw new InvalidOperationException("boom");
@@ -55,10 +57,65 @@ public class DurableFunctionActivitiesTests
         };
 
         var env = new ActivityEnvironment();
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+        var ex = await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(
             () => env.RunAsync(() => activities.InvokeFunctionAsync(input)));
 
-        Assert.Equal("boom", ex.Message);
+        Assert.Equal("DurableToolInvocationFailed", ex.ErrorType);
+        Assert.False(ex.NonRetryable);
+        Assert.Equal("Durable activity failed; failure details were omitted.", ex.Message);
+        Assert.Null(ex.InnerException);
+    }
+
+    [Fact]
+    public async Task InvokeFunctionAsync_ReturnsTypedResultTooLargeAfterToolEffectCompletes()
+    {
+        var invoked = false;
+        var largeFunction = AIFunctionFactory.Create(
+            () =>
+            {
+                invoked = true;
+                return new string('x', 10_000);
+            },
+            "large_result");
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [largeFunction.Name] = largeFunction });
+        var input = new DurableFunctionInput
+        {
+            FunctionName = largeFunction.Name,
+            EnableTransportPayloadGuard = true,
+            MaximumTransportPayloadSizeBytes = 2_048,
+        };
+        var env = new ActivityEnvironment
+        {
+            PayloadConverter = DurableAIDataConverter.Instance.PayloadConverter,
+        };
+
+        var output = await env.RunAsync(() => activities.InvokeFunctionAsync(input));
+
+        Assert.True(invoked);
+        Assert.Equal(DurableFunctionOutputStatus.ResultTooLarge, output.Status);
+        Assert.True(output.EffectCompleted);
+        Assert.Equal(DurableFunctionOutput.ResultTooLargeMessage, output.Result);
+        Assert.False(output.HasStateReplacement);
+    }
+
+    [Fact]
+    public async Task InvokeFunctionAsync_OversizedFailureMessageIsNotReturned()
+    {
+        Func<string> throwing = () => throw new InvalidOperationException(new string('s', 10_000));
+        var function = AIFunctionFactory.Create(throwing, "large_failure");
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [function.Name] = function });
+        var input = new DurableFunctionInput { FunctionName = function.Name };
+        var env = new ActivityEnvironment();
+
+        var exception = await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(
+            () => env.RunAsync(() => activities.InvokeFunctionAsync(input)));
+
+        Assert.Equal("DurableToolInvocationFailed", exception.ErrorType);
+        Assert.False(exception.NonRetryable);
+        Assert.DoesNotContain(new string('s', 100), exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
     }
 
     [Fact]

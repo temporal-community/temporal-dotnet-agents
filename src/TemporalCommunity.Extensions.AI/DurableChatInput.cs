@@ -64,4 +64,55 @@ public sealed class DurableChatInput
     /// the request is rejected before turn admission or external effects.
     /// </summary>
     public string? ExpectedSessionEpoch { get; init; }
+
+    [JsonIgnore]
+    internal int MaximumTransportPayloadSizeBytes { get; init; } = 1024 * 1024;
+
+    [JsonInclude]
+    [JsonPropertyName("maximumTransportPayloadSizeBytes")]
+    internal int? SerializedMaximumTransportPayloadSizeBytes
+    {
+        get => this.MaximumTransportPayloadSizeBytes;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.MaximumTransportPayloadSizeBytes = value.Value;
+            }
+        }
+    }
+
+    [JsonIgnore]
+    internal int PayloadCodecExpansionAllowanceBytes { get; init; }
+
+    [JsonInclude]
+    [JsonPropertyName("payloadCodecExpansionAllowanceBytes")]
+    internal int? SerializedPayloadCodecExpansionAllowanceBytes
+    {
+        get => this.PayloadCodecExpansionAllowanceBytes;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.PayloadCodecExpansionAllowanceBytes = value.Value;
+            }
+        }
+    }
+
+    [JsonIgnore]
+    internal bool EnableTransportPayloadGuard { get; init; }
+
+    [JsonInclude]
+    [JsonPropertyName("enableTransportPayloadGuard")]
+    internal bool? SerializedEnableTransportPayloadGuard
+    {
+        get => this.EnableTransportPayloadGuard;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.EnableTransportPayloadGuard = value.Value;
+            }
+        }
+    }
 }

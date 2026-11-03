@@ -85,6 +85,12 @@ batch before any tool activity starts. If a provider reports a tool-call finish 
 calls remain, the turn ends as `IncompleteResponse` instead of repeating model steps indefinitely.
 If a dispatched tool activity fails, its result tells the model the external effect outcome is
 unknown; an activity failure does not prove that no effect occurred.
+Activity outputs are checked against the configured per-payload transport budget before Temporal
+records them. If a tool has already completed but its result is too large, the activity returns a
+bounded `ResultTooLarge` outcome and the model receives a matching tool error result; the tool is
+not invoked again to recover that result. Keep tool results compact or return a reference to
+externally stored data. Activity failure messages and details are omitted from transported failures
+while retryability and known application failure types are preserved.
 
 ## Rules
 
@@ -122,6 +128,12 @@ worker.AddDurableTool(writeTool, options => options.NoRetry());
 
 An explicit multi-attempt policy on a tool without `Idempotent()` is rejected during configuration.
 The declaration is an application assertion, not an exactly-once guarantee.
+
+The same payload budget applies to model and tool activity results, not only their inputs. An
+oversized model response fails non-retryably because there is no safe model output to continue
+with. Oversized tool results are different: the tool effect has completed, so the workflow returns
+a bounded error result to the model rather than retrying the tool. A later model/tool call is a new
+operation and does not undo or deduplicate the completed effect.
 
 ## Invocation-scoped tools for typed turns
 

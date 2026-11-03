@@ -38,8 +38,10 @@ Persist `GetSessionEpochAsync` with the application conversation ID and pass it 
 The sample sets a 1 MiB per-payload transport budget. The guard uses the configured Temporal
 payload converter and reserves any declared custom-codec expansion; the built-in gzip codec is
 non-expanding. Reduce the limit for a stricter Temporal deployment, and avoid raising it beyond
-the service's actual per-payload limit. Activity outputs/failure details and aggregate event-history
-budgets are handled by later redesign units.
+the service's actual per-payload limit. Model and tool activity outputs use the same guard. An
+oversized model result fails bounded and non-retryably; an oversized successful tool result is
+reported to the model as `ResultTooLarge` without rerunning the completed tool effect. Failure
+details and stack traces are not transported to workflow code.
 
 Two `AddDurableToolset` registrations provide weather and service-status capabilities.
 `DefaultToolsetIds` composes them in a stable order as the stock workflow's worker-owned baseline.

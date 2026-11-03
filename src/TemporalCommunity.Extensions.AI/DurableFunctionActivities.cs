@@ -25,7 +25,30 @@ internal sealed class DurableFunctionActivities(
     /// Invokes a named <see cref="AIFunction"/> with the given arguments.
     /// </summary>
     [Activity("TemporalCommunity.Extensions.AI.InvokeFunction")]
-    public async Task<DurableFunctionOutput> InvokeFunctionAsync(DurableFunctionInput input)
+    public Task<DurableFunctionOutput> InvokeFunctionAsync(DurableFunctionInput input) =>
+        RunBoundedActivityAsync(input);
+
+    private async Task<DurableFunctionOutput> RunBoundedActivityAsync(
+        DurableFunctionInput input)
+    {
+        try
+        {
+            return await InvokeFunctionCoreAsync(input).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogFunctionFailed(exception, input.FunctionName);
+            throw Internal.DurableActivityFailurePolicy.CreateBounded(
+                exception,
+                "DurableToolInvocationFailed");
+        }
+    }
+
+    private async Task<DurableFunctionOutput> InvokeFunctionCoreAsync(DurableFunctionInput input)
     {
         var ctx = ActivityExecutionContext.Current;
         var ct = ctx.CancellationToken;
@@ -153,17 +176,65 @@ internal sealed class DurableFunctionActivities(
             }
 
             _logger.LogFunctionCompleted(input.FunctionName);
-            return new DurableFunctionOutput
+            var output = new DurableFunctionOutput
             {
                 Result = result,
+                EffectCompleted = true,
                 HasStateReplacement = stateUpdate.HasReplacement,
                 StateReplacement = stateUpdate.Value,
             };
+            if (input.EnableTransportPayloadGuard)
+            {
+                try
+                {
+                    Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                        ctx.PayloadConverter,
+                        output,
+                        input.MaximumTransportPayloadSizeBytes,
+                        input.PayloadCodecExpansionAllowanceBytes,
+                        "tool activity result");
+                }
+                catch (Exceptions.DurableTransportPayloadTooLargeException)
+                {
+                    output = new DurableFunctionOutput
+                    {
+                        Status = DurableFunctionOutputStatus.ResultTooLarge,
+                        Result = DurableFunctionOutput.ResultTooLargeMessage,
+                        EffectCompleted = true,
+                        HasStateReplacement = stateUpdate.HasReplacement,
+                        StateReplacement = stateUpdate.Value,
+                    };
+                    try
+                    {
+                        Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                            ctx.PayloadConverter,
+                            output,
+                            input.MaximumTransportPayloadSizeBytes,
+                            input.PayloadCodecExpansionAllowanceBytes,
+                            "bounded tool activity result");
+                    }
+                    catch (Exception exception)
+                    {
+                        throw Internal.DurableActivityFailurePolicy.CreateBounded(
+                            exception,
+                            "DurableToolResultTooLarge",
+                            nonRetryable: true);
+                    }
+                }
+                catch (Exception exception)
+                {
+                    throw Internal.DurableActivityFailurePolicy.CreateBounded(
+                        exception,
+                        "DurableToolResultSerializationFailed",
+                        nonRetryable: true);
+                }
+            }
+
+            return output;
         }
         catch (Exception ex)
         {
             span?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            _logger.LogFunctionFailed(ex, input.FunctionName);
             throw;
         }
     }

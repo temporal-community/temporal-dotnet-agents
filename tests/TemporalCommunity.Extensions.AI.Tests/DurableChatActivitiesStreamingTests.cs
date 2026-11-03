@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Temporalio.Exceptions;
+using Temporalio.Testing;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -53,6 +55,68 @@ public class DurableChatActivitiesStreamingTests
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => activities.GetResponseAsync(SimpleInput()));
+    }
+
+    [Fact]
+    public async Task GetResponseAsync_RejectsOversizedActivityResultAsBoundedFailure()
+    {
+        var activities = BuildActivities(new LargeResponseChatClient());
+        var input = new DurableChatInput
+        {
+            Messages = [new ChatMessage(ChatRole.User, "ping")],
+            MaximumTransportPayloadSizeBytes = 2_048,
+            EnableTransportPayloadGuard = true,
+        };
+        var env = new ActivityEnvironment
+        {
+            PayloadConverter = DurableAIDataConverter.Instance.PayloadConverter,
+        };
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => env.RunAsync(() => activities.GetResponseAsync(input)));
+
+        Assert.Equal("DurableModelResultTooLarge", exception.ErrorType);
+        Assert.True(exception.NonRetryable);
+        Assert.DoesNotContain(new string('x', 100), exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task GetChatStepAsync_RejectsOversizedManagedModelResultAsBoundedFailure()
+    {
+        var activities = BuildActivities(new LargeResponseChatClient());
+        var input = new DurableChatInput
+        {
+            Messages = [new ChatMessage(ChatRole.User, "ping")],
+            MaximumTransportPayloadSizeBytes = 2_048,
+            EnableTransportPayloadGuard = true,
+        };
+        var env = new ActivityEnvironment
+        {
+            PayloadConverter = DurableAIDataConverter.Instance.PayloadConverter,
+        };
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => env.RunAsync(() => activities.GetChatStepAsync(input)));
+
+        Assert.Equal("DurableModelResultTooLarge", exception.ErrorType);
+        Assert.True(exception.NonRetryable);
+        Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    public async Task GetResponseAsync_BoundsProviderFailureWithoutChangingRetryability()
+    {
+        var activities = BuildActivities(new LargeFailureChatClient());
+        var env = new ActivityEnvironment();
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => env.RunAsync(() => activities.GetResponseAsync(SimpleInput())));
+
+        Assert.Equal("DurableChatActivityFailed", exception.ErrorType);
+        Assert.False(exception.NonRetryable);
+        Assert.DoesNotContain(new string('s', 100), exception.Message, StringComparison.Ordinal);
+        Assert.Null(exception.InnerException);
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -124,6 +188,51 @@ public class DurableChatActivitiesStreamingTests
             await Task.Yield();
             throw new OperationCanceledException("simulated cancellation");
 #pragma warning disable CS0162 // yield break required for iterator-method shape; unreachable due to throw above
+            yield break;
+#pragma warning restore CS0162
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class LargeResponseChatClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, new string('x', 10_000))]));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            yield return new ChatResponseUpdate(ChatRole.Assistant, new string('x', 10_000));
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class LargeFailureChatClient : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException(new string('s', 10_000));
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            throw new InvalidOperationException(new string('s', 10_000));
+#pragma warning disable CS0162
             yield break;
 #pragma warning restore CS0162
         }

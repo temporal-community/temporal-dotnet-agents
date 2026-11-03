@@ -110,7 +110,11 @@ payload, including metadata, and subtracts `PayloadCodecExpansionAllowanceBytes`
 it with `MaximumTransportPayloadSizeBytes`. Lower the maximum for deployments with stricter
 service limits; only raise it when the configured Temporal service allows it. The limit covers
 workflow input, update input/result, query result, Continue-as-New input, and managed/direct
-activity inputs. Activity outputs and failure details receive their own guard in Phase 3.7.
+activity inputs and outputs. Model outputs that exceed the budget fail as a bounded non-retryable
+activity failure. When a tool effect succeeds but its output exceeds the budget, the activity
+returns a bounded `ResultTooLarge` result to the model and does not rerun the tool. Activity
+failure details are bounded before transport; retryability and recognized failure types are
+preserved, but original error text and stack details are not transported.
 
 The built-in gzip codec never expands a payload, so it needs no allowance. A custom codec must
 declare a known maximum expansion in `PayloadCodecExpansionAllowanceBytes`; the workflow can access

@@ -136,6 +136,9 @@ public sealed class DurableChatClient(IChatClient innerClient, DurableExecutionO
             Options = Internal.ChatOptionsSanitizer.PrepareForDurableTransport(options),
             ConversationId = Workflow.Info.WorkflowId,
             ClientKey = options.GetChatClientKey() ?? _durableOptions.DefaultChatClientKey,
+            MaximumTransportPayloadSizeBytes = _durableOptions.MaximumTransportPayloadSizeBytes,
+            PayloadCodecExpansionAllowanceBytes = _durableOptions.PayloadCodecExpansionAllowanceBytes,
+            EnableTransportPayloadGuard = true,
         };
     }
 

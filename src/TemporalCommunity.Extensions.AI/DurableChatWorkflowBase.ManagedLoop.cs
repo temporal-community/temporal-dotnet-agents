@@ -64,6 +64,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 ClientKey = clientKey,
                 CorrelationId = requestEntry.CorrelationId,
                 ToolDeclarations = effectiveDeclarations,
+                MaximumTransportPayloadSizeBytes = RequiredInput.MaximumTransportPayloadSizeBytes,
+                PayloadCodecExpansionAllowanceBytes = RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                EnableTransportPayloadGuard = RequiredInput.EnableTransportPayloadGuard,
             };
             if (RequiredInput.EnableTransportPayloadGuard)
             {
@@ -99,6 +102,22 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         "The LLM provider rejected the request with a non-retryable error.",
                         permanentProviderFailure,
                         errorType: Internal.LlmFailurePolicy.NonRetryableErrorType,
+                        nonRetryable: true);
+                }
+
+                var invalidModelResult =
+                    Internal.TemporalFailureInspector.FindNonRetryableApplicationFailure(
+                        llmFailure,
+                        "DurableModelResultTooLarge")
+                    ?? Internal.TemporalFailureInspector.FindNonRetryableApplicationFailure(
+                        llmFailure,
+                        "DurableModelResultSerializationFailed");
+                if (invalidModelResult is not null)
+                {
+                    throw new ApplicationFailureException(
+                        "The model activity result could not be returned within the configured payload budget.",
+                        invalidModelResult,
+                        errorType: invalidModelResult.ErrorType,
                         nonRetryable: true);
                 }
 
@@ -324,6 +343,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                                 IsIdempotent = manifestMember?.IsIdempotent
                                     ?? RequiredInput.IdempotentTools?.Contains(tc.Name, StringComparer.Ordinal) == true,
                                 IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
+                                MaximumTransportPayloadSizeBytes = RequiredInput.MaximumTransportPayloadSizeBytes,
+                                PayloadCodecExpansionAllowanceBytes = RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                                EnableTransportPayloadGuard = RequiredInput.EnableTransportPayloadGuard,
                             }, ResolveToolActivityOptions(tc.Name, manifestMember)));
                             break;
                         }
@@ -388,6 +410,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                                     IsIdempotent = manifestMember?.IsIdempotent
                                         ?? RequiredInput.IdempotentTools?.Contains(tc.Name, StringComparer.Ordinal) == true,
                                     IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.CurrentVersion,
+                                    MaximumTransportPayloadSizeBytes = RequiredInput.MaximumTransportPayloadSizeBytes,
+                                    PayloadCodecExpansionAllowanceBytes = RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                                    EnableTransportPayloadGuard = RequiredInput.EnableTransportPayloadGuard,
                                 }, ResolveToolActivityOptions(tc.Name, manifestMember)));
                             }
                             else
@@ -526,6 +551,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
                 if (task.IsCompletedSuccessfully)
                 {
+                    if (task.Result.Status == DurableFunctionOutputStatus.ResultTooLarge)
+                    {
+                        hadError = true;
+                        functionResultContents.Add(
+                            new FunctionResultContent(tc.CallId, DurableFunctionOutput.ResultTooLargeMessage));
+                        continue;
+                    }
+
                     // S-X-6: task.Result.Result crosses the activity boundary as a JsonElement
                     // (declared object?), so FunctionResultContent.Result holds a JsonElement here,
                     // not the tool's domain type. Accepted limitation — see DurableFunctionOutput.Result.

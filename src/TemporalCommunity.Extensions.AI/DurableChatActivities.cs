@@ -45,7 +45,12 @@ internal sealed class DurableChatActivities(
     /// Executes a chat completion by calling the inner <see cref="IChatClient"/>.
     /// </summary>
     [Activity("TemporalCommunity.Extensions.AI.GetResponse")]
-    public async Task<ChatResponse> GetResponseAsync(DurableChatInput input)
+    public Task<ChatResponse> GetResponseAsync(DurableChatInput input) =>
+        RunBoundedActivityAsync(
+            () => GetResponseCoreAsync(input),
+            "DurableChatActivityFailed");
+
+    private async Task<ChatResponse> GetResponseCoreAsync(DurableChatInput input)
     {
         var ctx = ActivityExecutionContext.HasCurrent ? ActivityExecutionContext.Current : null;
 
@@ -75,6 +80,7 @@ internal sealed class DurableChatActivities(
         var response = await StreamAndCollectAsync(
             chatClient, input.Messages, resolvedOptions, input, span, ctx)
             .ConfigureAwait(false);
+        EnsureActivityOutputFits(response, input, ctx, "chat activity result");
 
         _logger.LogChatActivityCompleted(input.ConversationId, input.TurnNumber);
 
@@ -165,7 +171,12 @@ internal sealed class DurableChatActivities(
     /// actionable tool-call requests so the workflow can fan them out.
     /// </summary>
     [Activity("TemporalCommunity.Extensions.AI.GetChatStep")]
-    public async Task<DurableChatStepResult> GetChatStepAsync(DurableChatInput input)
+    public Task<DurableChatStepResult> GetChatStepAsync(DurableChatInput input) =>
+        RunBoundedActivityAsync(
+            () => GetChatStepCoreAsync(input),
+            "DurableChatActivityFailed");
+
+    private async Task<DurableChatStepResult> GetChatStepCoreAsync(DurableChatInput input)
     {
         var ctx = ActivityExecutionContext.HasCurrent ? ActivityExecutionContext.Current : null;
 
@@ -246,7 +257,7 @@ internal sealed class DurableChatActivities(
 
         _logger.LogChatStepCompleted(input.ConversationId, input.TurnNumber, isFinal, toolCalls.Count);
 
-        return new DurableChatStepResult
+        var result = new DurableChatStepResult
         {
             IsFinal = isFinal,
             Messages = messages,
@@ -260,6 +271,8 @@ internal sealed class DurableChatActivities(
             AdditionalProperties = response.AdditionalProperties,
             CompletionReason = completionReason,
         };
+        EnsureActivityOutputFits(result, input, ctx, "model activity result");
+        return result;
     }
 
     /// <summary>
@@ -361,7 +374,76 @@ internal sealed class DurableChatActivities(
                 throw nonRetryableFailure;
             }
 
+            throw Internal.DurableActivityFailurePolicy.CreateBounded(
+                ex,
+                "DurableChatActivityFailed");
+        }
+    }
+
+    private async Task<T> RunBoundedActivityAsync<T>(
+        Func<Task<T>> activity,
+        string fallbackErrorType)
+    {
+        try
+        {
+            return await activity().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
             throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "A durable chat activity failed.");
+            throw Internal.DurableActivityFailurePolicy.CreateBounded(
+                exception,
+                fallbackErrorType);
+        }
+    }
+
+    private static void EnsureActivityOutputFits(
+        object output,
+        DurableChatInput input,
+        ActivityExecutionContext? context,
+        string boundary)
+    {
+        if (!input.EnableTransportPayloadGuard)
+        {
+            return;
+        }
+
+        if (context is null)
+        {
+            throw new InvalidOperationException(
+                "The durable activity output guard requires an activity execution context.");
+        }
+
+        try
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                context.PayloadConverter,
+                output,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                boundary);
+        }
+        catch (Exceptions.DurableTransportPayloadTooLargeException)
+        {
+            throw new ApplicationFailureException(
+                "The model response exceeded the configured durable activity result budget.",
+                errorType: "DurableModelResultTooLarge",
+                nonRetryable: true);
+        }
+        catch (ApplicationFailureException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            throw Internal.DurableActivityFailurePolicy.CreateBounded(
+                exception,
+                "DurableModelResultSerializationFailed",
+                nonRetryable: true);
         }
     }
 

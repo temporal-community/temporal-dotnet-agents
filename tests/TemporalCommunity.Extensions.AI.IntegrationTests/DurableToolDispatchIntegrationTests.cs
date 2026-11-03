@@ -133,10 +133,11 @@ public class DurableToolDispatchIntegrationTests
     }
 
     [Fact]
-    public async Task OversizedToolActivityInput_IsRejectedBeforeToolDispatch()
+    public async Task OversizedModelActivityResult_IsRejectedBeforeToolDispatch()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
         var invocations = 0;
         var tool = AIFunctionFactory.Create(
             (string value) =>
@@ -179,9 +180,8 @@ public class DurableToolDispatchIntegrationTests
                     "request fits",
                     requestId: "oversized-tool-input"));
 
-            Assert.True(
-                exception.ToString().Contains("tool activity input", StringComparison.Ordinal),
-                exception.ToString());
+            var applicationFailure = Assert.IsType<ApplicationFailureException>(exception.InnerException);
+            Assert.Equal("DurableModelResultTooLarge", applicationFailure.ErrorType);
             Assert.Equal(0, Volatile.Read(ref invocations));
         }
         finally
@@ -239,6 +239,52 @@ public class DurableToolDispatchIntegrationTests
         Assert.Equal(1, invokeCount);
 
         await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task OversizedSuccessfulToolResult_ReturnsBoundedErrorWithoutRedispatch()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var harness = new ScriptedToolHarness();
+        var tool = harness.BuildAlwaysSucceeds(
+            "large_result",
+            "Returns a result larger than the configured payload budget.",
+            _ => new string('x', 100_000));
+        var scripted = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("call-large-result", "large_result")],
+            "The tool completed, and I can proceed without its full result.");
+
+        var taskQueue = $"pattern3-large-tool-result-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            scripted,
+            builder => builder.AddDurableTools(tool),
+            options => options.MaximumTransportPayloadSizeBytes = 32 * 1024);
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"large-tool-result-{Guid.NewGuid():N}";
+        try
+        {
+            var response = await sessionClient.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "run the tool")]);
+
+            Assert.Contains("proceed", response.Text, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(1, harness.GetInvocationCount("large_result"));
+            Assert.Contains(
+                scripted.Calls[1].Messages.SelectMany(message => message.Contents)
+                    .OfType<FunctionResultContent>(),
+                result => result.CallId == "call-large-result"
+                    && result.Result?.ToString() == DurableFunctionOutput.ResultTooLargeMessage);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Temporalio.Exceptions;
 using Temporalio.Workflows;
 
 namespace TemporalCommunity.Extensions.AI;
@@ -43,6 +44,9 @@ public sealed class DurableAIFunction : DelegatingAIFunction
             FunctionName = Name,
             Arguments = ConvertArguments(arguments),
             IdempotencyKeyVersion = Internal.DurableToolIdempotencyKey.ActivityIdentityVersion,
+            MaximumTransportPayloadSizeBytes = _options.MaximumTransportPayloadSizeBytes,
+            PayloadCodecExpansionAllowanceBytes = _options.PayloadCodecExpansionAllowanceBytes,
+            EnableTransportPayloadGuard = true,
         };
         Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
             Workflow.PayloadConverter,
@@ -59,6 +63,14 @@ public sealed class DurableAIFunction : DelegatingAIFunction
         var output = await Workflow.ExecuteActivityAsync(
             (DurableFunctionActivities a) => a.InvokeFunctionAsync(input),
             activityOptions);
+
+        if (output.Status == DurableFunctionOutputStatus.ResultTooLarge)
+        {
+            throw new ApplicationFailureException(
+                DurableFunctionOutput.ResultTooLargeMessage,
+                errorType: "DurableToolResultTooLarge",
+                nonRetryable: true);
+        }
 
         return output.Result;
     }

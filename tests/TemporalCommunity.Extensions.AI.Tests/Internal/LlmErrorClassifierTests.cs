@@ -137,7 +137,8 @@ public class LlmErrorClassifierTests
 
         var typedFailure = Assert.IsType<ApplicationFailureException>(failure);
         Assert.Equal(DurableChatActivities.LlmNonRetryableErrorType, typedFailure.ErrorType);
-        Assert.Same(providerError, typedFailure.InnerException);
+        Assert.True(typedFailure.NonRetryable);
+        Assert.Null(typedFailure.InnerException);
     }
 
     [Fact]

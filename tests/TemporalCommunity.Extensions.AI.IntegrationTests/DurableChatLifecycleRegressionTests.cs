@@ -80,7 +80,7 @@ public class DurableChatLifecycleRegressionTests
     }
 
     [Fact]
-    public async Task UpdateResult_RejectsOversizedResponseAndRollsBackHistory()
+    public async Task OversizedModelActivityResult_FailsBeforeUpdateResultAndRollsBackHistory()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
@@ -105,7 +105,8 @@ public class DurableChatLifecycleRegressionTests
                     "small request",
                     requestId: "oversized-update-result"));
 
-            Assert.Contains("workflow update result", exception.ToString(), StringComparison.Ordinal);
+            var applicationFailure = Assert.IsType<ApplicationFailureException>(exception.InnerException);
+            Assert.Equal("DurableModelResultTooLarge", applicationFailure.ErrorType);
             Assert.Equal(1, model.CallCount);
             Assert.Empty(await session.GetHistoryAsync("oversized-update-result"));
         }

@@ -72,4 +72,54 @@ internal sealed record class DurableFunctionInput
 
     public int IdempotencyKeyVersion { get; init; }
 
+    [JsonIgnore]
+    public int MaximumTransportPayloadSizeBytes { get; init; } = 1024 * 1024;
+
+    [JsonInclude]
+    [JsonPropertyName("maximumTransportPayloadSizeBytes")]
+    internal int? SerializedMaximumTransportPayloadSizeBytes
+    {
+        get => this.MaximumTransportPayloadSizeBytes;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.MaximumTransportPayloadSizeBytes = value.Value;
+            }
+        }
+    }
+
+    [JsonIgnore]
+    public int PayloadCodecExpansionAllowanceBytes { get; init; }
+
+    [JsonInclude]
+    [JsonPropertyName("payloadCodecExpansionAllowanceBytes")]
+    internal int? SerializedPayloadCodecExpansionAllowanceBytes
+    {
+        get => this.PayloadCodecExpansionAllowanceBytes;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.PayloadCodecExpansionAllowanceBytes = value.Value;
+            }
+        }
+    }
+
+    [JsonIgnore]
+    public bool EnableTransportPayloadGuard { get; init; }
+
+    [JsonInclude]
+    [JsonPropertyName("enableTransportPayloadGuard")]
+    internal bool? SerializedEnableTransportPayloadGuard
+    {
+        get => this.EnableTransportPayloadGuard;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.EnableTransportPayloadGuard = value.Value;
+            }
+        }
+    }
 }

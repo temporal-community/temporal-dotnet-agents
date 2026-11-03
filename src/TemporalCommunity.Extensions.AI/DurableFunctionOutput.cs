@@ -5,6 +5,10 @@ namespace TemporalCommunity.Extensions.AI;
 /// </summary>
 internal sealed class DurableFunctionOutput
 {
+    public DurableFunctionOutputStatus Status { get; init; }
+
+    public bool EffectCompleted { get; init; }
+
     /// <summary>
     /// The result returned by the <see cref="Microsoft.Extensions.AI.AIFunction"/>.
     /// </summary>
@@ -26,4 +30,14 @@ internal sealed class DurableFunctionOutput
     public bool HasStateReplacement { get; init; }
 
     public System.Text.Json.JsonElement? StateReplacement { get; init; }
+
+    internal const string ResultTooLargeMessage =
+        "The tool completed successfully, but its result exceeded the durable activity result budget. " +
+        "Do not repeat the tool call; continue using other information or request a smaller result.";
+}
+
+internal enum DurableFunctionOutputStatus
+{
+    Succeeded,
+    ResultTooLarge,
 }
