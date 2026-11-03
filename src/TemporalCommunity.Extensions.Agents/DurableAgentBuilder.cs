@@ -202,6 +202,14 @@ public sealed class DurableAgentBuilder
     public string? HistoryReducerKey { get; set; }
 
     /// <summary>
+    /// Gets or sets the keyed worker-service key for an MEAI <see cref="IChatReducer"/> that
+    /// shapes eligible prior-turn model context without changing retained session history.
+    /// When unset, the worker-level <see cref="TemporalAgentsOptions.DefaultContextReducerKey"/>
+    /// is used.
+    /// </summary>
+    public string? ContextReducerKey { get; set; }
+
+    /// <summary>
     /// Gets or sets a callback that configures an <see cref="AIAgentBuilder"/> middleware pipeline
     /// wrapping the library-constructed <see cref="ChatClientAgent"/>. Inherits the worker-level
     /// <c>TemporalAgentsOptions.DefaultConfigureAgentPipeline</c> when <see langword="null"/>.
@@ -807,6 +815,7 @@ public sealed class DurableAgentBuilder
             ModelOutputTokenReserve: ModelOutputTokenReserve,
             MaxToolCallsPerTurn: MaxToolCallsPerTurn,
             HistoryReducerKey: HistoryReducerKey,
+            ContextReducerKey: ContextReducerKey,
             ConfigureAgentPipeline: ConfigureAgentPipeline,
             ToolInterceptorFactory: _toolInterceptorFactory,
             UseApprovalScopes: _useApprovalScopes,

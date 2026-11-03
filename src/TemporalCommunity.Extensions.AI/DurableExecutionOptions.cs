@@ -122,6 +122,25 @@ public sealed class DurableExecutionOptions
     public string? DefaultHistoryReducerKey { get; set; }
 
     /// <summary>
+    /// Gets or sets the keyed-service key captured in new managed-session workflow inputs and
+    /// used by the worker to resolve an MEAI <see cref="IChatReducer"/> for each model call.
+    /// The reducer receives isolated copies of eligible prior-turn context; its output is not
+    /// written to retained session history.
+    /// </summary>
+    /// <remarks>
+    /// Configure the key in the session-client options and register the reducer in worker DI.
+    /// Co-hosted applications can use the same value in <c>AddDurableAI</c>:
+    /// <code>
+    /// services.AddKeyedSingleton&lt;IChatReducer&gt;("recent-context", new MessageCountingChatReducer(20));
+    /// opts.DefaultContextReducerKey = "recent-context";
+    /// </code>
+    /// The session-client and worker must agree on the key. The reducer must preserve valid
+    /// tool-call/result exchanges in its output. System and developer messages, the active turn,
+    /// approvals, and interrupted turns are not reduced.
+    /// </remarks>
+    public string? DefaultContextReducerKey { get; set; }
+
+    /// <summary>
     /// Gets or sets whether to register the default <see cref="DurableChatWorkflow"/> and
     /// <see cref="DurableChatSessionClient"/>. Defaults to <see langword="true"/>.
     /// </summary>

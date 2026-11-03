@@ -76,6 +76,7 @@ public class ContinueAsNewInputTests
             EnableSearchAttributes = true,
             MaxEntryCount = 321,
             HistoryReducerKey = "reducer-v2",
+            ContextReducerKey = "context-reducer-v1",
             DefaultChatClientKey = "profile-v1",
             OriginalCreatedAt = DateTimeOffset.UnixEpoch,
             ToolActivityOptions = toolOptions,
@@ -139,6 +140,7 @@ public class ContinueAsNewInputTests
         Assert.Equal(original.EnableSearchAttributes, actual.EnableSearchAttributes);
         Assert.Equal(original.MaxEntryCount, actual.MaxEntryCount);
         Assert.Equal("reducer-v2", actual.HistoryReducerKey);
+        Assert.Equal("context-reducer-v1", actual.ContextReducerKey);
         Assert.Equal("profile-v1", actual.DefaultChatClientKey);
         Assert.Equal(createdAt, actual.OriginalCreatedAt);
         Assert.Equal("session-epoch", actual.SessionEpoch);

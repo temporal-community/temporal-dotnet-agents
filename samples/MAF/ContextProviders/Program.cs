@@ -9,6 +9,7 @@
 //   TurnCounterProvider — increments a session-scoped LLM-call counter in StateBag
 //                         and injects it as a system message before each LLM call.
 //   DateTimeProvider    — injects the current UTC date/time on every step (stateless).
+// A context-only MessageCountingChatReducer also limits eligible older turns for each model call.
 //
 // Run:  dotnet run --project samples/MAF/ContextProviders/ContextProviders.csproj
 
@@ -41,6 +42,12 @@ if (string.IsNullOrEmpty(apiBaseUrl))
 const string model = "gpt-4o-mini";
 var temporalAddress = builder.Configuration.GetValue<string>("TEMPORAL_ADDRESS") ?? "localhost:7233";
 
+#pragma warning disable MEAI001
+builder.Services.AddKeyedSingleton<IChatReducer>(
+    "recent-context",
+    new MessageCountingChatReducer(20));
+#pragma warning restore MEAI001
+
 var openAiClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) });
@@ -54,6 +61,7 @@ builder.Services
     .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
+        opts.DefaultContextReducerKey = "recent-context";
         opts.AddDurableAgent("Assistant", agent =>
         {
             agent.Instructions =

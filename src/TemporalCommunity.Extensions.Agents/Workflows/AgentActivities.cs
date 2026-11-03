@@ -195,6 +195,44 @@ internal sealed class AgentActivities(
         chatOptions.ResponseFormat = input.Request.ResponseFormat;
 
         messagesForLlm = FitModelContext(input, messagesForLlm, chatOptions, scopedServices).ToList();
+        var contextReducerKey = registration.ContextReducerKey ?? agentsOptions.DefaultContextReducerKey;
+        if (contextReducerKey is not null)
+        {
+            var reducer = scopedServices.GetKeyedService<IChatReducer>(contextReducerKey)
+                ?? throw new ApplicationFailureException(
+                    $"No IChatReducer is registered under key '{contextReducerKey}'.",
+                    errorType: "DurableContextReducerNotFound",
+                    nonRetryable: true);
+            var prefixRemoved = input.AccumulatedMessages.Count - messagesForLlm.Count;
+            var currentTurnStartIndex = Math.Max(0, input.CurrentTurnStartIndex - prefixRemoved);
+            var previousTurnRanges = (input.PreviousTurnRanges ?? [])
+                .Where(range => range.EndIndex > prefixRemoved)
+                .Select(range => new DurableChatTurnRange(
+                    Math.Max(0, range.StartIndex - prefixRemoved),
+                    range.EndIndex - prefixRemoved,
+                    range.IsProtected))
+                .ToArray();
+            try
+            {
+                var projection = await TemporalCommunity.Extensions.AI.Internal.DurableChatContextReducer
+                    .ReduceAsync(
+                        reducer,
+                        messagesForLlm,
+                        currentTurnStartIndex,
+                        previousTurnRanges,
+                        ct)
+                    .ConfigureAwait(false);
+                messagesForLlm = projection.Messages.ToList();
+            }
+            catch (TemporalCommunity.Extensions.AI.Internal.DurableContextReductionException exception)
+            {
+                throw new ApplicationFailureException(
+                    exception.Message,
+                    exception,
+                    errorType: "DurableContextReducerInvalidOutput",
+                    nonRetryable: true);
+            }
+        }
 
         // LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
         // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire

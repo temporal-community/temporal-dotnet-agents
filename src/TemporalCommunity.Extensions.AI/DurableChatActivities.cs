@@ -65,9 +65,10 @@ internal sealed class DurableChatActivities(
 
         EnsureNoCallerSuppliedTools(input.Options);
         var resolvedOptions = input.Options;
-        var messagesForModel = FitModelContext(
+        var messagesForModel = await PrepareModelContextAsync(
             input,
-            resolvedOptions ?? new ChatOptions());
+            resolvedOptions ?? new ChatOptions(),
+            ctx).ConfigureAwait(false);
 
         var chatClient = ResolveChatClient(input.ClientKey);
 
@@ -205,7 +206,8 @@ internal sealed class DurableChatActivities(
             effectiveOptions.Tools = null;
         }
 
-        var messagesForModel = FitModelContext(input, effectiveOptions);
+        var messagesForModel = await PrepareModelContextAsync(input, effectiveOptions, ctx)
+            .ConfigureAwait(false);
         var chatClient = ResolveChatClient(input.ClientKey);
         EnsureMixedPatternCheck(chatClient);
         chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
@@ -464,6 +466,66 @@ internal sealed class DurableChatActivities(
                 input.MaxModelContextTokens,
                 input.ModelOutputTokenReserve,
                 services.GetService<IDurableChatTokenEstimator>());
+        }
+        catch (DurableContextBudgetExceededException exception)
+        {
+            throw new ApplicationFailureException(
+                exception.Message,
+                exception,
+                errorType: "DurableContextBudgetExceeded",
+                nonRetryable: true);
+        }
+    }
+
+    private async Task<IList<ChatMessage>> PrepareModelContextAsync(
+        DurableChatInput input,
+        ChatOptions options,
+        ActivityExecutionContext? ctx)
+    {
+        var messagesForModel = FitModelContext(input, options);
+        if (input.ContextReducerKey is not { } reducerKey)
+        {
+            return messagesForModel;
+        }
+
+        var reducer = services.GetKeyedService<IChatReducer>(reducerKey)
+            ?? throw new ApplicationFailureException(
+                $"No IChatReducer is registered under key '{reducerKey}'.",
+                errorType: "DurableContextReducerNotFound",
+                nonRetryable: true);
+
+        var prefixRemoved = input.Messages.Count - messagesForModel.Count;
+        var currentTurnStartIndex = Math.Max(0, input.CurrentTurnStartIndex - prefixRemoved);
+        var previousTurnRanges = (input.PreviousTurnRanges ?? [])
+            .Where(range => range.EndIndex > prefixRemoved)
+            .Select(range => new DurableChatTurnRange(
+                Math.Max(0, range.StartIndex - prefixRemoved),
+                range.EndIndex - prefixRemoved,
+                range.IsProtected))
+            .ToArray();
+        try
+        {
+            var projection = await Internal.DurableChatContextReducer.ReduceAsync(
+                reducer,
+                messagesForModel.ToList(),
+                currentTurnStartIndex,
+                previousTurnRanges,
+                ctx?.CancellationToken ?? CancellationToken.None).ConfigureAwait(false);
+            Internal.DurableModelContextBudget.EnsureFits(
+                projection.Messages,
+                options,
+                input.MaxModelContextTokens,
+                input.ModelOutputTokenReserve,
+                services.GetService<IDurableChatTokenEstimator>());
+            return projection.Messages.ToList();
+        }
+        catch (Internal.DurableContextReductionException exception)
+        {
+            throw new ApplicationFailureException(
+                exception.Message,
+                exception,
+                errorType: "DurableContextReducerInvalidOutput",
+                nonRetryable: true);
         }
         catch (DurableContextBudgetExceededException exception)
         {

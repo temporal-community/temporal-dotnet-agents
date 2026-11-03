@@ -21,8 +21,8 @@ how-to reference for all of them:
 
 ## Durable-chat redesign target contracts
 
-**Implementation status:** Phases 0, 1, 2.1–2.6, 3.1–3.7, and 4.1 are implemented; later history
-budget and compaction behavior remains in progress. The current API supports request identity, active-turn admission,
+**Implementation status:** Phases 0, 1, 2.1–2.6, 3.1–3.7, and 4.1–4.2 are implemented; reducer and
+retained-history recovery work remains in progress. The current API supports request identity, active-turn admission,
 bounded terminal outcomes, epoch-aware idle deadlines, per-payload transport guards, bounded turn
 joiners, event-history thresholds, validated session shutdown, stable logical tool-operation keys,
 validated tool dispatch, call-bound approval decisions, and bounded review projections. In
@@ -37,7 +37,7 @@ particular, `correlationId` is not an idempotency key and current Continue-as-Ne
 | Approval and CAN | Close admission before draining; defer CAN until admitted handlers and the active turn finish. Approvals have finite deadlines. Session shutdown uses the validated `RequestShutdown` update; unknown, mismatched, and already-resolved approval decisions are rejected before admission. |
 | Event history | Use `Workflow.CurrentHistoryLength` and `CurrentHistorySize` (bytes, updated at workflow-task boundaries). Defaults are 40,000/45,000 events and 40/45 MiB soft/reserve thresholds; use `GetHistoryBudgetAsync` to inspect current usage. At the soft threshold, reject new turns while allowing completion and recovery work. Near reserve exhaustion, expire approvals as `Expired(HistoryBudget)`. A finite timer does not bound request volume. |
 | Failure and cancellation | With no dispatched tool effect, roll back the turn. After an effect, retain a bounded interrupted-turn record: completed call/result pairs, `unknown` for uncertain effects, `not executed` for undispatched calls, and a redacted bounded terminal marker. Drop partial assistant text and project protocol-valid model messages. |
-| Retained history | `GetHistory` is retained state, not an archive. Library-created request/response entries have distinct stable `EntryId`s and share a `TurnId`, preserved across Continue-as-New. Compaction markers store a bounded contiguous replaced range and a summary DTO; truncation markers use a separate discriminator and record removed ranges. Opt-in complete-turn trimming and a library-selected-prefix summarizer are separate from `IChatReducer`, which only shapes protected ephemeral model context. |
+| Retained history | `GetHistory` is retained state, not an archive. Library-created request/response entries have distinct stable `EntryId`s and share a `TurnId`, preserved across Continue-as-New. Compaction markers store a bounded contiguous replaced range and a summary DTO; truncation markers use a separate discriminator and record removed ranges. Opt-in complete-turn trimming and a library-selected-prefix summarizer are separate from `IChatReducer`, which only shapes eligible ephemeral model context. |
 | Model budget | Optional input-token limit plus output reserve, with a replaceable heuristic estimator counting instructions, tool declarations, output schema, context, active turn, and reserve. This is independent of Temporal payload limits. Protected content or reducer output that cannot fit gives `ContextBudgetExceeded`; unconfigured provider overflow maps to a typed non-retryable outcome. Summarization has its own budget. |
 | Tool safety | Reuse per-tool policies; unknown/effectful tools default to one attempt. Supply stable logical operation keys (epoch, request/turn, distinct call), enforced downstream for idempotency. Timeout/cancellation may mean `unknown`. Guard result and failure-detail bytes inside the activity before returning. |
 | Telemetry | MEAI owns inference spans and GenAI metrics; the library owns durable/tool telemetry. Content capture controls telemetry only, not persistence or model input. |
@@ -313,6 +313,42 @@ workerBuilder.Services
     .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
     .AddDurableAIWorker(options => options.DefaultChatClientKey = "primary");
 ```
+
+### Context-only chat reducers
+
+Set `DefaultContextReducerKey` in the session-client configuration; the value is captured in each
+new workflow input and survives Continue-as-New. Register an `IChatReducer` under the same key in
+worker DI. It receives deep copies of eligible complete prior turns and can shape the ephemeral request without
+changing `GetHistory` or retained session entries. System/developer instructions, the active turn,
+approvals, and interrupted turns are protected. Reducer output is checked for complete tool-call/
+result exchanges and rechecked against the configured model-context budget; malformed or
+still-oversized output fails before the provider call instead of being silently trimmed.
+
+```csharp
+clientBuilder.Services.AddTemporalClient("localhost:7233", "default");
+clientBuilder.Services.AddDurableAIClient(
+    "durable-chat",
+    options => options.DefaultContextReducerKey = "recent-context");
+
+#pragma warning disable MEAI001
+workerBuilder.Services.AddKeyedSingleton<IChatReducer>(
+    "recent-context",
+    new MessageCountingChatReducer(20));
+#pragma warning restore MEAI001
+
+workerBuilder.Services
+    .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+    .AddDurableAIWorker();
+```
+
+<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/MEAI/ContextReducer.cs. -->
+
+The reducer is activity work, not workflow code, but an activity retry may invoke it again.
+Configure an implementation that is deterministic for the same input and safe for concurrent calls;
+provider calls made by a reducer have their own retry and cost implications. MEAI's built-in
+`MessageCountingChatReducer` can omit entire messages containing tool calls or results, while its
+`SummarizingChatReducer` returns an unmarked summary. The library validates grammar but does not
+interpret a reducer's omissions as retained-history compaction.
 
 ### Send a turn and read history
 

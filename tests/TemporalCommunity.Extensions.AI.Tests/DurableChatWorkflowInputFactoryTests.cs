@@ -222,6 +222,7 @@ public class DurableChatWorkflowInputFactoryTests
         MaxTerminalOutcomeCount = 37,
         MaxTerminalOutcomeBytes = 98_765,
         DefaultHistoryReducerKey = "history-v1",
+        DefaultContextReducerKey = "context-v1",
         DefaultChatClientKey = "primary-profile",
         MaxToolCallsPerTurn = 13,
         MaximumConsecutiveErrorsPerRequest = 4,
@@ -241,6 +242,7 @@ public class DurableChatWorkflowInputFactoryTests
         Assert.Equal(expected.ApprovalTimeout, actual.ApprovalTimeout);
         Assert.Equal(expected.EnableSearchAttributes, actual.EnableSearchAttributes);
         Assert.Equal(expected.MaxEntryCount, actual.MaxEntryCount);
+        Assert.Equal(expected.ContextReducerKey, actual.ContextReducerKey);
         Assert.Equal(expected.MaxTerminalOutcomeCount, actual.MaxTerminalOutcomeCount);
         Assert.Equal(expected.MaxTerminalOutcomeBytes, actual.MaxTerminalOutcomeBytes);
         Assert.Equal(expected.HistoryReducerKey, actual.HistoryReducerKey);

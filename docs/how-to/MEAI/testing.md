@@ -74,6 +74,15 @@ sources, plus executed pinned NuGet assemblies. The MEAI source checkout HEAD wa
 `02107c65bab30aad9e35b5133ed643eaa77bccd8`; package execution is authoritative.
 Neither reference checkout is built or modified.
 
+## Context-only reducer verification
+
+`DurableChatContextReducerTests` applies the actual pinned MEAI `MessageCountingChatReducer` and
+`SummarizingChatReducer` to eligible prior turns. It verifies active-turn and instruction
+preservation, deep-copy isolation from reducer mutations, valid tool grammar after the counting
+reducer filters tool messages, rejection of malformed reducer output, and a final model-context
+budget check. These tests cover ephemeral model context only; they do not prove that retained
+history has been compacted or that Temporal's prior event history has been reduced.
+
 **Unavailable prerequisite experiment:** the assumption that the pinned summarizer returns a
 persistent incremental marker is false. This blocks adopting that marker as a compaction wire
 contract, not Phase 0 or the library-selected-prefix summarizer design. The history-counter APIs

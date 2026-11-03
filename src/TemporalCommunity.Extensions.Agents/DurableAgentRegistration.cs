@@ -30,6 +30,7 @@ internal sealed record DurableAgentRegistration(
     int? ModelOutputTokenReserve,
     int MaxToolCallsPerTurn,
     string? HistoryReducerKey,
+    string? ContextReducerKey,
     Action<AIAgentBuilder>? ConfigureAgentPipeline,
     Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? ToolInterceptorFactory = null,
     bool UseApprovalScopes = false,

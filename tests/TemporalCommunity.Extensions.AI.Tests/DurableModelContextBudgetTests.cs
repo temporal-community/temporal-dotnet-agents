@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Internal;
+using Temporalio.Exceptions;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
@@ -135,6 +136,112 @@ public class DurableModelContextBudgetTests
     }
 
     [Fact]
+    public async Task GetResponseAsync_AppliesContextReducerOnlyToEligiblePriorTurns()
+    {
+        var client = new CapturingChatClient();
+        using var services = new ServiceCollection()
+            .AddSingleton<IChatClient>(client)
+            .AddKeyedSingleton<IChatReducer>("recent", new MessageCountingChatReducer(1))
+            .BuildServiceProvider();
+        var activities = new DurableChatActivities(services, loggerFactory: null);
+        var input = new DurableChatInput
+        {
+            Messages =
+            [
+                new ChatMessage(ChatRole.System, "system instructions"),
+                new ChatMessage(ChatRole.User, "old request"),
+                new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-1", "lookup")]),
+                new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-1", "old result")]),
+                new ChatMessage(ChatRole.Assistant, "old response"),
+                new ChatMessage(ChatRole.User, "current request"),
+            ],
+            ContextReducerKey = "recent",
+            CurrentTurnStartIndex = 5,
+            PreviousTurnRanges = [new(1, 5, false)],
+        };
+
+        await activities.GetResponseAsync(input);
+
+        Assert.Collection(
+            client.Messages!,
+            message => Assert.Equal("system instructions", message.Text),
+            message => Assert.Equal("old response", message.Text),
+            message => Assert.Equal("current request", message.Text));
+        Assert.Equal("old request", input.Messages[1].Text);
+        Assert.Null(input.Messages[1].AdditionalProperties);
+    }
+
+    [Fact]
+    public async Task GetChatStepAsync_AppliesContextReducerOnlyToEligiblePriorTurns()
+    {
+        var client = new CapturingChatClient();
+        using var services = new ServiceCollection()
+            .AddSingleton<IChatClient>(client)
+            .AddKeyedSingleton<IChatReducer>("recent", new MessageCountingChatReducer(1))
+            .BuildServiceProvider();
+        var activities = new DurableChatActivities(services, loggerFactory: null);
+        var input = new DurableChatInput
+        {
+            Messages =
+            [
+                new ChatMessage(ChatRole.System, "system instructions"),
+                new ChatMessage(ChatRole.User, "old request"),
+                new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-1", "lookup")]),
+                new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-1", "old result")]),
+                new ChatMessage(ChatRole.Assistant, "old response"),
+                new ChatMessage(ChatRole.User, "current request"),
+            ],
+            ContextReducerKey = "recent",
+            CurrentTurnStartIndex = 5,
+            PreviousTurnRanges = [new(1, 5, false)],
+        };
+
+        var result = await activities.GetChatStepAsync(input);
+
+        Assert.True(result.IsFinal);
+        Assert.Collection(
+            client.Messages!,
+            message => Assert.Equal("system instructions", message.Text),
+            message => Assert.Equal("old response", message.Text),
+            message => Assert.Equal("current request", message.Text));
+        Assert.Equal("old request", input.Messages[1].Text);
+        Assert.Null(input.Messages[1].AdditionalProperties);
+    }
+
+    [Fact]
+    public async Task GetResponseAsync_RejectsReducerOutputThatStillExceedsBudgetBeforeProviderCall()
+    {
+        var client = new CapturingChatClient();
+        using var services = new ServiceCollection()
+            .AddSingleton<IChatClient>(client)
+            .AddSingleton<IDurableChatTokenEstimator>(new CountingEstimator())
+            .AddKeyedSingleton<IChatReducer>("recent", new ExpandingReducer())
+            .BuildServiceProvider();
+        var activities = new DurableChatActivities(services, loggerFactory: null);
+        var input = new DurableChatInput
+        {
+            Messages =
+            [
+                new ChatMessage(ChatRole.User, "old request"),
+                new ChatMessage(ChatRole.Assistant, "old response"),
+                new ChatMessage(ChatRole.User, "current request"),
+            ],
+            ContextReducerKey = "recent",
+            CurrentTurnStartIndex = 2,
+            PreviousTurnRanges = [new(0, 2, false)],
+            MaxModelContextTokens = 40,
+            ModelOutputTokenReserve = 1,
+        };
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => activities.GetResponseAsync(input));
+
+        Assert.True(exception.NonRetryable);
+        Assert.Equal("DurableContextBudgetExceeded", exception.ErrorType);
+        Assert.Null(client.Messages);
+    }
+
+    [Fact]
     public void Fit_RejectsInvalidTurnRanges()
     {
         Assert.Throws<InvalidOperationException>(() =>
@@ -152,6 +259,24 @@ public class DurableModelContextBudgetTests
     {
         public int EstimateInputTokens(IReadOnlyList<ChatMessage> messages, ChatOptions options) =>
             messages.Count * 10;
+    }
+
+    private sealed class ExpandingReducer : IChatReducer
+    {
+        public Task<IEnumerable<ChatMessage>> ReduceAsync(
+            IEnumerable<ChatMessage> messages,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult<IEnumerable<ChatMessage>>(
+            [
+                new(ChatRole.User, "summary part 1"),
+                new(ChatRole.Assistant, "summary part 2"),
+                new(ChatRole.User, "summary part 3"),
+                new(ChatRole.Assistant, "summary part 4"),
+                new(ChatRole.User, "summary part 5"),
+            ]);
+        }
     }
 
     private sealed class CapturingEstimator : IDurableChatTokenEstimator

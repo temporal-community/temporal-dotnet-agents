@@ -191,6 +191,23 @@ public sealed class TemporalAgentsOptions
     public string? DefaultHistoryReducerKey { get; set; }
 
     /// <summary>
+    /// Gets or sets the worker-level default key for a context-only MEAI
+    /// <see cref="IChatReducer"/>. An agent may override this with
+    /// <see cref="DurableAgentBuilder.ContextReducerKey"/>.
+    /// </summary>
+    /// <remarks>
+    /// Register the reducer in DI before calling <c>AddTemporalAgents</c>:
+    /// <code>
+    /// services.AddKeyedSingleton&lt;IChatReducer&gt;("recent-context", new MessageCountingChatReducer(20));
+    /// opts.DefaultContextReducerKey = "recent-context";
+    /// </code>
+    /// Eligible older turns are reduced only for the model call. The retained session history is
+    /// unchanged; system/developer messages, the active turn, approvals, and interrupted turns
+    /// are protected.
+    /// </remarks>
+    public string? DefaultContextReducerKey { get; set; }
+
+    /// <summary>
     /// Gets or sets the worker-level default interceptor factory. Accepts any factory that
     /// produces an <see cref="IDurableToolInterceptor{TContext}"/> for
     /// <see cref="AgentToolContext"/> — including factories that return

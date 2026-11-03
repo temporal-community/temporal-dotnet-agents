@@ -220,11 +220,11 @@ external-effect audit or proof of rollback; reconcile with the system of record 
 
 For long-running agent sessions the conversation history accumulated in the
 `AgentWorkflow` can grow large enough to make each LLM call expensive.
-`TemporalCommunity.Extensions.Agents` works with the same MEAI `IChatReducer` family
-as `TemporalCommunity.Extensions.AI`: register a stateless reducer such as
-`MessageCountingChatReducer` on the underlying `IChatClient` that backs your
-`AIAgent`. The reducer applies a sliding window at the LLM-call boundary —
-inside `AgentActivities.RunDurableAgentStepAsync` — so it does not need to be replay-safe.
+`TemporalCommunity.Extensions.Agents` can use the same MEAI `IChatReducer` family
+as `TemporalCommunity.Extensions.AI`. Register the reducer in worker DI and select
+it with `DefaultContextReducerKey` or the per-agent `ContextReducerKey`. The reducer
+runs in the model activity on isolated copies of eligible older turns; it never
+changes the retained history returned by `GetHistory`.
 
 `MessageCountingChatReducer` is annotated `[Experimental("MEAI001")]`, so it needs a suppression
 until MEAI stabilizes the type — the pragma below, or `<NoWarn>$(NoWarn);MEAI001</NoWarn>` in the
@@ -232,22 +232,16 @@ project file.
 
 ```csharp
 #pragma warning disable MEAI001
-var chatClient = openAiClient.GetChatClient("gpt-4o-mini")
-    .AsIChatClient()                                     // OpenAI's ChatClient is not an IChatClient
-    .AsBuilder()
-    .UseChatReducer(new MessageCountingChatReducer(20))   // 20-message window to the LLM
-    .Build();
-//  Note: do NOT call .UseFunctionInvocation() — the durable-agent path composes
-//  the chat pipeline internally and tools are dispatched as separate Temporal activities.
-//  This is enforced: the activity fails non-retryably before the model is called.
-
-builder.Services.AddChatClient(chatClient);
+builder.Services.AddKeyedSingleton<IChatReducer>(
+    "recent-context",
+    new MessageCountingChatReducer(20));
 builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
     .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
+        opts.DefaultContextReducerKey = "recent-context";
         opts.AddDurableAgent("MyAgent", agent =>
         {
             agent.Instructions = "You are a helpful assistant.";
@@ -264,7 +258,11 @@ With this configuration:
 - The `AgentWorkflow`'s `_history` retains every message ever exchanged in the
   session — that is the durable, replay-safe source of truth and survives worker
   restarts and continue-as-new transitions.
-- The reducer passes only the most recent 20 messages to the LLM on each turn.
+- The reducer receives only eligible prior turns. The active turn, system/developer
+  instructions, approval turns, and interrupted turns are protected from reduction.
+- Reducer output is validated for complete tool-call/result exchanges and checked
+  against the final model-context budget. Invalid output or output that still exceeds
+  the configured limit fails before the provider is called.
 - Querying `_history` (e.g., for audit) still returns the full unreduced log.
 - `MaxModelContextTokens` optionally bounds estimated input plus `ModelOutputTokenReserve`.
   The worker trims only complete eligible prior turns before context providers run, then validates
@@ -283,7 +281,9 @@ profiled deployments, the estimator and configured limit should match the worker
 > **Note:** `MessageCountingChatReducer` is provided by the MEAI library
 > (`Microsoft.Extensions.AI`). Any `IChatReducer` implementation works —
 > token-counting reducers, summarization reducers, etc. — as long as it is
-> stateless or scoped per call. This is prompt shaping only: an `IChatReducer`
+> deterministic for the same input and safe for concurrent activity calls. A reducer
+> may run again when an activity retries, and any provider calls it makes are activity
+> work with their own retry/cost implications. This is prompt shaping only: an `IChatReducer`
 > is not a durable `DurableSessionEntry` compaction adapter. Use the keyed
 > `HistoryReducerKey` path for continue-as-new history reduction.
 
@@ -1139,6 +1139,7 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
 | `RetryPolicy` | Agent-level retry policy. Applies to the `RunDurableAgentStep` (LLM) activity **and** to every tool and interceptor activity on this agent that does not override it — not LLM-only. A tool overrides it via `DurableToolOptions.RetryPolicy`. |
 | `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
+| `ContextReducerKey` | Per-agent MEAI context reducer key. Inherits `opts.DefaultContextReducerKey`; affects only the model request, not retained history. |
 | `MaxModelContextTokens`, `ModelOutputTokenReserve` | Optional per-agent estimated model-context limit and output reserve. Inherit worker defaults when unset. |
 | `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached on the `TemporalAIAgent` instance for its lifetime — it describes the agent, not the conversation, so every session that instance drives shares the resolved value. Changes to the builder value after worker startup do not affect agents already resolved. |
 | `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
@@ -1170,6 +1171,7 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.MaxModelContextTokens` | `opts.DefaultMaxModelContextTokens` |
 | `agent.ModelOutputTokenReserve` | `opts.DefaultModelOutputTokenReserve` |
 | `agent.HistoryReducerKey` | `opts.DefaultHistoryReducerKey` |
+| `agent.ContextReducerKey` | `opts.DefaultContextReducerKey` |
 | `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
 | `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
 

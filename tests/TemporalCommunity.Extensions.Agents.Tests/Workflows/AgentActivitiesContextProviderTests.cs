@@ -1,5 +1,6 @@
 #pragma warning disable MAAI001 // experimental AIContextProvider.InvokingContext ctor; see ExperimentalApiSuppressions.cs
 #pragma warning disable TA001 // IDurableToolSource is experimental; intentional consumption in these tests
+#pragma warning disable MEAI001 // The pinned MEAI reducer is experimental.
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FakeItEasy;
@@ -12,6 +13,7 @@ using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.Agents.Workflows;
+using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Client;
 using Temporalio.Testing;
@@ -184,6 +186,47 @@ public class AgentActivitiesContextProviderTests
         Assert.Equal("registered-instructions\nprovider-instructions", leafOptions!.Instructions);
         Assert.Equal(["STOP"], leafOptions.StopSequences);
         Assert.Equal(["alpha"], leafOptions.Tools!.Select(tool => tool.Name));
+    }
+
+    [Fact]
+    public async Task RunDurableAgentStep_AppliesContextReducerToPriorTurnsOnly()
+    {
+        var client = new SimpleStreamingChatClient();
+        var (activities, _) = BuildHarness(
+            opts =>
+            {
+                opts.AddDurableAgent("ReducedContextAgent", agent =>
+                {
+                    agent.ChatClient = _ => client;
+                    agent.ContextReducerKey = "recent";
+                });
+            },
+            services => services.AddKeyedSingleton<IChatReducer>(
+                "recent",
+                new MessageCountingChatReducer(1)));
+        var input = new AgentStepInput
+        {
+            AgentName = "ReducedContextAgent",
+            Request = new RunRequest("active request"),
+            AccumulatedMessages =
+            [
+                new ChatMessage(ChatRole.User, "old request"),
+                new ChatMessage(ChatRole.Assistant, "old response"),
+                new ChatMessage(ChatRole.User, "active request"),
+            ],
+            CurrentTurnStartIndex = 2,
+            PreviousTurnRanges = [new DurableChatTurnRange(0, 2, IsProtected: false)],
+            SessionId = TemporalAgentSessionId.WithRandomKey("ReducedContextAgent"),
+        };
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        await env.RunAsync(() => activities.RunDurableAgentStepAsync(input));
+
+        Assert.Collection(
+            client.LastMessages!,
+            message => Assert.Equal("old response", message.Text),
+            message => Assert.Equal("active request", message.Text));
+        Assert.Equal("old request", input.AccumulatedMessages[0].Text);
     }
 
     /// <summary>
@@ -507,6 +550,7 @@ public class AgentActivitiesContextProviderTests
     private sealed class SimpleStreamingChatClient : IChatClient
     {
         public ChatOptions? LastOptions { get; private set; }
+        public IReadOnlyList<ChatMessage>? LastMessages { get; private set; }
 
         public ChatClientMetadata Metadata { get; } = new("test-streaming");
 
@@ -522,6 +566,7 @@ public class AgentActivitiesContextProviderTests
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
             LastOptions = options;
+            LastMessages = messages.ToArray();
             yield return new ChatResponseUpdate(ChatRole.Assistant, string.Empty);
             await Task.CompletedTask;
         }

@@ -589,7 +589,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 var end = messageIndex + response.Messages.Count;
                 var isProtected = response.CompletionReason == DurableTurnCompletionReason.Interrupted
                     || ContainsApprovalContent(request.Messages)
-                    || ContainsApprovalContent(response.Messages);
+                    || ContainsApprovalContent(response.Messages)
+                    || ContainsInstructionContent(request.Messages)
+                    || ContainsInstructionContent(response.Messages);
                 if (end > start)
                 {
                     ranges.Add(new DurableChatTurnRange(start, end, isProtected));
@@ -616,6 +618,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private static bool ContainsApprovalContent(IReadOnlyList<ChatMessage> messages) =>
         messages.SelectMany(message => message.Contents)
             .Any(content => content is ToolApprovalRequestContent or ToolApprovalResponseContent);
+
+    private static bool ContainsInstructionContent(IReadOnlyList<ChatMessage> messages) =>
+        messages.Any(message =>
+            message.Role == ChatRole.System || message.Role == new ChatRole("developer"));
 
     /// <summary>
     /// Dispatches a durable activity to apply a keyed history reducer at continue-as-new time.

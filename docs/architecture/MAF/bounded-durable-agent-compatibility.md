@@ -14,7 +14,7 @@ The extension builds a fresh `ChatClientAgent` inside each LLM-step activity fro
 | Provider-owned history or external writes | Unsupported contract | Do not register it until a dedicated durable adapter defines idempotency and recovery. |
 | Provider state held in fields | Unsupported | Store compact per-session state in `AgentSessionStateBag`. |
 | `ChatHistoryProvider` as the durable history owner | Unsupported | Temporal owns `DurableSessionEntry` history; use a retry-safe context projection only. |
-| `IChatReducer` | Prompt shaping only | Use it in the `IChatClient` pipeline; use `HistoryReducerKey` for entry-level continue-as-new reduction. |
+| `IChatReducer` | Prompt shaping only | Register a keyed context reducer; it receives isolated eligible prior-turn context and does not change retained history. Use `HistoryReducerKey` for entry-level continue-as-new reduction. |
 | Large `StateBag` | Warning only at continue-as-new | Keep carried state compact; the 64 KB warning neither trims nor fails the session. |
 
 ## Supported inputs

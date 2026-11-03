@@ -416,6 +416,13 @@ public record class DurableChatWorkflowInput
     public string? HistoryReducerKey { get; init; }
 
     /// <summary>
+    /// Optional worker DI key for an MEAI <see cref="Microsoft.Extensions.AI.IChatReducer"/>
+    /// that shapes model context without changing retained history.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContextReducerKey { get; init; }
+
+    /// <summary>
     /// The UTC timestamp at which the session was originally created.
     /// Populated on the first run and carried forward through continue-as-new transitions
     /// so that <c>SessionCreatedAt</c> always reflects the true session start time.

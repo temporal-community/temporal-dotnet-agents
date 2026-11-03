@@ -46,6 +46,12 @@ public sealed class DurableChatInput
     public string? ClientKey { get; init; }
 
     /// <summary>
+    /// Optional keyed-service key for the context-only MEAI reducer resolved by the worker.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ContextReducerKey { get; init; }
+
+    /// <summary>
     /// Optional caller-supplied correlation ID for this turn. When null/empty, the
     /// workflow auto-generates one via <c>Workflow.NewGuid()</c>. Useful for threading
     /// upstream HTTP/gRPC trace IDs into the workflow for cross-system log correlation.

@@ -67,6 +67,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 ConversationId = conversationId ?? Workflow.Info.WorkflowId,
                 TurnNumber = CurrentTurnNumber,
                 ClientKey = clientKey,
+                ContextReducerKey = RequiredInput.ContextReducerKey,
                 CorrelationId = requestEntry.CorrelationId,
                 ToolDeclarations = effectiveDeclarations,
                 CurrentTurnStartIndex = CurrentTurnStartIndex,
