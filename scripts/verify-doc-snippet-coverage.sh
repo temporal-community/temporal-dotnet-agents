@@ -103,6 +103,9 @@ scan_docs() {
                  body ~ /ToDurableDecision\(\)/) ||
                 (FILENAME == "docs/how-to/MAF/usage.md" &&
                  (heading == "request-id-recovery" || heading == "inspecting-workflow-history-budget")) ||
+                (FILENAME == "docs/how-to/MEAI/custom-workflow-output.md" &&
+                 heading == "package-managed-typed-turns" &&
+                 body ~ /DurableToolWorkflowBase/) ||
                 (FILENAME == "docs/how-to/MEAI/testing.md" && heading ~ /^phase-[0-9]+-/))) {
                 print FILENAME "#" (heading == "" ? "-no-heading-" : heading)
             }

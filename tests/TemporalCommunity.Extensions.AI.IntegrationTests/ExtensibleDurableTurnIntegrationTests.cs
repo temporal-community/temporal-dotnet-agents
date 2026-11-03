@@ -8,6 +8,7 @@ using TemporalCommunity.Extensions.AI.Tools;
 using TemporalCommunity.Extensions.Tests.Shared;
 using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
+using Temporalio.Worker;
 using Temporalio.Workflows;
 using Xunit;
 
@@ -513,6 +514,15 @@ public class ExtensibleDurableTurnIntegrationTests
         Assert.Equal(
             2,
             await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+
+        var replayOptions = new WorkflowReplayerOptions
+        {
+            DataConverter = DurableAIDataConverter.Instance,
+        };
+        replayOptions.AddWorkflow<IntegrationDurableTurnWorkflow>();
+        var replay = await new WorkflowReplayer(replayOptions)
+            .ReplayWorkflowAsync(await handle.FetchHistoryAsync(), throwOnReplayFailure: false);
+        Assert.Null(replay.ReplayFailure);
 
         await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();

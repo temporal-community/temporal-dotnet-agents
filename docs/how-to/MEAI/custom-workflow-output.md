@@ -16,9 +16,12 @@ Use `DurableToolWorkflowBase<TRequestData, TTurnState>` when one workflow Update
 built-in managed tool loop and return a typed result:
 
 ```csharp
-[Workflow("ApplicationWorkflow")]
-public sealed class ApplicationWorkflow
-    : DurableToolWorkflowBase<ApplicationRequest, ApplicationTurnState>
+public sealed record ReportRequest(string OperationId);
+public sealed record ReportState(int Revision);
+
+[Workflow("CustomWorkflow.Report")]
+public sealed class CustomReportWorkflow
+    : DurableToolWorkflowBase<ReportRequest, ReportState>
 {
     protected override IReadOnlyList<string>? DurableToolsetBaselineIds =>
         ["catalog", "operations"];
@@ -33,12 +36,12 @@ public sealed class ApplicationWorkflow
 
     [WorkflowUpdateValidator(nameof(TurnAsync))]
     public void ValidateTurn(
-        DurableTurnRequest<ApplicationRequest, ApplicationTurnState> request) =>
+        DurableTurnRequest<ReportRequest, ReportState> request) =>
         ValidateDurableTurnAdmission(request);
 
     [WorkflowUpdate("Turn")]
-    public Task<DurableTurnResult<ApplicationTurnState>> TurnAsync(
-        DurableTurnRequest<ApplicationRequest, ApplicationTurnState> request) =>
+    public Task<DurableTurnResult<ReportState>> TurnAsync(
+        DurableTurnRequest<ReportRequest, ReportState> request) =>
         RunDurableTurnAsync(request);
 }
 ```

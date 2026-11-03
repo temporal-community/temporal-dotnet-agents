@@ -162,6 +162,18 @@ usage_snippet='// BEGIN SNIPPET docs/how-to/MEAI/usage.md#send
 run_case meai-usage-uncovered reject "$usage_doc" '' '' 'docs/how-to/MEAI/usage.md'
 run_case meai-usage-covered pass "$usage_doc" "$usage_snippet" '' 'docs/how-to/MEAI/usage.md'
 
+custom_workflow_doc='# Custom workflow output
+
+## Package-managed typed turns
+
+```csharp
+public sealed class ReportWorkflow : DurableToolWorkflowBase<RequestData, TurnState> { }
+```'
+custom_workflow_snippet='// BEGIN SNIPPET docs/how-to/MEAI/custom-workflow-output.md#package-managed-typed-turns
+// END SNIPPET docs/how-to/MEAI/custom-workflow-output.md#package-managed-typed-turns'
+run_case meai-custom-workflow-uncovered reject "$custom_workflow_doc" '' '' 'docs/how-to/MEAI/custom-workflow-output.md'
+run_case meai-custom-workflow-covered pass "$custom_workflow_doc" "$custom_workflow_snippet" '' 'docs/how-to/MEAI/custom-workflow-output.md'
+
 phase_doc='# Testing
 
 ### Phase 0 timer harness

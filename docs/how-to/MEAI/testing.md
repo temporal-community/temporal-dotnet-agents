@@ -232,7 +232,10 @@ The rule of thumb: if your code just *calls* `SendAsync` or `GetHistoryAsync`, u
 
 For `DurableToolWorkflowBase`, integration tests should separately prove the one-managed-turn-per-
 Update guard and Continue-as-New preservation of the concrete workflow plus frozen declaration and
-policy snapshot. The repository's `TypedDurableTurnLifecycleTests` is the reference shape.
+policy snapshot. Also replay a captured execution containing model-step and tool activities; the
+typed workflow's concrete `[WorkflowRun]` and its `RunDurableTurnAsync` lifecycle must reproduce
+the recorded commands. `ExtensibleDurableTurnIntegrationTests.TypedSequentialTurn_RetriesWithStableIdentity_AndReturnsFinalState`
+is the reference shape.
 
 Workflow-command compatibility is covered by checked-in histories. Capture the typed history only
 when its command sequence intentionally changes:

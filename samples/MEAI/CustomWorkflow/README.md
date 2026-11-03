@@ -34,6 +34,13 @@ Program.cs
 
 Note: cart tools execute inline inside the single `ShoppingActivity` invocation via `UseFunctionInvocation()`. They are NOT dispatched as separate Temporal activities. For per-tool activity dispatch with retry/timeout isolation, see `samples/MEAI/DurableTools/`.
 
+The workflow itself never resolves or calls an `IChatClient`: `ShoppingAssistantWorkflow` schedules
+the activity, and the worker injects its provider-backed client into `ShoppingActivities`. This
+sample deliberately owns the whole model/tool loop inside one activity. Use the
+[`ExtensibleDurableTurns` sample](../ExtensibleDurableTurns/README.md) when the package should
+schedule a distinct activity for each model step and durable tool while preserving typed request
+data and turn state.
+
 For a typed custom Update that reuses the package-managed model/tool loop, passes application
 request/state values to invocation-scoped tools, and retains a separate activity per tool, see
 [`samples/MEAI/ExtensibleDurableTurns`](../ExtensibleDurableTurns/README.md). That additive path uses
