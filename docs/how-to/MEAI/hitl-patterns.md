@@ -148,3 +148,9 @@ to the client call only cancels that RPC wait. If cancellation is requested whil
 running, Temporal cancels the activity and the workflow waits for cancellation to complete;
 activity code and downstream operations must cooperate, and cancellation cannot undo an effect
 that already occurred.
+
+If an approved tool was dispatched before the turn was cancelled or failed, the retained session
+history records the call and its known result, or an explicit unknown result when completion cannot
+be confirmed. Calls not dispatched are marked not executed. The partial assistant response and raw
+failure details are not retained, and this bounded model context does not replace checking the
+downstream system of record.

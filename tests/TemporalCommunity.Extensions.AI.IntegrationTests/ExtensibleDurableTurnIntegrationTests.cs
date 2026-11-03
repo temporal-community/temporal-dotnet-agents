@@ -288,13 +288,18 @@ public class ExtensibleDurableTurnIntegrationTests
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
 
-        var chatClient = ScriptedChatClient.WithRepeatingToolThenFinal(
-            index => new FunctionCallContent(
-                $"state-failure-{index}",
-                "state_failure",
-                new Dictionary<string, object?>()),
-            repeatCount: 2,
-            finalText: "The model should never reach this response.");
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [new FunctionCallContent("completed-call", "success_tool")])),
+            new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [new FunctionCallContent(
+                    "state-failure-0",
+                    "state_failure",
+                    new Dictionary<string, object?>())])),
+        ]);
         var invocationCount = 0;
         var taskQueue = $"extensible-state-failure-{Guid.NewGuid():N}";
         using var host = BuildStateCompletionFailureHost(
@@ -311,10 +316,72 @@ public class ExtensibleDurableTurnIntegrationTests
                 new WorkflowUpdateOptions { Id = "state-completion-failure" }));
 
         Assert.Equal(1, invocationCount);
-        Assert.Equal(1, chatClient.CallCount);
+        Assert.Equal(2, chatClient.CallCount);
         var history = await handle.QueryAsync<IntegrationDurableTurnWorkflow, IReadOnlyList<DurableSessionEntry>>(
             workflow => workflow.GetHistory());
-        Assert.Empty(history);
+        var interrupted = Assert.IsType<DurableSessionResponse>(Assert.Single(history.Skip(1)));
+        Assert.Equal(DurableTurnCompletionReason.Interrupted, interrupted.CompletionReason);
+        var retainedResults = interrupted.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionResultContent>()
+            .ToDictionary(result => result.CallId);
+        Assert.Equal("ordinary result", retainedResults["completed-call"].Result?.ToString());
+        Assert.Contains("unknown", retainedResults["state-failure-0"].Result?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(interrupted.Messages, message =>
+            message.Contents.OfType<FunctionCallContent>().Any(call => call.Name == "state_failure"));
+        Assert.Contains("reconcile before retrying", interrupted.Messages[^1].Text, StringComparison.Ordinal);
+
+        await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task InterruptedTurnHistory_CompactsOversizedToolResults()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [new FunctionCallContent("completed-call", "success_tool")])),
+            new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [new FunctionCallContent("state-failure-0", "state_failure")])),
+        ]);
+        var taskQueue = $"extensible-interrupted-compact-{Guid.NewGuid():N}";
+        using var host = BuildStateCompletionFailureHost(
+            env.Client,
+            taskQueue,
+            chatClient,
+            static () => { },
+            successfulToolResult: new string('x', 70 * 1024));
+        await host.StartAsync();
+
+        var handle = await StartWorkflowAsync(env.Client, host.Services, taskQueue);
+        await Assert.ThrowsAnyAsync<Exception>(() =>
+            handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+                workflow => workflow.TurnAsync(CreateRequest()),
+                new WorkflowUpdateOptions { Id = "interrupted-compact" }));
+
+        var history = await handle.QueryAsync<IntegrationDurableTurnWorkflow, IReadOnlyList<DurableSessionEntry>>(
+            workflow => workflow.GetHistory());
+        var interrupted = Assert.IsType<DurableSessionResponse>(history[^1]);
+        var calls = interrupted.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>()
+            .ToDictionary(call => call.CallId);
+        var results = interrupted.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionResultContent>()
+            .ToDictionary(result => result.CallId);
+        Assert.Null(calls["completed-call"].Arguments);
+        Assert.Contains(
+            "completed; result omitted",
+            results["completed-call"].Result?.ToString(),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(DurableTurnCompletionReason.Interrupted, interrupted.CompletionReason);
 
         await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
@@ -362,6 +429,16 @@ public class ExtensibleDurableTurnIntegrationTests
         Assert.Equal(
             1,
             await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+        var history = await handle.QueryAsync<IntegrationDurableTurnWorkflow, IReadOnlyList<DurableSessionEntry>>(
+            workflow => workflow.GetHistory());
+        var interrupted = Assert.IsType<DurableSessionResponse>(history[^1]);
+        Assert.Equal(DurableTurnCompletionReason.Interrupted, interrupted.CompletionReason);
+        var toolResults = interrupted.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionResultContent>()
+            .ToDictionary(result => result.CallId);
+        Assert.Contains("unknown", toolResults["fatal-first"].Result?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("not executed", toolResults["must-not-run"].Result?.ToString(), StringComparison.OrdinalIgnoreCase);
 
         await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
         await host.StopAsync();
@@ -903,7 +980,8 @@ public class ExtensibleDurableTurnIntegrationTests
         string taskQueue,
         IChatClient chatClient,
         Action onInvoke,
-        Action? onLaterInvoke = null)
+        Action? onLaterInvoke = null,
+        string successfulToolResult = "ordinary result")
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
@@ -918,6 +996,13 @@ public class ExtensibleDurableTurnIntegrationTests
                 options.HeartbeatTimeout = TimeSpan.FromSeconds(10);
             })
             .AddWorkflow<IntegrationDurableTurnWorkflow>();
+
+        worker.AddDurableTool(
+            AIFunctionFactory.Create(
+                () => successfulToolResult,
+                "success_tool",
+                "Returns a result before a later fatal failure."),
+            options => options.WithMaxAttempts(1));
 
         var declaration = AIFunctionFactory.Create(
             () => string.Empty,

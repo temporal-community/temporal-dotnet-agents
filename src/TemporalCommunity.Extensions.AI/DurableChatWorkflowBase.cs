@@ -25,6 +25,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private readonly Dictionary<string, TurnExecutionRecord> _terminalTurns =
         new(StringComparer.Ordinal);
     private readonly List<string> _terminalTurnOrder = [];
+    private readonly List<InterruptedToolBatch> _interruptedToolBatches = [];
     private long _terminalTurnLedgerBytes;
     private int _maxTerminalOutcomeCount = 128;
     private int _maxTerminalOutcomeBytes = 1024 * 1024;
@@ -81,6 +82,23 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     }
 
     private sealed record TurnFailure(string ErrorType, string Message, bool NonRetryable);
+
+    private sealed class InterruptedToolBatch(IReadOnlyList<FunctionCallContent> calls)
+    {
+        public IReadOnlyList<InterruptedToolCall> Calls { get; } =
+            calls.Select(call => new InterruptedToolCall(call)).ToArray();
+    }
+
+    private sealed class InterruptedToolCall(FunctionCallContent call)
+    {
+        public FunctionCallContent Call { get; } = call;
+
+        public bool Dispatched { get; set; }
+
+        public bool HasResult { get; set; }
+
+        public object? Result { get; set; }
+    }
 
     /// <summary>
     /// Represents ownership of, or a join on, one logical turn admission.
@@ -1460,6 +1478,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         var rollbackParticipant = this as Internal.IDurableTurnRollbackParticipant;
         JsonElement? participantStateBeforeTurn = null;
         var participantStateCaptured = false;
+        DurableSessionRequest? requestEntryToAppend = null;
+        _interruptedToolBatches.Clear();
 
         try
         {
@@ -1478,7 +1498,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             // Append the request entry for this turn. When external-history mode is on we
             // replace the messages with an empty list so the in-workflow history never holds
             // the raw user prompt — only request identity and metadata for turn counting.
-            var requestEntryToAppend = ShouldStripMessagesFromHistoryEntry()
+            requestEntryToAppend = ShouldStripMessagesFromHistoryEntry()
                 ? (DurableSessionRequest)StripMessagesFromEntry(requestEntry)
                 : requestEntry;
             _history.Add(requestEntryToAppend);
@@ -1562,6 +1582,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             var terminalException = IsCurrentTurnCancellationRequested()
                 ? CreateTurnCancellationFailure(exception)
                 : exception;
+
+            if (requestEntryToAppend is not null && HasDispatchedInterruptedToolCall())
+            {
+                var interruptedResponse = CreateInterruptedResponseEntry(
+                    requestEntryToAppend.CorrelationId,
+                    requestEntry.RequestId,
+                    IsCurrentTurnCancellationRequested());
+                _history.Add(requestEntryToAppend);
+                _history.Add(ShouldStripMessagesFromHistoryEntry()
+                    ? (DurableSessionResponse)StripMessagesFromEntry(interruptedResponse)
+                    : interruptedResponse);
+            }
+
             CompleteTurnFailure(turnRecord, terminalException);
             if (!IsCurrentTurnCancellationRequested())
             {
@@ -1576,8 +1609,152 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         }
         finally
         {
+            _interruptedToolBatches.Clear();
             _isProcessing = false;
         }
+    }
+
+    /// <summary>Starts tracking the tool calls in one model response for interruption recovery.</summary>
+    protected int BeginInterruptedToolBatch(IReadOnlyList<FunctionCallContent> calls)
+    {
+        ArgumentNullException.ThrowIfNull(calls);
+        _interruptedToolBatches.Add(new InterruptedToolBatch(calls));
+        return _interruptedToolBatches.Count - 1;
+    }
+
+    /// <summary>Marks a tool call as dispatched, conservatively treating its effect as uncertain.</summary>
+    protected void MarkInterruptedToolCallDispatched(int batchIndex, int callIndex)
+    {
+        GetInterruptedToolCall(batchIndex, callIndex).Dispatched = true;
+    }
+
+    /// <summary>Records a known tool result, including a synthetic non-dispatch result.</summary>
+    protected void RecordInterruptedToolCallResult(
+        int batchIndex,
+        int callIndex,
+        object? result,
+        bool wasDispatched)
+    {
+        var call = GetInterruptedToolCall(batchIndex, callIndex);
+        call.Dispatched |= wasDispatched;
+        call.HasResult = true;
+        call.Result = result;
+    }
+
+    private InterruptedToolCall GetInterruptedToolCall(int batchIndex, int callIndex)
+    {
+        if ((uint)batchIndex >= (uint)_interruptedToolBatches.Count)
+        {
+            throw new InvalidOperationException("The interrupted tool batch is not active.");
+        }
+
+        var calls = _interruptedToolBatches[batchIndex].Calls;
+        if ((uint)callIndex >= (uint)calls.Count)
+        {
+            throw new InvalidOperationException("The interrupted tool call index is invalid.");
+        }
+
+        return calls[callIndex];
+    }
+
+    private bool HasDispatchedInterruptedToolCall() =>
+        _interruptedToolBatches.Any(batch => batch.Calls.Any(call => call.Dispatched));
+
+    private DurableSessionResponse CreateInterruptedResponseEntry(
+        string correlationId,
+        string? requestId,
+        bool wasCancelled)
+    {
+        const int maximumInterruptedResponseBytes = 64 * 1024;
+        var maximumPayloadBytes = Math.Min(
+            maximumInterruptedResponseBytes,
+            RequiredInput.MaximumTransportPayloadSizeBytes);
+        var expansionAllowanceBytes = Math.Min(
+            RequiredInput.PayloadCodecExpansionAllowanceBytes,
+            maximumPayloadBytes - 1);
+        var response = CreateInterruptedResponseEntryCore(
+            correlationId,
+            requestId,
+            wasCancelled,
+            compact: false);
+
+        try
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                response,
+                maximumPayloadBytes,
+                expansionAllowanceBytes,
+                "interrupted-turn history entry");
+            return response;
+        }
+        catch (ApplicationFailureException exception)
+            when (exception.ErrorType == "DurableTransportPayloadTooLarge")
+        {
+            var compactResponse = CreateInterruptedResponseEntryCore(
+                correlationId,
+                requestId,
+                wasCancelled,
+                compact: true);
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                compactResponse,
+                maximumPayloadBytes,
+                expansionAllowanceBytes,
+                "compact interrupted-turn history entry");
+            return compactResponse;
+        }
+    }
+
+    private DurableSessionResponse CreateInterruptedResponseEntryCore(
+        string correlationId,
+        string? requestId,
+        bool wasCancelled,
+        bool compact)
+    {
+        var messages = new List<ChatMessage>();
+        foreach (var batch in _interruptedToolBatches)
+        {
+            var callContents = compact
+                ? batch.Calls
+                    .Select(call => (AIContent)new FunctionCallContent(call.Call.CallId, call.Call.Name))
+                    .ToList()
+                : batch.Calls.Select(call => (AIContent)call.Call).ToList();
+            messages.Add(new ChatMessage(ChatRole.Assistant, callContents));
+
+            var results = new List<AIContent>(batch.Calls.Count);
+            foreach (var call in batch.Calls)
+            {
+                var result = compact
+                    ? call.Dispatched && call.HasResult
+                        ? "Tool activity completed; result omitted from the bounded interruption record."
+                        : call.Dispatched
+                            ? "Tool effect may have completed; result unknown and omitted from the bounded interruption record."
+                            : "Tool call was not executed."
+                    : call.HasResult
+                        ? call.Result
+                        : call.Dispatched
+                            ? "Tool effect may have completed, but its result is unknown."
+                            : "Tool call was not executed.";
+                results.Add(new FunctionResultContent(call.Call.CallId, result));
+            }
+            messages.Add(new ChatMessage(ChatRole.Tool, results));
+        }
+
+        messages.Add(new ChatMessage(
+            ChatRole.Assistant,
+            wasCancelled
+                ? "Turn interrupted by cancellation. Tool effects may have occurred; reconcile before retrying."
+                : "Turn interrupted after a tool was dispatched. Tool effects may have occurred; reconcile before retrying."));
+
+        return new DurableSessionResponse
+        {
+            CorrelationId = correlationId,
+            CreatedAt = Workflow.UtcNow,
+            RequestId = requestId,
+            Messages = messages,
+            CompletionReason = DurableTurnCompletionReason.Interrupted,
+        };
     }
 
     // ── Queries ─────────────────────────────────────────────────────────────

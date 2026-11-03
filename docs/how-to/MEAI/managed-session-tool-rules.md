@@ -147,3 +147,9 @@ activity and interrupts a pending approval wait. It waits for active activity ca
 complete before stopping and does not schedule more activity work. Activity code and downstream
 operations must cooperate with cancellation; an external effect already dispatched is not undone
 and may need reconciliation.
+
+If dispatch occurred before the turn failed or was cancelled, the workflow retains an interrupted
+response for later model context: completed results remain paired with their calls, uncertain
+dispatched outcomes are marked unknown, and undispatched calls are marked not executed. Partial
+assistant text is dropped. This record is bounded and redacted; it is not an external-effect audit
+log or a guarantee that an unknown result did not commit.

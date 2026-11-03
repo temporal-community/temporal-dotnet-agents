@@ -660,6 +660,7 @@ internal class AgentWorkflow :
             }
 
             var toolCalls = stepResult.ToolCalls;
+            var interruptedBatchIndex = BeginInterruptedToolBatch(toolCalls);
 
             var registeredToolNames = _input!.DurableAgentToolActivityOptions?.Keys.ToArray()
                 ?? [];
@@ -939,6 +940,7 @@ internal class AgentWorkflow :
                 toolTasks[idx] = Workflow.ExecuteActivityAsync(
                     (AgentActivities a) => a.InvokeAgentToolAsync(input),
                     ApplyCurrentTurnCancellation(opts));
+                MarkInterruptedToolCallDispatched(interruptedBatchIndex, idx);
             }
 
             // ── Phase 3: Wait for all dispatched tool activities ──────────────────────────
@@ -946,9 +948,52 @@ internal class AgentWorkflow :
                 .Where(t => t is not null)
                 .Cast<Task<InvokeAgentToolResult>>()
                 .ToList();
-            InvokeAgentToolResult[]? toolResults = pendingTasks.Count > 0
-                ? await Workflow.WhenAllAsync(pendingTasks).ConfigureAwait(true)
-                : null;
+            InvokeAgentToolResult[]? toolResults;
+            try
+            {
+                toolResults = pendingTasks.Count > 0
+                    ? await Workflow.WhenAllAsync(pendingTasks).ConfigureAwait(true)
+                    : null;
+            }
+            catch
+            {
+                for (var i = 0; i < toolTasks.Length; i++)
+                {
+                    if (toolTasks[i] is { IsCompletedSuccessfully: true } completedTask)
+                    {
+                        RecordInterruptedToolCallResult(
+                            interruptedBatchIndex,
+                            i,
+                            completedTask.Result.Result,
+                            wasDispatched: true);
+                    }
+                }
+
+                throw;
+            }
+
+            var completedResultIndex = 0;
+            for (var i = 0; i < toolCalls.Count; i++)
+            {
+                if (syntheticResults[i] is { } synthetic)
+                {
+                    RecordInterruptedToolCallResult(
+                        interruptedBatchIndex,
+                        i,
+                        synthetic,
+                        wasDispatched: false);
+                }
+                else if (toolTasks[i] is { IsCompletedSuccessfully: true }
+                         && toolResults is not null)
+                {
+                    RecordInterruptedToolCallResult(
+                        interruptedBatchIndex,
+                        i,
+                        toolResults[completedResultIndex++].Result,
+                        wasDispatched: true);
+                }
+            }
+
             ThrowIfCurrentTurnCancellationRequested();
 
             // Assemble final results in original order.
@@ -966,6 +1011,11 @@ internal class AgentWorkflow :
                     functionResultContents.Add(new FunctionResultContent(
                         callId: toolCalls[i].CallId,
                         result: synthetic));
+                    RecordInterruptedToolCallResult(
+                        interruptedBatchIndex,
+                        i,
+                        synthetic,
+                        wasDispatched: false);
                 }
                 else if (toolResults is not null && pendingIdx < toolResults.Length)
                 {
@@ -977,6 +1027,11 @@ internal class AgentWorkflow :
                     functionResultContents.Add(new FunctionResultContent(
                         callId: toolCalls[i].CallId,
                         result: toolResult.Result));
+                    RecordInterruptedToolCallResult(
+                        interruptedBatchIndex,
+                        i,
+                        toolResult.Result,
+                        wasDispatched: true);
                 }
             }
 

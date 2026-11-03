@@ -118,6 +118,12 @@ The exact wording of the agent's final reply varies between runs — the model i
 non-deterministic. The retry scenario's deltas are the durable guarantee: lookup at least 2,
 while each write tool fires exactly once.
 
+On a turn failure after dispatch, the shared workflow keeps a bounded interrupted-turn projection
+for later model context: completed tool results remain paired with their calls, uncertain outcomes
+are marked unknown, and undispatched calls are marked not executed. This is not an external-effect
+receipt; reconcile with the system of record before retrying a write. The scenarios above focus on
+retry granularity and do not inject cancellation or a lost tool result.
+
 Selection is enforced twice: the model receives only the selected tool declarations, and the
 workflow checks every returned function call again before interceptor, approval, or tool activity
 dispatch. Unknown and excluded names receive the same generic result. Selection is exposure

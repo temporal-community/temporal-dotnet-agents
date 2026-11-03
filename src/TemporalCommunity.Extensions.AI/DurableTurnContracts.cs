@@ -110,4 +110,10 @@ public enum DurableTurnCompletionReason
     /// are dispatched, and any returned state is provisional and diagnostic only.
     /// </summary>
     IncompleteResponse = 2,
+
+    /// <summary>
+    /// The turn failed or was cancelled after a tool activity was dispatched. History retains
+    /// the request, protocol-valid tool-call/result exchanges, and a bounded interruption marker.
+    /// </summary>
+    Interrupted = 3,
 }

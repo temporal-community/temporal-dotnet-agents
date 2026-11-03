@@ -391,6 +391,39 @@ dispatched effect may have completed even if its result was lost, so use downstr
 reconcile authoritative state. The cancellation token passed to either RPC controls only that RPC
 wait; use `CancelTurnAsync` to request turn cancellation.
 
+If a turn fails after a tool activity was dispatched, `GetHistoryAsync` retains the request and a
+`DurableSessionResponse` with `CompletionReason == Interrupted`. Its tool-call/result messages
+preserve known completed results, use an explicit unknown result for dispatched calls whose
+outcome cannot be confirmed, and mark undispatched calls as not executed. Partial assistant prose
+is omitted. The interruption response is capped at 64 KiB; if necessary, tool arguments and
+results are replaced with bounded placeholders while preserving call/result grammar. This is model
+context for later turns, not proof of an external effect; reconcile with the system of record
+before retrying an effectful operation. A failure before any tool dispatch continues to roll back
+the request and response.
+
+#### Inspect interrupted history
+
+```csharp
+try
+{
+    await turn;
+}
+catch
+{
+    var interrupted = (await sessionClient.GetHistoryAsync("customer-42"))
+        .OfType<DurableSessionResponse>()
+        .LastOrDefault(entry =>
+            entry.RequestId == requestId
+            && entry.CompletionReason == DurableTurnCompletionReason.Interrupted);
+    if (interrupted is not null)
+    {
+        Console.WriteLine("The turn was interrupted after a tool dispatch; reconcile its effects.");
+    }
+
+    throw;
+}
+```
+
 #### Recovering a generated request ID
 
 When the library generated the ID, retain it from `DurableChatRequestException` if the submission fails:

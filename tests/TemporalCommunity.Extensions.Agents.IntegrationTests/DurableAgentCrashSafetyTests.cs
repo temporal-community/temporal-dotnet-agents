@@ -5,6 +5,8 @@ using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode; // shared scaffolding (linked via .csproj)
+using TemporalCommunity.Extensions.Agents.Workflows;
+using Temporalio.Worker;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
@@ -163,6 +165,83 @@ public class DurableAgentCrashSafetyTests
             // Read tool was called twice (1 fail + 1 retry succeed); write tool was called once.
             Assert.Equal(2, readTool.CallCount);
             Assert.Equal(1, writeTool.CallCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task DurableAgent_FailedFanOut_RetainsCompletedAndUnknownToolResults()
+    {
+        await using var env = await TestEnvironmentHelper.StartLocalAsync();
+        env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+        var taskQueue = $"durable-interrupted-{Guid.NewGuid():N}";
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var successfulTool = AIFunctionFactory.Create(
+            () =>
+            {
+                completed.TrySetResult();
+                return "known result";
+            },
+            "completed_tool",
+            "Completes before the paired tool fails.");
+        var failingTool = AIFunctionFactory.Create(
+            async () =>
+            {
+                await completed.Task.ConfigureAwait(false);
+                throw new InvalidOperationException("Injected tool failure.");
+            },
+            "failing_tool",
+            "Fails after the other tool has completed.");
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, [
+                new FunctionCallContent("call-completed", "completed_tool"),
+                new FunctionCallContent("call-unknown", "failing_tool"),
+            ])),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "The session recovered.")),
+        ]);
+
+        using var host = BuildHostOnTaskQueueWithTools(
+            env.Client,
+            taskQueue,
+            scripted,
+            agent =>
+            {
+                agent.AddTool(successfulTool, options => options.NoRetry());
+                agent.AddTool(failingTool, options => options.NoRetry());
+            });
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("DurableAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+
+            await Assert.ThrowsAnyAsync<Exception>(() => proxy.RunAsync("Run both tools", session));
+
+            var response = await proxy.RunAsync("Continue after the failed turn", session);
+            Assert.Contains("The session recovered.", response.Messages[^1].Text);
+            var retainedResults = scripted.Calls[1].Messages
+                .SelectMany(message => message.Contents)
+                .OfType<FunctionResultContent>()
+                .ToDictionary(result => result.CallId);
+            Assert.Equal("known result", retainedResults["call-completed"].Result?.ToString());
+            Assert.Contains(
+                "unknown",
+                retainedResults["call-unknown"].Result?.ToString(),
+                StringComparison.OrdinalIgnoreCase);
+
+            var workflow = env.Client.GetWorkflowHandle(session.SessionId.WorkflowId);
+            var replayOptions = new WorkflowReplayerOptions
+            {
+                DataConverter = TemporalAgentDataConverter.Instance,
+            };
+            replayOptions.AddWorkflow<AgentWorkflow>();
+            var replay = await new WorkflowReplayer(replayOptions)
+                .ReplayWorkflowAsync(await workflow.FetchHistoryAsync(), throwOnReplayFailure: false);
+            Assert.Null(replay.ReplayFailure);
         }
         finally
         {

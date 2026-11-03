@@ -196,6 +196,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
 
             var toolCalls = stepResult.ToolCalls;
+            var interruptedBatchIndex = BeginInterruptedToolBatch(toolCalls);
             var manifestMembers = new Internal.DurableToolsetManifestMember?[toolCalls.Count];
             var callerDeclarations = new Internal.DurableFunctionDeclarationSnapshot?[toolCalls.Count];
             var enabledToolCalls = new bool[toolCalls.Count];
@@ -459,10 +460,18 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         (DurableFunctionActivities a) => a.InvokeFunctionAsync(funcInput),
                         ApplyCurrentTurnCancellation(opts));
                     toolTasks[idx] = task;
+                    MarkInterruptedToolCallDispatched(interruptedBatchIndex, idx);
 
                     try
                     {
                         var output = await task.ConfigureAwait(true);
+                        RecordInterruptedToolCallResult(
+                            interruptedBatchIndex,
+                            idx,
+                            output.Status == DurableFunctionOutputStatus.ResultTooLarge
+                                ? DurableFunctionOutput.ResultTooLargeMessage
+                                : output.Result,
+                            wasDispatched: true);
                         ThrowIfCurrentTurnCancellationRequested();
                         if (output.HasStateReplacement)
                         {
@@ -501,6 +510,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     toolTasks[idx] = Workflow.ExecuteActivityAsync(
                         (DurableFunctionActivities a) => a.InvokeFunctionAsync(funcInput),
                         ApplyCurrentTurnCancellation(opts));
+                    MarkInterruptedToolCallDispatched(interruptedBatchIndex, idx);
                 }
             }
 
@@ -526,6 +536,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 }
                 catch (OperationCanceledException) when (IsCurrentTurnCancellationRequested())
                 {
+                    for (var i = 0; i < toolTasks.Length; i++)
+                    {
+                        if (toolTasks[i] is { IsCompletedSuccessfully: true } completedTask)
+                        {
+                            RecordInterruptedToolCallResult(
+                                interruptedBatchIndex,
+                                i,
+                                completedTask.Result.Status == DurableFunctionOutputStatus.ResultTooLarge
+                                    ? DurableFunctionOutput.ResultTooLargeMessage
+                                    : completedTask.Result.Result,
+                                wasDispatched: true);
+                        }
+                    }
                     throw; // workflow cancellation as OCE — do not classify as an application error
                 }
                 catch
@@ -534,6 +557,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     // Temporal-delivered cancellations rather than application errors.
                     if (IsCurrentTurnCancellationRequested())
                     {
+                        for (var i = 0; i < toolTasks.Length; i++)
+                        {
+                            if (toolTasks[i] is { IsCompletedSuccessfully: true } completedTask)
+                            {
+                                RecordInterruptedToolCallResult(
+                                    interruptedBatchIndex,
+                                    i,
+                                    completedTask.Result.Status == DurableFunctionOutputStatus.ResultTooLarge
+                                        ? DurableFunctionOutput.ResultTooLargeMessage
+                                        : completedTask.Result.Result,
+                                    wasDispatched: true);
+                            }
+                        }
                         throw new OperationCanceledException(
                             "Workflow cancelled during tool fan-out; propagating cancellation.");
                     }
@@ -541,6 +577,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 }
             }
 
+            for (var i = 0; i < toolTasks.Length; i++)
+            {
+                if (toolTasks[i] is { IsCompletedSuccessfully: true } completedTask)
+                {
+                    RecordInterruptedToolCallResult(
+                        interruptedBatchIndex,
+                        i,
+                        completedTask.Result.Status == DurableFunctionOutputStatus.ResultTooLarge
+                            ? DurableFunctionOutput.ResultTooLargeMessage
+                            : completedTask.Result.Result,
+                        wasDispatched: true);
+                }
+            }
             ThrowIfCurrentTurnCancellationRequested();
 
             // Assemble final results in original order (synthetic and real interleaved by index).
@@ -554,6 +603,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 {
                     // Skip or Block outcome — inject synthetic result directly.
                     functionResultContents.Add(new FunctionResultContent(tc.CallId, synthetic));
+                    RecordInterruptedToolCallResult(interruptedBatchIndex, i, synthetic, wasDispatched: false);
                     continue;
                 }
 
@@ -562,7 +612,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 {
                     // Tool was denied (PauseForApproval + denial): syntheticResults[i] was set,
                     // so we should have hit the branch above. This is a defensive fallback.
-                    functionResultContents.Add(new FunctionResultContent(tc.CallId, "[Denied] Tool call was denied."));
+                    const string deniedResult = "[Denied] Tool call was denied.";
+                    functionResultContents.Add(new FunctionResultContent(tc.CallId, deniedResult));
+                    RecordInterruptedToolCallResult(interruptedBatchIndex, i, deniedResult, wasDispatched: false);
                     continue;
                 }
 
@@ -573,6 +625,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         hadError = true;
                         functionResultContents.Add(
                             new FunctionResultContent(tc.CallId, DurableFunctionOutput.ResultTooLargeMessage));
+                        RecordInterruptedToolCallResult(
+                            interruptedBatchIndex,
+                            i,
+                            DurableFunctionOutput.ResultTooLargeMessage,
+                            wasDispatched: true);
                         continue;
                     }
 
@@ -580,6 +637,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     // (declared object?), so FunctionResultContent.Result holds a JsonElement here,
                     // not the tool's domain type. Accepted limitation — see DurableFunctionOutput.Result.
                     functionResultContents.Add(new FunctionResultContent(tc.CallId, task.Result.Result));
+                    RecordInterruptedToolCallResult(
+                        interruptedBatchIndex,
+                        i,
+                        task.Result.Result,
+                        wasDispatched: true);
                 }
                 else if (task.IsCanceled || IsCurrentTurnCancellationRequested())
                 {
@@ -595,6 +657,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     var fatalFailure = CreateFatalToolFailure(ex, tc.Name);
                     if (fatalFailure is not null)
                     {
+                        RecordInterruptedToolCallResult(
+                            interruptedBatchIndex,
+                            i,
+                            "Tool effect may have completed, but its result is unknown.",
+                            wasDispatched: true);
                         throw fatalFailure;
                     }
 
@@ -612,6 +679,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     // CRITICAL: synthesize a FunctionResultContent for EVERY CallId in original
                     // order — OpenAI/Anthropic reject tool turns with missing call IDs.
                     functionResultContents.Add(new FunctionResultContent(tc.CallId, errorMessage));
+                    RecordInterruptedToolCallResult(
+                        interruptedBatchIndex,
+                        i,
+                        errorMessage,
+                        wasDispatched: true);
                 }
             }
 

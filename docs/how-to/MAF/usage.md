@@ -208,6 +208,12 @@ and reconcile authoritative state. A cancellation token passed to `RunAsync` or 
 cancels only that RPC wait; it does not cancel an accepted turn. Use `CancelTurnAsync` to request
 turn cancellation.
 
+If a tool activity was dispatched before a turn fails or is cancelled, the next model step receives
+a bounded interrupted-turn projection: completed call/result pairs are retained, uncertain
+dispatched outcomes are marked unknown, and undispatched calls are marked not executed. Partial
+assistant prose is dropped. This projection supports protocol-valid continuation but is not an
+external-effect audit or proof of rollback; reconcile with the system of record before retrying.
+
 ---
 
 ## Reducing the LLM Context Window

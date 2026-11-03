@@ -361,6 +361,13 @@ external effect; if an effect may have completed before cancellation was observe
 authoritative state and use the logical operation key for downstream idempotency. A caller
 cancelling the `SendAsync` RPC wait is not a turn-cancellation request.
 
+When a turn terminates after dispatch, retained history includes protocol-valid call/result pairs:
+known completed values are kept, uncertain dispatched calls receive an explicit unknown result,
+and calls never dispatched receive a not-executed result. The bounded assistant marker omits
+partial model prose and raw failure details. A later model turn can use this record, but it does
+not establish whether an external effect committed; reconcile through the authoritative system
+and use the logical operation key when retrying.
+
 ### Activity idempotency key
 
 `Metadata.IdempotencyKey` identifies one logical tool call across activity retries and

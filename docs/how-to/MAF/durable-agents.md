@@ -121,6 +121,12 @@ a meaningful chance to recover.
 Setting `DefaultRetryPolicy` or a per-agent `RetryPolicy` **replaces** the backstop rather than
 layering on it, so an explicit policy with `MaximumAttempts = 0` does restore unlimited retries.
 
+If a turn terminates after a tool activity is dispatched, later model context receives a
+protocol-valid interrupted-turn projection: completed results remain paired with their calls,
+uncertain dispatched outcomes are marked unknown, and undispatched calls are marked not executed.
+Partial assistant prose and raw failure details are omitted. This bounded conversation context is
+not an audit log; verify an unknown effect with the downstream system before retrying.
+
 ## Split-deployment behavior
 
 In a split-deployment setup — where a client process uses `GetTemporalAgentProxy` without a full `AddDurableAgent` registration and the worker process hosts the agent via `AddDurableAgent` — the workflow starts without access to the worker's per-tool configuration. On the first `RunDurableAgentStep` call of each turn, the activity detects this state and resolves per-tool retry and timeout options from the worker's `DurableAgentRegistration` in memory, returning them as part of the step result. The workflow then uses these resolved options for all subsequent tool dispatches in that turn.

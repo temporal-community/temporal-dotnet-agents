@@ -9,6 +9,7 @@ using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
+using TemporalCommunity.Extensions.AI.Session;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
 using Temporalio.Worker;
@@ -1134,11 +1135,28 @@ public class DurableToolDispatchIntegrationTests
             historyAfterDuplicate.Events.Count(
                 item => item.WorkflowExecutionUpdateAcceptedEventAttributes is not null));
 
+        var retainedHistory = await sessionClient.GetHistoryAsync(conversationId);
+        var interrupted = Assert.IsType<DurableSessionResponse>(retainedHistory[^1]);
+        Assert.Equal(DurableTurnCompletionReason.Interrupted, interrupted.CompletionReason);
+        var retainedToolResult = Assert.Single(interrupted.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionResultContent>());
+        Assert.Equal("call-cancel-turn", retainedToolResult.CallId);
+        Assert.Contains("unknown", retainedToolResult.Result?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(interrupted.Messages, message =>
+            message.Role == ChatRole.Assistant
+            && message.Text.Contains("session remained usable", StringComparison.OrdinalIgnoreCase));
+
         var next = await sessionClient.SendAsync(
             conversationId,
             [new ChatMessage(ChatRole.User, "continue after cancellation")],
             requestId: "turn-after-cancel");
         Assert.Equal("The session remained usable.", next.Messages[^1].Text);
+        Assert.Contains(
+            scripted.Calls[1].Messages.SelectMany(message => message.Contents),
+            content => content is FunctionResultContent result
+                       && result.CallId == "call-cancel-turn"
+                       && result.Result?.ToString()?.Contains("unknown", StringComparison.OrdinalIgnoreCase) == true);
 
         var replayOptions = new WorkflowReplayerOptions
         {

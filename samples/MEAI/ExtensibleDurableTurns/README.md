@@ -93,6 +93,12 @@ Evicted or oversized outcomes are outside the deduplication window and may execu
 Malformed turn input (a null request, empty messages, or null options) fails promptly as the
 non-retryable `DurableTurnInvalidRequest` failure and schedules no model or tool activity.
 
+If a later turn failure occurs after any tool activity has been dispatched, the workflow retains
+the request plus a bounded `Interrupted` response: completed tool results stay paired with their
+calls, uncertain outcomes are marked unknown, and undispatched calls are marked not executed.
+Partial assistant prose is omitted. This is safe continuation context, not an external-effect
+receipt; reconcile with the authoritative system before retrying a write.
+
 The sample accepts state only after `FinalResponse`. Both `IterationLimitReached` and
 `IncompleteResponse` can return the last successfully recorded state for diagnostics, but that
 state is provisional and the sample discards it. The workflow carries only a safe terminal sentinel
