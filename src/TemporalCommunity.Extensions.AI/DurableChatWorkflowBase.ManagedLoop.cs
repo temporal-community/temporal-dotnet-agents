@@ -133,8 +133,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             modelId = stepResult.ModelId;
             additionalProperties = stepResult.AdditionalProperties;
 
-            accumulated.Add(stepResult.AssistantMessage);
-            allTurnMessages.Add(stepResult.AssistantMessage);
+            accumulated.AddRange(stepResult.Messages);
+            allTurnMessages.AddRange(stepResult.Messages);
 
             if (stepResult.CompletionReason == DurableTurnCompletionReason.IncompleteResponse)
             {
@@ -550,12 +550,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
                     hadError = true;
                     var includeDetails = RequiredInput.IncludeDetailedErrors;
-                    var errorMessage =
+                    var failureDetails =
                         includeDetails && ex is ApplicationFailureException afe
-                            ? $"Error: {afe.Message} ({afe.ErrorType})"
+                            ? $"{afe.Message} ({afe.ErrorType})"
                             : includeDetails && ex is not null
-                                ? $"Error: {ex.GetType().Name}: {ex.Message}"
-                                : "Error: Tool invocation failed.";
+                                ? $"{ex.GetType().Name}: {ex.Message}"
+                                : "Tool invocation failed.";
+                    var errorMessage =
+                        $"Error: {failureDetails} The external effect outcome is unknown.";
 
                     // CRITICAL: synthesize a FunctionResultContent for EVERY CallId in original
                     // order — OpenAI/Anthropic reject tool turns with missing call IDs.
@@ -654,14 +656,17 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             "Tool '{ToolName}' not found in caller-owned ToolActivityOptions; using workflow defaults.",
             toolName);
 
+        var isIdempotent =
+            RequiredInput.IdempotentTools?.Contains(toolName, StringComparer.Ordinal) == true;
         return new ActivityOptions
         {
             StartToCloseTimeout = RequiredInput.ActivityTimeout,
             HeartbeatTimeout = RequiredInput.HeartbeatTimeout,
-            // Apply the configured retry policy so an unmapped tool does not fall back to
-            // Temporal's default (unlimited retries) — a non-idempotent unregistered tool
-            // would otherwise retry forever. Bounded default when unset. The MAF path already does this.
-            RetryPolicy = Internal.DefaultRetryPolicy.ResolveForTool(RequiredInput.RetryPolicy),
+            RetryPolicy = Internal.DurableManagedToolRetryPolicy.Resolve(
+                null,
+                isIdempotent ? RequiredInput.RetryPolicy : null,
+                isIdempotent,
+                toolName),
             Summary = toolName,
         };
     }

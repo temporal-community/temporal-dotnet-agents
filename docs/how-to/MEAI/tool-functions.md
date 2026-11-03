@@ -29,7 +29,9 @@ builder.Services
         options.MaxToolCallsPerTurn = 10;
         options.RetryPolicy = new RetryPolicy { MaximumAttempts = 3 };
     })
-    .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
+    .AddDurableTool(
+        weatherTool,
+        tool => tool.Idempotent().WithTimeout(TimeSpan.FromSeconds(30)));
 ```
 
 The equivalent named grouping is:
@@ -76,6 +78,14 @@ The workflow executes this sequence until the model returns a final response:
 2. Each returned function call becomes an `InvokeFunction` activity.
 3. Results are added to the next model step.
 
+The workflow preserves the assistant message contents and correlates tool results by call ID.
+MEAI `FunctionCallContent.InformationalOnly` calls and calls already answered in retained
+messages are not dispatched again. Duplicate or malformed actionable call IDs reject the whole
+batch before any tool activity starts. If a provider reports a tool-call finish but no actionable
+calls remain, the turn ends as `IncompleteResponse` instead of repeating model steps indefinitely.
+If a dispatched tool activity fails, its result tells the model the external effect outcome is
+unknown; an activity failure does not prove that no effect occurred.
+
 ## Rules
 
 - `ChatOptions.Tools` is rejected for `DurableChatSessionClient`; it would carry caller-owned
@@ -83,16 +93,31 @@ The workflow executes this sequence until the model returns a final response:
 - Do not install `UseFunctionInvocation()` on the chat-client pipeline used by a durable session.
   The Temporal workflow owns function invocation.
 - Register every tool on every worker that can run the session task queue, with stable names.
-- Treat side-effecting tools as activities: make them idempotent where possible, or use
-  `tool.NoRetry()` when a retry would repeat an unsafe operation. Invocation-scoped factories
-  receive a stable `DurableToolInvocationMetadata.IdempotencyKey` derived from the session epoch,
-  request/turn, and distinct tool-call identity. Use it as a downstream deduplication key when the
-  external system supports one; it does not provide exactly-once effects by itself.
+- Treat side-effecting tools as activities. Managed tool calls default to one activity attempt;
+  retries require `tool.Idempotent()` so the downstream system can deduplicate with the logical
+  call key. Use `tool.NoRetry()` to explicitly keep one attempt even for an idempotent operation.
+  Invocation-scoped factories receive a stable `DurableToolInvocationMetadata.IdempotencyKey`
+  derived from the session epoch, request/turn, and distinct tool-call identity. Use it as a
+  downstream deduplication key when the external system supports one; it does not provide
+  exactly-once effects by itself.
 - `MaxToolCallsPerTurn` caps a runaway model/tool loop. Set it for your cost and risk budget.
 
 The per-tool callback methods such as `.NoRetry()` configure these managed, worker-registered
 tools. They do not configure a separate `AIFunction.AsDurable()` call in custom workflow code;
 that wrapper receives its own `DurableExecutionOptions` retry policy.
+
+### Retry safety
+
+Unmarked managed tools default to one activity attempt. Explicit retries require `Idempotent()` and
+downstream deduplication using the stable logical-call key:
+
+```csharp
+worker.AddDurableTool(readTool, options => options.Idempotent().WithMaxAttempts(3));
+worker.AddDurableTool(writeTool, options => options.NoRetry());
+```
+
+An explicit multi-attempt policy on a tool without `Idempotent()` is rejected during configuration.
+The declaration is an application assertion, not an exactly-once guarantee.
 
 ## Invocation-scoped tools for typed turns
 

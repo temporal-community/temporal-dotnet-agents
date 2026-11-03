@@ -621,6 +621,7 @@ public class TypedDurableTurnLifecycleTests
             },
             options => options
                 .WithTimeout(TimeSpan.FromSeconds(9))
+                .Idempotent()
                 .WithMaxAttempts(2));
 
         var approvalDeclaration = AIFunctionFactory.Create(

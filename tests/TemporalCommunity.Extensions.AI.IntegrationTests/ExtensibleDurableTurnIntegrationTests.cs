@@ -1013,7 +1013,7 @@ public class ExtensibleDurableTurnIntegrationTests
                                 [.. context.TurnState?.Receipts ?? [], name]))),
                 };
             },
-            options => options.WithMaxAttempts(2));
+            options => options.Idempotent().WithMaxAttempts(2));
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition, string description)

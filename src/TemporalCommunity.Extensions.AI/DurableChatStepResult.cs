@@ -18,16 +18,16 @@ internal sealed class DurableChatStepResult
     public required bool IsFinal { get; init; }
 
     /// <summary>
-    /// The assistant message produced by the LLM for this step. Always present —
-    /// even when the message is empty of text and only contains
-    /// <see cref="FunctionCallContent"/> entries.
+    /// The messages produced by the LLM for this step, preserving their roles, order, and
+    /// MEAI content instead of reconstructing a single assistant message.
     /// </summary>
-    public required ChatMessage AssistantMessage { get; init; }
+    public required IReadOnlyList<ChatMessage> Messages { get; init; }
 
     /// <summary>
-    /// The tool-call requests extracted from <see cref="AssistantMessage"/>, in the
-    /// order they appeared. Null when the step is terminal, including when provider output
-    /// contained calls that the completion policy did not authorize for dispatch.
+    /// The unresolved, non-informational tool-call requests extracted from assistant messages
+    /// in <see cref="Messages"/>, in the order they appeared. Null when the step is
+    /// terminal, including when provider output contained calls that the completion policy did
+    /// not authorize for dispatch.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<FunctionCallContent>? ToolCalls { get; init; }

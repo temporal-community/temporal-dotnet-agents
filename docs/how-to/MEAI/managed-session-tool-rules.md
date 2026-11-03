@@ -13,8 +13,9 @@ model, and dispatches each enabled invocation as an `InvokeFunction` Temporal ac
    `AddDurableTools(...)`, or a named group through `AddDurableToolset(...)` on
    every worker that serves the task queue.
 3. Keep function names and schemas stable across workers serving the same task queue.
-4. Use `NoRetry()` for a side-effecting function when an activity retry would be unsafe; otherwise
-   make the function idempotent.
+4. Managed tools default to one activity attempt. Multiple attempts require `Idempotent()` and
+   downstream deduplication using the logical-call key; use `NoRetry()` to explicitly keep one
+   attempt even for an idempotent function.
 5. Use `ResolveApprovalAsync(...)` to submit matching pending approval decisions. Non-progressing
    decisions are rejected before acceptance; reconcile ambiguous outcomes with application-owned
    review state instead of retrying blindly.

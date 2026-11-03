@@ -92,7 +92,8 @@ dotnet run --project samples/MEAI/DurableChat/DurableChat.csproj
 
 Open `http://localhost:8233` to inspect the one-time resolver, `GetChatStep` model activities, and individual
 `InvokeFunction` tool activities. Configure per-tool timeouts and retry behavior through the
-toolset member callback; use `NoRetry()` for an unsafe non-idempotent operation.
+toolset member callback. Tools default to one activity attempt; retries require `Idempotent()` and
+downstream deduplication using the logical-call key. Use `NoRetry()` to explicitly keep one attempt.
 
 The selected toolset manifest and profile key are carried through Continue-as-New, so changing
 toolset selection or client profile configuration affects newly created sessions only. Provider

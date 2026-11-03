@@ -161,8 +161,8 @@ internal sealed class DurableChatActivities(
     /// Executes a single durable LLM step. Unlike <see cref="GetResponseAsync"/> this method
     /// never executes tools inline — the durable workflow is responsible for dispatching each
     /// <see cref="FunctionCallContent"/> as its own <c>InvokeFunction</c> activity. The
-    /// <see cref="DurableChatStepResult"/> carries the raw assistant message plus extracted
-    /// tool-call requests so the workflow can fan them out.
+    /// <see cref="DurableChatStepResult"/> carries the original response messages plus extracted
+    /// actionable tool-call requests so the workflow can fan them out.
     /// </summary>
     [Activity("TemporalCommunity.Extensions.AI.GetChatStep")]
     public async Task<DurableChatStepResult> GetChatStepAsync(DurableChatInput input)
@@ -200,14 +200,27 @@ internal sealed class DurableChatActivities(
             chatClient, input.Messages, effectiveOptions, input, span, ctx)
             .ConfigureAwait(false);
 
-        // Coalesce all assistant messages from the response into a single ChatMessage
-        // carrying every content item. Streaming responses may split content across
-        // multiple chunks; the workflow loop just needs one assistant message to
-        // append to its accumulated transcript.
-        var (assistantMessage, toolCalls) = CollectAssistantContents(response);
-        var classification = DurableChatCompletionPolicy.Classify(
-            response.FinishReason,
-            toolCalls.Count);
+        // Keep the provider's original message sequence intact. Tool-call inspection operates on
+        // those messages, while the workflow appends the same protocol content for the next step.
+        var messages = response.Messages.ToList();
+        var toolCallResolution = Internal.DurableToolCallResolver.Resolve(
+            input.Messages,
+            messages);
+        var toolCalls = toolCallResolution.ActionableCalls;
+        var classification = toolCallResolution.Failure is null
+            ? DurableChatCompletionPolicy.Classify(response.FinishReason, toolCalls.Count)
+            : new DurableChatStepClassification(
+                DurableChatStepDisposition.IncompleteResponse,
+                IsProviderOutputContradictory: true);
+        if (toolCallResolution.Failure is not null)
+        {
+            _logger.LogWarning(
+                "Rejected provider tool-call output for conversation {ConversationId}, turn {TurnNumber}; reason {Failure}.",
+                input.ConversationId,
+                input.TurnNumber,
+                toolCallResolution.Failure);
+        }
+
         var isFinal = classification.Disposition != DurableChatStepDisposition.ContinueWithTools;
         var completionReason = classification.Disposition ==
             DurableChatStepDisposition.IncompleteResponse
@@ -236,7 +249,7 @@ internal sealed class DurableChatActivities(
         return new DurableChatStepResult
         {
             IsFinal = isFinal,
-            AssistantMessage = assistantMessage,
+            Messages = messages,
             ToolCalls = classification.Disposition == DurableChatStepDisposition.ContinueWithTools
                 ? toolCalls
                 : null,
@@ -352,32 +365,7 @@ internal sealed class DurableChatActivities(
         }
     }
 
-    /// <summary>
-    /// Coalesces assistant messages in <paramref name="response"/> into a single
-    /// <see cref="ChatMessage"/> and extracts tool-call requests. Used by
-    /// <see cref="GetChatStepAsync"/> to build a <see cref="DurableChatStepResult"/>.
-    /// </summary>
-    private static (ChatMessage AssistantMessage, List<FunctionCallContent> ToolCalls)
-        CollectAssistantContents(ChatResponse response)
-    {
-        List<AIContent> assistantContents = [];
-        foreach (var msg in response.Messages)
-        {
-            if (msg.Role == ChatRole.Assistant)
-            {
-                foreach (var c in msg.Contents)
-                {
-                    assistantContents.Add(c);
-                }
-            }
-        }
-
-        var assistantMessage = new ChatMessage(ChatRole.Assistant, assistantContents);
-        var toolCalls = assistantContents.OfType<FunctionCallContent>().ToList();
-
-        return (assistantMessage, toolCalls);
-    }
-
+    /// <summary>Returns whether the response contains visible assistant text.</summary>
     private static bool HasVisibleAssistantText(ChatResponse response) =>
         response.Messages
             .Where(message => message.Role == ChatRole.Assistant)

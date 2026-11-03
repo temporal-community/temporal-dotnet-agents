@@ -63,7 +63,41 @@ public sealed class DurableChatCompletionPolicyTests
         Assert.Null(result.ToolCalls);
         Assert.Equal(ChatFinishReason.Length, result.FinishReason);
         Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, result.CompletionReason);
-        Assert.Empty(result.AssistantMessage.Contents);
+        Assert.Empty(Assert.Single(result.Messages).Contents);
+    }
+
+    [Fact]
+    public async Task GetChatStepAsync_PreservesAllProviderMessagesAndRoles()
+    {
+        var response = new ChatResponse(
+        [
+            new ChatMessage(ChatRole.Assistant, "thinking")
+            {
+                AuthorName = "assistant-a",
+            },
+            new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-1", "done")]),
+        ])
+        {
+            FinishReason = ChatFinishReason.Stop,
+        };
+        using var client = new SingleResponseChatClient(response);
+        using var provider = new ServiceCollection()
+            .AddSingleton<IChatClient>(client)
+            .BuildServiceProvider();
+        var activities = new DurableChatActivities(provider);
+
+        var result = await activities.GetChatStepAsync(new DurableChatInput
+        {
+            Messages = [new ChatMessage(ChatRole.User, "continue")],
+        });
+
+        Assert.Equal(2, result.Messages.Count);
+        Assert.Equal(ChatRole.Assistant, result.Messages[0].Role);
+        Assert.Equal("assistant-a", result.Messages[0].AuthorName);
+        Assert.Equal(ChatRole.Tool, result.Messages[1].Role);
+        Assert.Equal(
+            "call-1",
+            Assert.IsType<FunctionResultContent>(result.Messages[1].Contents[0]).CallId);
     }
 
     private sealed class SingleResponseChatClient(ChatResponse response) : IChatClient

@@ -557,8 +557,8 @@ public class PolymorphicSerializationAuditTests
     // ─── DurableChatStepResult — Pattern 3 LLM-step result ──────────────────────────────────
 
     /// <summary>
-    /// <see cref="DurableChatStepResult.AssistantMessage"/> is a <see cref="ChatMessage"/>
-    /// — already covered by other tests. <see cref="DurableChatStepResult.ToolCalls"/>
+    /// <see cref="DurableChatStepResult.Messages"/> preserves the original
+    /// <see cref="ChatMessage"/> list. <see cref="DurableChatStepResult.ToolCalls"/>
     /// is <c>IReadOnlyList&lt;FunctionCallContent&gt;</c> — concrete type, no polymorphism
     /// risk, but verify the wrapping doesn't drop it.
     /// </summary>
@@ -568,7 +568,11 @@ public class PolymorphicSerializationAuditTests
         var stepResult = new DurableChatStepResult
         {
             IsFinal = false,
-            AssistantMessage = new ChatMessage(ChatRole.Assistant, "thinking..."),
+            Messages =
+            [
+                new ChatMessage(ChatRole.Assistant, "thinking..."),
+                new ChatMessage(ChatRole.Tool, [new FunctionResultContent("prior", "done")]),
+            ],
             ToolCalls = new List<FunctionCallContent>
             {
                 new("call-1", "get_weather", new Dictionary<string, object?> { ["city"] = "Seattle" }),
@@ -585,6 +589,13 @@ public class PolymorphicSerializationAuditTests
         Assert.Equal(2, deserialized.ToolCalls!.Count);
         Assert.Equal("get_weather", deserialized.ToolCalls[0].Name);
         Assert.Equal("send_email", deserialized.ToolCalls[1].Name);
+        Assert.Equal(2, deserialized.Messages.Count);
+        Assert.Equal(ChatRole.Tool, deserialized.Messages[1].Role);
+        Assert.Equal(
+            "done",
+            Assert.IsType<JsonElement>(
+                Assert.IsType<FunctionResultContent>(
+                    deserialized.Messages[1].Contents[0]).Result).GetString());
         Assert.NotNull(deserialized.Usage);
         Assert.Equal(100, deserialized.Usage!.InputTokenCount);
     }

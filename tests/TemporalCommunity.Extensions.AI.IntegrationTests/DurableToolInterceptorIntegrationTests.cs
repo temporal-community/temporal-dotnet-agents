@@ -382,7 +382,6 @@ public class DurableToolInterceptorIntegrationTests
 
     /// <summary>
     /// Every approval in one model-produced batch must resolve before any tool activity begins.
-    /// Duplicate model call IDs are not approval identities: each call receives its own request.
     /// </summary>
     [Fact]
     public async Task ApprovalBatch_WaitsForEveryDecisionBeforeSchedulingAnyTool()
@@ -395,8 +394,8 @@ public class DurableToolInterceptorIntegrationTests
         var deniedTool = harness.BuildAlwaysSucceeds("denied_action", "Denied action.", _ => "denied");
         var scripted = ScriptedChatClient.WithToolCallsThenFinal(
         [
-            new FunctionCallContent("duplicate-call-id", "approved_action"),
-            new FunctionCallContent("duplicate-call-id", "denied_action"),
+            new FunctionCallContent("approved-call-id", "approved_action"),
+            new FunctionCallContent("denied-call-id", "denied_action"),
         ],
         "Approval processing complete.");
 

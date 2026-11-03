@@ -94,6 +94,9 @@ scan_docs() {
                 (FILENAME == "docs/how-to/MEAI/tool-functions.md" &&
                  heading == "logical-operation-identity" &&
                  body ~ /context\.Metadata\.IdempotencyKey/) ||
+                (FILENAME == "docs/how-to/MEAI/tool-functions.md" &&
+                 heading == "retry-safety" &&
+                 body ~ /Idempotent\(\)/) ||
                 (FILENAME == "docs/how-to/MAF/usage.md" &&
                  (heading == "request-id-recovery" || heading == "inspecting-workflow-history-budget")) ||
                 (FILENAME == "docs/how-to/MEAI/testing.md" && heading ~ /^phase-[0-9]+-/))) {

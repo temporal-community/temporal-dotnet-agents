@@ -24,13 +24,13 @@ public sealed class DurableExecutionOptions
     public TimeSpan ActivityTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Gets or sets the Temporal retry policy for model and tool activities. When
-    /// <see langword="null"/> (the default), the library applies separate five-attempt bounded
-    /// defaults: model calls cap inter-attempt backoff at 2 seconds, while tool and policy
-    /// activities cap it at 30 seconds to allow more time for transient dependencies to recover.
-    /// These are attempt bounds, not total execution budgets, and they do not interpret HTTP
-    /// <c>Retry-After</c>. Set an explicit policy to replace the corresponding defaults exactly;
-    /// an explicit policy must set a positive <c>MaximumAttempts</c>.
+    /// Gets or sets the Temporal retry policy for model and policy activities. When
+    /// <see langword="null"/> (the default), model calls use a five-attempt bounded policy and
+    /// policy activities use their own bounded default. Managed tool calls default to one attempt
+    /// unless declared idempotent with <see cref="DurableChatToolOptions.Idempotent"/>; idempotent
+    /// tools inherit this policy or the bounded tool default. More than one tool attempt requires
+    /// that declaration. Attempt bounds are not total execution budgets and do not interpret HTTP
+    /// <c>Retry-After</c>. An explicit policy must set a positive <c>MaximumAttempts</c>.
     /// </summary>
     public RetryPolicy? RetryPolicy { get; set; }
 

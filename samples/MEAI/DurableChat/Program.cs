@@ -123,23 +123,21 @@ var durableWorker = builder.Services
         opts.MaximumTransportPayloadSizeBytes = 1024 * 1024;
         opts.PayloadCodecExpansionAllowanceBytes = 0;
 
-        // Worker-level fallback for any tool that doesn't override its RetryPolicy.
-        // Override the library's bounded five-attempt default with three attempts.
-        // Write-style tools must still opt out of retries individually.
+        // Worker-level retry policy for model calls and tools declared idempotent.
+        // Unmarked tools default to one attempt, even with this policy configured.
         opts.RetryPolicy = new RetryPolicy { MaximumAttempts = 3 };
 
         // Cap the LLM-to-tool loop per turn.
         opts.MaxToolCallsPerTurn = 10;
     });
 
-// Per-tool retry-policy fallback chain:
-//   per-tool opts.RetryPolicy (not set here) → worker `RetryPolicy = MaximumAttempts = 3`.
-// Weather lookup is idempotent (read-only), so we accept retries. For write-style tools
-// (send email, charge a card), override with `opts.NoRetry()`.
+// Weather lookup and service status are read-only and declared idempotent, so they may
+// inherit the worker's bounded three-attempt policy. Effectful tools default to one attempt;
+// retries require an idempotency key that the downstream system actually enforces.
 durableWorker.AddDurableToolset("information", tools => tools
-    .Add(weatherTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30))));
+    .Add(weatherTool, opts => opts.Idempotent().WithTimeout(TimeSpan.FromSeconds(30))));
 durableWorker.AddDurableToolset("operations", tools => tools
-    .Add(serviceStatusTool));
+    .Add(serviceStatusTool, opts => opts.Idempotent()));
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 var host = builder.Build();

@@ -241,6 +241,177 @@ public class DurableToolDispatchIntegrationTests
         await host.StopAsync();
     }
 
+    [Fact]
+    public async Task RepeatedAnsweredCallId_IsNotDispatchedAgain()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var invocations = 0;
+        var tool = AIFunctionFactory.Create(
+            () =>
+            {
+                Interlocked.Increment(ref invocations);
+                return "done";
+            },
+            "answer_once");
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [new FunctionCallContent("call-once", "answer_once")]))
+            {
+                FinishReason = ChatFinishReason.ToolCalls,
+            },
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "first turn complete")),
+            new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [new FunctionCallContent("call-once", "answer_once")]))
+            {
+                FinishReason = ChatFinishReason.ToolCalls,
+            },
+        ]);
+        var taskQueue = $"answered-tool-call-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            scripted,
+            builder => builder.AddDurableTools(tool));
+        await host.StartAsync();
+
+        var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"answered-tool-call-{Guid.NewGuid():N}";
+        try
+        {
+            await sessionClient.SendAsync(conversationId, "run the tool once");
+            var repeated = await sessionClient.SendAsync(conversationId, "repeat the prior call");
+
+            Assert.Equal(1, Volatile.Read(ref invocations));
+            Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, repeated.CompletionReason);
+            Assert.Contains(
+                scripted.Calls[2].Messages.SelectMany(message => message.Contents)
+                    .OfType<FunctionResultContent>(),
+                result => result.CallId == "call-once");
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task InformationalCall_IsPreservedButNotDispatched()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var invocations = 0;
+        var tool = AIFunctionFactory.Create(
+            () =>
+            {
+                Interlocked.Increment(ref invocations);
+                return "done";
+            },
+            "active_tool");
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [
+                    new FunctionCallContent("informational", "active_tool")
+                    {
+                        InformationalOnly = true,
+                    },
+                    new FunctionCallContent("actionable", "active_tool"),
+                ]))
+            {
+                FinishReason = ChatFinishReason.ToolCalls,
+            },
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "done")),
+        ]);
+        var taskQueue = $"informational-tool-call-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            scripted,
+            builder => builder.AddDurableTools(tool));
+        await host.StartAsync();
+
+        try
+        {
+            var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+            var response = await session.SendAsync(
+                $"informational-tool-call-{Guid.NewGuid():N}",
+                "process the request");
+
+            Assert.Equal(1, Volatile.Read(ref invocations));
+            Assert.Equal("done", response.Text);
+            Assert.Contains(
+                scripted.Calls[1].Messages.SelectMany(message => message.Contents)
+                    .OfType<FunctionCallContent>(),
+                call => call.CallId == "informational" && call.InformationalOnly);
+            Assert.Equal(
+                "actionable",
+                Assert.Single(scripted.Calls[1].Messages.SelectMany(message => message.Contents)
+                    .OfType<FunctionResultContent>()).CallId);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task DuplicateActionableCallIds_TerminateWithoutDispatch()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+
+        var invocations = 0;
+        var tool = AIFunctionFactory.Create(
+            () =>
+            {
+                Interlocked.Increment(ref invocations);
+                return "done";
+            },
+            "active_tool");
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                [
+                    new FunctionCallContent("duplicate", "active_tool"),
+                    new FunctionCallContent("duplicate", "active_tool"),
+                ]))
+            {
+                FinishReason = ChatFinishReason.ToolCalls,
+            },
+        ]);
+        var taskQueue = $"duplicate-tool-call-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            scripted,
+            builder => builder.AddDurableTools(tool));
+        await host.StartAsync();
+
+        try
+        {
+            var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+            var response = await session.SendAsync(
+                $"duplicate-tool-call-{Guid.NewGuid():N}",
+                "process the request");
+
+            Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, response.CompletionReason);
+            Assert.Equal(0, Volatile.Read(ref invocations));
+            Assert.Single(scripted.Calls);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     /// <summary>
     /// Test 2: two <see cref="FunctionCallContent"/> in a single LLM step
     /// → both <c>InvokeFunction</c> activities are dispatched in parallel.
@@ -686,6 +857,7 @@ public class DurableToolDispatchIntegrationTests
         Assert.Equal(2, results.Count);
         Assert.Equal("call-good", results[0].CallId);
         Assert.Equal("call-bad", results[1].CallId);
+        Assert.Contains("outcome is unknown", results[1].Result?.ToString(), StringComparison.Ordinal);
 
         await host.StopAsync();
     }

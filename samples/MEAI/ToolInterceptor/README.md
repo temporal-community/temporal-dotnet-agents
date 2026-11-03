@@ -34,7 +34,8 @@ An `AuditInterceptor` enforces file-deletion policy before any delete tool activ
 
 - **`SkipInterceptor()`** on `read_file` — the `RunToolInterceptor` activity is not dispatched
   at all; the tool proceeds directly to `InvokeFunction`. Use for read-only tools where policy
-  evaluation adds no value.
+  evaluation adds no value. It is also declared idempotent so it can safely inherit the configured
+  bounded retry policy.
 
 - **`RequireApproval()`** on `delete_file` — Rule 2, the absolute configuration-time floor.
   Even if the interceptor returned `Proceed`, the dispatch loop would still pause for human
@@ -63,7 +64,7 @@ Program.cs
     ├─ AddDurableAI(opts => opts.DefaultToolInterceptor = ...)
     │       └─ AuditInterceptor registered in DurableExecutionOptions
     │
-    ├─ AddDurableTool(readFileTool,   opts => opts.SkipInterceptor())
+    ├─ AddDurableTool(readFileTool,   opts => opts.Idempotent().SkipInterceptor())
     ├─ AddDurableTool(deleteFileTool, opts => opts.NoRetry().RequireApproval())
     │
     └─ DurableChatSessionClient.SendAsync(...)

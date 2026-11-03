@@ -121,7 +121,7 @@ var workerBuilder = builder.Services
 // interceptor activity is not dispatched and read_file proceeds directly to
 // InvokeFunction. Appropriate for read-only tools where policy evaluation adds
 // no value. The tool still runs as its own Temporal activity.
-workerBuilder.AddDurableTool(readFileTool, opts => opts.SkipInterceptor());
+workerBuilder.AddDurableTool(readFileTool, opts => opts.Idempotent().SkipInterceptor());
 
 // ── Tool registration: delete_file with RequireApproval() + NoRetry() ────────
 // RequireApproval() is the Rule 2 absolute floor: even if the interceptor returns

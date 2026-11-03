@@ -200,7 +200,7 @@ public class SerializationTests
         var result = new DurableChatStepResult
         {
             IsFinal = true,
-            AssistantMessage = new ChatMessage(ChatRole.Assistant, []),
+            Messages = [new ChatMessage(ChatRole.Assistant, [])],
             FinishReason = ChatFinishReason.Length,
             ResponseId = "response-1",
             ModelId = "model-1",
@@ -220,7 +220,7 @@ public class SerializationTests
         Assert.Equal("model-1", restored.ModelId);
         Assert.Equal("value", restored.AdditionalProperties!["provider.key"]?.ToString());
         Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, restored.CompletionReason);
-        Assert.Empty(restored.AssistantMessage.Contents);
+        Assert.Empty(Assert.Single(restored.Messages).Contents);
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class SerializationTests
         var legacyShape = new DurableChatStepResult
         {
             IsFinal = true,
-            AssistantMessage = new ChatMessage(ChatRole.Assistant, "legacy final"),
+            Messages = [new ChatMessage(ChatRole.Assistant, "legacy final")],
         };
         var json = JsonSerializer.Serialize(
             legacyShape,
@@ -245,7 +245,7 @@ public class SerializationTests
         Assert.NotNull(restored);
         Assert.Null(restored.FinishReason);
         Assert.Equal(DurableTurnCompletionReason.FinalResponse, restored.CompletionReason);
-        Assert.Equal("legacy final", restored.AssistantMessage.Text);
+        Assert.Equal("legacy final", Assert.Single(restored.Messages).Text);
     }
 
     [Fact]

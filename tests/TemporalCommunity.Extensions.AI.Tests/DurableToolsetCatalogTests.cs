@@ -24,7 +24,7 @@ public sealed class DurableToolsetCatalogTests
         });
         worker.AddDurableTool(
             AIFunctionFactory.Create((string city) => city, "weather"),
-            tool => tool.WithMaxAttempts(2).RequireApproval());
+            tool => tool.Idempotent().WithMaxAttempts(2).RequireApproval());
         worker.AddDurableTools(AIFunctionFactory.Create(() => "ok", "status"));
         using var provider = services.BuildServiceProvider();
 
@@ -39,6 +39,7 @@ public sealed class DurableToolsetCatalogTests
         Assert.Equal("default", manifest.Members[0].ToolsetId);
         Assert.True(manifest.Members[0].RequiresApproval);
         Assert.Equal(2, manifest.Members[0].ToolActivityOptions.RetryPolicy!.MaximumAttempts);
+        Assert.Equal(1, manifest.Members[1].ToolActivityOptions.RetryPolicy!.MaximumAttempts);
         Assert.Equal(TimeSpan.FromMinutes(3), manifest.Members[1].ToolActivityOptions.StartToCloseTimeout);
         Assert.Equal(TimeSpan.FromHours(4), manifest.Members[1].ApprovalTimeout);
         Assert.StartsWith("tai-toolset-v1:", manifest.Fingerprint, StringComparison.Ordinal);

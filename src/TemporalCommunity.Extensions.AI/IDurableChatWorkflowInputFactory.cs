@@ -131,12 +131,13 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
             {
                 StartToCloseTimeout = perTool?.StartToCloseTimeout ?? _options.ActivityTimeout,
                 HeartbeatTimeout = perTool?.HeartbeatTimeout ?? _options.HeartbeatTimeout,
-                RetryPolicy = perTool?.RetryPolicy ?? EffectiveToolRetryPolicy,
+                RetryPolicy = Internal.DurableManagedToolRetryPolicy.Resolve(
+                    perTool?.RetryPolicy,
+                    _options.RetryPolicy,
+                    perTool?.IsIdempotent == true,
+                    toolName),
                 Summary = toolName,
             };
-            Internal.DurableTransportPayloadGuard.EnsureBoundedRetryPolicy(
-                result[toolName].RetryPolicy,
-                $"RetryPolicy for tool '{toolName}'");
         }
 
         return result;

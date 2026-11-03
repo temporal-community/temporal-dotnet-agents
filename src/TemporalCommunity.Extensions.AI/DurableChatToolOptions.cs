@@ -15,9 +15,10 @@ namespace TemporalCommunity.Extensions.AI;
 /// <see cref="DurableExecutionOptions.RetryPolicy"/>).
 /// </para>
 /// <para>
-/// Use <see cref="NoRetry"/> on write-style tools (send email, persist a record,
-/// charge a card) so non-idempotent re-execution does not occur on activity retry.
-/// Read-style tools generally inherit the default retry policy.
+/// Tool activities default to one attempt unless they are declared idempotent. Retrying a tool
+/// more than once requires <see cref="Idempotent"/> so the downstream system can deduplicate
+/// with the logical-call key. <see cref="NoRetry"/> remains available to explicitly select one
+/// attempt even for an idempotent tool.
 /// </para>
 /// <para>
 /// Invocation-scoped tool factories also receive logical-call context and a stable
@@ -26,7 +27,8 @@ namespace TemporalCommunity.Extensions.AI;
 /// </para>
 /// <para>
 /// <see cref="Idempotent"/> records the application's declaration that retries are safe when the
-/// downstream operation deduplicates with that key. It does not configure the retry policy.
+/// downstream operation deduplicates with that key. It permits the configured retry policy or
+/// bounded default; it does not guarantee exactly-once effects.
 /// </para>
 /// </remarks>
 public sealed class DurableChatToolOptions
@@ -45,7 +47,9 @@ public sealed class DurableChatToolOptions
 
     /// <summary>
     /// Gets or sets the retry policy applied to this tool's activity dispatch.
-    /// When <see langword="null"/>, the worker-level default is used.
+    /// When <see langword="null"/>, an idempotent tool inherits the worker-level default and an
+    /// undeclared tool defaults to one attempt. A policy allowing multiple attempts requires
+    /// <see cref="Idempotent"/>.
     /// </summary>
     public RetryPolicy? RetryPolicy { get; set; }
 

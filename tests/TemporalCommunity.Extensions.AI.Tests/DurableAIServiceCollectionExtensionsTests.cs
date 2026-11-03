@@ -540,7 +540,7 @@ public class DurableAIServiceCollectionExtensionsTests
             .AddDurableChatWorkflowInputFactory("implementation-queue")
             .AddDurableToolDeclaration(
                 declaration,
-                options => options.WithMaxAttempts(2));
+                options => options.Idempotent().WithMaxAttempts(2));
 
         using var provider = services.BuildServiceProvider();
         var input = provider.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
@@ -642,7 +642,7 @@ public class DurableAIServiceCollectionExtensionsTests
             .AddDurableChatWorkflowInputFactory("implementation-queue")
             .AddDurableToolDeclaration(
                 declaration,
-                options => options.WithMaxAttempts(2));
+                options => options.Idempotent().WithMaxAttempts(2));
 
         using var provider = services.BuildServiceProvider();
         var input = provider.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();

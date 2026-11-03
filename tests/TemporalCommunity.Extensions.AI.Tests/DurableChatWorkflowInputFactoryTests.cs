@@ -26,7 +26,7 @@ public class DurableChatWorkflowInputFactoryTests
                 .RequireApproval()
                 .Idempotent()
                 .WithApprovalTimeout(TimeSpan.FromMinutes(33)),
-            ["read_record"] = new DurableChatToolOptions().SkipInterceptor(),
+            ["read_record"] = new DurableChatToolOptions().SkipInterceptor().Idempotent(),
         };
         var factory = new DurableChatWorkflowInputFactory(options, functions, toolOptions);
 
@@ -49,7 +49,9 @@ public class DurableChatWorkflowInputFactoryTests
             TimeSpan.FromSeconds(31),
             actual.ToolActivityOptions["write_record"].StartToCloseTimeout);
         Assert.Equal(1, actual.ToolActivityOptions["write_record"].RetryPolicy!.MaximumAttempts);
-        Assert.Equal("write_record", Assert.Single(actual.IdempotentTools!));
+        Assert.Equal(
+            ["read_record", "write_record"],
+            actual.IdempotentTools!.OrderBy(name => name, StringComparer.Ordinal));
         Assert.Equal(
             options.ActivityTimeout,
             actual.ToolActivityOptions["read_record"].StartToCloseTimeout);
@@ -74,7 +76,7 @@ public class DurableChatWorkflowInputFactoryTests
         functions.Register(AIFunctionFactory.Create(() => "ok", "tool"));
         var toolOptions = new DurableChatToolOptionsRegistry
         {
-            ["tool"] = new DurableChatToolOptions().WithMaxAttempts(2),
+            ["tool"] = new DurableChatToolOptions().Idempotent().WithMaxAttempts(2),
         };
         IDurableChatWorkflowInputFactory factory =
             new DurableChatWorkflowInputFactory(options, functions, toolOptions);
@@ -85,6 +87,40 @@ public class DurableChatWorkflowInputFactoryTests
         var actual = client.CreateWorkflowInput();
 
         AssertEquivalent(expected, actual);
+    }
+
+    [Fact]
+    public void Create_UnmarkedToolDefaultsToOneAttempt()
+    {
+        var options = CreateOptions();
+        options.RetryPolicy = null;
+        var functions = new DurableFunctionRegistry();
+        functions.Register(AIFunctionFactory.Create(() => "effect", "write_record"));
+        var factory = new DurableChatWorkflowInputFactory(
+            options,
+            functions,
+            new DurableChatToolOptionsRegistry());
+
+        var input = factory.Create();
+
+        Assert.Equal(1, input.ToolActivityOptions!["write_record"].RetryPolicy!.MaximumAttempts);
+    }
+
+    [Fact]
+    public void Create_RejectsMultipleAttemptsForUnmarkedTool()
+    {
+        var functions = new DurableFunctionRegistry();
+        functions.Register(AIFunctionFactory.Create(() => "effect", "write_record"));
+        var toolOptions = new DurableChatToolOptionsRegistry
+        {
+            ["write_record"] = new DurableChatToolOptions().WithMaxAttempts(2),
+        };
+        var factory = new DurableChatWorkflowInputFactory(CreateOptions(), functions, toolOptions);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => factory.Create());
+
+        Assert.Contains("Idempotent()", exception.Message);
+        Assert.Contains("write_record", exception.Message);
     }
 
     [Fact]
@@ -155,7 +191,10 @@ public class DurableChatWorkflowInputFactoryTests
         var factory = new DurableChatWorkflowInputFactory(
             options,
             functions,
-            new DurableChatToolOptionsRegistry());
+            new DurableChatToolOptionsRegistry
+            {
+                ["read_record"] = new DurableChatToolOptions().Idempotent(),
+            });
 
         var input = factory.Create();
 

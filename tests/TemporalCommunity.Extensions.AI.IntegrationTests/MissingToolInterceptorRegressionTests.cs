@@ -159,7 +159,7 @@ public class MissingToolInterceptorRegressionTests
                 options.ActivityTimeout = TimeSpan.FromSeconds(30);
                 options.HeartbeatTimeout = TimeSpan.FromSeconds(10);
                 options.SessionTimeToLive = TimeSpan.FromMinutes(5);
-                options.RetryPolicy = new() { MaximumAttempts = 3 };
+                options.RetryPolicy = new() { MaximumAttempts = 1 };
                 if (interceptorEnabled)
                 {
                     options.DefaultToolInterceptor = _ => new ProceedInterceptor();
