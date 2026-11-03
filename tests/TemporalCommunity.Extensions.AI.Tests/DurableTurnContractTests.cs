@@ -166,6 +166,7 @@ public class DurableTurnContractTests
     {
         protected override DurableSessionResponse BuildResponseEntry(
             string correlationId,
+            string? requestId,
             ChatResponse output,
             DateTimeOffset createdAt) => throw new NotImplementedException();
 

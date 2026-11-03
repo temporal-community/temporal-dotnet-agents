@@ -129,6 +129,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// <param name="createdAt">Workflow-time creation timestamp.</param>
     protected abstract DurableSessionResponse BuildResponseEntry(
         string correlationId,
+        string? requestId,
         TOutput output,
         DateTimeOffset createdAt);
 
@@ -224,9 +225,13 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             DurableSessionResponse resp => new DurableSessionResponse
             {
                 CorrelationId = resp.CorrelationId,
+                RequestId = resp.RequestId,
                 CreatedAt = resp.CreatedAt,
                 Messages = [],
                 Usage = resp.Usage,
+                ResponseId = resp.ResponseId,
+                ModelId = resp.ModelId,
+                ResponseAdditionalProperties = resp.ResponseAdditionalProperties,
                 FinishReason = resp.FinishReason,
                 CompletionReason = resp.CompletionReason,
                 AdditionalProperties = resp.AdditionalProperties,
@@ -234,6 +239,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             DurableSessionRequest req => new DurableSessionRequest
             {
                 CorrelationId = req.CorrelationId,
+                RequestId = req.RequestId,
+                InputFingerprint = req.InputFingerprint,
                 CreatedAt = req.CreatedAt,
                 Messages = [],
                 AdditionalProperties = req.AdditionalProperties,
@@ -564,6 +571,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     {
         ArgumentNullException.ThrowIfNull(requestEntry);
 
+        requestEntry.RequestId ??= Workflow.NewGuid().ToString("N");
+        requestEntry.InputFingerprint ??= Internal.DurableRequestFingerprint.CreateSessionTurn(
+            requestEntry,
+            chatOptions,
+            RequiredInput);
+
         // Serialize: wait for any in-progress turn to finish.
         // Safety note: after WaitConditionAsync returns, the workflow is in a synchronous
         // execution window. Temporal's single-threaded scheduler cannot interleave another
@@ -593,7 +606,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
             // Append the request entry for this turn. When external-history mode is on we
             // replace the messages with an empty list so the in-workflow history never holds
-            // the raw user prompt — only metadata (CorrelationId, CreatedAt) for turn counting.
+            // the raw user prompt — only request identity and metadata for turn counting.
             var requestEntryToAppend = ShouldStripMessagesFromHistoryEntry()
                 ? (DurableSessionRequest)StripMessagesFromEntry(requestEntry)
                 : requestEntry;
@@ -613,7 +626,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
             // Build the response entry, then optionally strip its message payload before
             // appending so external-history mode keeps the workflow history metadata-only.
-            var responseEntry = BuildResponseEntry(requestEntry.CorrelationId, output, Workflow.UtcNow);
+            var responseEntry = BuildResponseEntry(
+                requestEntry.CorrelationId,
+                requestEntry.RequestId,
+                output,
+                Workflow.UtcNow);
             var responseEntryToAppend = ShouldStripMessagesFromHistoryEntry()
                 ? (DurableSessionResponse)StripMessagesFromEntry(responseEntry)
                 : responseEntry;

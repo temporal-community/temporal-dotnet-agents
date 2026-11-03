@@ -35,7 +35,8 @@ public sealed class AgentSessionResponse : DurableSessionResponse
     public static AgentSessionResponse FromAgentResponse(
         string correlationId,
         AgentResponse response,
-        DateTimeOffset timestamp)
+        DateTimeOffset timestamp,
+        string? requestId = null)
     {
         ArgumentNullException.ThrowIfNull(response);
 
@@ -53,6 +54,7 @@ public sealed class AgentSessionResponse : DurableSessionResponse
         return new AgentSessionResponse
         {
             CorrelationId = correlationId,
+            RequestId = requestId,
             CreatedAt = createdAt,
             Messages = response.Messages.ToList(),
             Usage = response.Usage,

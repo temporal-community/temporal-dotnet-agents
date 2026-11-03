@@ -15,7 +15,10 @@ The string overload accepts one user message directly, while the message overloa
 `ChatOptions.ConversationId`, `RawRepresentationFactory`, and `ContinuationToken` are rejected
 because they cannot safely resume across durable activity boundaries. Responses retain usage,
 finish reason, provider response/model IDs, and serializable provider metadata. Its correlation ID
-is not a deduplication key. Phase 0 documented pinned reducer and replay
+is not a deduplication key. The first demo turn supplies a caller-known request ID separately from
+correlation metadata; persist that ID before submission when the caller must retry an ambiguous
+RPC. Phase 2.1 records the ID and canonical input fingerprint; duplicate suppression follows in
+Phase 2.2. Phase 0 documented pinned reducer and replay
 prerequisites. Phase 1.0 removed the durable embedding wrapper; request epochs, terminal ledgers,
 safe interrupted-turn recovery, and independent context/history budgets are still pending. Do not
 retry an ambiguously completed effectful turn assuming the library will suppress duplicate

@@ -35,6 +35,20 @@ public class StateSerializationTests
     }
 
     [Fact]
+    public void FromRunRequest_PreservesRequestId()
+    {
+        var request = new RunRequest("Hello")
+        {
+            CorrelationId = "test-corr",
+            RequestId = "logical-request-1",
+        };
+
+        var stateRequest = AgentSessionRequest.FromRunRequest(request, DateTimeOffset.UtcNow);
+
+        Assert.Equal(request.RequestId, stateRequest.RequestId);
+    }
+
+    [Fact]
     public void FromRunRequest_PreservesMessageRole()
     {
         var request = new RunRequest("Hello", role: ChatRole.User) { CorrelationId = "test-corr" };

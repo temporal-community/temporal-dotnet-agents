@@ -94,6 +94,7 @@ public sealed class WorkflowInitializationTests
 
         protected override DurableSessionResponse BuildResponseEntry(
             string correlationId,
+            string? requestId,
             ChatResponse output,
             DateTimeOffset createdAt) => throw new NotSupportedException();
 

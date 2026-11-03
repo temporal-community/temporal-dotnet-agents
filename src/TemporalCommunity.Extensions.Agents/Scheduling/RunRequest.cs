@@ -32,6 +32,14 @@ public record RunRequest
     [JsonInclude]
     public string? CorrelationId { get; init; }
 
+    /// <summary>
+    /// Gets the caller-known logical request ID used to recover the same turn after an ambiguous
+    /// RPC result. Reusing an ID with different effect-bearing input is a conflict.
+    /// </summary>
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RequestId { get; init; }
+
     /// <summary>Gets the ID of the orchestration or workflow that initiated this request (if any).</summary>
     [JsonInclude]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -108,7 +108,12 @@ internal static class Usage
         // BEGIN SNIPPET docs/how-to/MEAI/usage.md#send-a-turn-and-read-history
         var sessionClient = services.GetRequiredService<DurableChatSessionClient>();
 
-        var response = await sessionClient.SendAsync("customer-42", "What is the weather in Seattle?");
+        // Persist this ID before submitting if the caller must retry an ambiguous RPC.
+        var requestId = Guid.NewGuid().ToString("N");
+        var response = await sessionClient.SendAsync(
+            "customer-42",
+            "What is the weather in Seattle?",
+            requestId: requestId);
 
         Console.WriteLine(response.Text);
 

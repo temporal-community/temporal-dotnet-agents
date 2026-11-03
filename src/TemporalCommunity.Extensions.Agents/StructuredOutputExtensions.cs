@@ -159,6 +159,7 @@ public static class StructuredOutputExtensions
                 request.EnableToolNames)
             {
                 CorrelationId = attempt == 0 ? firstAttemptCorrelationId : Guid.NewGuid().ToString("N"),
+                RequestId = attempt == 0 ? request.RequestId : Guid.NewGuid().ToString("N"),
                 OrchestrationId = request.OrchestrationId,
             };
 

@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Xunit;
 
@@ -59,6 +60,26 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
         var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
         var history = await handle.QueryAsync(wf => wf.GetHistory());
         Assert.NotEmpty(history);
+    }
+
+    [Fact]
+    public async Task SingleTurn_PersistsRequestIdentity()
+    {
+        var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
+
+        await _fixture.AgentProxy.RunAsync(
+            "Persist this request identity.",
+            session,
+            new TemporalAgentRunOptions { RequestId = "logical-request-1" });
+
+        var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
+        var history = await handle.QueryAsync(wf => wf.GetHistory());
+        var request = Assert.IsType<AgentSessionRequest>(history[0]);
+        var response = Assert.IsType<AgentSessionResponse>(history[1]);
+
+        Assert.Equal("logical-request-1", request.RequestId);
+        Assert.StartsWith("tai-request-v1:", request.InputFingerprint, StringComparison.Ordinal);
+        Assert.Equal(request.RequestId, response.RequestId);
     }
 
     // ── Multi-turn / history ───────────────────────────────────────────────────

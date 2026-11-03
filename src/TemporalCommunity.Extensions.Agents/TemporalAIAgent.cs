@@ -169,6 +169,7 @@ public sealed class TemporalAIAgent : AIAgent
         IList<string>? enableToolNames = null;
         bool enableToolCalls = true;
         string? callerCorrelationId = null;
+        string? callerRequestId = null;
         ChatResponseFormat? responseFormat = null;
 
         if (options is TemporalAgentRunOptions temporalOptions)
@@ -176,6 +177,7 @@ public sealed class TemporalAIAgent : AIAgent
             enableToolCalls = temporalOptions.EnableToolCalls;
             enableToolNames = temporalOptions.EnableToolNames;
             callerCorrelationId = temporalOptions.CorrelationId;
+            callerRequestId = temporalOptions.RequestId;
         }
         else if (options is ChatClientAgentRunOptions chatOptions)
         {
@@ -187,12 +189,18 @@ public sealed class TemporalAIAgent : AIAgent
             responseFormat = format;
         }
 
+        if (callerRequestId is not null && string.IsNullOrWhiteSpace(callerRequestId))
+        {
+            throw new ArgumentException("Request ID cannot be empty or whitespace.", nameof(options));
+        }
+
         var request = new RunRequest([.. messages], responseFormat, enableToolCalls, enableToolNames)
         {
             OrchestrationId = Workflow.Info.WorkflowId,
             CorrelationId = string.IsNullOrEmpty(callerCorrelationId)
                 ? Workflow.NewGuid().ToString("N")
                 : callerCorrelationId,
+            RequestId = callerRequestId ?? Workflow.NewGuid().ToString("N"),
         };
 
         temporalSession.AppendHistoryEntry(AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow));
@@ -300,7 +308,7 @@ public sealed class TemporalAIAgent : AIAgent
                 };
 
                 temporalSession.AppendHistoryEntry(AgentSessionResponse.FromAgentResponse(
-                    request.CorrelationId!, response, Workflow.UtcNow));
+                    request.CorrelationId!, response, Workflow.UtcNow, request.RequestId));
 
                 return response;
             }
@@ -539,7 +547,7 @@ public sealed class TemporalAIAgent : AIAgent
             CreatedAt = Workflow.UtcNow,
         };
         temporalSession.AppendHistoryEntry(AgentSessionResponse.FromAgentResponse(
-            request.CorrelationId!, iterCapResponse, Workflow.UtcNow));
+            request.CorrelationId!, iterCapResponse, Workflow.UtcNow, request.RequestId));
 
         return iterCapResponse;
     }

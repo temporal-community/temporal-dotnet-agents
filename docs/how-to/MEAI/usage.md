@@ -221,7 +221,12 @@ workerBuilder.Services
 ```csharp
 var sessionClient = services.GetRequiredService<DurableChatSessionClient>();
 
-var response = await sessionClient.SendAsync("customer-42", "What is the weather in Seattle?");
+// Persist this ID before submitting if the caller must retry an ambiguous RPC.
+var requestId = Guid.NewGuid().ToString("N");
+var response = await sessionClient.SendAsync(
+    "customer-42",
+    "What is the weather in Seattle?",
+    requestId: requestId);
 
 Console.WriteLine(response.Text);
 
@@ -246,12 +251,16 @@ supported for durable sessions — there is no `GetStreamingResponseAsync` equiv
 registration and dispatch contract, and [HITL patterns](hitl-patterns.md) for pausing a turn on
 tool approval.
 
-The optional `correlationId` argument groups a turn's request and response in history and can carry
-an upstream tracing/logging identifier. It is **not** a request idempotency key. If Temporal accepts
-a turn but the caller does not receive its response, submitting `SendAsync` again can run another
-turn; passing the same `correlationId` does not deduplicate that submission. Make effectful tools
+`requestId` is the logical identity for a turn; `correlationId` is only for observability, and
+Temporal's workflow-update ID is a separate transport identity. The optional `requestId` is
+generated before the RPC when omitted, but callers that must recover an ambiguous submission need
+to supply and persist their own ID before calling `SendAsync`. The workflow records a canonical
+fingerprint alongside the request, covering messages, model options, the pinned profile, and
+recorded tool authority; reusing one ID with changed effect-bearing input is not a valid retry.
+Phase 2.1 records these identities and fingerprints; admission/deduplication behavior lands in
+Phase 2.2, so the current API does not yet suppress a repeated turn. Make effectful tools
 idempotent with an application-level business-operation ID when they must suppress repeated
-external effects. That does not suppress a second model call or history turn.
+external effects.
 
 Session history is retained workflow state, not an unlimited archive. `MaxEntryCount` defaults to
 1000 entries and triggers Continue-as-New. Without a keyed history reducer, the workflow carries

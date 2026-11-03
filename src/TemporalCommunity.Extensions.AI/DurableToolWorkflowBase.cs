@@ -124,7 +124,12 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
 
         var requestEntry = DurableSessionRequest.FromMessages(
             request.Messages,
-            request.CorrelationId);
+            request.CorrelationId,
+            requestId: request.RequestId,
+            inputFingerprint: Internal.DurableRequestFingerprint.CreateTurn(
+                request,
+                RequiredInput,
+                RequiredInput.ToolsetManifest?.Narrow(request.Options.ToolsetIds).Fingerprint));
         _turnRequests.Add(requestEntry, request);
 
         try
@@ -198,6 +203,7 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
     /// <inheritdoc/>
     protected sealed override DurableSessionResponse BuildResponseEntry(
         string correlationId,
+        string? requestId,
         DurableTurnResult<TTurnState> output,
         DateTimeOffset createdAt)
     {
@@ -227,7 +233,8 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
             correlationId,
             historyResponse,
             createdAt,
-            output.CompletionReason);
+            output.CompletionReason,
+            requestId);
     }
 
     /// <inheritdoc/>

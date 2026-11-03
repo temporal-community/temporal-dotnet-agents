@@ -91,6 +91,7 @@ internal class TemporalAIAgentProxy(
         bool enableToolCalls = true;
         bool isFireAndForget = false;
         string? callerCorrelationId = null;
+        string? callerRequestId = null;
         ChatResponseFormat? responseFormat = null;
 
         if (options is TemporalAgentRunOptions temporalOptions)
@@ -99,6 +100,7 @@ internal class TemporalAIAgentProxy(
             enableToolNames = temporalOptions.EnableToolNames;
             isFireAndForget = temporalOptions.IsFireAndForget;
             callerCorrelationId = temporalOptions.CorrelationId;
+            callerRequestId = temporalOptions.RequestId;
         }
         else if (options is ChatClientAgentRunOptions chatOptions)
         {
@@ -115,6 +117,8 @@ internal class TemporalAIAgentProxy(
             CorrelationId = string.IsNullOrEmpty(callerCorrelationId)
                 ? Guid.NewGuid().ToString("N")
                 : callerCorrelationId,
+            RequestId = TemporalCommunity.Extensions.AI.Internal.DurableRequestFingerprint
+                .ResolveRequestId(callerRequestId),
         };
         var sessionId = temporalSession.SessionId;
 
@@ -159,6 +163,7 @@ internal class TemporalAIAgentProxy(
         var request = new RunRequest([.. messages])
         {
             CorrelationId = Guid.NewGuid().ToString("N"),
+            RequestId = Guid.NewGuid().ToString("N"),
         };
         var sessionId = session.SessionId;
 

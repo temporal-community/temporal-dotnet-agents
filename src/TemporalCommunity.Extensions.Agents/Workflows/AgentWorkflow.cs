@@ -91,6 +91,32 @@ internal class AgentWorkflow :
         await base.RunAsync(input).ConfigureAwait(true);
     }
 
+    private AgentSessionRequest CreateAgentRequestEntry(RunRequest request)
+    {
+        if (request.RequestId is not null && string.IsNullOrWhiteSpace(request.RequestId))
+        {
+            throw new ArgumentException("Request ID cannot be empty or whitespace.");
+        }
+
+        var requestEntry = AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow);
+        requestEntry.RequestId ??= Workflow.NewGuid().ToString("N");
+        requestEntry.InputFingerprint =
+            TemporalCommunity.Extensions.AI.Internal.DurableRequestFingerprint.Create(
+                new
+                {
+                    Version = 1,
+                    requestEntry.Messages,
+                    DefaultChatClientKey = RequiredInput.DefaultChatClientKey,
+                    Authority = TemporalCommunity.Extensions.AI.Internal.DurableRequestFingerprint
+                        .CreateAuthority(RequiredInput),
+                    requestEntry.EnableToolCalls,
+                    requestEntry.EnableToolNames,
+                    requestEntry.ResponseType,
+                    requestEntry.ResponseSchema,
+                });
+        return requestEntry;
+    }
+
     /// <summary>
     /// Validates that a <see cref="RunAgentAsync"/> request is well-formed before it enters history.
     /// </summary>
@@ -103,6 +129,8 @@ internal class AgentWorkflow :
             throw new InvalidOperationException("Session is continuing as new. Retry the turn.");
         if (request?.Messages is null || request.Messages.Count == 0)
             throw new ArgumentException("At least one message is required.");
+        if (request.RequestId is not null && string.IsNullOrWhiteSpace(request.RequestId))
+            throw new ArgumentException("Request ID cannot be empty or whitespace.");
     }
 
     /// <summary>
@@ -114,7 +142,7 @@ internal class AgentWorkflow :
     {
         await WaitForAgentInputAsync().ConfigureAwait(true);
 
-        var requestEntry = AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow);
+        var requestEntry = CreateAgentRequestEntry(request);
 
         var (output, _) = await RunTurnAsync(requestEntry, chatOptions: null);
 
@@ -293,9 +321,10 @@ internal class AgentWorkflow :
     /// <inheritdoc/>
     protected override DurableSessionResponse BuildResponseEntry(
         string correlationId,
+        string? requestId,
         AgentResponse output,
         DateTimeOffset createdAt) =>
-        AgentSessionResponse.FromAgentResponse(correlationId, output, createdAt);
+        AgentSessionResponse.FromAgentResponse(correlationId, output, createdAt, requestId);
 
     /// <inheritdoc/>
     protected override Task<List<DurableSessionEntry>> ApplyKeyedHistoryReducerAsync(
@@ -1106,7 +1135,7 @@ internal class AgentWorkflow :
         {
             await WaitForAgentInputAsync().ConfigureAwait(true);
 
-            var requestEntry = AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow);
+            var requestEntry = CreateAgentRequestEntry(request);
             await RunTurnAsync(requestEntry, chatOptions: null).ConfigureAwait(true);
         }
         catch (Exception ex)

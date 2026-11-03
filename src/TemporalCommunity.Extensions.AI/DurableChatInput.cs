@@ -18,11 +18,12 @@ public sealed class DurableChatInput
     public required IList<ChatMessage> Messages { get; init; }
 
     /// <summary>
-    /// Optional chat options. Non-serializable or non-resumable provider fields
-    /// (<see cref="ChatOptions.RawRepresentationFactory"/> and
-    /// <see cref="ChatOptions.ContinuationToken"/>) are not preserved across the activity
-    /// boundary. Serializable Temporal routing metadata remains available to worker decorators
-    /// and is removed immediately before the provider call.
+    /// Optional chat options. Provider-owned fields such as
+    /// <see cref="ChatOptions.ConversationId"/>, <see cref="ChatOptions.RawRepresentationFactory"/>,
+    /// and <see cref="ChatOptions.ContinuationToken"/> are rejected because they cannot be
+    /// resumed across the durable workflow/activity boundary. Serializable Temporal routing
+    /// metadata remains available to worker decorators and is removed immediately before the
+    /// provider call.
     /// </summary>
     public ChatOptions? Options { get; init; }
 
@@ -51,4 +52,10 @@ public sealed class DurableChatInput
     /// Per-turn (each <c>SendAsync</c> call), not per-session.
     /// </summary>
     public string? CorrelationId { get; init; }
+
+    /// <summary>
+    /// Optional caller-known logical request ID used to identify retries of the same turn.
+    /// This is distinct from the observability correlation ID and Temporal's update ID.
+    /// </summary>
+    public string? RequestId { get; init; }
 }

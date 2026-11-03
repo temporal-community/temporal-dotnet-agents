@@ -183,6 +183,49 @@ public class TemporalAIAgentProxyTests
     }
 
     [Fact]
+    public async Task RunAsync_WithRequestIdInOptions_PropagatesToRunRequest()
+    {
+        RunRequest? capturedRequest = null;
+        var fakeClient = A.Fake<ITemporalAgentClient>();
+        A.CallTo(() => fakeClient.SendAsync(
+                A<TemporalAgentSessionId>._,
+                A<RunRequest>._,
+                A<CancellationToken>._))
+            .Invokes((TemporalAgentSessionId _, RunRequest r, CancellationToken _) => capturedRequest = r)
+            .Returns(Task.FromResult(new AgentResponse()));
+
+        var proxy = new TemporalAIAgentProxy("TestAgent", fakeClient);
+        var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+
+        await proxy.RunAsync(
+            "Hello",
+            session,
+            new TemporalAgentRunOptions { RequestId = "logical-request-1" });
+
+        Assert.Equal("logical-request-1", capturedRequest!.RequestId);
+    }
+
+    [Fact]
+    public async Task RunAsync_WithoutRequestIdInOptions_AutoGenerates()
+    {
+        RunRequest? capturedRequest = null;
+        var fakeClient = A.Fake<ITemporalAgentClient>();
+        A.CallTo(() => fakeClient.SendAsync(
+                A<TemporalAgentSessionId>._,
+                A<RunRequest>._,
+                A<CancellationToken>._))
+            .Invokes((TemporalAgentSessionId _, RunRequest r, CancellationToken _) => capturedRequest = r)
+            .Returns(Task.FromResult(new AgentResponse()));
+
+        var proxy = new TemporalAIAgentProxy("TestAgent", fakeClient);
+        var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+
+        await proxy.RunAsync("Hello", session);
+
+        Assert.False(string.IsNullOrWhiteSpace(capturedRequest!.RequestId));
+    }
+
+    [Fact]
     public async Task RunAsync_WithoutCorrelationIdInOptions_AutoGenerates()
     {
         // When no CorrelationId is supplied, the proxy must auto-generate one — no null leak,

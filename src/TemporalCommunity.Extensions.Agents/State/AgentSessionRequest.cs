@@ -91,6 +91,7 @@ public sealed class AgentSessionRequest : DurableSessionRequest
         return new AgentSessionRequest
         {
             CorrelationId = request.CorrelationId,
+            RequestId = request.RequestId,
             CreatedAt = createdAt,
             Messages = request.Messages.ToList(),
             EnableToolCalls = request.EnableToolCalls,

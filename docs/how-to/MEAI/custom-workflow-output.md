@@ -217,7 +217,10 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
     [WorkflowUpdate("Shop")]
     public async Task<ShoppingTurnOutput> ShopAsync(DurableChatInput input)
     {
-        var requestEntry = DurableSessionRequest.FromMessages(input.Messages, input.CorrelationId);
+        var requestEntry = DurableSessionRequest.FromMessages(
+            input.Messages,
+            input.CorrelationId,
+            requestId: input.RequestId);
         var (output, _) = await RunTurnAsync(requestEntry, input.Options);
         return output;
     }
@@ -226,9 +229,15 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
     // to history. The base class calls this once ExecuteTurnAsync completes.
     protected override DurableSessionResponse BuildResponseEntry(
         string correlationId,
+        string? requestId,
         ShoppingTurnOutput output,
         DateTimeOffset createdAt) =>
-        DurableSessionResponse.FromChatResponse(correlationId, output.Response, createdAt);
+        DurableSessionResponse.FromChatResponse(
+            correlationId,
+            output.Response,
+            createdAt,
+            DurableTurnCompletionReason.FinalResponse,
+            requestId);
 
     protected override Task<ShoppingTurnOutput> ExecuteTurnAsync(
         ActivityOptions activityOptions,
@@ -317,19 +326,30 @@ becomes the replay-frozen authority for that session.
 
 ## The Three Abstract Members
 
-### `BuildResponseEntry(correlationId, output, createdAt)`
+### `BuildResponseEntry(correlationId, requestId, output, createdAt)`
 
-Wraps the per-turn `TOutput` into a `DurableSessionResponse` that the base class appends to history. The correlation ID matches the request entry that was already appended.
+Wraps the per-turn `TOutput` into a `DurableSessionResponse` that the base class appends to
+history. The correlation ID matches the request entry; the logical request ID is a separate
+identity used to recognize retries.
 
 ```csharp
 protected override DurableSessionResponse BuildResponseEntry(
     string correlationId,
+    string? requestId,
     ShoppingTurnOutput output,
     DateTimeOffset createdAt) =>
-    DurableSessionResponse.FromChatResponse(correlationId, output.Response, createdAt);
+    DurableSessionResponse.FromChatResponse(
+        correlationId,
+        output.Response,
+        createdAt,
+        DurableTurnCompletionReason.FinalResponse,
+        requestId);
 ```
 
-For a `ChatResponse`-based output, the static `DurableSessionResponse.FromChatResponse` factory captures the assistant messages, usage, and timestamp. If your output type does not include the full `ChatResponse`, construct a `DurableSessionResponse` directly from the assistant messages you want preserved.
+For a `ChatResponse`-based output, the static `DurableSessionResponse.FromChatResponse` factory
+captures messages, usage, provider metadata, timestamp, and the request ID. If your output type
+does not include the full `ChatResponse`, construct a `DurableSessionResponse` directly from the
+assistant messages you want preserved and set `RequestId`.
 
 ### `ExecuteTurnAsync(ActivityOptions activityOptions, DurableSessionRequest requestEntry, ChatOptions? chatOptions)`
 

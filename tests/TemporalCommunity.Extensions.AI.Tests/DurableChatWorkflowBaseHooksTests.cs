@@ -28,8 +28,13 @@ public class DurableChatWorkflowBaseHooksTests
             => UpsertCustomSearchAttributes();
 
         protected override DurableSessionResponse BuildResponseEntry(
-            string correlationId, ChatResponse output, DateTimeOffset createdAt)
-            => DurableSessionResponse.FromChatResponse(correlationId, output, createdAt);
+            string correlationId, string? requestId, ChatResponse output, DateTimeOffset createdAt)
+            => DurableSessionResponse.FromChatResponse(
+                correlationId,
+                output,
+                createdAt,
+                DurableTurnCompletionReason.FinalResponse,
+                requestId);
 
         protected override Task<ChatResponse> ExecuteTurnAsync(
             ActivityOptions activityOptions,
@@ -56,8 +61,13 @@ public class DurableChatWorkflowBaseHooksTests
             => UpsertCustomSearchAttributes();
 
         protected override DurableSessionResponse BuildResponseEntry(
-            string correlationId, ChatResponse output, DateTimeOffset createdAt)
-            => DurableSessionResponse.FromChatResponse(correlationId, output, createdAt);
+            string correlationId, string? requestId, ChatResponse output, DateTimeOffset createdAt)
+            => DurableSessionResponse.FromChatResponse(
+                correlationId,
+                output,
+                createdAt,
+                DurableTurnCompletionReason.FinalResponse,
+                requestId);
 
         protected override Task<ChatResponse> ExecuteTurnAsync(
             ActivityOptions activityOptions,

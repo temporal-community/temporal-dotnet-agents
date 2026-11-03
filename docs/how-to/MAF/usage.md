@@ -149,6 +149,24 @@ var r2 = await agentProxy.RunAsync("What is its population?", session);
 Console.WriteLine(r2.Messages[0].Text);  // ~2.1 million (context preserved)
 ```
 
+### Request ID Recovery
+
+For recovery after an ambiguous RPC result, supply a logical request ID and persist it before
+submitting the turn. Reuse it only for the same effect-bearing input; correlation IDs are for
+observability and do not provide deduplication.
+
+```csharp
+var requestId = Guid.NewGuid().ToString("N"); // Persist this ID before submitting the turn.
+var response = await agentProxy.RunAsync(
+    "What is the capital of France?",
+    session,
+    new TemporalAgentRunOptions { RequestId = requestId });
+```
+
+The workflow records the request ID and a fingerprint of messages, model route, tool authority,
+tool selection, and structured-output settings. The fingerprint is groundwork for retry-safe
+admission; until that admission behavior is enabled, it does not by itself deduplicate requests.
+
 ---
 
 ## Reducing the LLM Context Window

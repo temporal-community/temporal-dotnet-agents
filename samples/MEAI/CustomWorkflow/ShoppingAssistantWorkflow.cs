@@ -48,10 +48,12 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
     [WorkflowUpdate("Shop")]
     public async Task<ShoppingTurnOutput> ShopAsync(DurableChatInput input)
     {
-        // Build the request entry — factory auto-generates the correlation ID via
-        // Workflow.NewGuid() when the caller did not supply one.
+        // Build the request entry — logical request identity is distinct from correlation metadata.
         var messages = input.Messages as IReadOnlyList<ChatMessage> ?? input.Messages.ToList();
-        var requestEntry = DurableSessionRequest.FromMessages(messages, input.CorrelationId);
+        var requestEntry = DurableSessionRequest.FromMessages(
+            messages,
+            input.CorrelationId,
+            requestId: input.RequestId);
 
         // Stash per-turn metadata keyed by the correlation ID so concurrent Shop updates
         // cannot stomp on each other's values while waiting on the _isProcessing mutex.
@@ -79,9 +81,15 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
     /// </summary>
     protected override DurableSessionResponse BuildResponseEntry(
         string correlationId,
+        string? requestId,
         ShoppingTurnOutput output,
         DateTimeOffset createdAt) =>
-        DurableSessionResponse.FromChatResponse(correlationId, output.Response, createdAt);
+        DurableSessionResponse.FromChatResponse(
+            correlationId,
+            output.Response,
+            createdAt,
+            DurableTurnCompletionReason.FinalResponse,
+            requestId);
 
     protected override Task<ShoppingTurnOutput> ExecuteTurnAsync(
         ActivityOptions activityOptions,

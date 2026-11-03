@@ -149,4 +149,22 @@ public class DurableChatSessionClientTests
         Assert.Contains(propertyName, exception.Message, StringComparison.Ordinal);
         A.CallTo(client).Where(call => call.Method.Name.Contains("UpdateWithStart", StringComparison.Ordinal)).MustNotHaveHappened();
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SendAsync_RejectsInvalidRequestIdBeforeWorkflowDispatch(string requestId)
+    {
+        var client = A.Fake<ITemporalClient>();
+        var sessionClient = new DurableChatSessionClient(
+            client,
+            new DurableExecutionOptions { TaskQueue = "test" });
+
+        await Assert.ThrowsAsync<ArgumentException>(() => sessionClient.SendAsync(
+            "conversation",
+            [new ChatMessage(ChatRole.User, "hello")],
+            requestId: requestId));
+
+        A.CallTo(client).Where(call => call.Method.Name.Contains("UpdateWithStart", StringComparison.Ordinal)).MustNotHaveHappened();
+    }
 }

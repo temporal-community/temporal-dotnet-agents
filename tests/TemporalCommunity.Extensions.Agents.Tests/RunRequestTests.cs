@@ -50,6 +50,14 @@ public class RunRequestTests
     }
 
     [Fact]
+    public void RequestId_DefaultsToNull()
+    {
+        var request = new RunRequest("test");
+
+        Assert.Null(request.RequestId);
+    }
+
+    [Fact]
     public void EnableToolCalls_DefaultsToTrue()
     {
         var request = new RunRequest("test");
@@ -101,10 +109,15 @@ public class RunRequestTests
     [Fact]
     public void JsonRoundTrip_PreservesCorrelationId()
     {
-        var original = new RunRequest("test") { CorrelationId = "round-trip-corr" };
+        var original = new RunRequest("test")
+        {
+            CorrelationId = "round-trip-corr",
+            RequestId = "logical-request-1",
+        };
         var json = JsonSerializer.Serialize(original);
         var deserialized = JsonSerializer.Deserialize<RunRequest>(json);
         Assert.Equal(original.CorrelationId, deserialized!.CorrelationId);
+        Assert.Equal(original.RequestId, deserialized.RequestId);
     }
 
     [Fact]

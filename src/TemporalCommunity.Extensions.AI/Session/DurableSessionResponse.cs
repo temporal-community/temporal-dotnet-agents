@@ -16,6 +16,10 @@ public class DurableSessionResponse : DurableSessionEntry
     /// </summary>
     public UsageDetails? Usage { get; init; }
 
+    /// <summary>The logical request ID associated with this turn, when supplied.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RequestId { get; init; }
+
     /// <summary>The provider's response ID, when supplied.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResponseId { get; init; }
@@ -86,7 +90,8 @@ public class DurableSessionResponse : DurableSessionEntry
         string correlationId,
         ChatResponse response,
         DateTimeOffset timestamp,
-        DurableTurnCompletionReason completionReason)
+        DurableTurnCompletionReason completionReason,
+        string? requestId = null)
     {
         ArgumentNullException.ThrowIfNull(response);
 
@@ -104,6 +109,7 @@ public class DurableSessionResponse : DurableSessionEntry
         return new DurableSessionResponse
         {
             CorrelationId = correlationId,
+            RequestId = requestId,
             CreatedAt = createdAt,
             Messages = response.Messages.ToList(),
             Usage = response.Usage,

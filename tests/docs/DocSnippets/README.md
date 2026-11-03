@@ -98,6 +98,8 @@ Phase 1.1 adds a compiled split-hosting example so the client-only and worker-on
 overloads stay aligned with the MEAI usage guide. Phase 1.2 adds a compiled keyed-profile example
 for worker-side registration validation. Phase 1.3 documents the session-pinned profile contract
 and carries that profile through Continue-as-New without serializing runtime provider or tool services.
+Phase 2.1 adds a compiled MAF request-ID example so caller-known retry identity stays aligned with
+the usage guide and `TemporalAgentRunOptions`.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 

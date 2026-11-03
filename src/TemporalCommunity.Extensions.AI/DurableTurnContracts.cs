@@ -25,6 +25,12 @@ public sealed class DurableTurnRequest<TRequestData, TTurnState>
     public string? CorrelationId { get; init; }
 
     /// <summary>
+    /// Gets the caller-known logical request ID used to identify retries of the same turn.
+    /// This is distinct from correlation metadata and Temporal's update ID.
+    /// </summary>
+    public string? RequestId { get; init; }
+
+    /// <summary>
     /// Gets the optional application conversation identifier. The Temporal workflow ID is used
     /// when this value is absent.
     /// </summary>

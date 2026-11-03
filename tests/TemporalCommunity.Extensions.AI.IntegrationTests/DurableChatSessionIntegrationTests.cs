@@ -206,9 +206,13 @@ public class DurableChatSessionIntegrationTests
         {
             var sessionClient = host.Services.GetRequiredService<IDurableChatSessionClient>();
             var conversationId = $"managed-response-metadata-{Guid.NewGuid():N}";
-            var response = await sessionClient.SendAsync(conversationId, "hello");
+            var response = await sessionClient.SendAsync(
+                conversationId,
+                "hello",
+                requestId: "logical-request-1");
 
             Assert.Equal("hello back", response.Text);
+            Assert.Equal("logical-request-1", response.RequestId);
             Assert.Equal("provider-response-1", response.ResponseId);
             Assert.Equal("model-1", response.ModelId);
             Assert.Equal(ChatFinishReason.Stop, response.FinishReason);
@@ -217,9 +221,14 @@ public class DurableChatSessionIntegrationTests
 
             var stored = Assert.IsType<DurableSessionResponse>(
                 (await sessionClient.GetHistoryAsync(conversationId))[1]);
+            Assert.Equal("logical-request-1", stored.RequestId);
             Assert.Equal("provider-response-1", stored.ResponseId);
             Assert.Equal("model-1", stored.ModelId);
             Assert.Equal("trace-1", stored.ResponseAdditionalProperties!["provider.trace"].GetString());
+            var storedRequest = Assert.IsType<DurableSessionRequest>(
+                (await sessionClient.GetHistoryAsync(conversationId))[0]);
+            Assert.Equal("logical-request-1", storedRequest.RequestId);
+            Assert.StartsWith("tai-request-v1:", storedRequest.InputFingerprint, StringComparison.Ordinal);
         }
         finally
         {

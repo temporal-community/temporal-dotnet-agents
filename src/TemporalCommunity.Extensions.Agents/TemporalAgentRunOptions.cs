@@ -20,6 +20,7 @@ public sealed class TemporalAgentRunOptions : AgentRunOptions
             : null;
         this.IsFireAndForget = options.IsFireAndForget;
         this.CorrelationId = options.CorrelationId;
+        this.RequestId = options.RequestId;
     }
 
     /// <summary>Gets or sets whether to enable tool calls. Defaults to <c>true</c>.</summary>
@@ -52,6 +53,12 @@ public sealed class TemporalAgentRunOptions : AgentRunOptions
     /// </para>
     /// </remarks>
     public string? CorrelationId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the caller-known logical request ID for this turn. Persist it before
+    /// submission if it will be used to retry after an ambiguous RPC result.
+    /// </summary>
+    public string? RequestId { get; set; }
 
     /// <inheritdoc/>
     public override AgentRunOptions Clone() => new TemporalAgentRunOptions(this);

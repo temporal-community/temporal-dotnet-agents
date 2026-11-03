@@ -42,6 +42,10 @@ public interface IDurableChatSessionClient
     /// Optional caller-supplied correlation ID for this turn. When null/empty, the
     /// workflow auto-generates one via <c>Workflow.NewGuid()</c>.
     /// </param>
+    /// <param name="requestId">
+    /// Optional caller-known logical request ID. Reuse it only when retrying the same turn with
+    /// identical effect-bearing input; correlation IDs and Temporal update IDs are separate.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// The response entry from the LLM, including per-turn <see cref="UsageDetails"/>, provider
@@ -52,6 +56,7 @@ public interface IDurableChatSessionClient
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         string? correlationId = null,
+        string? requestId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -61,6 +66,10 @@ public interface IDurableChatSessionClient
     /// <param name="message">User text to append to the conversation.</param>
     /// <param name="options">Optional supported MEAI chat options.</param>
     /// <param name="correlationId">Optional observability identifier for the turn.</param>
+    /// <param name="requestId">
+    /// Optional caller-known logical request ID. Reuse it only when retrying the same turn with
+    /// identical effect-bearing input.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token for this RPC wait.</param>
     /// <returns>
     /// The durable response entry for the turn, including provider response/model IDs, finish
@@ -71,6 +80,7 @@ public interface IDurableChatSessionClient
         string message,
         ChatOptions? options = null,
         string? correlationId = null,
+        string? requestId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

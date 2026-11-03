@@ -80,6 +80,8 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
             throw new InvalidOperationException("Session is continuing as new. Retry the turn.");
         if (input.Messages is null or { Count: 0 })
             throw new ArgumentException("At least one message is required.");
+        if (input.RequestId is not null && string.IsNullOrWhiteSpace(input.RequestId))
+            throw new ArgumentException("Request ID cannot be empty or whitespace.");
         if (_toolAuthorityReady)
         {
             ValidateSessionProfile(input.ClientKey);
@@ -100,7 +102,11 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
         // correlation ID via Workflow.NewGuid() (deterministic, replay-safe) when the
         // caller did not supply one.
         var messages = input.Messages as IReadOnlyList<ChatMessage> ?? input.Messages.ToList();
-        var requestEntry = DurableSessionRequest.FromMessages(messages, input.CorrelationId);
+        var requestEntry = DurableSessionRequest.FromMessages(
+            messages,
+            input.CorrelationId,
+            requestId: input.RequestId);
+        requestEntry.InputFingerprint = Internal.DurableRequestFingerprint.CreateChat(input, RequiredInput);
 
         // Store per-turn metadata keyed by the request entry object reference.
         // Removed in the finally block so exceptions (cancellation, timeout, tool failure)
@@ -116,7 +122,8 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
                 requestEntry.CorrelationId,
                 output.Response,
                 responseEntry.CreatedAt,
-                output.CompletionReason);
+                output.CompletionReason,
+                requestEntry.RequestId);
         }
         finally
         {
@@ -130,6 +137,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     /// </summary>
     protected override DurableSessionResponse BuildResponseEntry(
         string correlationId,
+        string? requestId,
         DurableManagedLoopResult output,
         DateTimeOffset createdAt)
     {
@@ -142,7 +150,8 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
             correlationId,
             historyResponse,
             createdAt,
-            output.CompletionReason);
+            output.CompletionReason,
+            requestId);
     }
 
     /// <inheritdoc/>

@@ -337,7 +337,8 @@ try
     };
 
     var output = await ExecuteTurnAsync(activityOptions, requestEntry, chatOptions);
-    var responseEntry = BuildResponseEntry(requestEntry.CorrelationId, output, Workflow.UtcNow);
+    var responseEntry = BuildResponseEntry(
+        requestEntry.CorrelationId, requestEntry.RequestId, output, Workflow.UtcNow);
 
     _history.Add(responseEntry);
     return (output, responseEntry);
@@ -370,7 +371,7 @@ The overrides on `AgentWorkflow`:
 
 | Hook | Purpose |
 |---|---|
-| `BuildResponseEntry(correlationId, AgentResponse output, createdAt)` | Returns `AgentSessionResponse.FromAgentResponse(...)` so the entry on the wire is the MAF subclass with `OrchestrationId`/`ResponseType`/`ResponseSchema` discrimination preserved. |
+| `BuildResponseEntry(correlationId, requestId, AgentResponse output, createdAt)` | Returns `AgentSessionResponse.FromAgentResponse(...)` so the entry on the wire is the MAF subclass with request identity and `OrchestrationId`/`ResponseType`/`ResponseSchema` discrimination preserved. |
 | `ExecuteTurnAsync(activityOptions, requestEntry, chatOptions)` | Discards the base's `activityOptions` and builds its own from the frozen `AgentWorkflowInput`, then drives the per-step durable loop in `ExecuteDurableAgentTurnAsync`: each iteration dispatches `AgentActivities.RunDurableAgentStepAsync` (one LLM call) and, if the step returns pending tool calls, fans out one `AgentActivities.InvokeAgentToolAsync` activity per call via `Workflow.WhenAllAsync`. Overlays the updated StateBag onto `_currentStateBag` after each step. |
 | `CreateContinueAsNewException(input)` | `with`-clones the retained `_input` (an `AgentWorkflowInput`), overwriting the base-owned CAN fields from the `input` argument and adding `CarriedStateBag` plus `AgentApprovalResolutionHistory`. Cloning rather than field-by-field reconstruction is what keeps a newly added setting from being silently dropped at the boundary. |
 | `UpsertCustomSearchAttributes()` | Upserts the `AgentName` typed search attribute. Called by the base after the standard `SessionCreatedAt` / `TurnCount` upserts. Default in the base is a no-op; `DurableChatWorkflow` (the MEAI sibling) does not override it because chat sessions are not named. |
@@ -677,7 +678,7 @@ Here is the complete path a message takes from an external caller to the LLM and
 │                                                              │
 │   Back in the base's RunTurnAsync:                           │
 │   22. responseEntry =                                        │
-│        BuildResponseEntry(corrId, output, Workflow.UtcNow)   │
+│  BuildResponseEntry(corrId, requestId, output, Workflow.UtcNow) │
 │        └─ Subclass override returns                          │
 │            AgentSessionResponse.FromAgentResponse(...)       │
 │   23. _history.Add(responseEntry)                            │  ← Record response

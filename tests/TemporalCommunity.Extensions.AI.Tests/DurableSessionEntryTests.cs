@@ -30,6 +30,8 @@ public class DurableSessionEntryTests
         var original = new DurableSessionRequest
         {
             CorrelationId = "corr-req-1",
+            RequestId = "request-1",
+            InputFingerprint = "tai-request-v1:fingerprint",
             CreatedAt = createdAt,
             Messages = new List<ChatMessage>
             {
@@ -44,6 +46,8 @@ public class DurableSessionEntryTests
         var roundTripped = RoundTrip(original);
 
         Assert.Equal("corr-req-1", roundTripped.CorrelationId);
+        Assert.Equal("request-1", roundTripped.RequestId);
+        Assert.Equal("tai-request-v1:fingerprint", roundTripped.InputFingerprint);
         Assert.Equal(createdAt, roundTripped.CreatedAt);
         Assert.Equal(2, roundTripped.Messages.Count);
         Assert.IsType<TextContent>(roundTripped.Messages[0].Contents[0]);

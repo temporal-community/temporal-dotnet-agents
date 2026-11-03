@@ -92,7 +92,10 @@ Console.WriteLine($"Session workflow ID: {session}\n");
 // Each RunAsync call is a Temporal WorkflowUpdate — a durable, acknowledged
 // request/response round-trip. Conversation history is preserved in the workflow.
 Console.WriteLine("User : What is the capital of France?");
-var r1 = await proxy.RunAsync("What is the capital of France?", session);
+var r1 = await proxy.RunAsync(
+    "What is the capital of France?",
+    session,
+    new TemporalAgentRunOptions { RequestId = "basic-agent-turn-1" });
 Console.WriteLine($"Agent: {r1.Text ?? "(no response)"}\n");
 
 Console.WriteLine("User : What is its population?");

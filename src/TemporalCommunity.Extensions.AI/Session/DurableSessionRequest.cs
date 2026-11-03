@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Temporalio.Workflows;
 
@@ -27,9 +28,16 @@ public class DurableSessionRequest : DurableSessionEntry
     public static DurableSessionRequest FromMessages(
         IReadOnlyList<ChatMessage> messages,
         string? correlationId = null,
-        DateTimeOffset? timestamp = null)
+        DateTimeOffset? timestamp = null,
+        string? requestId = null,
+        string? inputFingerprint = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
+
+        if (requestId is not null && string.IsNullOrWhiteSpace(requestId))
+        {
+            throw new ArgumentException("requestId cannot be empty or whitespace.", nameof(requestId));
+        }
 
         string effectiveCorrelationId = !string.IsNullOrEmpty(correlationId)
             ? correlationId
@@ -47,8 +55,27 @@ public class DurableSessionRequest : DurableSessionEntry
         return new DurableSessionRequest
         {
             CorrelationId = effectiveCorrelationId,
+            RequestId = requestId ?? (Workflow.InWorkflow
+                ? Workflow.NewGuid().ToString("N")
+                : Guid.NewGuid().ToString("N")),
+            InputFingerprint = inputFingerprint,
             CreatedAt = createdAt,
             Messages = messages.ToList(),
         };
     }
+
+    /// <summary>
+    /// Gets the logical request ID. It is generated deterministically when a workflow caller
+    /// omits one, or may be supplied by an external caller before submission.
+    /// </summary>
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RequestId { get; internal set; }
+
+    /// <summary>
+    /// Gets the canonical fingerprint of effect-bearing serialized input for this request.
+    /// </summary>
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InputFingerprint { get; internal set; }
 }
