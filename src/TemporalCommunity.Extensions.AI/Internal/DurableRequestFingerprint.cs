@@ -32,9 +32,29 @@ internal static class DurableRequestFingerprint
         {
             Version = 1,
             input.Messages,
+            input.ConversationId,
             Options = ChatOptionsSanitizer.PrepareForDurableTransport(input.Options),
             ClientKey = input.ClientKey ?? sessionInput.DefaultChatClientKey,
             Authority = CreateAuthority(sessionInput),
+        });
+    }
+
+    internal static string CreateChatAdmission(DurableChatInput input)
+    {
+        if (input.Options?.Tools is { Count: > 0 })
+        {
+            throw new DurableConfigurationException(
+                "ChatOptions.Tools cannot be fingerprinted as durable session input. " +
+                "Register durable tools through the session's tool authority instead.");
+        }
+
+        return Create(new
+        {
+            Version = 1,
+            input.Messages,
+            input.ConversationId,
+            Options = ChatOptionsSanitizer.PrepareForDurableTransport(input.Options),
+            input.ClientKey,
         });
     }
 
@@ -54,9 +74,33 @@ internal static class DurableRequestFingerprint
         {
             Version = 1,
             request.Messages,
+            request.ConversationId,
             ChatOptions = ChatOptionsSanitizer.PrepareForDurableTransport(request.ChatOptions),
             ClientKey = sessionInput.DefaultChatClientKey,
             Authority = CreateAuthority(sessionInput, toolsetManifestFingerprint),
+            request.RequestData,
+            request.InitialTurnState,
+            request.Options.DispatchMode,
+            request.Options.ToolsetIds,
+        });
+    }
+
+    internal static string CreateTurnAdmission<TRequestData, TTurnState>(
+        DurableTurnRequest<TRequestData, TTurnState> request)
+    {
+        if (request.ChatOptions?.Tools is { Count: > 0 })
+        {
+            throw new DurableConfigurationException(
+                "ChatOptions.Tools cannot be fingerprinted as durable turn input. " +
+                "Select tools through DurableTurnOptions.ToolsetIds.");
+        }
+
+        return Create(new
+        {
+            Version = 1,
+            request.Messages,
+            request.ConversationId,
+            ChatOptions = ChatOptionsSanitizer.PrepareForDurableTransport(request.ChatOptions),
             request.RequestData,
             request.InitialTurnState,
             request.Options.DispatchMode,

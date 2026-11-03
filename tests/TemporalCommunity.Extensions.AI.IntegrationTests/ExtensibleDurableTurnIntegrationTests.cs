@@ -107,22 +107,21 @@ public class ExtensibleDurableTurnIntegrationTests
 
         chatClient.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "queued turn complete")));
         chatClient.Enqueue(new ChatResponse(new ChatMessage(ChatRole.Assistant, "queued turn complete")));
-        var queuedFirstRequest = CreateRequestWithToolsets("queued-first", ["first"]);
-        var queuedSecondRequest = CreateRequestWithToolsets("queued-second", ["second"]);
-        var queuedFirst = handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
-            workflow => workflow.TurnAsync(queuedFirstRequest),
+        var sequentialFirstRequest = CreateRequestWithToolsets("sequential-first", ["first"]);
+        var sequentialSecondRequest = CreateRequestWithToolsets("sequential-second", ["second"]);
+        await handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(sequentialFirstRequest),
             new WorkflowUpdateOptions { Id = "queued-first" });
-        var queuedSecond = handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
-            workflow => workflow.TurnAsync(queuedSecondRequest),
+        await handle.ExecuteUpdateAsync<NarrowingDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+            workflow => workflow.TurnAsync(sequentialSecondRequest),
             new WorkflowUpdateOptions { Id = "queued-second" });
-        await Task.WhenAll(queuedFirst, queuedSecond);
 
         var queuedCalls = chatClient.Calls.Skip(6).ToArray();
         Assert.Equal(2, queuedCalls.Length);
         var firstCall = Assert.Single(queuedCalls, call =>
-            call.Messages.Last(message => message.Role == ChatRole.User).Text == "queued-first");
+            call.Messages.Last(message => message.Role == ChatRole.User).Text == "sequential-first");
         var secondCall = Assert.Single(queuedCalls, call =>
-            call.Messages.Last(message => message.Role == ChatRole.User).Text == "queued-second");
+            call.Messages.Last(message => message.Role == ChatRole.User).Text == "sequential-second");
         Assert.Equal(["first_tool"], firstCall.Options!.Tools!.Select(tool => tool.Name));
         Assert.Equal(["second_tool"], secondCall.Options!.Tools!.Select(tool => tool.Name));
 
@@ -1147,6 +1146,10 @@ public sealed class IntegrationDurableTurnWorkflow
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
 
+    [WorkflowUpdateValidator(nameof(TurnAsync))]
+    public void ValidateTurn(DurableTurnRequest<IntegrationRequestData, IntegrationTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
+
     [WorkflowUpdate("Turn")]
     public Task<DurableTurnResult<IntegrationTurnState>> TurnAsync(
         DurableTurnRequest<IntegrationRequestData, IntegrationTurnState> request) =>
@@ -1161,6 +1164,10 @@ public sealed class NarrowingDurableTurnWorkflow
 
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
+
+    [WorkflowUpdateValidator(nameof(TurnAsync))]
+    public void ValidateTurn(DurableTurnRequest<IntegrationRequestData, IntegrationTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
 
     [WorkflowUpdate("Turn")]
     public Task<DurableTurnResult<IntegrationTurnState>> TurnAsync(

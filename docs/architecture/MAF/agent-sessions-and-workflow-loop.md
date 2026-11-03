@@ -130,7 +130,7 @@ The session effectively *is* the workflow. Creating a session doesn't start the 
 
 `AgentWorkflow` inherits from `DurableChatWorkflowBase<AgentResponse>` (declared in
 `TemporalCommunity.Extensions.AI`). The base class owns the session-loop body — the turn
-mutex, turn rollback, continue-as-new triggering, history reduction, the
+turn admission, rollback, continue-as-new triggering, history reduction, the
 `[WorkflowQuery("GetHistory")]` handler, the `[WorkflowSignal("Shutdown")]` handler, and the
 generic HITL approval handlers (`RequestApproval`, `ResolveApproval`, `GetPendingApproval`).
 
@@ -145,7 +145,7 @@ The shared shape:
 ```
 DurableChatWorkflowBase<TOutput>           ← in TemporalCommunity.Extensions.AI
     ├─ _history: List<DurableSessionEntry> (private)
-    ├─ session-loop body (turn mutex, turn rollback, CAN trigger, history reducer)
+    ├─ session-loop body (turn admission, rollback, CAN trigger, history reducer)
     ├─ [WorkflowQuery("GetHistory")]
     ├─ [WorkflowSignal("Shutdown")]        ← ShutdownSignalName
     ├─ [WorkflowUpdate("RequestApproval")] + [WorkflowUpdateValidator]
@@ -284,23 +284,26 @@ ends so a fire-and-forget turn is never aborted mid-flight.
 
 While the workflow is parked, it is **not consuming compute resources**. It sits in Temporal's persistence layer and only wakes when a message (Update or Signal) arrives.
 
-### The Processing Gate: `_isProcessing`
+### Turn admission: `_activeTurn`
 
-The base serializes concurrent requests with a boolean gate. The subclass's
-`[WorkflowUpdate("Run")]` handler crosses the input-readiness barrier, then delegates the actual
-turn execution to the base's `RunTurnAsync` helper, which acquires the gate, appends the
-request entry, calls `ExecuteTurnAsync` (the subclass override), appends
-the response entry, and releases the gate:
+The base admits one logical request at a time. A matching request ID and caller-input fingerprint
+joins the active handler or returns a retained terminal outcome; a different request ID receives
+`Busy`, and changed input under the same ID receives `Conflict`. The synchronous Update validator
+performs those checks before Temporal accepts the Update. `RunAgentAsync` reserves the admission
+before its first await, then crosses the input-readiness barrier and delegates execution to
+`RunTurnAsync`:
 
 ```csharp
 // In AgentWorkflow:
 [WorkflowUpdate("Run")]
 public async Task<AgentResponse> RunAgentAsync(RunRequest request)
 {
+    var requestId = request.RequestId ?? Workflow.NewGuid().ToString("N");
+    var admission = BeginTurnAdmission(requestId, CreateAgentAdmissionFingerprint(request));
     await WaitForAgentInputAsync().ConfigureAwait(true);
-
     var requestEntry = AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow);
-    var (output, _) = await RunTurnAsync(requestEntry, chatOptions: null);
+    requestEntry.RequestId = requestId;
+    var (output, _) = await RunTurnAsync(requestEntry, admission, chatOptions: null);
 
     Workflow.Logger.LogWorkflowUpdateCompleted(
         _input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId ?? string.Empty);
@@ -308,21 +311,17 @@ public async Task<AgentResponse> RunAgentAsync(RunRequest request)
 }
 ```
 
-`RunTurnAsync` (on the base) wraps the body in the mutex and treats the turn as a transaction:
+`RunTurnAsync` (on the base) treats the admitted turn as a transaction:
 
 ```csharp
 // In DurableChatWorkflowBase<TOutput>.RunTurnAsync(...):
-await Workflow.WaitConditionAsync(() => !_isProcessing);
-_isProcessing = true;
-
 var historyCountBeforeTurn = _history.Count;
 var turnCountBeforeTurn = _turnCount;
 var rollbackParticipant = this as IDurableTurnRollbackParticipant;   // AgentWorkflow implements this
 JsonElement? participantStateBeforeTurn = null;
 try
 {
-    // Captured only after this turn owns the gate, so a queued update cannot snapshot
-    // state from before the preceding turn committed.
+    // Captured only after this request owns admission.
     participantStateBeforeTurn = rollbackParticipant?.CaptureTurnRollbackState();
 
     _history.Add(requestEntry);
@@ -377,7 +376,7 @@ The overrides on `AgentWorkflow`:
 | `UpsertCustomSearchAttributes()` | Upserts the `AgentName` typed search attribute. Called by the base after the standard `SessionCreatedAt` / `TurnCount` upserts. Default in the base is a no-op; `DurableChatWorkflow` (the MEAI sibling) does not override it because chat sessions are not named. |
 | `ApplyKeyedHistoryReducerAsync(reducerKey, history, activityOptions)` | Dispatches the `ReduceHistoryByKey` activity so the DI-resolved reducer delegate runs on the worker and its result lands in workflow history. |
 | `OnApprovalResolutionAccepted` / `OnApprovalRequestResolved` | Upgrade the base's scope-less `DurableApprovalDecision` into the full `DurableAgentApprovalDecision` (scope, pattern, grant ID, expiry) before it enters the MAF approval archive. |
-| `CaptureTurnRollbackState` / `RestoreTurnRollbackState` (`IDurableTurnRollbackParticipant`) | Snapshot and restore `_currentStateBag` inside the base's serialized-turn gate. Restoration retains reserved approval-scope records, which were committed by independent approval updates while the turn was parked. |
+| `CaptureTurnRollbackState` / `RestoreTurnRollbackState` (`IDurableTurnRollbackParticipant`) | Snapshot and restore `_currentStateBag` inside the admitted turn transaction. Restoration retains reserved approval-scope records, which were committed by independent approval updates while the turn was parked. |
 
 The fire-and-forget path is unique to MAF and stays on the subclass:
 
@@ -558,7 +557,7 @@ Here is the complete path a message takes from an external caller to the LLM and
 │                                                              │
 │   6. requestEntry =                                          │
 │        AgentSessionRequest.FromRunRequest(request, ...)      │
-│   7. await base.RunTurnAsync(requestEntry, chatOptions: null)│
+│   7. await base.RunTurnAsync(requestEntry, admission, null)   │
 │        Inside the inherited base helper:                     │
 │          await WaitConditionAsync(() => !_isProcessing)      │  ← Serialize
 │          _isProcessing = true                                │
@@ -1237,9 +1236,9 @@ and turn count before the Update failure is returned. A later turn therefore can
 send the failed request to the model as conversation history. `AgentWorkflow` also restores the
 StateBag snapshot from before the turn, so application-, provider-, interceptor-, and tool-owned
 mutations from that failed turn do not leak forward. Snapshot capture and restoration occur inside
-the base workflow's serialized-turn gate. A queued Update therefore snapshots only after the
-preceding turn commits, and rollback cannot replace that committed StateBag with state observed
-before the queued Update entered the gate. Reserved approval-scope records are retained: their
+the base workflow's admitted-turn transaction. A different request cannot start concurrently;
+matching retries join the active request. Rollback therefore cannot replace committed StateBag
+state with a pre-turn snapshot. Reserved approval-scope records are retained: their
 decisions were committed through independent approval updates while the turn was parked.
 
 #### Scenario B: Worker Crashes Between Activities (Workflow Code Running)
@@ -1340,7 +1339,7 @@ Activity start ─────┘                                              �
 | Worker dies between activities | None | Workflow replayed, cached results returned | Yes |
 | Worker dies during update | None | Update re-executes on new worker, client blocks until done | Yes |
 | Temporal server restarts | None | Workers reconnect, workflows resume | Yes |
-| Client disconnects during update | Possible duplicate request | Client re-sends update; serialized via `_isProcessing` | Manual |
+| Client disconnects during update | Possible duplicate request | Re-send with the same request ID and fingerprint to join or return its outcome; a distinct request is rejected as `Busy` | Manual |
 
 ---
 

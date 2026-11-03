@@ -6,6 +6,7 @@ using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.AI.Session;
 using Temporalio.Client;
 using Temporalio.Common;
+using Temporalio.Exceptions;
 using Temporalio.Worker;
 using Xunit;
 
@@ -119,6 +120,123 @@ public class DurableChatLifecycleRegressionTests
     public Task Shutdown_DrainsAdmittedModelUpdate_BeforeWorkflowCompletes() =>
         RunShutdownAsync();
 
+    [Fact]
+    public async Task TurnAdmission_RejectsBusyAndConflictBeforeAccepting_AndJoinsMatchingRequest()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new GatedChatClient();
+        var taskQueue = $"turn-admission-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, model);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"turn-admission-{Guid.NewGuid():N}";
+        var workflowId = session.GetWorkflowId(conversationId);
+        var workflow = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        Task<DurableSessionResponse>? firstTask = null;
+        WorkflowUpdateHandle<DurableSessionResponse>? duplicate = null;
+
+        try
+        {
+            firstTask = session.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "same input")],
+                requestId: "request-1");
+            await model.Entered.WaitAsync(Deadline);
+            await WaitForHistoryEventAsync(
+                workflow,
+                e => e.WorkflowExecutionUpdateAcceptedEventAttributes is not null);
+            var acceptedBeforeRejections = await CountAcceptedUpdatesAsync(workflow);
+
+            var busy = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                workflow.ExecuteUpdateAsync(wf => wf.ChatAsync(new DurableChatInput
+                {
+                    ConversationId = conversationId,
+                    RequestId = "request-2",
+                    Messages = new List<ChatMessage> { new(ChatRole.User, "different request") },
+                })));
+            Assert.Equal(
+                "DurableTurnBusy",
+                Assert.IsType<ApplicationFailureException>(busy.InnerException).ErrorType);
+
+            var conflict = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                workflow.ExecuteUpdateAsync(wf => wf.ChatAsync(new DurableChatInput
+                {
+                    ConversationId = conversationId,
+                    RequestId = "request-1",
+                    Messages = new List<ChatMessage> { new(ChatRole.User, "changed input") },
+                })));
+            Assert.Equal(
+                "DurableTurnConflict",
+                Assert.IsType<ApplicationFailureException>(conflict.InnerException).ErrorType);
+            Assert.Equal(acceptedBeforeRejections, await CountAcceptedUpdatesAsync(workflow));
+
+            duplicate = await workflow.StartUpdateAsync<DurableChatWorkflow, DurableSessionResponse>(
+                wf => wf.ChatAsync(new DurableChatInput
+                {
+                    ConversationId = conversationId,
+                    RequestId = "request-1",
+                    Messages = new List<ChatMessage> { new(ChatRole.User, "same input") },
+                }),
+                new WorkflowUpdateStartOptions(WorkflowUpdateStage.Accepted));
+
+            model.Release();
+            var first = await firstTask.WaitAsync(Deadline);
+            var joined = await duplicate.GetResultAsync().WaitAsync(Deadline);
+            Assert.Equal(first.RequestId, joined.RequestId);
+            Assert.Equal(first.Text, joined.Text);
+            Assert.Equal(1, model.Calls);
+            Assert.Equal(2, await CountAcceptedUpdatesAsync(workflow));
+        }
+        finally
+        {
+            model.Release();
+            if (firstTask is not null)
+            {
+                try { await firstTask.WaitAsync(Deadline); }
+                catch (Exception) { /* Preserve the original assertion failure. */ }
+            }
+            if (duplicate is not null)
+            {
+                try { await duplicate.GetResultAsync().WaitAsync(Deadline); }
+                catch (Exception) { /* Preserve the original assertion failure. */ }
+            }
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task TurnAdmission_ReplaysTerminalFailureWithoutRedispatchingModelActivity()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new FailingChatClient();
+        var taskQueue = $"turn-failure-ledger-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, model);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"turn-failure-ledger-{Guid.NewGuid():N}";
+        var messages = new List<ChatMessage> { new(ChatRole.User, "fail once") };
+
+        try
+        {
+            await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                session.SendAsync(conversationId, messages, requestId: "terminal-failure"));
+            var attemptsAfterFailure = model.Calls;
+            Assert.True(attemptsAfterFailure > 0);
+
+            await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                session.SendAsync(conversationId, messages, requestId: "terminal-failure"));
+
+            Assert.Equal(attemptsAfterFailure, model.Calls);
+            Assert.Empty(await session.GetHistoryAsync(conversationId));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     internal static async Task RunShutdownAsync(Func<WorkflowHistory, Task>? capture = null)
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
@@ -210,6 +328,19 @@ public class DurableChatLifecycleRegressionTests
         throw new TimeoutException($"Expected {minimumCount} matching workflow history event(s).");
     }
 
+    private static async Task<int> CountAcceptedUpdatesAsync(WorkflowHandle handle)
+    {
+        var count = 0;
+        await foreach (var ev in handle.FetchHistoryEventsAsync())
+        {
+            if (ev.WorkflowExecutionUpdateAcceptedEventAttributes is not null)
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
     private static async Task<string> WaitForNewRunAsync(
         WorkflowHandle handle, string oldRunId)
     {
@@ -252,14 +383,17 @@ public class DurableChatLifecycleRegressionTests
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource _release =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _calls;
 
         public Task Entered => _entered.Task;
+        public int Calls => _calls;
         public void Release() => _release.TrySetResult();
 
         public async Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
+            Interlocked.Increment(ref _calls);
             _entered.TrySetResult();
             await _release.Task.WaitAsync(cancellationToken);
             return new ChatResponse(new ChatMessage(ChatRole.Assistant, "completed admitted turn"));
@@ -272,6 +406,41 @@ public class DurableChatLifecycleRegressionTests
             var response = await GetResponseAsync(messages, options, cancellationToken);
             foreach (var update in response.ToChatResponseUpdates())
                 yield return update;
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class FailingChatClient : IChatClient
+    {
+        private int _calls;
+
+        public int Calls => _calls;
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _calls);
+            return Task.FromException<ChatResponse>(
+                new ApplicationFailureException(
+                    "Expected model failure.",
+                    errorType: "ExpectedModelFailure",
+                    nonRetryable: true));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;

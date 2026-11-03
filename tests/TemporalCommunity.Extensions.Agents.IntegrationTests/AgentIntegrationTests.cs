@@ -2,6 +2,8 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Exceptions;
+using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.Agents.Workflows;
@@ -80,6 +82,42 @@ public class AgentIntegrationTests : IClassFixture<IntegrationTestFixture>
         Assert.Equal("logical-request-1", request.RequestId);
         Assert.StartsWith("tai-request-v1:", request.InputFingerprint, StringComparison.Ordinal);
         Assert.Equal(request.RequestId, response.RequestId);
+    }
+
+    [Fact]
+    public async Task ReusingRequestId_ReturnsTerminalOutcomeOrRejectsChangedInput()
+    {
+        var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
+        const string requestId = "terminal-request-1";
+        const string originalMessage = "Record this terminal request.";
+
+        var original = await _fixture.AgentProxy.RunAsync(
+            originalMessage,
+            session,
+            new TemporalAgentRunOptions { RequestId = requestId });
+        var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
+
+        var retry = await handle.ExecuteUpdateAsync(
+            workflow => workflow.RunAgentAsync(new RunRequest(originalMessage)
+            {
+                RequestId = requestId,
+                CorrelationId = "terminal-correlation",
+            }));
+
+        Assert.Equal(original.Messages[^1].Text, retry.Messages[^1].Text);
+        Assert.Equal(2, (await handle.QueryAsync(workflow => workflow.GetHistory())).Count);
+
+        var conflict = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+            handle.ExecuteUpdateAsync(
+                workflow => workflow.RunAgentAsync(new RunRequest("Changed payload.")
+                {
+                    RequestId = requestId,
+                    CorrelationId = "terminal-correlation",
+                })));
+        Assert.Equal(
+            "DurableTurnConflict",
+            Assert.IsType<ApplicationFailureException>(conflict.InnerException).ErrorType);
+        Assert.Equal(2, (await handle.QueryAsync(workflow => workflow.GetHistory())).Count);
     }
 
     // ── Multi-turn / history ───────────────────────────────────────────────────

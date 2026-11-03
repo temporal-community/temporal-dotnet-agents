@@ -76,6 +76,33 @@ public class DurableRequestFingerprintTests
     }
 
     [Fact]
+    public void CreateChatAdmission_IncludesConversationButIgnoresCorrelationAndRequestIdentity()
+    {
+        var first = DurableRequestFingerprint.CreateChatAdmission(new DurableChatInput
+        {
+            Messages = [new ChatMessage(ChatRole.User, "hello")],
+            ConversationId = "conversation-one",
+            CorrelationId = "trace-one",
+            RequestId = "request-one",
+        });
+        var retry = DurableRequestFingerprint.CreateChatAdmission(new DurableChatInput
+        {
+            Messages = [new ChatMessage(ChatRole.User, "hello")],
+            ConversationId = "conversation-one",
+            CorrelationId = "trace-two",
+            RequestId = "request-two",
+        });
+        var changedConversation = DurableRequestFingerprint.CreateChatAdmission(new DurableChatInput
+        {
+            Messages = [new ChatMessage(ChatRole.User, "hello")],
+            ConversationId = "conversation-two",
+        });
+
+        Assert.Equal(first, retry);
+        Assert.NotEqual(first, changedConversation);
+    }
+
+    [Fact]
     public void CreateTurn_IncludesTypedRequestDataAndTurnToolsetSelection()
     {
         var workflowInput = new DurableChatWorkflowInput { DefaultChatClientKey = "primary" };
@@ -104,5 +131,28 @@ public class DurableRequestFingerprintTests
 
         Assert.NotEqual(original, changedData);
         Assert.NotEqual(original, changedAuthority);
+    }
+
+    [Fact]
+    public void CreateTurnAdmission_IncludesConversationIdentity()
+    {
+        var original = DurableRequestFingerprint.CreateTurnAdmission(
+            new DurableTurnRequest<string, string>
+            {
+                Messages = [new ChatMessage(ChatRole.User, "hello")],
+                ConversationId = "conversation-one",
+                RequestData = "domain-input",
+                InitialTurnState = "state",
+            });
+        var changed = DurableRequestFingerprint.CreateTurnAdmission(
+            new DurableTurnRequest<string, string>
+            {
+                Messages = [new ChatMessage(ChatRole.User, "hello")],
+                ConversationId = "conversation-two",
+                RequestData = "domain-input",
+                InitialTurnState = "state",
+            });
+
+        Assert.NotEqual(original, changed);
     }
 }

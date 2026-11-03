@@ -80,9 +80,13 @@ package target assets.
 The decorator uses them only to locate subject/resource and obtains the current decision from the
 authoritative service immediately before each stateful function.
 
-The `Turn` Update calls `RunDurableTurnAsync` exactly once. The specialized base rejects a second
-managed turn from the same Update before it can schedule another model or tool activity. Use a new
-Update ID for each turn; Continue-as-New starts a new run and resets the run-local guard.
+The `Turn` Update has a paired synchronous validator that calls
+`ValidateDurableTurnAdmission`. Matching request IDs and fingerprints join the in-flight turn or
+return its terminal outcome; another request is rejected as `Busy`, and changed input under the
+same ID is rejected as `Conflict` before the Update is accepted. `RunDurableTurnAsync` also checks
+admission defensively and rejects a second managed turn from the same Update before scheduling
+another model or tool activity. The terminal ledger is currently run-local and unbounded; its
+Continue-as-New retention and bounds are Phase 2.3 work.
 Malformed turn input (a null request, empty messages, or null options) fails promptly as the
 non-retryable `DurableTurnInvalidRequest` failure and schedules no model or tool activity.
 

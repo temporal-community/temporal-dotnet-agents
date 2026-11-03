@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
+using Temporalio.Exceptions;
 using Temporalio.Workflows;
 
 namespace TemporalCommunity.Extensions.AI;
@@ -11,7 +12,7 @@ namespace TemporalCommunity.Extensions.AI;
 /// <summary>
 /// Abstract base class for durable chat workflows with typed turn output.
 /// Provides the shared session loop, conversation history, HITL approval support,
-/// continue-as-new handling, search attribute upserts, and serialized turn execution.
+/// continue-as-new handling, search attribute upserts, and retry-safe turn admission.
 /// Concrete subclasses implement the abstract members to dispatch to their own
 /// activities and to convert per-turn output into <see cref="DurableSessionResponse"/>
 /// entries that get appended to history.
@@ -28,10 +29,58 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     public const string ShutdownSignalName = "Shutdown";
     private List<DurableSessionEntry> _history = new(16);
     private readonly DurableApprovalMixin _approvalMixin = new();
+    private readonly Dictionary<string, TurnExecutionRecord> _terminalTurns =
+        new(StringComparer.Ordinal);
+    private TurnExecutionRecord? _activeTurn;
     private bool _isProcessing;
     private bool _shutdownRequested;
     private bool _continueAsNewPending;
     private int _turnCount;
+
+    private sealed class TurnExecutionRecord(
+        string requestId,
+        string admissionFingerprint)
+    {
+        public string RequestId { get; } = requestId;
+
+        public string AdmissionFingerprint { get; } = admissionFingerprint;
+
+        public string? TurnInputFingerprint { get; set; }
+
+        public bool IsTerminal { get; set; }
+
+        public TOutput? Output { get; set; }
+
+        public DurableSessionResponse? ResponseEntry { get; set; }
+
+        public TurnFailure? Failure { get; set; }
+    }
+
+    private sealed record TurnFailure(string ErrorType, string Message, bool NonRetryable);
+
+    /// <summary>
+    /// Represents ownership of, or a join on, one logical turn admission.
+    /// </summary>
+    protected sealed class TurnAdmission
+    {
+        internal object RecordState { get; }
+
+        private TurnAdmission(object recordState, string requestId, bool isOwner)
+        {
+            RecordState = recordState;
+            RequestId = requestId;
+            IsOwner = isOwner;
+        }
+
+        internal static TurnAdmission Create(object recordState, string requestId, bool isOwner) =>
+            new(recordState, requestId, isOwner);
+
+        /// <summary>Whether this handler owns execution of the admitted turn.</summary>
+        public bool IsOwner { get; }
+
+        /// <summary>The logical request ID associated with this admission.</summary>
+        public string RequestId { get; }
+    }
 
     /// <summary>
     /// The workflow input set by <see cref="InitializeInput"/>.
@@ -520,56 +569,239 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     }
 
     /// <summary>
-    /// Executes a single chat turn: serializes concurrent turns, appends the supplied
-    /// request entry, dispatches the LLM call via <see cref="ExecuteTurnAsync"/>, appends
-    /// a response entry, and updates the turn count search attribute if opted in.
+    /// Rejects a request that conflicts with the active or retained terminal turn.
+    /// Call from a synchronous <c>[WorkflowUpdateValidator]</c> before accepting an update.
     /// </summary>
-    /// <param name="requestEntry">
-    /// The request entry to append to history before the activity is dispatched. Subclass
-    /// <c>[WorkflowUpdate]</c> handlers construct this via library-specific factories
-    /// (<see cref="DurableSessionRequest.FromMessages"/> for chat workflows;
-    /// <c>AgentSessionRequest.FromRunRequest</c> for MAF agent workflows).
-    /// </param>
-    /// <param name="chatOptions">
-    /// Optional chat options for the activity dispatch. May be null.
-    /// </param>
+    /// <param name="requestId">Caller-known logical request ID, when supplied.</param>
+    /// <param name="admissionFingerprint">Fingerprint of caller-controlled effect-bearing input.</param>
+    protected void ValidateTurnAdmission(string? requestId, string admissionFingerprint)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(admissionFingerprint);
+
+        if (requestId is not null
+            && _terminalTurns.TryGetValue(requestId, out var terminal))
+        {
+            EnsureAdmissionFingerprint(terminal, requestId, admissionFingerprint);
+            return;
+        }
+
+        if (_activeTurn is null)
+        {
+            return;
+        }
+
+        if (!string.Equals(requestId, _activeTurn.RequestId, StringComparison.Ordinal))
+        {
+            throw TurnAdmissionFailure(
+                "The session already has an active turn.",
+                "DurableTurnBusy");
+        }
+
+        EnsureAdmissionFingerprint(_activeTurn, requestId, admissionFingerprint);
+    }
+
+    /// <summary>
+    /// Validates a session-style request using the same stable input fingerprint as
+    /// <see cref="BeginTurnAdmission(DurableChatInput)"/>.
+    /// </summary>
+    protected void ValidateTurnAdmission(DurableChatInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        if (input.Messages is null or { Count: 0 })
+        {
+            throw TurnAdmissionFailure(
+                "At least one message is required.",
+                "DurableTurnInvalidRequest");
+        }
+
+        if (input.RequestId is not null && string.IsNullOrWhiteSpace(input.RequestId))
+        {
+            throw TurnAdmissionFailure(
+                "Request ID cannot be empty or whitespace.",
+                "DurableTurnInvalidRequest");
+        }
+
+        if (IsShutdownRequested)
+        {
+            throw TurnAdmissionFailure("Session has been shut down.", "DurableSessionShutdown");
+        }
+
+        if (IsContinueAsNewPending)
+        {
+            throw TurnAdmissionFailure(
+                "The session is continuing as new. Retry the turn against the current run.",
+                "DurableTurnContinueAsNewPending");
+        }
+
+        ValidateTurnAdmission(
+            input.RequestId,
+            Internal.DurableRequestFingerprint.CreateChatAdmission(input));
+    }
+
+    /// <summary>
+    /// Reserves a logical turn before the handler's first await. A matching request joins its
+    /// pending execution or retained terminal outcome; any other request is rejected.
+    /// </summary>
+    protected TurnAdmission BeginTurnAdmission(
+        string requestId,
+        string admissionFingerprint)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(admissionFingerprint);
+        ValidateTurnAdmission(requestId, admissionFingerprint);
+
+        if (_terminalTurns.TryGetValue(requestId, out var terminal))
+        {
+            return TurnAdmission.Create(terminal, requestId, isOwner: false);
+        }
+
+        if (_activeTurn is { } active)
+        {
+            return TurnAdmission.Create(active, requestId, isOwner: false);
+        }
+
+        var record = new TurnExecutionRecord(requestId, admissionFingerprint);
+        _activeTurn = record;
+        _isProcessing = true;
+        return TurnAdmission.Create(record, requestId, isOwner: true);
+    }
+
+    /// <summary>
+    /// Reserves a session-style request before the handler's first await. Use the same input in
+    /// the paired synchronous Update validator via <see cref="ValidateTurnAdmission(DurableChatInput)"/>.
+    /// </summary>
+    protected TurnAdmission BeginTurnAdmission(DurableChatInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ValidateTurnAdmission(input);
+        var requestId = input.RequestId ?? Workflow.NewGuid().ToString("N");
+        return BeginTurnAdmission(
+            requestId,
+            Internal.DurableRequestFingerprint.CreateChatAdmission(input));
+    }
+
+    /// <summary>
+    /// Verifies the worker-authoritative fingerprint once initialization-dependent policy is
+    /// available. The caller-controlled fingerprint has already protected admission.
+    /// </summary>
+    protected void SetTurnInputFingerprint(TurnAdmission admission, string inputFingerprint)
+    {
+        ArgumentNullException.ThrowIfNull(admission);
+        ArgumentException.ThrowIfNullOrWhiteSpace(inputFingerprint);
+
+        var record = GetTurnRecord(admission);
+        if (record.TurnInputFingerprint is { } known
+            && !string.Equals(known, inputFingerprint, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The admitted turn's durable input fingerprint changed after admission.");
+        }
+
+        record.TurnInputFingerprint = inputFingerprint;
+    }
+
+    /// <summary>
+    /// Waits for the owning handler and returns its terminal output, or rethrows its recorded
+    /// failure. Only matching duplicate handlers should call this.
+    /// </summary>
+    protected async Task<(TOutput Output, DurableSessionResponse ResponseEntry)> WaitForTurnOutcomeAsync(
+        TurnAdmission admission)
+    {
+        ArgumentNullException.ThrowIfNull(admission);
+        await Workflow.WaitConditionAsync(() => GetTurnRecord(admission).IsTerminal).ConfigureAwait(true);
+
+        var record = GetTurnRecord(admission);
+        if (record.Failure is { } failure)
+        {
+            throw new ApplicationFailureException(
+                failure.Message,
+                errorType: failure.ErrorType,
+                nonRetryable: failure.NonRetryable);
+        }
+
+        return (record.Output!, record.ResponseEntry!);
+    }
+
+    /// <summary>
+    /// Completes an admission that failed before <see cref="RunTurnAsync"/> took ownership.
+    /// </summary>
+    protected void FailTurnAdmission(TurnAdmission admission, Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(admission);
+        ArgumentNullException.ThrowIfNull(exception);
+        if (!admission.IsOwner || GetTurnRecord(admission).IsTerminal)
+        {
+            return;
+        }
+
+        CompleteTurnFailure(GetTurnRecord(admission), exception);
+    }
+
+    private static TurnExecutionRecord GetTurnRecord(TurnAdmission admission) =>
+        (TurnExecutionRecord)admission.RecordState;
+
+    private static void EnsureAdmissionFingerprint(
+        TurnExecutionRecord record,
+        string? requestId,
+        string admissionFingerprint)
+    {
+        if (!string.Equals(record.AdmissionFingerprint, admissionFingerprint, StringComparison.Ordinal))
+        {
+            throw TurnAdmissionFailure(
+                $"Request ID '{requestId}' was already used with different effect-bearing input.",
+                "DurableTurnConflict");
+        }
+    }
+
+    private static ApplicationFailureException TurnAdmissionFailure(string message, string errorType) =>
+        new(message, errorType: errorType, nonRetryable: true);
+
+    private void CompleteTurnSuccess(
+        TurnExecutionRecord record,
+        TOutput output,
+        DurableSessionResponse responseEntry)
+    {
+        record.Output = output;
+        record.ResponseEntry = responseEntry;
+        record.IsTerminal = true;
+        _terminalTurns[record.RequestId] = record;
+        if (ReferenceEquals(_activeTurn, record))
+        {
+            _activeTurn = null;
+        }
+        _isProcessing = false;
+    }
+
+    private void CompleteTurnFailure(TurnExecutionRecord record, Exception exception)
+    {
+        var (errorType, message, nonRetryable) = exception is ApplicationFailureException failure
+            ? (failure.ErrorType ?? "DurableTurnFailure", failure.Message, failure.NonRetryable)
+            : (exception.GetType().FullName ?? exception.GetType().Name, exception.Message, false);
+        record.Failure = new TurnFailure(errorType, message, nonRetryable);
+        record.IsTerminal = true;
+        _terminalTurns[record.RequestId] = record;
+        if (ReferenceEquals(_activeTurn, record))
+        {
+            _activeTurn = null;
+        }
+        _isProcessing = false;
+    }
+
+    /// <summary>
+    /// Executes a previously admitted turn, appending its request and response to history.
+    /// </summary>
+    /// <param name="requestEntry">The durable request entry for this turn.</param>
+    /// <param name="admission">The previously reserved logical turn admission.</param>
+    /// <param name="chatOptions">Optional chat options for the activity dispatch.</param>
     /// <param name="cancellationToken">Cancellation token for the workflow update.</param>
-    /// <returns>
-    /// A tuple containing the activity's raw <typeparamref name="TOutput"/> and the
-    /// <see cref="DurableSessionResponse"/> entry that was appended to history.
-    /// Subclass update handlers typically return one or the other depending on the
-    /// shape they want to expose to callers.
-    /// </returns>
-    /// <remarks>
-    /// <para>
-    /// <strong>Retry policy for subclassers.</strong> The <see cref="ActivityOptions"/>
-    /// constructed inside this method and handed to <see cref="ExecuteTurnAsync"/> uses the
-    /// workflow input's configured retry policy. When none is configured, the library applies a
-    /// bounded five-attempt default.
-    /// </para>
-    /// <para>
-    /// This default is appropriate for idempotent LLM calls (the canonical use case for
-    /// <see cref="DurableChatWorkflowBase{TOutput}"/>): retrying an inference request just
-    /// re-asks the model. It is <strong>not sufficient</strong> for subclassers whose
-    /// <see cref="ExecuteTurnAsync"/> dispatches non-idempotent activities — mutating state,
-    /// calling external APIs without idempotency keys, sending notifications, etc. In those
-    /// cases retries can duplicate side effects.
-    /// </para>
-    /// <para>
-    /// Subclassers with non-idempotent activities must override <see cref="ExecuteTurnAsync"/>
-    /// and construct a hardened <see cref="ActivityOptions"/> with an explicit
-    /// <see cref="ActivityOptions.RetryPolicy"/> (for example,
-    /// <c>new RetryPolicy { MaximumAttempts = 1 }</c>) before invoking the activity.
-    /// See <see href="https://docs.temporal.io/encyclopedia/retry-policies"/> for the full
-    /// server-default behavior reference.
-    /// </para>
-    /// </remarks>
     protected async Task<(TOutput Output, DurableSessionResponse ResponseEntry)> RunTurnAsync(
         DurableSessionRequest requestEntry,
+        TurnAdmission admission,
         ChatOptions? chatOptions = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requestEntry);
+        ArgumentNullException.ThrowIfNull(admission);
 
         requestEntry.RequestId ??= Workflow.NewGuid().ToString("N");
         requestEntry.InputFingerprint ??= Internal.DurableRequestFingerprint.CreateSessionTurn(
@@ -577,14 +809,20 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             chatOptions,
             RequiredInput);
 
-        // Serialize: wait for any in-progress turn to finish.
-        // Safety note: after WaitConditionAsync returns, the workflow is in a synchronous
-        // execution window. Temporal's single-threaded scheduler cannot interleave another
-        // update handler until the next await point. Setting _isProcessing = true immediately
-        // after the condition is therefore atomic — no concurrent handler can observe
-        // _isProcessing == false and enter this section between these two lines.
-        await Workflow.WaitConditionAsync(() => !_isProcessing);
-        _isProcessing = true;
+        if (!admission.IsOwner)
+        {
+            return await WaitForTurnOutcomeAsync(admission).ConfigureAwait(true);
+        }
+
+        if (!string.Equals(
+            requestEntry.RequestId,
+            GetTurnRecord(admission).RequestId,
+            StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The turn request does not match its admission.");
+        }
+
+        SetTurnInputFingerprint(admission, requestEntry.InputFingerprint);
 
         var historyCountBeforeTurn = _history.Count;
         var turnCountBeforeTurn = _turnCount;
@@ -643,15 +881,16 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     DurableSessionAttributes.TurnCount.ValueSet(_turnCount));
             }
 
+            CompleteTurnSuccess(GetTurnRecord(admission), output, responseEntry);
             return (output, responseEntry);
         }
-        catch
+        catch (Exception exception)
         {
             // A turn is a transactional unit from the session's perspective. If model/tool
             // execution, response projection, or search-attribute publication fails, retain
             // neither the request nor any partially-created response and do not count the
-            // failed attempt as a completed turn. The workflow gate prevents another turn
-            // from mutating these collections while this rollback runs.
+            // failed attempt as a completed turn. Only the admitted owner can mutate these
+            // collections while this rollback runs.
             if (_history.Count > historyCountBeforeTurn)
             {
                 _history.RemoveRange(
@@ -661,13 +900,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
             _turnCount = turnCountBeforeTurn;
 
-            // Restore derived state before releasing the same gate that protected the turn.
+            // Restore derived state before releasing the active-turn admission.
             // This keeps the base history and any participant state in one transaction boundary.
             if (participantStateCaptured)
             {
                 rollbackParticipant!.RestoreTurnRollbackState(participantStateBeforeTurn);
             }
 
+            CompleteTurnFailure(GetTurnRecord(admission), exception);
             throw;
         }
         finally

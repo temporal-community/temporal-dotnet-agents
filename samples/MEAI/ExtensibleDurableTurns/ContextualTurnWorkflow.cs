@@ -15,6 +15,10 @@ public sealed class ContextualTurnWorkflow
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
 
+    [WorkflowUpdateValidator(nameof(TurnAsync))]
+    public void ValidateTurn(DurableTurnRequest<ProcessingRequest, ProcessingState> request) =>
+        ValidateDurableTurnAdmission(request);
+
     [WorkflowUpdate("Turn")]
     public Task<DurableTurnResult<ProcessingState>> TurnAsync(
         DurableTurnRequest<ProcessingRequest, ProcessingState> request) =>

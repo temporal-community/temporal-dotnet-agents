@@ -31,6 +31,11 @@ public sealed class ApplicationWorkflow
         await base.RunAsync(input).ConfigureAwait(true);
     }
 
+    [WorkflowUpdateValidator(nameof(TurnAsync))]
+    public void ValidateTurn(
+        DurableTurnRequest<ApplicationRequest, ApplicationTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
+
     [WorkflowUpdate("Turn")]
     public Task<DurableTurnResult<ApplicationTurnState>> TurnAsync(
         DurableTurnRequest<ApplicationRequest, ApplicationTurnState> request) =>
@@ -41,9 +46,12 @@ public sealed class ApplicationWorkflow
 `InitializeInput` must be the first workflow-state operation in a custom run method, before its
 first await. Temporal may admit an Update-With-Start handler before the run method executes user
 code. An asynchronous handler that needs input may call the protected `WaitForInputAsync`; an Update
-validator cannot await and must admit the request when initialization-dependent state is not ready,
-leaving authoritative validation to the handler. Validators are an early rejection optimization,
-not the only invariant check.
+validator cannot await and must not depend on state that may not be initialized. The handler also
+performs authoritative validation. For typed turns, `ValidateDurableTurnAdmission` rejects malformed
+requests, `Busy`, and `Conflict` before Temporal accepts the Update; matching request IDs and input
+fingerprints join the active turn or return its recorded terminal result within that workflow run.
+The terminal ledger is not yet bounded or carried through Continue-as-New; those guarantees are
+added in Phase 2.3.
 
 The protected baseline is resolved once and is the workflow's maximum tool authority. A turn may
 deterministically narrow it without carrying schemas or implementations in the Update:
@@ -206,23 +214,26 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
 
     [WorkflowUpdateValidator(nameof(ShopAsync))]
-    public void ValidateShop(DurableChatInput input)
-    {
-        if (IsShutdownRequested)
-            throw new InvalidOperationException("Session has been shut down.");
-        if (input?.Messages is null || input.Messages.Count == 0)
-            throw new ArgumentException("At least one message is required.");
-    }
+    public void ValidateShop(DurableChatInput input) => ValidateTurnAdmission(input);
 
     [WorkflowUpdate("Shop")]
     public async Task<ShoppingTurnOutput> ShopAsync(DurableChatInput input)
     {
+        var admission = BeginTurnAdmission(input);
         var requestEntry = DurableSessionRequest.FromMessages(
             input.Messages,
             input.CorrelationId,
-            requestId: input.RequestId);
-        var (output, _) = await RunTurnAsync(requestEntry, input.Options);
-        return output;
+            requestId: admission.RequestId);
+        try
+        {
+            var (output, _) = await RunTurnAsync(requestEntry, admission, input.Options);
+            return output;
+        }
+        catch (Exception exception)
+        {
+            FailTurnAdmission(admission, exception);
+            throw;
+        }
     }
 
     // Wraps the activity output as a DurableSessionResponse for the base class to append
@@ -404,7 +415,11 @@ By extending `DurableChatWorkflowBase<TOutput>` you get the following shared wor
 
 - **Session loop** — `RunAsync` waits for shutdown or `ContinueAsNewSuggested`, then transitions or returns.
 - **Conversation history** — the current run's retained `List<DurableSessionEntry>` is persisted in workflow state. Each turn appends a `DurableSessionRequest` followed by a `DurableSessionResponse`.
-- **Turn serialization** — `WaitConditionAsync(() => !_isProcessing)` prevents concurrent turns from corrupting history.
+- **Turn admission** — one distinct request runs at a time. Matching IDs and fingerprints join the
+  active turn or return a terminal outcome; different IDs are rejected as `Busy`, and changed
+  input under a reused ID is rejected as `Conflict` before acceptance. Custom workflows must call
+  `ValidateTurnAdmission` from the paired synchronous Update validator and reserve with
+  `BeginTurnAdmission` before their first await.
 - **HITL handlers** — `[WorkflowUpdate("RequestApproval")]`, `[WorkflowUpdate("ResolveApproval")]`, and `[WorkflowQuery("GetPendingApproval")]` are wired to `DurableApprovalMixin`.
 - **Continue-as-new** — retained history, search attributes, and the complete frozen session configuration are carried forward when the entry limit or Temporal's history suggestion triggers a new run.
 - **Search attributes** — optional `TurnCount` and `SessionCreatedAt` upserts via `DurableSessionAttributes` when `input.EnableSearchAttributes` is `true`.

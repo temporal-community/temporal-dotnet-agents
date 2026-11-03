@@ -15,10 +15,8 @@ namespace CustomWorkflow;
 [Workflow("CustomWorkflow.ShoppingAssistant")]
 public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<ShoppingTurnOutput>
 {
-    // Per-turn metadata keyed by correlation ID. Populated in ShopAsync before
-    // dispatching to RunTurnAsync; read inside ExecuteTurnAsync and removed after use.
-    // Keying by correlation ID (vs. a scalar field) avoids the race where a second
-    // Shop update overwrites the first turn's value while it is still awaiting its activity.
+    // Per-turn metadata keyed by correlation ID. Populated before dispatching the turn;
+    // read inside ExecuteTurnAsync and removed after use.
     private readonly Dictionary<string, string> _conversationIdByCorrelation = new();
 
     [WorkflowRun]
@@ -39,6 +37,7 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
             throw new InvalidOperationException("Session has been shut down.");
         if (input?.Messages is null || input.Messages.Count == 0)
             throw new ArgumentException("At least one message is required.");
+        ValidateTurnAdmission(input);
     }
 
     /// <summary>
@@ -48,15 +47,15 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
     [WorkflowUpdate("Shop")]
     public async Task<ShoppingTurnOutput> ShopAsync(DurableChatInput input)
     {
+        var admission = BeginTurnAdmission(input);
         // Build the request entry — logical request identity is distinct from correlation metadata.
         var messages = input.Messages as IReadOnlyList<ChatMessage> ?? input.Messages.ToList();
         var requestEntry = DurableSessionRequest.FromMessages(
             messages,
             input.CorrelationId,
-            requestId: input.RequestId);
+            requestId: admission.RequestId);
 
-        // Stash per-turn metadata keyed by the correlation ID so concurrent Shop updates
-        // cannot stomp on each other's values while waiting on the _isProcessing mutex.
+        // Stash per-turn metadata keyed by correlation ID for the admitted owner.
         if (!string.IsNullOrEmpty(input.ConversationId))
         {
             _conversationIdByCorrelation[requestEntry.CorrelationId] = input.ConversationId;
@@ -64,8 +63,13 @@ public sealed class ShoppingAssistantWorkflow : DurableChatWorkflowBase<Shopping
 
         try
         {
-            var (output, _) = await RunTurnAsync(requestEntry, input.Options);
+            var (output, _) = await RunTurnAsync(requestEntry, admission, input.Options);
             return output;
+        }
+        catch (Exception exception)
+        {
+            FailTurnAdmission(admission, exception);
+            throw;
         }
         finally
         {

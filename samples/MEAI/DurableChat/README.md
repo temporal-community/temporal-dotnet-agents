@@ -17,12 +17,14 @@ because they cannot safely resume across durable activity boundaries. Responses 
 finish reason, provider response/model IDs, and serializable provider metadata. Its correlation ID
 is not a deduplication key. The first demo turn supplies a caller-known request ID separately from
 correlation metadata; persist that ID before submission when the caller must retry an ambiguous
-RPC. Phase 2.1 records the ID and canonical input fingerprint; duplicate suppression follows in
-Phase 2.2. Phase 0 documented pinned reducer and replay
-prerequisites. Phase 1.0 removed the durable embedding wrapper; request epochs, terminal ledgers,
-safe interrupted-turn recovery, and independent context/history budgets are still pending. Do not
-retry an ambiguously completed effectful turn assuming the library will suppress duplicate
-external effects.
+RPC. Phase 2.1 records the ID and canonical input fingerprint. Phase 2.2 lets a matching ID and
+fingerprint join an active turn or return its terminal outcome in
+the current workflow run; different IDs are `Busy`, and changed input under the same ID is
+`Conflict`. The terminal ledger is not yet bounded or carried through Continue-as-New, which is
+Phase 2.3 work. Phase 0 documented pinned reducer and replay prerequisites. Phase 1.0 removed the
+durable embedding wrapper; request epochs, bounded cross-run ledger retention, safe interrupted-turn
+recovery, and independent context/history budgets are still pending. The ledger does not make
+external tool effects exactly-once.
 
 Two `AddDurableToolset` registrations provide weather and service-status capabilities.
 `DefaultToolsetIds` composes them in a stable order as the stock workflow's worker-owned baseline.

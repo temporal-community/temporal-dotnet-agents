@@ -334,10 +334,18 @@ public sealed class PackedTurnWorkflow
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
 
+    [WorkflowUpdateValidator(nameof(TurnAsync))]
+    public void ValidateTurn(DurableTurnRequest<PackedRequestData, PackedTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
+
     [WorkflowUpdate("Turn")]
     public Task<DurableTurnResult<PackedTurnState>> TurnAsync(
         DurableTurnRequest<PackedRequestData, PackedTurnState> request) =>
         RunDurableTurnAsync(request);
+
+    [WorkflowUpdateValidator(nameof(DoubleTurnAsync))]
+    public void ValidateDoubleTurn(DurableTurnRequest<PackedRequestData, PackedTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
 
     [WorkflowUpdate("DoubleTurn")]
     public async Task DoubleTurnAsync(

@@ -21,10 +21,11 @@ how-to reference for all of them:
 
 ## Durable-chat redesign target contracts
 
-**Target design, not the current API:** Phase 0 verifies prerequisites; it does not add request
-deduplication, epochs, recovery, context budgets, or validated admission to production workflows.
-The current registration and `SendAsync` examples below remain runnable. In particular,
-`correlationId` is still not an idempotency key and current Continue-as-New can trim history.
+**Implementation status:** Phases 0, 1, and 2.1–2.2 are implemented. The current API supports
+request identity, active-turn admission, matching retries, and retained terminal outcomes within
+one workflow run. Ledger bounds and Continue-as-New preservation arrive in Phase 2.3; do not rely
+on deduplication surviving Continue-as-New yet. Other rows below describe later target behavior.
+In particular, `correlationId` is not an idempotency key and current Continue-as-New can trim history.
 
 | Boundary | Selected target contract |
 |---|---|
@@ -255,12 +256,49 @@ tool approval.
 Temporal's workflow-update ID is a separate transport identity. The optional `requestId` is
 generated before the RPC when omitted, but callers that must recover an ambiguous submission need
 to supply and persist their own ID before calling `SendAsync`. The workflow records a canonical
-fingerprint alongside the request, covering messages, model options, the pinned profile, and
-recorded tool authority; reusing one ID with changed effect-bearing input is not a valid retry.
-Phase 2.1 records these identities and fingerprints; admission/deduplication behavior lands in
-Phase 2.2, so the current API does not yet suppress a repeated turn. Make effectful tools
-idempotent with an application-level business-operation ID when they must suppress repeated
-external effects.
+fingerprint covering messages, model options, the pinned profile, and recorded tool authority.
+While a turn is active, the same request ID and fingerprint joins it; another request ID is
+rejected as `Busy`, while changed input under the same ID is rejected as `Conflict`. A matching
+retry after completion returns its recorded success or failure within the current workflow run.
+Busy and Conflict are rejected by the update validator, before Temporal records an accepted update.
+The terminal ledger is currently run-local and unbounded; Phase 2.3 adds limits and carries it
+through Continue-as-New. These guarantees do not make external tool effects exactly-once. Make
+effectful tools idempotent with an application-level business-operation ID when duplicate external
+effects must be suppressed.
+
+### Custom typed-turn admission
+
+Custom workflows using `DurableToolWorkflowBase` should pair the turn update with a synchronous
+validator that calls `ValidateDurableTurnAdmission`. This ensures malformed, busy, and conflicting
+requests are rejected before acceptance. The handler also performs admission defensively; update
+validators must not await or depend on workflow input that may not yet be initialized.
+
+```csharp
+public sealed record ApplicationRequest(string OperationId);
+public sealed record ApplicationTurnState(int Revision);
+
+[Workflow("ApplicationWorkflow")]
+public sealed class ApplicationWorkflow
+    : DurableToolWorkflowBase<ApplicationRequest, ApplicationTurnState>
+{
+    [WorkflowRun]
+    public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
+
+    [WorkflowUpdateValidator(nameof(TurnAsync))]
+    public void ValidateTurn(
+        DurableTurnRequest<ApplicationRequest, ApplicationTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
+
+    [WorkflowUpdate("Turn")]
+    public Task<DurableTurnResult<ApplicationTurnState>> TurnAsync(
+        DurableTurnRequest<ApplicationRequest, ApplicationTurnState> request) =>
+        RunDurableTurnAsync(request);
+}
+```
+
+See [custom workflow output](custom-workflow-output.md) and the runnable
+[`ExtensibleDurableTurns` sample](../../../samples/MEAI/ExtensibleDurableTurns/README.md) for the
+complete typed-turn contract.
 
 Session history is retained workflow state, not an unlimited archive. `MaxEntryCount` defaults to
 1000 entries and triggers Continue-as-New. Without a keyed history reducer, the workflow carries

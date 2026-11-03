@@ -82,6 +82,9 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
             throw new ArgumentException("At least one message is required.");
         if (input.RequestId is not null && string.IsNullOrWhiteSpace(input.RequestId))
             throw new ArgumentException("Request ID cannot be empty or whitespace.");
+        ValidateTurnAdmission(
+            input.RequestId,
+            Internal.DurableRequestFingerprint.CreateChatAdmission(input));
         if (_toolAuthorityReady)
         {
             ValidateSessionProfile(input.ClientKey);
@@ -95,18 +98,15 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     [WorkflowUpdate("Chat")]
     public async Task<DurableSessionResponse> ChatAsync(DurableChatInput input)
     {
-        await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
-        ValidateSessionProfile(input.ClientKey);
-
-        // Build the request entry for this turn — the factory auto-generates the
-        // correlation ID via Workflow.NewGuid() (deterministic, replay-safe) when the
-        // caller did not supply one.
+        var requestId = input.RequestId ?? Workflow.NewGuid().ToString("N");
         var messages = input.Messages as IReadOnlyList<ChatMessage> ?? input.Messages.ToList();
         var requestEntry = DurableSessionRequest.FromMessages(
             messages,
             input.CorrelationId,
-            requestId: input.RequestId);
-        requestEntry.InputFingerprint = Internal.DurableRequestFingerprint.CreateChat(input, RequiredInput);
+            requestId: requestId);
+        var admission = BeginTurnAdmission(
+            requestId,
+            Internal.DurableRequestFingerprint.CreateChatAdmission(input));
 
         // Store per-turn metadata keyed by the request entry object reference.
         // Removed in the finally block so exceptions (cancellation, timeout, tool failure)
@@ -114,7 +114,15 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
         _perTurnMeta[requestEntry] = (input.ClientKey, input.ConversationId);
         try
         {
-            var (output, responseEntry) = await RunTurnAsync(requestEntry, input.Options);
+            await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+            ValidateSessionProfile(input.ClientKey);
+            requestEntry.InputFingerprint =
+                Internal.DurableRequestFingerprint.CreateChat(input, RequiredInput);
+
+            var (output, responseEntry) = await RunTurnAsync(
+                requestEntry,
+                admission,
+                input.Options);
 
             // The history entry may contain a protocol-safe sentinel. The caller receives the
             // original diagnostic response and its terminal metadata.
@@ -124,6 +132,11 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
                 responseEntry.CreatedAt,
                 output.CompletionReason,
                 requestEntry.RequestId);
+        }
+        catch (Exception exception)
+        {
+            FailTurnAdmission(admission, exception);
+            throw;
         }
         finally
         {

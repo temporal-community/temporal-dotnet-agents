@@ -9,6 +9,28 @@ Durable AI code has two distinct testing concerns, and they call for different t
 | **Application logic** | Code that depends on `IDurableChatSessionClient` — controllers, services, background jobs | xUnit unit tests with a stub implementation |
 | **Library integration** | The workflow, activities, and middleware together — that the full pipeline produces correct results | xUnit integration tests using `TemporalServiceTestEnvironment.StartLocalAsync()` |
 
+## Phase 2.2 turn-admission verification
+
+The managed-session regression
+`DurableChatLifecycleRegressionTests.TurnAdmission_RejectsBusyAndConflictBeforeAccepting_AndJoinsMatchingRequest`
+holds the model activity open, then verifies:
+
+- a different request ID is rejected as `DurableTurnBusy`;
+- reusing the active request ID with changed input is rejected as `DurableTurnConflict`;
+- neither rejection adds an Update-Accepted event;
+- a matching request is accepted as a joiner, both callers receive the same result, and only one
+  model call is made.
+
+`TurnAdmission_ReplaysTerminalFailureWithoutRedispatchingModelActivity` exercises rollback and
+terminal failure replay: the failed turn leaves no partial history, and retrying the same ID does
+not start another turn. Activity retry attempts within the original turn are still governed by the
+configured Temporal retry policy. Turn cancellation is a later Phase 3.5 capability.
+
+Custom workflows based on `DurableToolWorkflowBase<TRequestData, TTurnState>` must call
+`ValidateDurableTurnAdmission` from the validator paired with each turn Update. Handler-side checks
+remain defensive, but only a validator can reject a request before the Update is recorded. The
+`ExtensibleDurableTurns` sample and its compiled usage-guide snippet demonstrate this pairing.
+
 ## Phase 0 research and harness
 
 The [redesign target contracts](usage.md#durable-chat-redesign-target-contracts) are not production

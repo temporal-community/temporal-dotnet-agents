@@ -94,6 +94,82 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
                 nonRetryable: true);
         }
 
+        if (request.Options is null)
+        {
+            throw CreateInvalidRequestFailure("Turn options cannot be null.");
+        }
+
+        if (!Enum.IsDefined(typeof(DurableToolDispatchMode), request.Options.DispatchMode))
+        {
+            throw new ApplicationFailureException(
+                $"Unknown durable tool dispatch mode '{(int)request.Options.DispatchMode}'.",
+                errorType: "DurableTurnInvalidDispatchMode",
+                nonRetryable: true);
+        }
+
+        ValidateDurableTurnAdmission(request);
+        var requestId = request.RequestId ?? Workflow.NewGuid().ToString("N");
+        var admissionFingerprint = Internal.DurableRequestFingerprint.CreateTurnAdmission(request);
+        var admission = BeginTurnAdmission(requestId, admissionFingerprint);
+
+        if (IsContinueAsNewPending)
+        {
+            var exception = new ApplicationFailureException(
+                "The session is continuing as new. Retry the turn against the current run.",
+                errorType: "DurableTurnContinueAsNewPending",
+                nonRetryable: true);
+            FailTurnAdmission(admission, exception);
+            throw exception;
+        }
+
+        try
+        {
+            await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+
+            var requestEntry = DurableSessionRequest.FromMessages(
+                request.Messages,
+                request.CorrelationId,
+                requestId: requestId,
+                inputFingerprint: Internal.DurableRequestFingerprint.CreateTurn(
+                    request,
+                    RequiredInput,
+                    RequiredInput.ToolsetManifest?.Narrow(request.Options.ToolsetIds).Fingerprint));
+            _turnRequests.Add(requestEntry, request);
+
+            try
+            {
+                var (result, _) = await RunTurnAsync(
+                    requestEntry,
+                    admission,
+                    request.ChatOptions,
+                    cancellationToken).ConfigureAwait(true);
+                return result;
+            }
+            finally
+            {
+                _turnRequests.Remove(requestEntry);
+            }
+        }
+        catch (Exception exception)
+        {
+            FailTurnAdmission(admission, exception);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Validates typed-turn admission synchronously. Custom workflows should invoke this from
+    /// the <c>[WorkflowUpdateValidator]</c> paired with the handler that calls
+    /// <see cref="RunDurableTurnAsync"/>.
+    /// </summary>
+    protected void ValidateDurableTurnAdmission(
+        DurableTurnRequest<TRequestData, TTurnState> request)
+    {
+        if (request is null)
+        {
+            throw CreateInvalidRequestFailure("Durable turn request cannot be null.");
+        }
+
         if (request.Messages is null or { Count: 0 })
         {
             throw CreateInvalidRequestFailure("At least one message is required.");
@@ -112,6 +188,19 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
                 nonRetryable: true);
         }
 
+        if (request.RequestId is not null && string.IsNullOrWhiteSpace(request.RequestId))
+        {
+            throw CreateInvalidRequestFailure("Request ID cannot be empty or whitespace.");
+        }
+
+        if (IsShutdownRequested)
+        {
+            throw new ApplicationFailureException(
+                "Session has been shut down.",
+                errorType: "DurableSessionShutdown",
+                nonRetryable: true);
+        }
+
         if (IsContinueAsNewPending)
         {
             throw new ApplicationFailureException(
@@ -120,30 +209,9 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
                 nonRetryable: true);
         }
 
-        await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
-
-        var requestEntry = DurableSessionRequest.FromMessages(
-            request.Messages,
-            request.CorrelationId,
-            requestId: request.RequestId,
-            inputFingerprint: Internal.DurableRequestFingerprint.CreateTurn(
-                request,
-                RequiredInput,
-                RequiredInput.ToolsetManifest?.Narrow(request.Options.ToolsetIds).Fingerprint));
-        _turnRequests.Add(requestEntry, request);
-
-        try
-        {
-            var (result, _) = await RunTurnAsync(
-                requestEntry,
-                request.ChatOptions,
-                cancellationToken).ConfigureAwait(true);
-            return result;
-        }
-        finally
-        {
-            _turnRequests.Remove(requestEntry);
-        }
+        ValidateTurnAdmission(
+            request.RequestId,
+            Internal.DurableRequestFingerprint.CreateTurnAdmission(request));
     }
 
     private static ApplicationFailureException CreateInvalidRequestFailure(string message) =>

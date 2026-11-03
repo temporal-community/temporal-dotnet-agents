@@ -91,7 +91,7 @@ internal class AgentWorkflow :
         await base.RunAsync(input).ConfigureAwait(true);
     }
 
-    private AgentSessionRequest CreateAgentRequestEntry(RunRequest request)
+    private AgentSessionRequest CreateAgentRequestEntry(RunRequest request, string? requestId = null)
     {
         if (request.RequestId is not null && string.IsNullOrWhiteSpace(request.RequestId))
         {
@@ -99,7 +99,7 @@ internal class AgentWorkflow :
         }
 
         var requestEntry = AgentSessionRequest.FromRunRequest(request, Workflow.UtcNow);
-        requestEntry.RequestId ??= Workflow.NewGuid().ToString("N");
+        requestEntry.RequestId ??= requestId ?? Workflow.NewGuid().ToString("N");
         requestEntry.InputFingerprint =
             TemporalCommunity.Extensions.AI.Internal.DurableRequestFingerprint.Create(
                 new
@@ -117,6 +117,21 @@ internal class AgentWorkflow :
         return requestEntry;
     }
 
+    private static string CreateAgentAdmissionFingerprint(RunRequest request)
+    {
+        var requestEntry = AgentSessionRequest.FromRunRequest(request, DateTimeOffset.UnixEpoch);
+        return TemporalCommunity.Extensions.AI.Internal.DurableRequestFingerprint.Create(
+            new
+            {
+                Version = 1,
+                requestEntry.Messages,
+                requestEntry.EnableToolCalls,
+                requestEntry.EnableToolNames,
+                requestEntry.ResponseType,
+                requestEntry.ResponseSchema,
+            });
+    }
+
     /// <summary>
     /// Validates that a <see cref="RunAgentAsync"/> request is well-formed before it enters history.
     /// </summary>
@@ -131,6 +146,9 @@ internal class AgentWorkflow :
             throw new ArgumentException("At least one message is required.");
         if (request.RequestId is not null && string.IsNullOrWhiteSpace(request.RequestId))
             throw new ArgumentException("Request ID cannot be empty or whitespace.");
+        ValidateTurnAdmission(
+            request.RequestId,
+            CreateAgentAdmissionFingerprint(request));
     }
 
     /// <summary>
@@ -140,15 +158,25 @@ internal class AgentWorkflow :
     [WorkflowUpdate("Run")]
     public async Task<AgentResponse> RunAgentAsync(RunRequest request)
     {
-        await WaitForAgentInputAsync().ConfigureAwait(true);
+        var requestId = request.RequestId ?? Workflow.NewGuid().ToString("N");
+        var admission = BeginTurnAdmission(requestId, CreateAgentAdmissionFingerprint(request));
+        try
+        {
+            await WaitForAgentInputAsync().ConfigureAwait(true);
 
-        var requestEntry = CreateAgentRequestEntry(request);
+            var requestEntry = CreateAgentRequestEntry(request, requestId);
 
-        var (output, _) = await RunTurnAsync(requestEntry, chatOptions: null);
+            var (output, _) = await RunTurnAsync(requestEntry, admission, chatOptions: null);
 
-        Workflow.Logger.LogWorkflowUpdateCompleted(
-            _input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId ?? string.Empty);
-        return output;
+            Workflow.Logger.LogWorkflowUpdateCompleted(
+                _input!.AgentName, Workflow.Info.WorkflowId, request.CorrelationId ?? string.Empty);
+            return output;
+        }
+        catch (Exception exception)
+        {
+            FailTurnAdmission(admission, exception);
+            throw;
+        }
     }
 
     /// <summary>
@@ -1131,15 +1159,24 @@ internal class AgentWorkflow :
 
     private async Task ProcessFireAndForgetAsync(RunRequest request)
     {
+        TurnAdmission? admission = null;
         try
         {
+            var requestId = request.RequestId ?? Workflow.NewGuid().ToString("N");
+            admission = BeginTurnAdmission(
+                requestId,
+                CreateAgentAdmissionFingerprint(request));
             await WaitForAgentInputAsync().ConfigureAwait(true);
 
-            var requestEntry = CreateAgentRequestEntry(request);
-            await RunTurnAsync(requestEntry, chatOptions: null).ConfigureAwait(true);
+            var requestEntry = CreateAgentRequestEntry(request, requestId);
+            await RunTurnAsync(requestEntry, admission, chatOptions: null).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
+            if (admission is not null)
+            {
+                FailTurnAdmission(admission, ex);
+            }
             Workflow.Logger.LogFireAndForgetActivityFailed(
                 _input?.AgentName ?? "unknown", Workflow.Info.WorkflowId, ex);
             // Swallow — fire-and-forget errors must not crash the session.

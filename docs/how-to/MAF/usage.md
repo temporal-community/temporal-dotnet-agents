@@ -163,9 +163,16 @@ var response = await agentProxy.RunAsync(
     new TemporalAgentRunOptions { RequestId = requestId });
 ```
 
-The workflow records the request ID and a fingerprint of messages, model route, tool authority,
-tool selection, and structured-output settings. The fingerprint is groundwork for retry-safe
-admission; until that admission behavior is enabled, it does not by itself deduplicate requests.
+Within one workflow run, a matching request ID and fingerprint joins an active turn or returns
+its recorded terminal outcome. A different request is rejected as `Busy`; reusing the ID with
+changed effect-bearing input is rejected as `Conflict`, before the update is accepted into history.
+The current terminal ledger is run-local and unbounded, so this retry window does not yet survive
+Continue-as-New; Phase 2.3 adds bounded retention and carry-forward. Request IDs do not make
+downstream tool effects exactly-once.
+
+The fingerprint covers messages, the configured model route and tool authority, tool selection,
+and structured-output settings. Correlation IDs and Temporal Update IDs remain separate from this
+logical request identity.
 
 ---
 

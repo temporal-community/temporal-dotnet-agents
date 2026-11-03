@@ -30,10 +30,19 @@ public sealed class TypedDurableTurnWorkflow
     [WorkflowRun]
     public new Task RunAsync(DurableChatWorkflowInput input) => base.RunAsync(input);
 
+    [WorkflowUpdateValidator(nameof(TurnAsync))]
+    public void ValidateTurn(DurableTurnRequest<TypedTurnRequestData, TypedTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
+
     [WorkflowUpdate("Turn")]
     public Task<DurableTurnResult<TypedTurnState>> TurnAsync(
         DurableTurnRequest<TypedTurnRequestData, TypedTurnState> request) =>
         RunDurableTurnAsync(request);
+
+    [WorkflowUpdateValidator(nameof(TurnWithNullOptionsAsync))]
+    public void ValidateTurnWithNullOptions(
+        DurableTurnRequest<TypedTurnRequestData, TypedTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
 
     [WorkflowUpdate("TurnWithNullOptions")]
     public Task<DurableTurnResult<TypedTurnState>> TurnWithNullOptionsAsync(
@@ -49,6 +58,10 @@ public sealed class TypedDurableTurnWorkflow
             Options = null!,
         });
 
+    [WorkflowUpdateValidator(nameof(DoubleTurnAsync))]
+    public void ValidateDoubleTurn(DurableTurnRequest<TypedTurnRequestData, TypedTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
+
     [WorkflowUpdate("DoubleTurn")]
     public async Task DoubleTurnAsync(
         DurableTurnRequest<TypedTurnRequestData, TypedTurnState> request)
@@ -56,6 +69,11 @@ public sealed class TypedDurableTurnWorkflow
         await RunDurableTurnAsync(request);
         await RunDurableTurnAsync(request);
     }
+
+    [WorkflowUpdateValidator(nameof(FailThenSecondTurnAsync))]
+    public void ValidateFailThenSecondTurn(
+        DurableTurnRequest<TypedTurnRequestData, TypedTurnState> request) =>
+        ValidateDurableTurnAdmission(request);
 
     [WorkflowUpdate("FailThenSecondTurn")]
     public async Task FailThenSecondTurnAsync(
