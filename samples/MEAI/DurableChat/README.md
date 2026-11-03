@@ -28,6 +28,13 @@ failure should persist their own ID before submission. Phase 0 documented pinned
 prerequisites. Phase 1.0 removed the durable embedding wrapper; safe interrupted-turn recovery and
 independent context/history budgets are still pending.
 
+`SessionTimeToLive` is an idle lifetime tracked as an absolute workflow-time deadline. Admitted or
+completed work renews it, active turns and approval waits drain before expiry, and Continue-as-New
+preserves the deadline. After idle expiry the same workflow ID may start a new session lineage.
+Persist `GetSessionEpochAsync` with the application conversation ID and pass it as
+`expectedSessionEpoch` when stale callers must not continue in that new lineage; a mismatch throws
+`DurableChatSessionEpochMismatchException` before provider or tool work.
+
 Two `AddDurableToolset` registrations provide weather and service-status capabilities.
 `DefaultToolsetIds` composes them in a stable order as the stock workflow's worker-owned baseline.
 The client sends only its conversation ID, messages, and chat options; it does not construct or

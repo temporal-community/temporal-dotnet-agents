@@ -37,7 +37,10 @@ public class AgentWorkflowValidatorTests
     public void ValidateRunAgent_ValidRequest_DoesNotThrow()
     {
         var workflow = new AgentWorkflow();
-        var request = new RunRequest("Hello");
+        var request = new RunRequest("Hello")
+        {
+            CorrelationId = "test-correlation",
+        };
 
         // Should not throw.
         workflow.ValidateRunAgent(request);

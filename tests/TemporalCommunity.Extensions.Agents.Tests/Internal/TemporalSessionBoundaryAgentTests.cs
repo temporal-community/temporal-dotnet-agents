@@ -23,7 +23,7 @@ public class TemporalSessionBoundaryAgentTests
 
         Assert.Null(leaf.NonStreamingSession);
         Assert.Null(leaf.NonStreamingRunContextSession);
-        Assert.Same(durableSession, AIAgent.CurrentRunContext?.Session);
+        Assert.Null(AIAgent.CurrentRunContext);
     }
 
     [Fact]

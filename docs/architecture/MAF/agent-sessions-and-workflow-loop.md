@@ -235,6 +235,7 @@ if (input.CarriedHistory is { Count: > 0 })
 _turnCount = InitializeTurnCount(_history);         // Re-derive from history
 
 var sessionCreatedAt = input.OriginalCreatedAt ?? Workflow.UtcNow;
+// InitializeInput restores the carried deadline or creates the first absolute deadline.
 
 if (input.EnableSearchAttributes)
 {
@@ -242,19 +243,34 @@ if (input.EnableSearchAttributes)
     UpsertCustomSearchAttributes();                 // Subclass hook (MAF: AgentName)
 }
 
-// input.TimeToLive is a non-nullable TimeSpan that already defaults to 14 days.
-bool conditionMet = await Workflow.WaitConditionAsync(
-    () => _shutdownRequested
-          || (!_isProcessing && Workflow.ContinueAsNewSuggested)
-          || (!_isProcessing && _history.Count >= input.MaxEntryCount),
-    timeout: input.TimeToLive);
-
-if (!conditionMet)
+// SessionIdleDeadline is an absolute Workflow.UtcNow value carried through Continue-as-New.
+// Admission, joined requests, turn completion/failure, and accepted approval resolution call
+// RenewSessionIdleDeadline(), updating both this field and the carried input.
+while (true)
 {
-    // TTL elapsed. Drain in-flight handlers (e.g. fire-and-forget turns) so they
-    // are not aborted with TMPRL1102, then complete normally.
-    await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished);
-    return;
+    var waitingDeadline = _sessionIdleDeadline!.Value;
+    var remaining = waitingDeadline - Workflow.UtcNow;
+    bool conditionMet = remaining > TimeSpan.Zero && await Workflow.WaitConditionAsync(
+        () => _shutdownRequested
+              || (!_isProcessing && Workflow.ContinueAsNewSuggested)
+              || (!_isProcessing && _history.Count >= input.MaxEntryCount)
+              || _sessionIdleDeadline != waitingDeadline,
+        timeout: remaining);
+
+    var canContinueAsNew = !_isProcessing
+        && (Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount);
+    if (conditionMet && _sessionIdleDeadline != waitingDeadline
+        && !_shutdownRequested && !canContinueAsNew)
+        continue; // Work renewed the deadline; restart the idle wait.
+    if (conditionMet)
+        break;
+
+    _sessionAdmissionClosed = true;
+    await Workflow.WaitConditionAsync(
+        () => Workflow.AllHandlersFinished && !_isProcessing && !HasPendingBackgroundTurns);
+    if (_sessionIdleDeadline <= Workflow.UtcNow)
+        return;
+    _sessionAdmissionClosed = false;
 }
 
 if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount)

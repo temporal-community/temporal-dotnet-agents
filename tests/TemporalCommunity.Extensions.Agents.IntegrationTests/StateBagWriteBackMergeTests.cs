@@ -296,15 +296,15 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
     }
 
     [Fact]
-    public Task QueuedFailedTurn_DoesNotRestoreStateFromBeforePrecedingSuccessfulTurn() =>
-        RunQueuedFailedTurnScenarioAsync(captureHistory: false);
+    public Task FailedTurn_DoesNotRestoreStateFromBeforePrecedingSuccessfulTurn() =>
+        RunFailedTurnScenarioAsync(captureHistory: false);
 
     [Fact]
     [Trait("Category", "HistoryCapture")]
-    public Task Capture_QueuedFailedTurnStateBagRollbackHistory() =>
-        RunQueuedFailedTurnScenarioAsync(captureHistory: true);
+    public Task Capture_FailedTurnStateBagRollbackHistory() =>
+        RunFailedTurnScenarioAsync(captureHistory: true);
 
-    private async Task RunQueuedFailedTurnScenarioAsync(bool captureHistory)
+    private async Task RunFailedTurnScenarioAsync(bool captureHistory)
     {
         const string toolName = "queued_failing_tool";
         const string committedKey = "concurrent-turn.committed";
@@ -322,7 +322,7 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             FailTool,
             new AIFunctionFactoryOptions { Name = toolName });
 
-        var taskQueue = $"queued-failed-turn-statebag-{Guid.NewGuid():N}";
+        var taskQueue = $"failed-turn-statebag-{Guid.NewGuid():N}";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(Env.Client);
         builder.Services.AddSingleton<IChatClient>(blockingClient);
@@ -345,27 +345,17 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             var proxy = host.Services.GetTemporalAgentProxy("QueuedFailedTurnStateAgent");
             var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
 
-            // Hold turn A inside its model activity after its provider has written the value that
-            // will be committed. Queue turn B and wait until Temporal accepts it; its handler has
-            // then run synchronously to the serialized turn gate. This reproduces the old stale-
-            // snapshot window without timing delays.
+            // Hold the first model activity until its context provider has written the value that
+            // will be committed, then let that turn finish before starting the failing turn.
             var firstTurn = proxy.RunAsync("commit", session);
             await blockingClient.FirstCallStarted.WaitAsync(TimeSpan.FromSeconds(10));
-
-            var workflowHandle = Env.Client.GetWorkflowHandle<AgentWorkflow>(
-                session.SessionId.WorkflowId);
-            var queuedTurn = await workflowHandle.StartUpdateAsync<AgentWorkflow, AgentResponse>(
-                wf => wf.RunAgentAsync(new RunRequest("fail")
-                {
-                    CorrelationId = "queued-failed-turn",
-                }),
-                new WorkflowUpdateStartOptions(WorkflowUpdateStage.Accepted));
-
             blockingClient.ReleaseFirstCall();
 
             var firstResponse = await firstTurn;
             Assert.Equal("First turn completed.", firstResponse.Messages[^1].Text);
-            await Assert.ThrowsAnyAsync<Exception>(() => queuedTurn.GetResultAsync());
+            var workflowHandle = Env.Client.GetWorkflowHandle<AgentWorkflow>(
+                session.SessionId.WorkflowId);
+            await Assert.ThrowsAnyAsync<Exception>(() => proxy.RunAsync("fail", session));
 
             var finalResponse = await proxy.RunAsync("observe", session);
 
@@ -378,7 +368,7 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             if (captureHistory)
             {
                 var history = await workflowHandle.FetchHistoryAsync();
-                await SaveAgentHistoryAsync("queued-statebag-rollback.json", history);
+                await SaveAgentHistoryAsync("failed-turn-statebag-rollback.json", history);
             }
         }
         finally

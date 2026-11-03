@@ -88,6 +88,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
             Internal.DurableRequestFingerprint.CreateChatAdmission(input));
         if (_toolAuthorityReady)
         {
+            ValidateExpectedSessionEpoch(input.ExpectedSessionEpoch);
             ValidateSessionProfile(input.ClientKey);
         }
     }
@@ -100,6 +101,7 @@ internal sealed class DurableChatWorkflow : DurableChatWorkflowBase<DurableManag
     public async Task<DurableSessionResponse> ChatAsync(DurableChatInput input)
     {
         await Workflow.WaitConditionAsync(() => _toolAuthorityReady).ConfigureAwait(true);
+        ValidateExpectedSessionEpoch(input.ExpectedSessionEpoch);
         ValidateTurnAdmission(input);
 
         var requestId = input.RequestId ?? Workflow.NewGuid().ToString("N");

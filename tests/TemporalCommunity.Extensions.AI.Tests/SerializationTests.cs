@@ -259,6 +259,7 @@ public class SerializationTests
             ApprovalTimeout = TimeSpan.FromDays(2),
             MaxEntryCount = 99,
             SessionEpoch = "epoch-1",
+            SessionIdleDeadline = DateTimeOffset.UnixEpoch.AddHours(3),
             CompletedTurnCount = 23,
             MaxTerminalOutcomeCount = 15,
             MaxTerminalOutcomeBytes = 12345,
@@ -292,6 +293,7 @@ public class SerializationTests
         Assert.Equal(TimeSpan.FromDays(2), deserialized.ApprovalTimeout);
         Assert.Equal(99, deserialized.MaxEntryCount);
         Assert.Equal("epoch-1", deserialized.SessionEpoch);
+        Assert.Equal(DateTimeOffset.UnixEpoch.AddHours(3), deserialized.SessionIdleDeadline);
         Assert.Equal(23, deserialized.CompletedTurnCount);
         Assert.Equal(15, deserialized.MaxTerminalOutcomeCount);
         Assert.Equal(12345, deserialized.MaxTerminalOutcomeBytes);

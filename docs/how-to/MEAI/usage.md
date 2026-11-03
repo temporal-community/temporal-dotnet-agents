@@ -166,6 +166,37 @@ declarations.
 For a co-hosted deployment, `AddDurableAI()` remains the concise combined registration shown in
 [Built-in managed session](#built-in-managed-session).
 
+### Session lifetime and lineage
+
+`SessionTimeToLive` is an idle lifetime, not a per-run timer. The workflow stores an absolute
+`Workflow.UtcNow` idle deadline, renews it when a turn is admitted or completes, and carries it
+unchanged through Continue-as-New. An active turn—including a turn waiting for tool approval—is
+drained rather than expired; completion renews the deadline before the workflow resumes its idle
+wait. When the session expires, the workflow closes and a later send may start a new lineage using
+the same workflow ID.
+
+Read the current lineage with `GetSessionEpochAsync` and pass it as `expectedSessionEpoch` when a
+request must not silently run in a restarted session:
+
+```csharp
+var epoch = await sessionClient.GetSessionEpochAsync("customer-42");
+var response = await sessionClient.SendAsync(
+    "customer-42",
+    "Continue the same conversation.",
+    requestId: "turn-17",
+    expectedSessionEpoch: epoch);
+Console.WriteLine(response.Text);
+```
+
+An epoch mismatch throws `DurableChatSessionEpochMismatchException` before turn admission or
+provider/tool effects. Callers without a previously stored epoch cannot distinguish a first
+session from a new lineage after expiry; persist the epoch alongside the application session
+identity when that distinction matters.
+
+The client uses `WorkflowIdConflictPolicy.UseExisting` for an active session and explicitly allows
+workflow-ID reuse after a closed run. Reuse starts a new epoch rather than restoring expired
+history. Use the expected-epoch precondition to detect that restart.
+
 ### Sharing a worker with non-AI workflows
 
 Temporal configures a data converter per client or worker, not per workflow. Calling

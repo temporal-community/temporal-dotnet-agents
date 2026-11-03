@@ -211,12 +211,16 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
         turnOptions,
         requestId: requestId);
     Console.WriteLine($" Agent: {r1.Text} (model: {r1.ModelId ?? "provider default"})\n");
+    var sessionEpoch = await sessionClient.GetSessionEpochAsync(conversationId);
 
     // The workflow's history already contains the previous exchange, so the
     // model can answer this pronoun reference without being told explicitly.
     var q2 = "What is the population of that city?";
     Console.WriteLine($" User : {q2}");
-    var r2 = await sessionClient.SendAsync(conversationId, [new ChatMessage(ChatRole.User, q2)]);
+    var r2 = await sessionClient.SendAsync(
+        conversationId,
+        [new ChatMessage(ChatRole.User, q2)],
+        expectedSessionEpoch: sessionEpoch);
     Console.WriteLine($" Agent: {r2.Text}");
 
     Console.WriteLine("════════════════════════════════════════════════════════\n");

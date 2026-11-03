@@ -28,7 +28,8 @@ public record class DurableChatWorkflowInput
     public string? DefaultChatClientKey { get; init; }
 
     /// <summary>
-    /// The session time-to-live. The workflow completes when idle for this duration.
+    /// The session idle lifetime. Each admitted or completed operation renews the absolute
+    /// <see cref="SessionIdleDeadline"/> by this duration.
     /// </summary>
     [JsonIgnore]
     public TimeSpan TimeToLive { get; init; } = TimeSpan.FromDays(14);
@@ -57,6 +58,13 @@ public record class DurableChatWorkflowInput
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SessionEpoch { get; init; }
+
+    /// <summary>
+    /// Absolute workflow-time deadline for the current idle interval, preserved across
+    /// continue-as-new and renewed when work is admitted or completed.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? SessionIdleDeadline { get; init; }
 
     /// <summary>
     /// Cumulative completed-turn count carried across continue-as-new.

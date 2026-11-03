@@ -46,6 +46,10 @@ public interface IDurableChatSessionClient
     /// Optional caller-known logical request ID. Reuse it only when retrying the same turn with
     /// identical effect-bearing input; correlation IDs and Temporal update IDs are separate.
     /// </param>
+    /// <param name="expectedSessionEpoch">
+    /// Optional session-lineage precondition. A mismatch fails with
+    /// <see cref="Exceptions.DurableChatSessionEpochMismatchException"/> before turn admission.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// The response entry from the LLM, including per-turn <see cref="UsageDetails"/>, provider
@@ -57,6 +61,7 @@ public interface IDurableChatSessionClient
         ChatOptions? options = null,
         string? correlationId = null,
         string? requestId = null,
+        string? expectedSessionEpoch = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -70,6 +75,10 @@ public interface IDurableChatSessionClient
     /// Optional caller-known logical request ID. Reuse it only when retrying the same turn with
     /// identical effect-bearing input.
     /// </param>
+    /// <param name="expectedSessionEpoch">
+    /// Optional session-lineage precondition. A mismatch fails with
+    /// <see cref="Exceptions.DurableChatSessionEpochMismatchException"/> before turn admission.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token for this RPC wait.</param>
     /// <returns>
     /// The durable response entry for the turn, including provider response/model IDs, finish
@@ -81,6 +90,16 @@ public interface IDurableChatSessionClient
         ChatOptions? options = null,
         string? correlationId = null,
         string? requestId = null,
+        string? expectedSessionEpoch = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the opaque epoch identifying the current session lineage.
+    /// </summary>
+    /// <param name="conversationId">The application conversation identifier.</param>
+    /// <param name="cancellationToken">Cancellation token for this query.</param>
+    Task<string> GetSessionEpochAsync(
+        string conversationId,
         CancellationToken cancellationToken = default);
 
     /// <summary>

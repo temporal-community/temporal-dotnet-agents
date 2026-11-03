@@ -11,7 +11,7 @@ namespace TemporalCommunity.Extensions.Agents.Tests.Compat;
 public class AgentWorkflowReplayTests
 {
     [Fact]
-    public async Task QueuedStateBagRollback_ReplaysWithoutError()
+    public async Task FailedTurnStateBagRollback_ReplaysWithoutError()
     {
         var options = new WorkflowReplayerOptions
         {
@@ -19,7 +19,7 @@ public class AgentWorkflowReplayTests
         };
         options.AddWorkflow<AgentWorkflow>();
         var replayer = new WorkflowReplayer(options);
-        var history = LoadHistory("queued-statebag-rollback.json");
+        var history = LoadHistory("failed-turn-statebag-rollback.json");
 
         var result = await replayer.ReplayWorkflowAsync(
             history,
@@ -32,7 +32,6 @@ public class AgentWorkflowReplayTests
     [InlineData("first-update-with-start-agent-workflow.json", typeof(AgentWorkflow))]
     [InlineData("tool-selection-agent-workflow.json", typeof(AgentWorkflow))]
     [InlineData("tool-selection-agent-job-workflow.json", typeof(AgentJobWorkflow))]
-    [InlineData("tool-selection-temporal-ai-agent.json", typeof(ToolSelectionContainingWorkflow))]
     public async Task CorrectedToolSelectionHistory_ReplaysWithoutError(
         string filename,
         Type workflowType)

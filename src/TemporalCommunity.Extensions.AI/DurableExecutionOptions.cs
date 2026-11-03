@@ -40,7 +40,8 @@ public sealed class DurableExecutionOptions
     public string WorkflowIdPrefix { get; set; } = "chat-";
 
     /// <summary>
-    /// Gets or sets the session time-to-live. Defaults to 14 days.
+    /// Gets or sets the session idle lifetime. Admitted or completed work renews the absolute
+    /// workflow-time deadline. Defaults to 14 days.
     /// </summary>
     public TimeSpan SessionTimeToLive { get; set; } = TimeSpan.FromDays(14);
 

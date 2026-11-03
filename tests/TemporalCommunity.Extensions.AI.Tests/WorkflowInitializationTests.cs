@@ -18,6 +18,7 @@ public sealed class WorkflowInitializationTests
         {
             ApprovalTimeout = TimeSpan.FromMinutes(3),
             SessionEpoch = "epoch-1",
+            SessionIdleDeadline = DateTimeOffset.UnixEpoch,
         };
 
         workflow.Initialize(input);

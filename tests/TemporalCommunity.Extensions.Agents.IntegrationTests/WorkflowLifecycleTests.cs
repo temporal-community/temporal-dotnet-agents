@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
+using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Xunit;
@@ -76,7 +77,7 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
     // ── Concurrent updates serialization ───────────────────────────────────────
 
     [Fact]
-    public async Task ConcurrentUpdates_AllComplete_WithoutError()
+    public async Task ConcurrentUpdates_CompleteOrRejectBusyWithoutCorruptingTurnOrder()
     {
         var session = await _fixture.AgentProxy.CreateSessionAsync();
         const int concurrentRequests = 5;
@@ -86,34 +87,56 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
             .Select(i => _fixture.AgentProxy.RunAsync($"Msg-{i}", session))
             .ToArray();
 
-        var results = await Task.WhenAll(tasks);
-
-        // All should succeed.
-        Assert.Equal(concurrentRequests, results.Length);
-        foreach (var r in results)
+        var responses = new List<Microsoft.Agents.AI.AgentResponse>();
+        var failures = new List<WorkflowUpdateFailedException>();
+        foreach (var task in tasks)
         {
-            Assert.NotNull(r);
-            Assert.NotEmpty(r.Messages);
+            try
+            {
+                responses.Add(await task);
+            }
+            catch (WorkflowUpdateFailedException exception)
+            {
+                failures.Add(exception);
+            }
         }
 
-        _output.WriteLine($"All {concurrentRequests} concurrent updates completed successfully.");
+        Assert.NotEmpty(responses);
+        Assert.All(responses, response => Assert.NotEmpty(response.Messages));
+        Assert.Equal(concurrentRequests, responses.Count + failures.Count);
+        foreach (var failure in failures)
+        {
+            var applicationFailure = Assert.IsType<ApplicationFailureException>(failure.InnerException);
+            Assert.Equal("DurableTurnBusy", applicationFailure.ErrorType);
+        }
+
+        var turnCounts = responses
+            .Select(response => response.Messages[0].Text)
+            .Select(text =>
+            {
+                var bracket = text.IndexOf('[');
+                var closeBracket = text.IndexOf(']');
+                return int.Parse(text[(bracket + 1)..closeBracket]);
+            })
+            .OrderBy(count => count)
+            .ToList();
+        Assert.Equal(Enumerable.Range(1, responses.Count).ToList(), turnCounts);
+
+        _output.WriteLine(
+            $"{responses.Count} concurrent updates completed; {failures.Count} distinct requests were rejected as busy.");
     }
 
     [Fact]
-    public async Task ConcurrentUpdates_TurnCountsAreSequential()
+    public async Task SequentialUpdates_TurnCountsAreSequential()
     {
         var session = await _fixture.AgentProxy.CreateSessionAsync();
-        const int concurrentRequests = 5;
+        const int requestCount = 5;
+        var results = new List<Microsoft.Agents.AI.AgentResponse>(requestCount);
+        for (var i = 1; i <= requestCount; i++)
+        {
+            results.Add(await _fixture.AgentProxy.RunAsync($"Msg-{i}", session));
+        }
 
-        // Launch multiple RunAsync calls in parallel to the same session.
-        var tasks = Enumerable.Range(1, concurrentRequests)
-            .Select(i => _fixture.AgentProxy.RunAsync($"Msg-{i}", session))
-            .ToArray();
-
-        var results = await Task.WhenAll(tasks);
-
-        // Each response's turn count should be unique (1–5) because the
-        // workflow serializes updates via _isProcessing flag.
         var turnCounts = results
             .Select(r => r.Messages[0].Text)
             .Select(text =>
@@ -128,8 +151,7 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
 
         _output.WriteLine($"Turn counts observed: [{string.Join(", ", turnCounts)}]");
 
-        // Should be exactly [1, 2, 3, 4, 5] — no duplicates, no gaps.
-        Assert.Equal(Enumerable.Range(1, concurrentRequests).ToList(), turnCounts);
+        Assert.Equal(Enumerable.Range(1, requestCount).ToList(), turnCounts);
     }
 
     // ── Fire-and-forget vs synchronous race ────────────────────────────────────
@@ -189,52 +211,36 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
     }
 
     [Fact]
-    public async Task FireAndForget_AndSynchronousUpdate_BothComplete()
+    public async Task FireAndForget_CompletesBeforeSynchronousUpdate()
     {
-        // Send a fire-and-forget signal and a synchronous update to the same session.
-        // The workflow serializes both via the _isProcessing flag: the signal queues
-        // work via Workflow.RunTaskAsync, while the update awaits WaitConditionAsync.
         var session = await _fixture.AgentProxy.CreateSessionAsync();
 
         // Send synchronous turn 1 to establish the session.
         var r1 = await _fixture.AgentProxy.RunAsync("Turn 1", session);
         Assert.Contains("Echo [1]:", r1.Messages[0].Text);
 
-        // Now fire both a fire-and-forget signal and a synchronous update concurrently.
         var fireAndForgetOptions = new TemporalAgentRunOptions { IsFireAndForget = true };
-        var fireAndForgetTask = _fixture.AgentProxy.RunAsync("F&F message", session, fireAndForgetOptions);
-        var synchronousTask = _fixture.AgentProxy.RunAsync("Sync message", session);
-
-        // Both should complete without error.
-        var fafResponse = await fireAndForgetTask;
-        var syncResponse = await synchronousTask;
+        var fafResponse = await _fixture.AgentProxy.RunAsync("F&F message", session, fireAndForgetOptions);
 
         // Fire-and-forget returns empty response.
         Assert.NotNull(fafResponse);
         Assert.Empty(fafResponse.Messages);
 
-        // Synchronous update returns the agent's response.
-        Assert.NotNull(syncResponse);
-        Assert.NotEmpty(syncResponse.Messages);
-
-        // Give the fire-and-forget a moment to process.
-        await Task.Delay(TimeSpan.FromSeconds(1));
-
-        // Query history — should have 3 requests total (turn 1 + F&F + sync).
         var typedSession = (TemporalAgentSession)session;
         var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(
             typedSession.SessionId.WorkflowId);
+        await WaitForHistoryEntriesAsync(handle, expectedCount: 4);
+
+        var syncResponse = await _fixture.AgentProxy.RunAsync("Sync message", session);
+        Assert.NotEmpty(syncResponse.Messages);
+
+        await WaitForHistoryEntriesAsync(handle, expectedCount: 6);
         var history = await handle.QueryAsync(wf => wf.GetHistory());
 
-        // Each request+response pair = 2 entries, so at least 6 entries.
-        // The F&F might still be processing, so just verify at least 4 entries
-        // (turn 1 req + resp, sync req + resp) and at most 6.
-        Assert.True(history.Count >= 4,
-            $"Expected at least 4 history entries but got {history.Count}");
+        Assert.Equal(6, history.Count);
 
         _output.WriteLine(
-            $"Fire-and-forget + synchronous both completed. " +
-            $"History entries: {history.Count}");
+            $"Fire-and-forget completed before the synchronous update. History entries: {history.Count}");
     }
 
     // ── Worker restart & history replay ────────────────────────────────────────

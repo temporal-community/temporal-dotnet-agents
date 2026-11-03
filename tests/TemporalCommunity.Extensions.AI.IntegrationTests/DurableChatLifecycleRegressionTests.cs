@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.AI.Session;
 using Temporalio.Client;
@@ -384,6 +385,121 @@ public class DurableChatLifecycleRegressionTests
         }
     }
 
+    [Fact]
+    public async Task SessionIdleDeadline_RenewsWhenLongRunningTurnCompletes()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new GatedChatClient();
+        var taskQueue = $"session-idle-renewal-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            sessionTimeToLive: TimeSpan.FromSeconds(1));
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"session-idle-renewal-{Guid.NewGuid():N}";
+        var handle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+            session.GetWorkflowId(conversationId));
+        Task<DurableSessionResponse>? pending = null;
+
+        try
+        {
+            pending = session.SendAsync(conversationId, "long-running turn");
+            await model.Entered.WaitAsync(Deadline);
+            await Task.Delay(TimeSpan.FromMilliseconds(1200));
+            model.Release();
+
+            var completed = await pending.WaitAsync(Deadline);
+            Assert.Equal("completed admitted turn", completed.Text);
+
+            var followUp = await session.SendAsync(conversationId, "after completion")
+                .WaitAsync(Deadline);
+            Assert.Equal("completed admitted turn", followUp.Text);
+            Assert.NotNull(await handle.QueryAsync<DurableChatWorkflow, string>(
+                wf => wf.GetSessionEpoch()).WaitAsync(Deadline));
+
+            await handle.SignalAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+            await handle.GetResultAsync().WaitAsync(Deadline);
+        }
+        finally
+        {
+            model.Release();
+            if (pending is not null)
+            {
+                try { await pending.WaitAsync(Deadline); }
+                catch (Exception) { /* Preserve the original assertion failure. */ }
+            }
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ExpiredSession_RestartsWithNewEpochAndRejectsStaleExpectedEpoch()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new TestChatClient();
+        var taskQueue = $"session-epoch-restart-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            sessionTimeToLive: TimeSpan.FromSeconds(1));
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"session-epoch-restart-{Guid.NewGuid():N}";
+        var workflowId = session.GetWorkflowId(conversationId);
+        var handle = env.Client.GetWorkflowHandle<DurableChatWorkflow>(workflowId);
+        var currentRunStarted = false;
+        var currentRunCompleted = false;
+
+        try
+        {
+            await session.SendAsync(conversationId, "first lineage").WaitAsync(Deadline);
+            var originalEpoch = await session.GetSessionEpochAsync(conversationId).WaitAsync(Deadline);
+            await handle.GetResultAsync().WaitAsync(Deadline);
+
+            var callsBeforeStaleRequest = model.CallCount;
+            currentRunStarted = true;
+            await Assert.ThrowsAsync<DurableChatSessionEpochMismatchException>(() =>
+                session.SendAsync(
+                    conversationId,
+                    "must not run in a new lineage",
+                    requestId: "stale-epoch-request",
+                    expectedSessionEpoch: originalEpoch).WaitAsync(Deadline));
+
+            var newEpoch = await session.GetSessionEpochAsync(conversationId).WaitAsync(Deadline);
+            Assert.NotEqual(originalEpoch, newEpoch);
+            Assert.Equal(callsBeforeStaleRequest, model.CallCount);
+
+            await session.SendAsync(
+                conversationId,
+                "new lineage",
+                requestId: "stale-epoch-request",
+                expectedSessionEpoch: newEpoch).WaitAsync(Deadline);
+            Assert.Equal(callsBeforeStaleRequest + 1, model.CallCount);
+
+            await handle.SignalAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+            await handle.GetResultAsync().WaitAsync(Deadline);
+            currentRunCompleted = true;
+        }
+        finally
+        {
+            if (currentRunStarted && !currentRunCompleted)
+            {
+                try
+                {
+                    await handle.SignalAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+                    await handle.GetResultAsync().WaitAsync(Deadline);
+                }
+                catch (Exception) { /* Preserve the original assertion failure. */ }
+            }
+            await host.StopAsync();
+        }
+    }
+
     internal static async Task RunShutdownAsync(Func<WorkflowHistory, Task>? capture = null)
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
@@ -438,7 +554,8 @@ public class DurableChatLifecycleRegressionTests
         string? reducerKey = null,
         Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>? reducer = null,
         int maxTerminalOutcomeCount = 128,
-        int maxTerminalOutcomeBytes = 1024 * 1024)
+        int maxTerminalOutcomeBytes = 1024 * 1024,
+        TimeSpan? sessionTimeToLive = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
@@ -449,7 +566,7 @@ public class DurableChatLifecycleRegressionTests
             options.MaxTerminalOutcomeCount = maxTerminalOutcomeCount;
             options.MaxTerminalOutcomeBytes = maxTerminalOutcomeBytes;
             options.ActivityTimeout = TimeSpan.FromSeconds(60);
-            options.SessionTimeToLive = TimeSpan.FromMinutes(5);
+            options.SessionTimeToLive = sessionTimeToLive ?? TimeSpan.FromMinutes(5);
             options.DefaultHistoryReducerKey = reducerKey;
         });
         if (reducerKey is not null && reducer is not null)

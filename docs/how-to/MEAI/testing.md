@@ -93,8 +93,9 @@ dotnet test tests/TemporalCommunity.Extensions.AI.IntegrationTests --no-restore 
 The skipped `RedesignedSessionCore_UpdateWithStart_CannotReadUninitializedState` names **unit 2.2**
 as its owner. Its counterexample deliberately fails if unskipped without replacing the synthetic
 unsafe path with the production redesigned core. It is intentionally unimplemented acceptance,
-not an unavailable pinned API and not a Phase 0 failure. Carried idle deadlines (2.4), approval
-waits (3.3), and MEAI dispatch (1.4/3.2) remain later-unit acceptance work; Phase 0 does not add
+not an unavailable pinned API and not a Phase 0 failure. Absolute idle-deadline renewal and
+expected-epoch restart behavior are covered by the Phase 2.4 lifecycle tests. Approval waits (3.3)
+and complete MEAI dispatch (1.4/3.2) remain later-unit acceptance work; Phase 0 does not add
 placeholder passing tests for them.
 
 The target session declares **no signal handlers**. Current `Shutdown` is replaced by validated

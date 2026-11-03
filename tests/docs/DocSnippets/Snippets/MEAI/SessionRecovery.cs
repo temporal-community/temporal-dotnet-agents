@@ -21,4 +21,17 @@ internal static class SessionRecovery
         }
         // END SNIPPET docs/how-to/MEAI/usage.md#recovering-a-generated-request-id
     }
+
+    internal static async Task SendWithExpectedEpochAsync(DurableChatSessionClient sessionClient)
+    {
+        // BEGIN SNIPPET docs/how-to/MEAI/usage.md#session-lifetime-and-lineage
+        var epoch = await sessionClient.GetSessionEpochAsync("customer-42");
+        var response = await sessionClient.SendAsync(
+            "customer-42",
+            "Continue the same conversation.",
+            requestId: "turn-17",
+            expectedSessionEpoch: epoch);
+        Console.WriteLine(response.Text);
+        // END SNIPPET docs/how-to/MEAI/usage.md#session-lifetime-and-lineage
+    }
 }

@@ -58,4 +58,10 @@ public sealed class DurableChatInput
     /// This is distinct from the observability correlation ID and Temporal's update ID.
     /// </summary>
     public string? RequestId { get; init; }
+
+    /// <summary>
+    /// Optional expected session epoch. When it differs from the active session lineage,
+    /// the request is rejected before turn admission or external effects.
+    /// </summary>
+    public string? ExpectedSessionEpoch { get; init; }
 }

@@ -49,6 +49,7 @@ public class ContinueAsNewInputTests
         {
             TimeToLive = TimeSpan.FromDays(3),
             SessionEpoch = "session-epoch",
+            SessionIdleDeadline = DateTimeOffset.UnixEpoch.AddDays(3),
             CompletedTurnCount = 41,
             MaxTerminalOutcomeCount = 17,
             MaxTerminalOutcomeBytes = 8192,
@@ -109,9 +110,16 @@ public class ContinueAsNewInputTests
                 },
             ];
         var createdAt = new DateTimeOffset(2026, 8, 10, 1, 2, 3, TimeSpan.Zero);
+        var renewedIdleDeadline = createdAt.AddDays(3);
 
         var actual = DurableChatWorkflowBase<ChatResponse>.CreateContinueAsNewInput(
-            original, carriedHistory, approvals, createdAt, terminalOutcomes, completedTurnCount: 42);
+            original,
+            carriedHistory,
+            approvals,
+            createdAt,
+            terminalOutcomes,
+            completedTurnCount: 42,
+            sessionIdleDeadline: renewedIdleDeadline);
 
         Assert.NotSame(original, actual);
         Assert.Equal(original.TimeToLive, actual.TimeToLive);
@@ -127,6 +135,7 @@ public class ContinueAsNewInputTests
         Assert.Equal("profile-v1", actual.DefaultChatClientKey);
         Assert.Equal(createdAt, actual.OriginalCreatedAt);
         Assert.Equal("session-epoch", actual.SessionEpoch);
+        Assert.Equal(renewedIdleDeadline, actual.SessionIdleDeadline);
         Assert.Equal(42, actual.CompletedTurnCount);
         Assert.Equal(17, actual.MaxTerminalOutcomeCount);
         Assert.Equal(8192, actual.MaxTerminalOutcomeBytes);

@@ -39,6 +39,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private bool _isProcessing;
     private bool _shutdownRequested;
     private bool _continueAsNewPending;
+    private bool _sessionAdmissionClosed;
+    private DateTimeOffset? _sessionIdleDeadline;
     private int _turnCount;
 
     private sealed class TurnExecutionRecord(
@@ -131,8 +133,19 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             input = input with { SessionEpoch = sessionEpoch };
         }
+        var sessionIdleDeadline = input.SessionIdleDeadline ?? Input?.SessionIdleDeadline;
+        if (sessionIdleDeadline is null)
+        {
+            sessionIdleDeadline = Workflow.UtcNow + input.TimeToLive;
+        }
+
+        if (input.SessionIdleDeadline != sessionIdleDeadline)
+        {
+            input = input with { SessionIdleDeadline = sessionIdleDeadline };
+        }
         _maxTerminalOutcomeCount = input.MaxTerminalOutcomeCount;
         _maxTerminalOutcomeBytes = input.MaxTerminalOutcomeBytes;
+        _sessionIdleDeadline = sessionIdleDeadline;
         Input = input;
         if (firstInitialization)
         {
@@ -160,6 +173,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         return RequiredInput;
     }
 
+    protected void RenewSessionIdleDeadline()
+    {
+        var input = RequiredInput;
+        var deadline = Workflow.UtcNow + input.TimeToLive;
+        _sessionIdleDeadline = deadline;
+        Input = input with { SessionIdleDeadline = deadline };
+    }
+
     /// <summary>
     /// Returns <see langword="true"/> once a <c>Shutdown</c> signal has been received.
     /// Subclass update validators can use this to reject new turns after shutdown.
@@ -168,6 +189,31 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
     /// <summary>Whether this run has stopped admitting new turns before continue-as-new.</summary>
     protected bool IsContinueAsNewPending => _continueAsNewPending;
+
+    /// <summary>Whether idle expiry has closed new-turn admission while accepted work drains.</summary>
+    protected bool IsSessionAdmissionClosed => _sessionAdmissionClosed;
+
+    /// <summary>
+    /// Validates a caller's optional session-lineage precondition after workflow input is restored.
+    /// </summary>
+    protected void ValidateExpectedSessionEpoch(string? expectedSessionEpoch)
+    {
+        if (expectedSessionEpoch is not null && string.IsNullOrWhiteSpace(expectedSessionEpoch))
+        {
+            throw new ArgumentException(
+                "Expected session epoch cannot be empty or whitespace.",
+                nameof(expectedSessionEpoch));
+        }
+
+        if (expectedSessionEpoch is not null
+            && !string.Equals(expectedSessionEpoch, CurrentSessionEpoch, StringComparison.Ordinal))
+        {
+            throw new ApplicationFailureException(
+                $"Expected session epoch '{expectedSessionEpoch}' does not match the active session epoch.",
+                errorType: Exceptions.DurableChatSessionEpochMismatchException.ErrorType,
+                nonRetryable: true);
+        }
+    }
 
     /// <summary>Whether a subclass has started turns outside tracked Update handlers.</summary>
     protected virtual bool HasPendingBackgroundTurns => false;
@@ -430,22 +476,52 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             UpsertCustomSearchAttributes();
         }
 
-        // Wait until shutdown, SDK-suggested CAN, or history has grown to MaxEntryCount.
-        bool conditionMet = await Workflow.WaitConditionAsync(
-            () => _shutdownRequested
-                  || (!_isProcessing && Workflow.ContinueAsNewSuggested)
-                  || (!_isProcessing && _history.Count >= input.MaxEntryCount),
-            timeout: input.TimeToLive);
-
-        if (!conditionMet)
+        bool conditionMet;
+        while (true)
         {
-            // TTL elapsed — session complete. Drain any in-flight handlers (e.g. fire-and-forget
-            // turns) before completing so we don't abort them with TMPRL1102.
+            var waitingDeadline = _sessionIdleDeadline!.Value;
+            var remaining = waitingDeadline - Workflow.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                conditionMet = false;
+            }
+            else
+            {
+                conditionMet = await Workflow.WaitConditionAsync(
+                    () => _shutdownRequested
+                          || (!_isProcessing && Workflow.ContinueAsNewSuggested)
+                          || (!_isProcessing && _history.Count >= input.MaxEntryCount)
+                          || _sessionIdleDeadline != waitingDeadline,
+                    timeout: remaining).ConfigureAwait(true);
+            }
+
+            var canContinueAsNew = !_isProcessing
+                                   && (Workflow.ContinueAsNewSuggested
+                                       || _history.Count >= input.MaxEntryCount);
+            if (conditionMet
+                && _sessionIdleDeadline != waitingDeadline
+                && !_shutdownRequested
+                && !canContinueAsNew)
+            {
+                continue;
+            }
+
+            if (conditionMet)
+            {
+                break;
+            }
+
+            _sessionAdmissionClosed = true;
             await Workflow.WaitConditionAsync(
                 () => Workflow.AllHandlersFinished
                       && !_isProcessing
                       && !HasPendingBackgroundTurns).ConfigureAwait(true);
-            return;
+            if (_shutdownRequested || _sessionIdleDeadline <= Workflow.UtcNow)
+            {
+                return;
+            }
+
+            _sessionAdmissionClosed = false;
         }
 
         if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount) && !_shutdownRequested)
@@ -498,7 +574,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     _approvalMixin.GetResolvedApprovals(),
                     sessionCreatedAt,
                     SnapshotTerminalTurnOutcomes(),
-                    _turnCount);
+                    _turnCount,
+                    _sessionIdleDeadline);
             }
             if (!drainBeforeSnapshot)
             {
@@ -530,7 +607,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     _approvalMixin.GetResolvedApprovals(),
                     sessionCreatedAt,
                     SnapshotTerminalTurnOutcomes(),
-                    _turnCount);
+                    _turnCount,
+                    _sessionIdleDeadline);
             }
             throw CreateContinueAsNewException(carriedInput!);
         }
@@ -561,7 +639,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         IReadOnlyList<DurableApprovalDecision> approvalResolutionHistory,
         DateTimeOffset originalCreatedAt,
         IReadOnlyList<Internal.DurableTerminalTurnOutcome> terminalTurnOutcomes,
-        int completedTurnCount)
+        int completedTurnCount,
+        DateTimeOffset? sessionIdleDeadline = null)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(carriedHistory);
@@ -577,6 +656,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             OriginalCreatedAt = originalCreatedAt,
             CompletedTurnCount = completedTurnCount,
             CarriedTerminalOutcomes = terminalTurnOutcomes,
+            SessionIdleDeadline = sessionIdleDeadline ?? input.SessionIdleDeadline,
         };
     }
 
@@ -650,6 +730,13 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(admissionFingerprint);
 
+        if (_sessionAdmissionClosed)
+        {
+            throw TurnAdmissionFailure(
+                "The session is idle-expiring and no longer admits new turns.",
+                "DurableSessionAdmissionClosed");
+        }
+
         if (requestId is not null
             && _terminalTurns.TryGetValue(requestId, out var terminal))
         {
@@ -721,6 +808,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
         ArgumentException.ThrowIfNullOrWhiteSpace(admissionFingerprint);
         ValidateTurnAdmission(requestId, admissionFingerprint);
+        if (Input is not null)
+        {
+            RenewSessionIdleDeadline();
+        }
 
         if (_terminalTurns.TryGetValue(requestId, out var terminal))
         {
@@ -780,6 +871,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         TurnAdmission admission)
     {
         ArgumentNullException.ThrowIfNull(admission);
+        RenewSessionIdleDeadline();
         await Workflow.WaitConditionAsync(() => GetTurnRecord(admission).IsTerminal).ConfigureAwait(true);
 
         var record = GetTurnRecord(admission);
@@ -1043,6 +1135,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         }
 
         SetTurnInputFingerprint(admission, requestEntry.InputFingerprint);
+        RenewSessionIdleDeadline();
 
         var historyCountBeforeTurn = _history.Count;
         var turnCountBeforeTurn = _turnCount;
@@ -1102,6 +1195,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
 
             CompleteTurnSuccess(GetTurnRecord(admission), output, responseEntry);
+            RenewSessionIdleDeadline();
             return (output, responseEntry);
         }
         catch (Exception exception)
@@ -1128,6 +1222,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
 
             CompleteTurnFailure(GetTurnRecord(admission), exception);
+            RenewSessionIdleDeadline();
             throw;
         }
         finally
@@ -1229,6 +1324,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         if (result.Status == DurableApprovalResolutionStatus.Accepted)
         {
             OnApprovalResolutionAccepted(decision);
+            RenewSessionIdleDeadline();
         }
 
         return result;

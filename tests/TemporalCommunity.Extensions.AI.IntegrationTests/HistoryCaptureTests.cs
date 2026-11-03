@@ -204,6 +204,43 @@ public class HistoryCaptureTests
 
     // ── Typed durable turn ─────────────────────────────────────────────────────────────
 
+    [Fact]
+    public async Task Capture_TypedDurableTurnV1()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var scripted = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "typed turn complete")),
+        ]);
+        var taskQueue = $"capture-typed-simple-turn-{Guid.NewGuid():N}";
+        using var host = BuildTypedTurnHost(env.Client, scripted, taskQueue);
+        await host.StartAsync();
+
+        var input = host.Services.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
+        var workflowId = $"capture-typed-simple-turn-{Guid.NewGuid():N}";
+        var handle = await env.Client.StartWorkflowAsync(
+            (TypedDurableTurnWorkflow workflow) => workflow.RunAsync(input),
+            new WorkflowOptions(workflowId, taskQueue));
+        var request = new DurableTurnRequest<TypedTurnRequestData, TypedTurnState>
+        {
+            Messages = [new ChatMessage(ChatRole.User, "capture typed turn")],
+            RequestData = new TypedTurnRequestData("capture-operation"),
+            InitialTurnState = new TypedTurnState(0, []),
+            CorrelationId = "capture-correlation",
+        };
+        var result = await handle.ExecuteUpdateAsync(
+            workflow => workflow.TurnAsync(request),
+            new WorkflowUpdateOptions { Id = "capture-typed-update" });
+
+        Assert.Equal("typed turn complete", result.Response.Messages[0].Text);
+        var history = await handle.FetchHistoryAsync();
+        await SaveHistoryAsync("typed-durable-turn-v1.json", history);
+
+        await handle.SignalAsync(workflow => workflow.RequestShutdownAsync());
+        await host.StopAsync();
+    }
+
     /// <summary>
     /// Captures the public typed workflow surface with a model step, one real tool activity,
     /// explicit state completion, and a final model response.

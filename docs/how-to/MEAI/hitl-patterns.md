@@ -36,8 +36,9 @@ SendAsync
 ```
 
 The waiting occurs in workflow state. No tool activity is held open and no tool-side heartbeat is
-needed while a human reviews the request. `SessionTimeToLive` must be longer than
-`ApprovalTimeout` so the session does not exit first.
+needed while a human reviews the request. An active approval wait is not expired by
+`SessionTimeToLive`; the session drains the turn and renews its idle deadline after the turn
+completes. `ApprovalTimeout` still bounds how long the workflow waits for a decision.
 
 ## Read and resolve an approval
 

@@ -91,6 +91,10 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     /// Optional caller-known logical request ID. Reuse it only when retrying the same turn with
     /// identical effect-bearing input.
     /// </param>
+    /// <param name="expectedSessionEpoch">
+    /// Optional session-lineage precondition. A mismatch fails with
+    /// <see cref="DurableChatSessionEpochMismatchException"/> before turn admission.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The response entry from the LLM, including per-turn <see cref="UsageDetails"/> and correlation ID.</returns>
     public async Task<DurableSessionResponse> SendAsync(
@@ -99,12 +103,19 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         ChatOptions? options = null,
         string? correlationId = null,
         string? requestId = null,
+        string? expectedSessionEpoch = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
         ArgumentNullException.ThrowIfNull(messages);
         var requestIdWasGenerated = requestId is null;
         var effectiveRequestId = Internal.DurableRequestFingerprint.ResolveRequestId(requestId);
+        if (expectedSessionEpoch is not null && string.IsNullOrWhiteSpace(expectedSessionEpoch))
+        {
+            throw new ArgumentException(
+                "Expected session epoch cannot be empty or whitespace.",
+                nameof(expectedSessionEpoch));
+        }
 
         if (options?.Tools is { Count: > 0 })
         {
@@ -148,6 +159,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             new WorkflowOptions(workflowId, _options.TaskQueue!)
             {
                 IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+                IdReusePolicy = WorkflowIdReusePolicy.AllowDuplicate,
                 // Rpc is disallowed on the start operation — cancellation goes on the update options below.
             });
 
@@ -160,6 +172,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             ClientKey = workflowInput.DefaultChatClientKey,
             CorrelationId = string.IsNullOrEmpty(correlationId) ? null : correlationId,
             RequestId = effectiveRequestId,
+            ExpectedSessionEpoch = expectedSessionEpoch,
         };
         // Validate that all effect-bearing caller input can be canonically serialized before
         // the update-with-start RPC records the request in workflow history. The workflow
@@ -184,6 +197,11 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         }
         catch (Exception exception)
         {
+            if (expectedSessionEpoch is not null && IsSessionEpochMismatch(exception))
+            {
+                throw new DurableChatSessionEpochMismatchException(expectedSessionEpoch, exception);
+            }
+
             if (requestIdWasGenerated)
             {
                 throw new DurableChatRequestException(effectiveRequestId, exception);
@@ -221,6 +239,10 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
     /// Optional caller-known logical request ID. Reuse it only when retrying the same turn with
     /// identical effect-bearing input.
     /// </param>
+    /// <param name="expectedSessionEpoch">
+    /// Optional session-lineage precondition. A mismatch fails with
+    /// <see cref="DurableChatSessionEpochMismatchException"/> before turn admission.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token for this RPC wait.</param>
     /// <returns>The durable response entry for the turn.</returns>
     public Task<DurableSessionResponse> SendAsync(
@@ -229,6 +251,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         ChatOptions? options = null,
         string? correlationId = null,
         string? requestId = null,
+        string? expectedSessionEpoch = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -238,7 +261,39 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             options,
             correlationId,
             requestId,
+            expectedSessionEpoch,
             cancellationToken);
+    }
+
+    /// <summary>
+    /// Returns the opaque epoch identifying the current session lineage.
+    /// </summary>
+    /// <param name="conversationId">The application conversation identifier.</param>
+    /// <param name="cancellationToken">Cancellation token for this query.</param>
+    public async Task<string> GetSessionEpochAsync(
+        string conversationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
+        return await handle.QueryAsync<DurableChatWorkflow, string>(
+            wf => wf.GetSessionEpoch(),
+            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
+    private static bool IsSessionEpochMismatch(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is Temporalio.Exceptions.ApplicationFailureException applicationFailure
+                && applicationFailure.ErrorType == DurableChatSessionEpochMismatchException.ErrorType)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

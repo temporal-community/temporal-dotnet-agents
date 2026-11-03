@@ -551,7 +551,10 @@ Temporal request is sent.
 
 ## Session TTL
 
-Sessions expire after the configured TTL (default: 14 days). Configure per-agent overrides on the builder:
+Sessions expire after the configured idle lifetime (default: 14 days). The workflow tracks an
+absolute `Workflow.UtcNow` deadline, renews it on admitted/completed work, and carries it through
+Continue-as-New. Active turns and approval waits drain before expiry. Configure per-agent overrides
+on the builder:
 
 ```csharp
 opts.AddDurableAgent("ShortLivedAgent", agent =>
@@ -564,8 +567,8 @@ opts.AddDurableAgent("ShortLivedAgent", agent =>
 opts.DefaultTimeToLive = TimeSpan.FromDays(7);
 ```
 
-When the TTL elapses, the `AgentWorkflow` completes naturally. The next message to that session ID starts a fresh
-workflow run.
+When the idle deadline elapses without active work, the `AgentWorkflow` completes naturally. The
+next message to that session ID starts a fresh session lineage.
 
 ---
 
