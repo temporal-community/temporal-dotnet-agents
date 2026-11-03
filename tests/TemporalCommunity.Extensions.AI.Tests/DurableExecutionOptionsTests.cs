@@ -27,6 +27,21 @@ public class DurableExecutionOptionsTests
         Assert.Equal(32, options.MaxConcurrentTurnJoiners);
         Assert.Equal(8192, options.HistorySummarizerMaxContextTokens);
         Assert.Equal(1024, options.HistorySummarizerOutputTokenReserve);
+        Assert.Equal(DurableInferenceTelemetryMode.ApplicationOwned, options.InferenceTelemetryMode);
+    }
+
+    [Fact]
+    public void Validate_RejectsUnknownInferenceTelemetryMode()
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "test-queue",
+            InferenceTelemetryMode = (DurableInferenceTelemetryMode)999,
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
+
+        Assert.Contains(nameof(DurableExecutionOptions.InferenceTelemetryMode), exception.Message);
     }
 
     [Fact]

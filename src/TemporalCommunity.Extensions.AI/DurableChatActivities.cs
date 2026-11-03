@@ -57,13 +57,6 @@ internal sealed class DurableChatActivities(
 
         _logger.LogChatActivityStarted(input.ConversationId, input.TurnNumber);
 
-        var modelId = input.Options?.ModelId;
-        using var span = DurableChatTelemetry.ActivitySource.StartActivity(
-            $"{DurableChatTelemetry.ChatOperationName} {modelId ?? "unknown"}",
-            System.Diagnostics.ActivityKind.Client);
-
-        SetupSpanTags(span, input.ConversationId, modelId, input.Options);
-
         EnsureNoCallerSuppliedTools(input.Options);
         var resolvedOptions = input.Options;
         var messagesForModel = await PrepareModelContextAsync(
@@ -79,17 +72,41 @@ internal sealed class DurableChatActivities(
         // the A-check cannot reach. Per-client cache so the walk runs at most once per
         // resolved instance.
         EnsureMixedPatternCheck(chatClient);
+        EnsureInferenceTelemetryConfiguration(chatClient);
         chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
         Internal.ChatClientActivityTags.Apply(resolvedOptions, _logger);
 
         var response = await StreamAndCollectAsync(
-            chatClient, messagesForModel, resolvedOptions, input, span, ctx)
+            chatClient, messagesForModel, resolvedOptions, input, ctx)
             .ConfigureAwait(false);
         EnsureActivityOutputFits(response, input, ctx, "chat activity result");
 
         _logger.LogChatActivityCompleted(input.ConversationId, input.TurnNumber);
 
         return response;
+    }
+
+    private void EnsureInferenceTelemetryConfiguration(IChatClient chatClient)
+    {
+        var mode = services.GetService<DurableExecutionOptions>()?.InferenceTelemetryMode
+            ?? DurableInferenceTelemetryMode.ApplicationOwned;
+        if (mode != DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient)
+        {
+            return;
+        }
+
+        var wrapperCount = Internal.AgentChainWalker.WalkChatClient(chatClient)
+            .OfType<OpenTelemetryChatClient>()
+            .Take(2)
+            .Count();
+        if (wrapperCount != 1)
+        {
+            throw new ApplicationFailureException(
+                "InferenceTelemetryMode requires exactly one discoverable MEAI " +
+                "OpenTelemetryChatClient in the resolved chat-client chain.",
+                errorType: "DurableInferenceTelemetryConfigurationInvalid",
+                nonRetryable: true);
+        }
     }
 
     /// <summary>
@@ -187,13 +204,6 @@ internal sealed class DurableChatActivities(
 
         _logger.LogChatStepStarted(input.ConversationId, input.TurnNumber);
 
-        var modelId = input.Options?.ModelId;
-        using var span = DurableChatTelemetry.ActivitySource.StartActivity(
-            $"{DurableChatTelemetry.ChatOperationName} {modelId ?? "unknown"}",
-            System.Diagnostics.ActivityKind.Client);
-
-        SetupSpanTags(span, input.ConversationId, modelId, input.Options);
-
         // Caller-supplied tools cannot cross the durable boundary. The workflow owns the
         // model-facing schema and supplies its recorded declarations to this activity.
         EnsureNoCallerSuppliedTools(input.Options);
@@ -211,11 +221,12 @@ internal sealed class DurableChatActivities(
             .ConfigureAwait(false);
         var chatClient = ResolveChatClient(input.ClientKey);
         EnsureMixedPatternCheck(chatClient);
+        EnsureInferenceTelemetryConfiguration(chatClient);
         chatClient = new Internal.ProviderBoundaryChatClient(chatClient);
         Internal.ChatClientActivityTags.Apply(effectiveOptions, _logger);
 
         var response = await StreamAndCollectAsync(
-            chatClient, messagesForModel, effectiveOptions, input, span, ctx)
+            chatClient, messagesForModel, effectiveOptions, input, ctx)
             .ConfigureAwait(false);
 
         // Keep the provider's original message sequence intact. Tool-call inspection operates on
@@ -244,13 +255,6 @@ internal sealed class DurableChatActivities(
             DurableChatStepDisposition.IncompleteResponse
                 ? DurableTurnCompletionReason.IncompleteResponse
                 : DurableTurnCompletionReason.FinalResponse;
-
-        if (classification.Disposition != DurableChatStepDisposition.ContinueWithTools)
-        {
-            span?.SetTag(
-                DurableChatTelemetry.TurnCompletionReasonAttribute,
-                completionReason.ToString());
-        }
 
         if (classification.Disposition == DurableChatStepDisposition.IncompleteResponse)
         {
@@ -640,16 +644,13 @@ internal sealed class DurableChatActivities(
 
     /// <summary>
     /// Shared streaming accumulator: streams the LLM response, heartbeats each chunk,
-    /// materializes the response via <c>ToChatResponse()</c>, populates span success tags,
-    /// and rethrows any exception with span error status and a log entry. The span is passed
-    /// in (owned by the caller's <c>using</c> block) so its lifetime spans the entire method.
+    /// materializes it via <c>ToChatResponse()</c>, and rethrows failures with a log entry.
     /// </summary>
     private async Task<ChatResponse> StreamAndCollectAsync(
         IChatClient chatClient,
         IList<ChatMessage> messages,
         ChatOptions? options,
         DurableChatInput input,
-        System.Diagnostics.Activity? span,
         ActivityExecutionContext? ctx)
     {
         var ct = ctx?.CancellationToken ?? CancellationToken.None;
@@ -664,24 +665,6 @@ internal sealed class DurableChatActivities(
                 ctx?.Heartbeat(update.Text);
             }
             var response = collected.ToChatResponse();
-
-            span?.SetTag(DurableChatTelemetry.InputTokensAttribute, response.Usage?.InputTokenCount);
-            span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, response.Usage?.OutputTokenCount);
-            span?.SetTag(
-                DurableChatTelemetry.ReasoningOutputTokensAttribute,
-                response.Usage?.ReasoningTokenCount);
-            span?.SetTag(DurableChatTelemetry.ResponseModelAttribute, response.ModelId);
-            if (response.FinishReason is { } finishReason)
-            {
-                span?.SetTag(
-                    DurableChatTelemetry.ResponseFinishReasonsAttribute,
-                    new[] { finishReason.Value });
-            }
-
-            span?.SetTag(
-                DurableChatTelemetry.EmptyVisibleTextAttribute,
-                !HasVisibleAssistantText(response));
-
             return response;
         }
         catch (OperationCanceledException)
@@ -691,7 +674,6 @@ internal sealed class DurableChatActivities(
         }
         catch (Exception ex)
         {
-            span?.SetStatus(System.Diagnostics.ActivityStatusCode.Error, ex.Message);
             _logger.LogChatActivityFailed(ex, input.ConversationId, input.TurnNumber);
 
             // Retry-hardening: a deterministic LLM error (HTTP 400/401/403/404/422) will never
@@ -861,13 +843,6 @@ internal sealed class DurableChatActivities(
     }
 
     /// <summary>Returns whether the response contains visible assistant text.</summary>
-    private static bool HasVisibleAssistantText(ChatResponse response) =>
-        response.Messages
-            .Where(message => message.Role == ChatRole.Assistant)
-            .SelectMany(message => message.Contents)
-            .OfType<TextContent>()
-            .Any(content => !string.IsNullOrWhiteSpace(content.Text));
-
     private static void EnsureNoCallerSuppliedTools(ChatOptions? options)
     {
         if (options?.Tools is not { Count: > 0 })
@@ -880,21 +855,6 @@ internal sealed class DurableChatActivities(
             "with AddDurableTools or AddDurableToolset.",
             errorType: nameof(DurableConfigurationException),
             nonRetryable: true);
-    }
-
-    /// <summary>
-    /// Sets up the shared OTel span tags for chat activities.
-    /// </summary>
-    private static void SetupSpanTags(
-        System.Diagnostics.Activity? span,
-        string? conversationId,
-        string? modelId,
-        ChatOptions? options)
-    {
-        span?.SetTag(DurableChatTelemetry.OperationNameAttribute, DurableChatTelemetry.ChatOperationName);
-        span?.SetTag(DurableChatTelemetry.ConversationIdAttribute, conversationId);
-        span?.SetTag(DurableChatTelemetry.RequestModelAttribute, modelId);
-        span?.SetTag(DurableChatTelemetry.RequestMaxTokensAttribute, options?.MaxOutputTokens);
     }
 
     /// <summary>

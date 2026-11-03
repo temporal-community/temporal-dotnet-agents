@@ -9,6 +9,16 @@ Durable AI code has two distinct testing concerns, and they call for different t
 | **Application logic** | Code that depends on `IDurableChatSessionClient` — controllers, services, background jobs | xUnit unit tests with a stub implementation |
 | **Library integration** | The workflow, activities, and middleware together — that the full pipeline produces correct results | xUnit integration tests using `TemporalServiceTestEnvironment.StartLocalAsync()` |
 
+## Inference telemetry verification
+
+`DurableChatActivitiesTelemetryTests` uses an in-memory `ActivityListener` to assert that the
+library emits no inference span by itself, while an application-configured MEAI
+`OpenTelemetryChatClient` emits exactly one span with the pinned GenAI operation/model/usage
+attributes. It also verifies that `RequireVisibleOpenTelemetryClient` rejects a missing wrapper and
+that `TrustOpaqueApplicationInstrumentation` permits a wrapped client hidden behind an
+application-owned opaque chain. These tests do not infer global exactly-once telemetry across
+Temporal activity retries.
+
 ## Phase 2.2 turn-admission verification
 
 The managed-session regression

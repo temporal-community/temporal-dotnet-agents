@@ -41,6 +41,8 @@ public class DurableChatActivitiesTagTests
                 ActivitySamplingResult.AllData,
         };
         ActivitySource.AddActivityListener(listener);
+        using var activity = DurableChatTelemetry.ActivitySource.StartActivity("test-temporal-activity");
+        Assert.NotNull(activity);
 
         if (chatStep)
         {
@@ -51,8 +53,8 @@ public class DurableChatActivitiesTagTests
             await activities.GetResponseAsync(input);
         }
 
-        Assert.Equal("acme", inner.ActivityTags["tenant"]);
-        Assert.Equal("req-1", inner.ActivityTags["request_id"]);
+        Assert.Equal("acme", activity.GetTagItem("tenant"));
+        Assert.Equal("req-1", activity.GetTagItem("request_id"));
         Assert.Equal("keep", inner.Options?.AdditionalProperties?["user.custom"]);
         Assert.DoesNotContain(
             inner.Options!.AdditionalProperties!,

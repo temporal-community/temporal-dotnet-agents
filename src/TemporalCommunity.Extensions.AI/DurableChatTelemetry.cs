@@ -11,8 +11,8 @@ namespace TemporalCommunity.Extensions.AI;
 /// </para>
 /// </summary>
 /// <remarks>
-/// Span names for LLM inference and tool execution follow the OpenTelemetry GenAI semantic
-/// conventions at the Development stability tier
+/// Tool execution span names follow the OpenTelemetry GenAI semantic conventions at the
+/// Development stability tier
 /// (https://opentelemetry.io/docs/specs/semconv/gen-ai/).
 /// Names and attributes may change before the specification reaches Stable.
 /// </remarks>
@@ -49,14 +49,6 @@ public static class DurableChatTelemetry
     public const string ChatSendSpanName = "durable_chat.send";
 
     /// <summary>
-    /// GenAI operation name prefix for LLM inference spans.
-    /// The full span name is <c>"chat {modelId}"</c>, constructed dynamically at call sites
-    /// where the model ID is available. Follows the OTel GenAI semantic convention
-    /// <c>"{operation.name} {model}"</c> format.
-    /// </summary>
-    public const string ChatOperationName = "chat";
-
-    /// <summary>
     /// GenAI operation name prefix for tool execution spans.
     /// The full span name is <c>"execute_tool {toolName}"</c>, constructed dynamically at
     /// call sites. Follows the OTel GenAI semantic convention <c>"execute_tool {tool_name}"</c>
@@ -75,33 +67,11 @@ public static class DurableChatTelemetry
     /// <summary>The conversation/session identifier.</summary>
     public const string ConversationIdAttribute = "conversation.id";
 
-    /// <summary>The model ID from the request.</summary>
-    public const string RequestModelAttribute = "gen_ai.request.model";
-
-    /// <summary>The model ID from the response.</summary>
-    public const string ResponseModelAttribute = "gen_ai.response.model";
-
-    /// <summary>The configured maximum number of output tokens.</summary>
-    public const string RequestMaxTokensAttribute = "gen_ai.request.max_tokens";
-
-    /// <summary>The provider-reported response finish reasons.</summary>
-    public const string ResponseFinishReasonsAttribute = "gen_ai.response.finish_reasons";
-
-    /// <summary>Number of input tokens consumed.</summary>
-    public const string InputTokensAttribute = "gen_ai.usage.input_tokens";
-
-    /// <summary>Number of output tokens produced.</summary>
-    public const string OutputTokensAttribute = "gen_ai.usage.output_tokens";
-
-    /// <summary>Number of reasoning output tokens produced.</summary>
-    public const string ReasoningOutputTokensAttribute = "gen_ai.usage.reasoning.output_tokens";
+    /// <summary>The model requested for a Temporal update, distinct from inference attributes.</summary>
+    public const string RequestedModelAttribute = "temporal.ai.chat.requested_model";
 
     /// <summary>The package-level reason the durable managed turn completed.</summary>
     public const string TurnCompletionReasonAttribute = "temporal.ai.turn.completion_reason";
-
-    /// <summary>Whether the provider response contains no visible assistant text.</summary>
-    public const string EmptyVisibleTextAttribute =
-        "temporal.durable_ai.response.empty_visible_text";
 
     /// <summary>The name of the tool being invoked.</summary>
     public const string ToolNameAttribute = "gen_ai.tool.name";

@@ -132,7 +132,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             ActivityKind.Client);
 
         span?.SetTag(DurableChatTelemetry.ConversationIdAttribute, conversationId);
-        span?.SetTag(DurableChatTelemetry.RequestModelAttribute, options?.ModelId);
+        span?.SetTag(DurableChatTelemetry.RequestedModelAttribute, options?.ModelId);
 
         _logger.LogClientSendingChat(workflowId);
 
@@ -222,26 +222,15 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             throw;
         }
 
-        span?.SetTag(DurableChatTelemetry.InputTokensAttribute, responseEntry.Usage?.InputTokenCount);
         Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
             _client.Options.DataConverter.PayloadConverter,
             responseEntry,
             workflowInput.MaximumTransportPayloadSizeBytes,
             workflowInput.PayloadCodecExpansionAllowanceBytes,
             "workflow update result");
-        span?.SetTag(DurableChatTelemetry.OutputTokensAttribute, responseEntry.Usage?.OutputTokenCount);
-        span?.SetTag(
-            DurableChatTelemetry.ReasoningOutputTokensAttribute,
-            responseEntry.Usage?.ReasoningTokenCount);
         span?.SetTag(
             DurableChatTelemetry.TurnCompletionReasonAttribute,
             responseEntry.CompletionReason.ToString());
-        if (responseEntry.FinishReason is { } finishReason)
-        {
-            span?.SetTag(
-                DurableChatTelemetry.ResponseFinishReasonsAttribute,
-                new[] { finishReason.Value });
-        }
 
         return responseEntry;
     }

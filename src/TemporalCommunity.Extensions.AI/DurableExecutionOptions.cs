@@ -157,6 +157,16 @@ public sealed class DurableExecutionOptions
     public string? DefaultContextReducerKey { get; set; }
 
     /// <summary>
+    /// Gets or sets whether to require a visible application-owned MEAI inference telemetry
+    /// wrapper. The library does not add inference spans; use the MEAI
+    /// <c>UseOpenTelemetry()</c> middleware on the worker-owned chat client when instrumentation
+    /// is desired. Select <see cref="DurableInferenceTelemetryMode.TrustOpaqueApplicationInstrumentation"/>
+    /// when a custom client hides that wrapper and the application verifies instrumentation itself.
+    /// </summary>
+    public DurableInferenceTelemetryMode InferenceTelemetryMode { get; set; } =
+        DurableInferenceTelemetryMode.ApplicationOwned;
+
+    /// <summary>
     /// Gets or sets the optional keyed chat-client profile used by the library-owned history
     /// summarizer. When unset, the managed session's default chat-client profile is used.
     /// </summary>
@@ -495,6 +505,12 @@ public sealed class DurableExecutionOptions
         {
             throw new InvalidOperationException(
                 $"{nameof(DefaultHistoryCompactionStrategy)} is not a supported strategy.");
+        }
+
+        if (!Enum.IsDefined(typeof(DurableInferenceTelemetryMode), InferenceTelemetryMode))
+        {
+            throw new InvalidOperationException(
+                $"{nameof(InferenceTelemetryMode)} is not a supported mode.");
         }
 
         if (DefaultHistoryReducerKey is not null

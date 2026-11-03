@@ -28,14 +28,39 @@ The library creates these spans:
 | Operation | Span name | When it is emitted |
 |---|---|---|
 | Client request | `durable_chat.send` | `DurableChatSessionClient.SendAsync` |
-| Model step | `chat {modelId}` | `GetResponse` (direct adapter) or `GetChatStep` (managed session) activity |
 | Tool invocation | `execute_tool {toolName}` | Each `InvokeFunction` activity |
 | Toolset resolution | `durable_toolset.resolve` | Once for a new worker-owned session baseline |
 
-The model-step span has `gen_ai.operation.name=chat`, `conversation.id`, request and response
-model IDs, and usage counts when the provider supplies them. A tool span has
-`gen_ai.operation.name=execute_tool` and `gen_ai.tool.name`. `durable_chat.send` carries the
-conversation ID, requested model, and final response usage.
+The library does not create inference spans or copy token usage onto its Temporal update span.
+Inference spans and token metrics come from an application-configured MEAI
+`OpenTelemetryChatClient`; without one, inference telemetry is not emitted by this package:
+
+```csharp
+builder.Services
+    .AddChatClient(providerChatClient)
+    .UseOpenTelemetry()
+    .Build();
+```
+
+`UseOpenTelemetry()` follows the pinned MEAI GenAI conventions and captures message content only
+when explicitly enabled. Set `DurableExecutionOptions.InferenceTelemetryMode` to
+`RequireVisibleOpenTelemetryClient` to reject a resolved chat-client chain unless it contains
+exactly one discoverable MEAI wrapper. Chain discovery follows `DelegatingChatClient` inner links.
+If an application-owned opaque client hides an already configured wrapper, explicitly select
+`TrustOpaqueApplicationInstrumentation`; this trusts the application and does not add another
+wrapper. The default `ApplicationOwned` mode leaves instrumentation entirely to the application.
+These modes verify configuration only; the library never wraps the provider client for inference
+telemetry.
+
+A tool span has `gen_ai.operation.name=execute_tool` and `gen_ai.tool.name`. The
+`durable_chat.send` span describes the Temporal update request, not the model inference, and uses
+Temporal-specific attributes rather than GenAI usage attributes.
+
+MEAI's default content-capture behavior is controlled by
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` (unset/false means redacted). Applications
+may explicitly set `OpenTelemetryChatClient.EnableSensitiveData`, which overrides that default.
+Treat enabling capture as a sensitive-data policy change: prompts, responses, tool arguments, and
+tool results may appear in telemetry.
 
 ## Toolset metrics and logs
 
@@ -76,9 +101,9 @@ following as the operation sequence rather than a guaranteed span tree:
 ```
 SendAsync
   → UpdateWorkflow:Chat
-  → GetChatStep activity → chat {modelId}
+  → GetChatStep activity → MEAI chat {model} inference span (when configured)
   → InvokeFunction activity → execute_tool {toolName}   (for each tool call)
-  → GetChatStep activity → chat {modelId}               (until final response)
+  → GetChatStep activity → MEAI chat {model} inference span (until final response)
 ```
 
 The direct `DurableChatClient` adapter uses the separate `GetResponse` activity and does not

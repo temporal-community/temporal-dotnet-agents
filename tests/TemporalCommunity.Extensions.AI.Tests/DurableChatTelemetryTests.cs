@@ -17,9 +17,8 @@ public class DurableChatTelemetryTests
         // so it retains its original name rather than following the GenAI convention.
         Assert.Equal("durable_chat.send", DurableChatTelemetry.ChatSendSpanName);
 
-        // LLM inference and tool spans follow OTel GenAI semantic conventions.
-        // Full span names are constructed dynamically as "{operation} {model|tool}".
-        Assert.Equal("chat", DurableChatTelemetry.ChatOperationName);
+        // Tool spans follow OTel GenAI semantic conventions.
+        // The MEAI OpenTelemetryChatClient owns inference span names.
         Assert.Equal("execute_tool", DurableChatTelemetry.ExecuteToolOperationName);
     }
 
@@ -28,23 +27,12 @@ public class DurableChatTelemetryTests
     {
         Assert.Equal("gen_ai.operation.name", DurableChatTelemetry.OperationNameAttribute);
         Assert.Equal("conversation.id", DurableChatTelemetry.ConversationIdAttribute);
-        Assert.Equal("gen_ai.request.model", DurableChatTelemetry.RequestModelAttribute);
-        Assert.Equal("gen_ai.request.max_tokens", DurableChatTelemetry.RequestMaxTokensAttribute);
-        Assert.Equal("gen_ai.response.model", DurableChatTelemetry.ResponseModelAttribute);
         Assert.Equal(
-            "gen_ai.response.finish_reasons",
-            DurableChatTelemetry.ResponseFinishReasonsAttribute);
-        Assert.Equal("gen_ai.usage.input_tokens", DurableChatTelemetry.InputTokensAttribute);
-        Assert.Equal("gen_ai.usage.output_tokens", DurableChatTelemetry.OutputTokensAttribute);
-        Assert.Equal(
-            "gen_ai.usage.reasoning.output_tokens",
-            DurableChatTelemetry.ReasoningOutputTokensAttribute);
+            "temporal.ai.chat.requested_model",
+            DurableChatTelemetry.RequestedModelAttribute);
         Assert.Equal(
             "temporal.ai.turn.completion_reason",
             DurableChatTelemetry.TurnCompletionReasonAttribute);
-        Assert.Equal(
-            "temporal.durable_ai.response.empty_visible_text",
-            DurableChatTelemetry.EmptyVisibleTextAttribute);
         Assert.Equal("gen_ai.tool.name", DurableChatTelemetry.ToolNameAttribute);
         Assert.Equal("gen_ai.tool.call.id", DurableChatTelemetry.ToolCallIdAttribute);
     }

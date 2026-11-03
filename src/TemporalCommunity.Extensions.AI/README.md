@@ -160,9 +160,11 @@ var options = new ChatOptions()
 await sessionClient.SendAsync("customer-42", messages, options);
 ```
 
-Serializable Temporal tag values cross the workflow/activity boundary and are applied directly to
-the current model-activity span. Immediately before the provider call, the library removes all
-Temporal-private keys while retaining ordinary MEAI options and user-owned `AdditionalProperties`.
+Serializable Temporal tag values cross the workflow/activity boundary and are applied to the
+ambient activity span when one is active (normally the Temporal activity span when tracing is
+configured). The library does not create a separate inference span. Immediately before the provider
+call, it removes all Temporal-private keys while retaining ordinary MEAI options and user-owned
+`AdditionalProperties`.
 Use ordinary MEAI `IChatClient` middleware for retry, routing, logging, telemetry, caching, and
 shadowing. Managed sessions pin the `DefaultChatClientKey` selected at session start; custom
 workflows using `DurableChatClient` can use `WithChatClientKey(...)` to select a pipeline per call.

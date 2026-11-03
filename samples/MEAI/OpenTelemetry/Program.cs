@@ -95,8 +95,7 @@ builder.Services.AddSingleton<ITemporalClient>(temporalClient);
 // AddChatClient is the idiomatic MEAI DI pattern — it returns a ChatClientBuilder
 // for chaining middleware, then Build() registers the final IChatClient singleton.
 // DurableChatActivities constructor-injects the unkeyed IChatClient on the worker
-// side; this is the client it calls when executing the GetChatStep activity
-// (which produces the leaf `chat {modelId}` span).
+// side; MEAI's OpenTelemetryChatClient below produces the inference span and token metrics.
 IChatClient openAiChatClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) }
@@ -104,8 +103,9 @@ IChatClient openAiChatClient = new OpenAIClient(
 
 // This sample registers no tools, so we deliberately do NOT chain
 // .UseFunctionInvocation() — managed durable sessions own function invocation.
-// To see per-tool spans, look at samples/MEAI/DurableTools or samples/MEAI/DurableChat.
-builder.Services.AddChatClient(openAiChatClient);
+// Inference instrumentation is application-owned; this visible MEAI wrapper emits one span
+// per provider attempt and keeps message content redacted by default.
+builder.Services.AddChatClient(openAiChatClient).UseOpenTelemetry().Build();
 
 // ── Setup: Register worker + durable AI ────────────────────────────────────
 // AddDurableAI is the registration path for AI integrations. It registers
@@ -116,6 +116,8 @@ builder.Services
     .AddHostedTemporalWorker("durable-chat-otel")
     .AddDurableAI(opts =>
     {
+        opts.InferenceTelemetryMode =
+            DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient;
         opts.ActivityTimeout = TimeSpan.FromMinutes(5);
         // Demo-friendly TTL (default is 14 days). The sample finishes in seconds;
         // long TTLs only matter for production sessions that may sit idle between turns.
@@ -173,7 +175,7 @@ Console.WriteLine("Done.");
 //   durable_chat.send (conversation.id = <id>)
 //     UpdateWorkflow:Chat
 //       RunActivity:GetChatStep
-//         chat {modelId} (conversation.id, gen_ai.usage.*)
+//         chat {model} (MEAI OpenTelemetryChatClient, gen_ai.usage.*)
 //
 // The conversation.id attribute is the same on both the send and leaf spans,
 // making it easy to filter all traces for a single session in your backend.
@@ -209,7 +211,7 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
     Console.WriteLine("   durable_chat.send");
     Console.WriteLine("     UpdateWorkflow:Chat");
     Console.WriteLine("       RunActivity:GetChatStep");
-    Console.WriteLine("         chat {modelId}");
+    Console.WriteLine("         chat {model} (MEAI OpenTelemetryChatClient)");
     Console.WriteLine();
     Console.WriteLine($" Filter by tag conversation.id = {conversationId}");
     Console.WriteLine("════════════════════════════════════════════════════════\n");

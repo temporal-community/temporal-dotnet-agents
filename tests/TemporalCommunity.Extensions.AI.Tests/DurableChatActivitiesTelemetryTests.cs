@@ -3,14 +3,14 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Temporalio.Exceptions;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.Tests;
 
 /// <summary>
-/// Verifies that <see cref="DurableChatActivities"/> populates GenAI usage tags
-/// (input_tokens / output_tokens / response.model) on the "chat {modelId}" span.
-/// Regression for Morpheus's unverified item B2 from the OTel sample review.
+/// Verifies that GenAI inference telemetry is emitted only by an application-configured MEAI
+/// <see cref="OpenTelemetryChatClient"/>, never by package-authored inference spans.
 /// </summary>
 [Collection(nameof(DurableToolsetTelemetryTests))]
 public class DurableChatActivitiesTelemetryTests
@@ -24,11 +24,16 @@ public class DurableChatActivitiesTelemetryTests
 
     private static DurableChatActivities BuildActivities(
         IChatClient client,
-        ILoggerFactory? loggerFactory = null)
+        ILoggerFactory? loggerFactory = null,
+        DurableInferenceTelemetryMode telemetryMode = DurableInferenceTelemetryMode.ApplicationOwned)
     {
-        var provider = new ServiceCollection()
+        var services = new ServiceCollection()
             .AddSingleton(client)
-            .BuildServiceProvider();
+            .AddSingleton(new DurableExecutionOptions
+            {
+                InferenceTelemetryMode = telemetryMode,
+            });
+        var provider = services.BuildServiceProvider();
         return new DurableChatActivities(provider, loggerFactory);
     }
 
@@ -46,7 +51,7 @@ public class DurableChatActivitiesTelemetryTests
     {
         ActivitySource.AddActivityListener(new ActivityListener
         {
-            ShouldListenTo = src => src.Name == DurableChatTelemetry.ActivitySourceName,
+            ShouldListenTo = _ => true,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllDataAndRecorded,
             ActivityStopped = a =>
@@ -84,7 +89,7 @@ public class DurableChatActivitiesTelemetryTests
     };
 
     [Fact]
-    public async Task GetResponseAsync_PopulatesUsageAndModelTagsOnChatSpan()
+    public async Task GetResponseAsync_LeavesInferenceInstrumentationToApplication()
     {
         var captured = StartCapture();
 
@@ -93,37 +98,24 @@ public class DurableChatActivitiesTelemetryTests
 
         var response = await activities.GetResponseAsync(InputWithModel());
 
-        // Source data was actually produced.
         Assert.NotNull(response.Usage);
         Assert.Equal(InputTokens, response.Usage!.InputTokenCount);
         Assert.Equal(OutputTokens, response.Usage.OutputTokenCount);
         Assert.Equal(ResponseModel, response.ModelId);
-
-        var span = Assert.Single(captured);
-        Assert.Equal($"chat {RequestModel}", span.DisplayName);
-
-        var tags = span.TagObjects.ToDictionary(kv => kv.Key, kv => kv.Value);
-
-        Assert.True(tags.ContainsKey(DurableChatTelemetry.InputTokensAttribute),
-            $"Missing tag {DurableChatTelemetry.InputTokensAttribute}");
-        Assert.True(tags.ContainsKey(DurableChatTelemetry.OutputTokensAttribute),
-            $"Missing tag {DurableChatTelemetry.OutputTokensAttribute}");
-
-        Assert.Equal((long)InputTokens, Convert.ToInt64(tags[DurableChatTelemetry.InputTokensAttribute]));
-        Assert.Equal((long)OutputTokens, Convert.ToInt64(tags[DurableChatTelemetry.OutputTokensAttribute]));
-        Assert.Equal(ResponseModel, tags[DurableChatTelemetry.ResponseModelAttribute]);
-        Assert.Equal(RequestModel, tags[DurableChatTelemetry.RequestModelAttribute]);
-        Assert.Equal(DurableChatTelemetry.ChatOperationName, tags[DurableChatTelemetry.OperationNameAttribute]);
-        Assert.Equal("conv-test-1", tags[DurableChatTelemetry.ConversationIdAttribute]);
+        Assert.DoesNotContain(captured, IsInferenceSpan);
     }
 
     [Fact]
-    public async Task GetChatStepAsync_PopulatesUsageFinishAndRequestTagsOnChatSpan()
+    public async Task GetChatStepAsync_ApplicationConfiguredMEAIWrapperEmitsInferenceSpan()
     {
         var captured = StartCapture();
 
-        var client = new UsageReportingChatClient();
-        var activities = BuildActivities(client);
+        var client = new ChatClientBuilder(new UsageReportingChatClient())
+            .UseOpenTelemetry()
+            .Build();
+        var activities = BuildActivities(
+            client,
+            telemetryMode: DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient);
 
         var result = await activities.GetChatStepAsync(InputWithModel());
 
@@ -133,32 +125,13 @@ public class DurableChatActivitiesTelemetryTests
         Assert.Equal(ReasoningTokens, result.Usage.ReasoningTokenCount);
         Assert.Equal(ChatFinishReason.Stop, result.FinishReason);
 
-        var span = Assert.Single(captured);
-        Assert.Equal($"chat {RequestModel}", span.DisplayName);
-
+        var span = Assert.Single(captured, IsInferenceSpan);
         var tags = span.TagObjects.ToDictionary(kv => kv.Key, kv => kv.Value);
-
-        Assert.True(tags.ContainsKey(DurableChatTelemetry.InputTokensAttribute),
-            $"Missing tag {DurableChatTelemetry.InputTokensAttribute} on Pattern 3 path");
-        Assert.True(tags.ContainsKey(DurableChatTelemetry.OutputTokensAttribute),
-            $"Missing tag {DurableChatTelemetry.OutputTokensAttribute} on Pattern 3 path");
-
-        Assert.Equal((long)InputTokens, Convert.ToInt64(tags[DurableChatTelemetry.InputTokensAttribute]));
-        Assert.Equal((long)OutputTokens, Convert.ToInt64(tags[DurableChatTelemetry.OutputTokensAttribute]));
-        Assert.Equal(
-            (long)ReasoningTokens,
-            Convert.ToInt64(tags[DurableChatTelemetry.ReasoningOutputTokensAttribute]));
-        Assert.Equal(
-            MaxOutputTokens,
-            Convert.ToInt32(tags[DurableChatTelemetry.RequestMaxTokensAttribute]));
-        Assert.Equal(
-            [ChatFinishReason.Stop.Value],
-            Assert.IsType<string[]>(tags[DurableChatTelemetry.ResponseFinishReasonsAttribute]));
-        Assert.Equal(ResponseModel, tags[DurableChatTelemetry.ResponseModelAttribute]);
-        Assert.Equal(false, tags[DurableChatTelemetry.EmptyVisibleTextAttribute]);
-        Assert.Equal(
-            DurableTurnCompletionReason.FinalResponse.ToString(),
-            tags[DurableChatTelemetry.TurnCompletionReasonAttribute]);
+        Assert.Equal("chat", tags["gen_ai.operation.name"]);
+        Assert.Equal(RequestModel, tags["gen_ai.request.model"]);
+        Assert.Equal(ResponseModel, tags["gen_ai.response.model"]);
+        Assert.Equal((long)InputTokens, Convert.ToInt64(tags["gen_ai.usage.input_tokens"]));
+        Assert.Equal((long)OutputTokens, Convert.ToInt64(tags["gen_ai.usage.output_tokens"]));
     }
 
     [Fact]
@@ -176,12 +149,7 @@ public class DurableChatActivitiesTelemetryTests
         var result = await activities.GetChatStepAsync(InputWithModel());
 
         Assert.Equal(DurableTurnCompletionReason.IncompleteResponse, result.CompletionReason);
-        var span = Assert.Single(captured);
-        var tags = span.TagObjects.ToDictionary(kv => kv.Key, kv => kv.Value);
-        Assert.Equal(true, tags[DurableChatTelemetry.EmptyVisibleTextAttribute]);
-        Assert.Equal(
-            DurableTurnCompletionReason.IncompleteResponse.ToString(),
-            tags[DurableChatTelemetry.TurnCompletionReasonAttribute]);
+        Assert.DoesNotContain(captured, IsInferenceSpan);
 
         var warning = Assert.Single(logs.Logs, log => log.EventId.Id == 26);
         Assert.Equal(LogLevel.Warning, warning.Level);
@@ -191,7 +159,7 @@ public class DurableChatActivitiesTelemetryTests
     }
 
     [Fact]
-    public async Task GetChatStepAsync_ContinueWithTools_OmitsCompletionReasonFromChatSpan()
+    public async Task GetChatStepAsync_WithoutMEAIWrapperEmitsNoInferenceSpan()
     {
         var captured = StartCapture();
 
@@ -202,10 +170,40 @@ public class DurableChatActivitiesTelemetryTests
 
         Assert.False(result.IsFinal);
         Assert.Single(result.ToolCalls!);
-        var span = Assert.Single(captured);
-        var tags = span.TagObjects.ToDictionary(kv => kv.Key, kv => kv.Value);
-        Assert.DoesNotContain(DurableChatTelemetry.TurnCompletionReasonAttribute, tags.Keys);
+        Assert.DoesNotContain(captured, IsInferenceSpan);
     }
+
+    [Fact]
+    public async Task OpaqueApplicationChain_RequiresExplicitTelemetryTrust()
+    {
+        var captured = StartCapture();
+        var wrapped = new ChatClientBuilder(new UsageReportingChatClient()).UseOpenTelemetry().Build();
+        var opaque = new OpaqueChatClient(wrapped);
+        var activities = BuildActivities(
+            opaque,
+            telemetryMode: DurableInferenceTelemetryMode.TrustOpaqueApplicationInstrumentation);
+
+        var result = await activities.GetChatStepAsync(InputWithModel());
+
+        Assert.Equal(ChatFinishReason.Stop, result.FinishReason);
+        Assert.Single(captured, IsInferenceSpan);
+    }
+
+    [Fact]
+    public async Task RequireVisibleTelemetryMode_RejectsMissingMEAIWrapper()
+    {
+        var activities = BuildActivities(
+            new UsageReportingChatClient(),
+            telemetryMode: DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient);
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => activities.GetChatStepAsync(InputWithModel()));
+
+        Assert.Equal("DurableInferenceTelemetryConfigurationInvalid", exception.ErrorType);
+    }
+
+    private static bool IsInferenceSpan(Activity activity) =>
+        activity.GetTagItem("gen_ai.operation.name") is string;
 
     /// <summary>
     /// Streaming chat client that emits a text chunk plus a terminal <see cref="UsageContent"/>
@@ -243,6 +241,24 @@ public class DurableChatActivitiesTelemetryTests
                 FinishReason = ChatFinishReason.Stop,
             };
         }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class OpaqueChatClient(IChatClient inner) : IChatClient
+    {
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            inner.GetResponseAsync(messages, options, cancellationToken);
+
+        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default) =>
+            inner.GetStreamingResponseAsync(messages, options, cancellationToken);
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }

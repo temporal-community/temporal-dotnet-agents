@@ -4,14 +4,15 @@
 
 This sample demonstrates OpenTelemetry tracing and metrics for a durable MEAI chat session. It
 produces a complete span hierarchy from the external `SendAsync` call, through the Temporal
-protocol layers, down to the LLM inference span emitted by `DurableChatActivities`. It also shows
-how to subscribe to the library's stable `Meter` name.
+protocol layers, down to the LLM inference span emitted by MEAI's application-configured
+`OpenTelemetryChatClient`. It also shows how to subscribe to the library's stable `Meter` name.
 
-- Full span hierarchy from `durable_chat.send` down through the Temporal protocol spans to the
-  `chat {modelId}` inference span
-- `conversation.id` attribute on the client send span and the inference span — filter an entire
-  session in one query
-- Four `ActivitySource` names must be registered with the tracer provider
+- Full span hierarchy from `durable_chat.send` through Temporal protocol spans to the MEAI
+  `chat {model}` inference span
+- `conversation.id` on the client send span; the application-owned MEAI inference span uses
+  GenAI attributes and may be correlated through the Temporal trace
+- Five core `ActivitySource` names must be registered with the tracer provider (the optional
+  OpenAI SDK instrumentation adds its own source)
 - `DurableChatTelemetry.MeterName` must be registered with the meter provider to collect durable
   toolset resolver and validation measurements
 - `TracingInterceptor` propagates the W3C `traceparent` header across gRPC boundaries
@@ -20,7 +21,8 @@ how to subscribe to the library's stable `Meter` name.
 
 The library and the Temporal SDK emit spans during a chat turn:
 
-- `TemporalCommunity.Extensions.AI` — library spans for the client send and the LLM inference call
+- `TemporalCommunity.Extensions.AI` — Temporal update and toolset spans
+- MEAI `OpenTelemetryChatClient` — provider inference spans and token metrics
 - `Temporalio-Client`, `Temporalio-Workflow`, `Temporalio-Activity` — Temporal SDK protocol spans
   (emitted by `TracingInterceptor`)
 
@@ -32,8 +34,7 @@ durable_chat.send                                                ← DurableChat
        └─ RunWorkflow:TemporalCommunity.Extensions.AI.DurableChatWorkflow
                                                                  ← TracingInterceptor (worker)
             └─ RunActivity:TemporalCommunity.Extensions.AI.GetChatStep  ← TracingInterceptor (activity)
-                 └─ chat gpt-4o-mini                             ← DurableChatTelemetry
-                                                                   (ActivityKind.Client)
+                 └─ chat gpt-4o-mini                             ← MEAI OpenTelemetryChatClient
                                                                    carries gen_ai.* tags
 ```
 
@@ -44,9 +45,8 @@ Notes on the names:
   formatted by the Temporal SDK's `TracingInterceptor` from the workflow/update/activity names
   registered in code. The workflow type is `TemporalCommunity.Extensions.AI.DurableChatWorkflow`; the
   update is `Chat`; the model-step activity is `TemporalCommunity.Extensions.AI.GetChatStep`.
-- `chat {modelId}` is constructed dynamically at the call site. The prefix
-  (`DurableChatTelemetry.ChatOperationName`) follows the OTel GenAI semantic convention
-  `"{operation.name} {model}"`. With `OPENAI_MODEL=gpt-4o-mini` this prints as `chat gpt-4o-mini`.
+- `chat {model}` is emitted by MEAI's `OpenTelemetryChatClient` and follows its pinned GenAI
+  semantic-convention implementation. The library does not emit a second inference span.
 
 ## Attributes
 
@@ -55,14 +55,13 @@ Notes on the names:
 | Attribute | Source |
 |---|---|
 | `conversation.id` | The session ID you pass to `SendAsync` |
-| `gen_ai.request.model` | `ChatOptions.ModelId` from the request, if set |
+| `temporal.ai.chat.requested_model` | `ChatOptions.ModelId` from the request, if set |
 
-### On `chat {modelId}` (LLM inference span)
+### On `chat {model}` (LLM inference span)
 
 | Attribute | Source |
 |---|---|
 | `gen_ai.operation.name` | Always `"chat"` |
-| `conversation.id` | The session ID |
 | `gen_ai.request.model` | `ChatOptions.ModelId` from the request |
 | `gen_ai.response.model` | Model ID echoed by the response |
 | `gen_ai.usage.input_tokens` | Token counts populated when the provider returns usage data |
@@ -74,9 +73,9 @@ the full list.
 
 ## Highlights
 
-- **Four sources, not one.** `DurableChatTelemetry.ActivitySourceName` covers library semantic
-  spans; the three `TracingInterceptor` sources cover Temporal protocol spans. Omitting any one of
-  them produces gaps in your trace.
+- **Five sources, not one.** `DurableChatTelemetry.ActivitySourceName` covers library semantic
+  spans; the three `TracingInterceptor` sources cover Temporal protocol spans; and MEAI's source
+  covers inference. Omitting a source produces gaps in your trace.
 
   ```csharp
   builder.Services
@@ -86,22 +85,21 @@ the full list.
           .AddSource(TracingInterceptor.ClientSource.Name)
           .AddSource(TracingInterceptor.WorkflowsSource.Name)
           .AddSource(TracingInterceptor.ActivitiesSource.Name)
+          .AddSource("Microsoft.Extensions.AI")
           .AddConsoleExporter())
       .WithMetrics(metrics => metrics
           .AddMeter(DurableChatTelemetry.MeterName)
           .AddConsoleExporter());
   ```
-- **The library owns semantic diagnostics; the application owns export.**
-  `TemporalCommunity.Extensions.AI` emits `ActivitySource`, `Meter`, and structured `ILogger`
-  signals without depending on an OpenTelemetry SDK. `Temporalio.Extensions.OpenTelemetry`
-  supplies the Temporal protocol spans and trace-context propagation. This sample selects the
-  OpenTelemetry console exporters for both library spans and metrics.
+- **Inference instrumentation is application-owned.** The sample configures
+  `.UseOpenTelemetry()` on the provider chat client; the durable library does not add inference
+  spans or duplicate token usage tags. `Temporalio.Extensions.OpenTelemetry` supplies the Temporal
+  protocol spans and trace-context propagation.
 - **`TracingInterceptor` is required for connected traces.** Without it, Temporal's internal gRPC
   calls break the distributed trace and the library spans appear disconnected from the protocol
   spans in your backend.
-- **`conversation.id` makes session filtering practical.** Both the client-side `durable_chat.send`
-  span and the worker-side `chat {modelId}` span carry `conversation.id`, so a single attribute
-  filter surfaces every span for a session across all service instances.
+- **The library's source is not the inference source.** Add the MEAI wrapper's source when
+  collecting inference spans; the exact trace parent layout depends on cross-process propagation.
 - **`AddDurableAI()` is the registration entry point.** The package ships no plugin-registration
   wrappers; to add your own Temporal plugins, populate `TemporalWorkerOptions.Plugins` or
   `TemporalClientConnectOptions.Plugins` directly.
@@ -203,7 +201,8 @@ This sample does not register durable tools, so every chat turn dispatches a sin
 `AddDurableTools(...)`:
 
 - The workflow schedules one `TemporalCommunity.Extensions.AI.GetChatStep` activity per LLM step
-  (still wrapped in `RunActivity:...`, with the inner `chat {modelId}` span carrying `gen_ai.*` tags).
+  (still wrapped in `RunActivity:...`, with an application-configured `chat {model}` span carrying
+  `gen_ai.*` tags).
 - Each tool invocation produces a separate `RunActivity:TemporalCommunity.Extensions.AI.InvokeFunction`
   span — one span per tool call.
 
@@ -245,7 +244,7 @@ experimental and off by default; behaviour, span names, and attribute schemas ma
 SDK versions. The source of truth is the
 [OpenAI .NET Observability docs](https://github.com/openai/openai-dotnet/blob/main/docs/Observability.md).
 
-The `chat {modelId}` inference span documented above is emitted by `DurableChatTelemetry` and is
-not affected by the OpenAI switch — the switch adds additional, lower-level spans from inside the
-OpenAI client. The Nexus span family mentioned in the "What's new in the Temporal SDK protocol
-spans (1.14.x)" section above is also independent of this switch.
+The `chat {model}` inference span documented above is emitted by MEAI's configured
+`OpenTelemetryChatClient`. The OpenAI switch adds additional provider-level spans from inside the
+OpenAI client; those may coexist with the MEAI inference span and should be considered when
+counting provider attempts.
