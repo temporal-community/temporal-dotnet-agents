@@ -285,7 +285,7 @@ internal sealed class DurableFunctionActivities(
             const string truncatedMarker = "...[truncated]";
             return serialized.Length <= 4096
                 ? serialized
-                : string.Concat(serialized.AsSpan(0, 4096 - truncatedMarker.Length), truncatedMarker);
+                : serialized[..(4096 - truncatedMarker.Length)] + truncatedMarker;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
