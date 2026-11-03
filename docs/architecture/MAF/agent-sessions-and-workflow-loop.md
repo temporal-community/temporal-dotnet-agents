@@ -278,13 +278,17 @@ if ((Workflow.ContinueAsNewSuggested || _history.Count >= input.MaxEntryCount)
 {
     var carriedHistory = input.HistoryReducerKey is not null
         ? await ApplyKeyedHistoryReducerAsync(input.HistoryReducerKey, _history, reducerOptions)
-        : DefaultBoundedTrim(_history, input.MaxEntryCount);
+        : await ApplySelectedCompactionStrategyAsync(_history);
 
     var carriedInput = CreateContinueAsNewInput(input, carriedHistory, /* ... */);
     await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished);
     throw CreateContinueAsNewException(carriedInput);   // Subclass hook
 }
 ```
+
+If no strategy is configured or a projection fails validation, the workflow preserves its last
+valid history and enters queryable `HistoryBlocked`; it does not fall back to an implicit trim.
+Recovery is explicit through the retry/trim updates, with bounded operation counts.
 
 This is **not** a tight polling loop. `WaitConditionAsync` is an event-driven primitive that parks the workflow until one of these conditions becomes true:
 
@@ -470,9 +474,10 @@ fires when `Workflow.ContinueAsNewSuggested` becomes true, or when `_history.Cou
 `MaxEntryCount` (default `1000`) — whichever comes first, and only while no turn holds the gate
 and no shutdown has been requested. The workflow then:
 
-1. **Reduces** the history (base does this). Two paths:
-   - `HistoryReducerKey` set → dispatch the `ReduceHistoryByKey` activity and carry its result
-   - otherwise → `DefaultBoundedTrim`
+1. **Reduces** the history (base does this). `HistoryReducerKey` set → dispatch the
+   `ReduceHistoryByKey` activity and carry its validated result. With no keyed reducer, the base
+   applies only an explicitly selected strategy; if none is configured or projection fails, it
+   blocks and preserves the last valid history.
 2. Waits for `Workflow.AllHandlersFinished` so no in-flight turn is aborted
 3. Calls `CreateContinueAsNewException(carriedInput)` (subclass override produces the typed exception)
 4. The MAF override `with`-clones `_input`, overwriting the base CAN fields from the argument and
@@ -482,17 +487,12 @@ and no shutdown has been requested. The workflow then:
 6. The new run restores history from `input.CarriedHistory` (in the base) and `_currentStateBag` from `input.CarriedStateBag` (in `AgentWorkflow.RunAsync`)
 7. The base's `InitializeTurnCount` re-derives `_turnCount` from the carried history (counting `DurableSessionResponse` entries), so the `TurnCount` search attribute monotonically grows across CAN boundaries
 
-**Carry-forward is lossy by default.** `DefaultBoundedTrim` keeps only the most recent
-`MaxEntryCount / 2` entries (floored, minimum 1) and returns the history unchanged only when it is
-already at or below that target. The half-window is deliberate: carrying the full history into the
-fresh run would immediately re-trip the same entry-count threshold and produce a back-to-back CAN
-loop. The trim additionally drops a leading orphaned response whose matching request was just cut,
-so the new run never opens on a response it cannot attribute. `MaxEntryCount` is validated to be at
-least `4` precisely so a complete request/response turn can survive the half-window.
-
-Configure a `HistoryReducerKey` when a smarter policy (summarisation, selective retention) is
-required; the delegate is resolved from DI inside the activity, so only the *key* travels on the
-wire.
+There is no implicit carry-forward trim. A configured `HistoryReducerKey` runs as a worker-owned
+activity projection; otherwise an explicitly selected compaction strategy is required. If no
+strategy is selected or the output is invalid/no-progress, the workflow preserves its last valid
+history and enters queryable `HistoryBlocked` rather than silently dropping turns. Operators can
+retry the configured reducer or explicitly request a one-time truncating recovery through
+`ITemporalAgentClient`. The removed range is represented by a truncation marker.
 
 From the caller's perspective the workflow ID is unchanged and the conversation continues, but
 **older turns may be gone** — do not treat `GetHistory` as a complete transcript across CAN

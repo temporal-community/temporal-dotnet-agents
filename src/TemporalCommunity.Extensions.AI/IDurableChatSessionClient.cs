@@ -143,6 +143,21 @@ public interface IDurableChatSessionClient
         string conversationId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Retries the configured retained-history strategy once for a blocked session.</summary>
+    Task<DurableHistoryRecoveryResult> RetryHistoryCompactionAsync(
+        string conversationId,
+        string operationId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Explicitly trims an oldest complete-turn prefix once for the current blocked incident.
+    /// The removed range is recorded with a truncation marker.
+    /// </summary>
+    Task<DurableHistoryRecoveryResult> TrimBlockedHistoryAsync(
+        string conversationId,
+        string operationId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Requests workflow-owned cancellation of the active turn identified by
     /// <paramref name="requestId"/>.

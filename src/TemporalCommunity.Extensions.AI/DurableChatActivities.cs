@@ -303,13 +303,28 @@ internal sealed class DurableChatActivities(
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        var reducer = services.GetKeyedService<
-            Func<IList<Session.DurableSessionEntry>, IList<Session.DurableSessionEntry>>>(
-            input.ReducerKey)
-            ?? throw new InvalidOperationException(
-                $"No history reducer registered under key '{input.ReducerKey}'. " +
-                $"Register a Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> " +
-                $"via services.AddKeyedSingleton(\"{input.ReducerKey}\", ...).");
+        Func<IList<Session.DurableSessionEntry>, IList<Session.DurableSessionEntry>>? reducer;
+        try
+        {
+            reducer = services.GetKeyedService<
+                Func<IList<Session.DurableSessionEntry>, IList<Session.DurableSessionEntry>>>(
+                input.ReducerKey);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new ApplicationFailureException(
+                "The configured history reducer could not be resolved from worker DI.",
+                exception,
+                errorType: nameof(DurableConfigurationException),
+                nonRetryable: true);
+        }
+        if (reducer is null)
+        {
+            throw new ApplicationFailureException(
+                "The configured history reducer is missing from worker DI.",
+                errorType: nameof(DurableConfigurationException),
+                nonRetryable: true);
+        }
 
         var result = reducer(input.History);
         return Task.FromResult(result as List<Session.DurableSessionEntry>

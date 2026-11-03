@@ -20,6 +20,38 @@ public class ContinueAsNewInputTests
         Assert.NotNull(restored);
         Assert.Equal(8192, restored.HistorySummarizerMaxContextTokens);
         Assert.Equal(1024, restored.HistorySummarizerOutputTokenReserve);
+        Assert.Equal(DurableHistoryCompactionStrategy.None, restored.HistoryCompactionStrategy);
+    }
+
+    [Fact]
+    public void CompactionStrategyAndRecoveryState_SurviveWorkflowInputSerialization()
+    {
+        var input = new DurableChatWorkflowInput
+        {
+            HistoryCompactionStrategy = DurableHistoryCompactionStrategy.TrimRecentTurns,
+            HistoryRecovery = new DurableHistoryRecoveryState
+            {
+                IsBlocked = true,
+                BlockReason = "compaction-failed",
+                RetryCountThisIncident = 2,
+                AcceptedOperationIds = ["retry-1", "retry-2"],
+                LastOutcome = "retry-failed",
+            },
+        };
+
+        var payload = JsonSerializer.Serialize(input, DurableAIJsonUtilities.DefaultOptions);
+        var restored = JsonSerializer.Deserialize<DurableChatWorkflowInput>(
+            payload,
+            DurableAIJsonUtilities.DefaultOptions);
+
+        Assert.NotNull(restored);
+        Assert.Equal(DurableHistoryCompactionStrategy.TrimRecentTurns, restored.HistoryCompactionStrategy);
+        Assert.NotNull(restored.HistoryRecovery);
+        Assert.True(restored.HistoryRecovery.IsBlocked);
+        Assert.Equal("compaction-failed", restored.HistoryRecovery.BlockReason);
+        Assert.Equal(2, restored.HistoryRecovery.RetryCountThisIncident);
+        Assert.Equal(["retry-1", "retry-2"], restored.HistoryRecovery.AcceptedOperationIds);
+        Assert.Equal("retry-failed", restored.HistoryRecovery.LastOutcome);
     }
 
     [Fact]
@@ -40,6 +72,15 @@ public class ContinueAsNewInputTests
         };
         var skippedTools = new[] { "skip" };
         var approvalTools = new[] { "approve" };
+        var historyRecovery = new DurableHistoryRecoveryState
+        {
+            IsBlocked = true,
+            BlockReason = "configuration-invalid",
+            RetryCountThisIncident = 3,
+            TrimUsedThisIncident = true,
+            AcceptedOperationIds = ["retry-1", "retry-2", "retry-3", "trim-1"],
+            LastOutcome = "retry-failed",
+        };
         var approvalTimeouts = new Dictionary<string, TimeSpan>
         {
             ["approve"] = TimeSpan.FromHours(4),
@@ -93,6 +134,8 @@ public class ContinueAsNewInputTests
             HistorySummarizerClientKey = "summary-profile-v1",
             HistorySummarizerMaxContextTokens = 16_384,
             HistorySummarizerOutputTokenReserve = 2_048,
+            HistoryCompactionStrategy = DurableHistoryCompactionStrategy.SummarizeOldestTurns,
+            HistoryRecovery = historyRecovery,
             OriginalCreatedAt = DateTimeOffset.UnixEpoch,
             ToolActivityOptions = toolOptions,
             InterceptorActivityOptions = interceptorOptions,
@@ -160,6 +203,10 @@ public class ContinueAsNewInputTests
         Assert.Equal("summary-profile-v1", actual.HistorySummarizerClientKey);
         Assert.Equal(16_384, actual.HistorySummarizerMaxContextTokens);
         Assert.Equal(2_048, actual.HistorySummarizerOutputTokenReserve);
+        Assert.Equal(
+            DurableHistoryCompactionStrategy.SummarizeOldestTurns,
+            actual.HistoryCompactionStrategy);
+        Assert.Same(historyRecovery, actual.HistoryRecovery);
         Assert.Equal(createdAt, actual.OriginalCreatedAt);
         Assert.Equal("session-epoch", actual.SessionEpoch);
         Assert.Equal(renewedIdleDeadline, actual.SessionIdleDeadline);

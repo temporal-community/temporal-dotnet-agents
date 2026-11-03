@@ -455,6 +455,28 @@ public record class DurableChatWorkflowInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? HistoryReducerKey { get; init; }
 
+    /// <summary>Explicit strategy for compacting retained history when reduction is required.</summary>
+    [JsonIgnore]
+    public DurableHistoryCompactionStrategy HistoryCompactionStrategy { get; init; }
+
+    [JsonInclude]
+    [JsonPropertyName("historyCompactionStrategy")]
+    internal DurableHistoryCompactionStrategy? SerializedHistoryCompactionStrategy
+    {
+        get => this.HistoryCompactionStrategy;
+        init
+        {
+            if (value.HasValue)
+            {
+                this.HistoryCompactionStrategy = value.Value;
+            }
+        }
+    }
+
+    /// <summary>Blocked-state and bounded recovery counters carried across continue-as-new.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DurableHistoryRecoveryState? HistoryRecovery { get; init; }
+
     /// <summary>
     /// Optional worker DI key for an MEAI <see cref="Microsoft.Extensions.AI.IChatReducer"/>
     /// that shapes model context without changing retained history.

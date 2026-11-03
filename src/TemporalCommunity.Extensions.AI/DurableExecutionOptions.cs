@@ -108,7 +108,7 @@ public sealed class DurableExecutionOptions
     /// Register the reducer in DI before calling <c>AddDurableAI</c>:
     /// <code>
     /// services.AddKeyedSingleton&lt;Func&lt;IList&lt;DurableSessionEntry&gt;, IList&lt;DurableSessionEntry&gt;&gt;&gt;(
-    ///     "my-reducer", (sp, key) => history => history.TakeLast(50).ToList());
+    ///     "my-reducer", (sp, key) => MyHistoryReducers.KeepRecentCompleteTurns);
     /// opts.DefaultHistoryReducerKey = "my-reducer";
     /// </code>
     /// </para>
@@ -118,8 +118,24 @@ public sealed class DurableExecutionOptions
     /// nondeterminism hazard for in-flight sessions (treat reducer changes like workflow-code
     /// changes: new key or <c>Workflow.Patched</c>).
     /// </para>
+    /// <para>
+    /// The projection must preserve complete request/response turns, ordering, and protected
+    /// current, approval, or interrupted turns. Entry-count slicing can split a turn and is rejected.
+    /// </para>
     /// </remarks>
     public string? DefaultHistoryReducerKey { get; set; }
+
+    /// <summary>
+    /// Gets or sets the explicit retained-history strategy used at a continue-as-new boundary
+    /// when the session history must be reduced. Defaults to <see cref="DurableHistoryCompactionStrategy.None"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="DurableHistoryCompactionStrategy.SummarizeOldestTurns"/> uses the worker-owned
+    /// history summarizer. <see cref="DurableHistoryCompactionStrategy.TrimRecentTurns"/> is
+    /// lossy and records a truncation marker. A keyed <see cref="DefaultHistoryReducerKey"/>
+    /// is another explicit strategy; it cannot be combined with this setting.
+    /// </remarks>
+    public DurableHistoryCompactionStrategy DefaultHistoryCompactionStrategy { get; set; }
 
     /// <summary>
     /// Gets or sets the keyed-service key captured in new managed-session workflow inputs and
@@ -473,6 +489,20 @@ public sealed class DurableExecutionOptions
         {
             throw new InvalidOperationException(
                 $"{nameof(DefaultHistorySummarizerClientKey)} must be null or a non-empty profile key.");
+        }
+
+        if (!Enum.IsDefined(typeof(DurableHistoryCompactionStrategy), DefaultHistoryCompactionStrategy))
+        {
+            throw new InvalidOperationException(
+                $"{nameof(DefaultHistoryCompactionStrategy)} is not a supported strategy.");
+        }
+
+        if (DefaultHistoryReducerKey is not null
+            && DefaultHistoryCompactionStrategy != DurableHistoryCompactionStrategy.None)
+        {
+            throw new InvalidOperationException(
+                $"{nameof(DefaultHistoryReducerKey)} cannot be combined with " +
+                $"{nameof(DefaultHistoryCompactionStrategy)}.");
         }
 
         if (DefaultToolsetIds is not null)

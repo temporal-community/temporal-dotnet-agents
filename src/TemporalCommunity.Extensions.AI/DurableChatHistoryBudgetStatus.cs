@@ -32,4 +32,25 @@ public sealed record DurableChatHistoryBudgetStatus
 
     /// <summary>Number of matching duplicate handlers currently joined to the active turn.</summary>
     public required int ConcurrentTurnJoiners { get; init; }
+
+    /// <summary>Whether retained-history compaction is blocked pending explicit recovery.</summary>
+    public bool IsHistoryBlocked { get; init; }
+
+    /// <summary>Content-free reason for the current history block, if any.</summary>
+    public string? HistoryBlockReason { get; init; }
+
+    /// <summary>Accepted manual retry operations in the current workflow run.</summary>
+    public int HistoryRecoveryRetriesThisRun { get; init; }
+
+    /// <summary>Accepted manual retry operations in this incident across continue-as-new.</summary>
+    public int HistoryRecoveryRetriesThisIncident { get; init; }
+
+    /// <summary>Whether this incident's explicitly authorized trim has been used.</summary>
+    public bool HistoryRecoveryTrimUsed { get; init; }
+
+    /// <summary>Content-free outcome of the latest accepted history recovery operation.</summary>
+    public string? HistoryRecoveryLastOutcome { get; init; }
+
+    /// <summary>Number of entries currently retained by the workflow.</summary>
+    public int RetainedHistoryEntryCount { get; init; }
 }

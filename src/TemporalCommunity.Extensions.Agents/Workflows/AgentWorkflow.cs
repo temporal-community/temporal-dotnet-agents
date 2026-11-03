@@ -452,6 +452,8 @@ internal class AgentWorkflow :
             EnableSearchAttributes = input.EnableSearchAttributes,
             MaxEntryCount = input.MaxEntryCount,
             HistoryReducerKey = input.HistoryReducerKey,
+            HistoryCompactionStrategy = input.HistoryCompactionStrategy,
+            HistoryRecovery = input.HistoryRecovery,
             OriginalCreatedAt = input.OriginalCreatedAt,
             SessionEpoch = input.SessionEpoch,
             CompletedTurnCount = input.CompletedTurnCount,
@@ -1270,13 +1272,13 @@ internal class AgentWorkflow :
         var totalMessageCount = 0;
         foreach (var entry in History)
         {
-            totalMessageCount += entry.Messages.Count;
+            totalMessageCount += ProjectHistoryEntryMessages(entry).Count;
         }
 
         var messages = new List<ChatMessage>(totalMessageCount);
         foreach (var entry in History)
         {
-            foreach (var m in entry.Messages)
+            foreach (var m in ProjectHistoryEntryMessages(entry))
             {
                 messages.Add(m);
             }

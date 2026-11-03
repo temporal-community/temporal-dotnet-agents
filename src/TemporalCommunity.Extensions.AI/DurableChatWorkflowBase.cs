@@ -38,6 +38,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private int _turnCount;
     private int _currentTurnStartIndex;
     private IReadOnlyList<DurableChatTurnRange> _previousTurnRanges = [];
+    private DurableHistoryRecoveryState _historyRecovery = new();
+    private int _historyRecoveryRetriesThisRun;
+    private bool _historyRecoveryOperationActive;
+    private bool _historyRecoveryCanAttemptedThisRun;
+    private List<DurableSessionEntry>? _preparedHistory;
+
+    private const int MaximumHistoryRecoveryRetriesPerRun = 3;
+    private const int MaximumHistoryRecoveryRetriesPerIncident = 9;
 
     private sealed class TurnExecutionRecord
     {
@@ -214,6 +222,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             throw new InvalidOperationException(
                 "The configured history-summarizer client key cannot be empty or whitespace.");
         }
+        if (!Enum.IsDefined(typeof(DurableHistoryCompactionStrategy), input.HistoryCompactionStrategy)
+            || (input.HistoryReducerKey is not null
+                && input.HistoryCompactionStrategy != DurableHistoryCompactionStrategy.None))
+        {
+            throw new InvalidOperationException("The configured history-compaction strategy is invalid.");
+        }
         var sessionEpoch = input.SessionEpoch ?? Input?.SessionEpoch;
         if (sessionEpoch is null)
         {
@@ -254,6 +268,18 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             _approvalMixin.RestoreResolvedApprovals(input.ApprovalResolutionHistory);
             RestoreTerminalTurnOutcomes(input.CarriedTerminalOutcomes);
+            _historyRecovery = input.HistoryRecovery ?? new DurableHistoryRecoveryState();
+            if (_historyRecovery.RetryCountThisIncident < 0
+                || _historyRecovery.RetryCountThisIncident > MaximumHistoryRecoveryRetriesPerIncident
+                || _historyRecovery.AcceptedOperationIds is null
+                || _historyRecovery.AcceptedOperationIds.Count > MaximumHistoryRecoveryRetriesPerIncident + 1
+                || _historyRecovery.AcceptedOperationIds.Any(string.IsNullOrWhiteSpace)
+                || _historyRecovery.AcceptedOperationIds.Distinct(StringComparer.Ordinal).Count()
+                != _historyRecovery.AcceptedOperationIds.Count)
+            {
+                throw new InvalidOperationException("The carried history-recovery state is invalid.");
+            }
+            _sessionAdmissionClosed = _historyRecovery.IsBlocked;
         }
     }
 
@@ -584,7 +610,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             var entry = _history[index];
             var start = messageIndex;
-            messageIndex += entry.Messages.Count;
+            messageIndex += ProjectHistoryEntryMessages(entry).Count;
 
             if (ReferenceEquals(entry, currentRequest)
                 || string.Equals(entry.EntryId, currentRequest.EntryId, StringComparison.Ordinal))
@@ -635,6 +661,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         messages.Any(message =>
             message.Role == ChatRole.System || message.Role == new ChatRole("developer"));
 
+    /// <summary>Projects a retained entry to the messages used for future model context.</summary>
+    protected static IReadOnlyList<ChatMessage> ProjectHistoryEntryMessages(DurableSessionEntry entry) =>
+        entry is CompactionMarkerEntry marker
+            ? [new ChatMessage(ChatRole.Assistant, marker.Summary.Text)]
+            : entry.Messages;
+
     /// <summary>
     /// Dispatches a durable activity to apply a keyed history reducer at continue-as-new time.
     /// Implemented by concrete subclasses to invoke the library-specific activity type
@@ -656,6 +688,26 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         throw new NotImplementedException(
             $"{GetType().Name} does not override {nameof(ApplyKeyedHistoryReducerAsync)}. " +
             "Set HistoryReducerKey only on workflow types that implement this method.");
+
+    /// <summary>Dispatches the library-owned summarizer activity from a workflow implementation.</summary>
+    protected virtual Task<DurableHistorySummarizationResult> SummarizeHistoryPrefixAsync(
+        DurableHistorySummarizationInput input,
+        ActivityOptions activityOptions)
+    {
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                input,
+                RequiredInput.MaximumTransportPayloadSizeBytes,
+                RequiredInput.PayloadCodecExpansionAllowanceBytes,
+                "history summarizer activity input");
+        }
+
+        return Workflow.ExecuteActivityAsync(
+            (DurableChatActivities activities) => activities.SummarizeHistoryPrefixAsync(input),
+            activityOptions);
+    }
 
     /// <summary>
     /// When <see langword="true"/>, response entries appended to the in-workflow history have
@@ -714,9 +766,23 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         bool conditionMet;
         while (true)
         {
+            if (_historyRecovery.IsBlocked)
+            {
+                _sessionAdmissionClosed = true;
+                await WaitForHistoryRecoveryAsync(input, sessionCreatedAt).ConfigureAwait(true);
+                if (_shutdownRequested)
+                {
+                    return;
+                }
+            }
+
             var waitingDeadline = _sessionIdleDeadline!.Value;
             var remaining = waitingDeadline - Workflow.UtcNow;
-            if (remaining <= TimeSpan.Zero)
+            if (_continueAsNewPending)
+            {
+                conditionMet = true;
+            }
+            else if (remaining <= TimeSpan.Zero)
             {
                 conditionMet = false;
             }
@@ -724,6 +790,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             {
                 conditionMet = await Workflow.WaitConditionAsync(
                     () => _shutdownRequested
+                          || _continueAsNewPending
                           || IsHistoryAdmissionRestricted
                           || (!_isProcessing && Workflow.ContinueAsNewSuggested)
                           || (!_isProcessing && _history.Count >= input.MaxEntryCount)
@@ -732,7 +799,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
 
             var canContinueAsNew = !_isProcessing
-                                   && (Workflow.ContinueAsNewSuggested
+                                   && (_continueAsNewPending
+                                       || Workflow.ContinueAsNewSuggested
                                        || _history.Count >= input.MaxEntryCount
                                        || IsHistoryAdmissionRestricted);
             if (conditionMet
@@ -763,104 +831,218 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         if ((Workflow.ContinueAsNewSuggested
              || _history.Count >= input.MaxEntryCount
-             || IsHistoryAdmissionRestricted)
+             || IsHistoryAdmissionRestricted
+             || _continueAsNewPending)
             && !_shutdownRequested)
         {
-            // Reducer selection:
-            //
-            // 1. HistoryReducerKey — dispatch a ReduceHistoryByKey activity so
-            //    the reducer delegate is resolved from DI on the worker side. The activity result
-            //    is stored in Temporal history and survives replay deterministically. The key is
-            //    serialized and travels on the wire; the delegate never does.
-            //
-            // 2. DefaultBoundedTrim (C-2 fallback) — no reducer configured. Keeps a recent suffix
-            //    with headroom before the next CAN, but never splits a known adjacent request/response
-            //    pair at its leading boundary. Pure and order-preserving — replay-safe. External-store
-            //    mode (MAF only) nulls CarriedHistory in its CreateContinueAsNewException override,
-            //    making this a harmless no-op there.
-            List<DurableSessionEntry> carriedHistory;
-            ActivityOptions? reducerActivityOptions = null;
-            List<DurableSessionEntry> historySnapshotAtReduction = _history.ToList();
-            var historyCountAtReduction = historySnapshotAtReduction.Count;
-            if (input.HistoryReducerKey is not null)
+            var historySnapshot = _history.ToList();
+            var historyCountAtReduction = historySnapshot.Count;
+            var explicitHistoryRecovery = Workflow.Patched("meai-history-recovery-v1");
+            var hasConfiguredReducer = input.HistoryReducerKey is not null;
+            var needsReduction = historySnapshot.Count >= input.MaxEntryCount;
+            var noStrategyReductionRequired = _preparedHistory is null
+                && !hasConfiguredReducer
+                && input.HistoryCompactionStrategy == DurableHistoryCompactionStrategy.None
+                && needsReduction;
+            if (noStrategyReductionRequired && explicitHistoryRecovery)
             {
-                reducerActivityOptions = new ActivityOptions
+                RecordHistoryRecoveryFailure(
+                    new Exceptions.DurableConfigurationException(
+                        "History reduction is required, but no retained-history compaction strategy is configured."),
+                    "compaction-blocked");
+                _continueAsNewPending = false;
+                await WaitForHistoryRecoveryAsync(input, sessionCreatedAt).ConfigureAwait(true);
+                if (_shutdownRequested || _historyRecovery.IsBlocked)
+                {
+                    return;
+                }
+
+                var recoveredInput = CreateContinueAsNewInput(
+                    input,
+                    _preparedHistory ?? _history.ToList(),
+                    _approvalMixin.GetResolvedApprovals(),
+                    sessionCreatedAt,
+                    SnapshotTerminalTurnOutcomes(),
+                    _turnCount,
+                    _sessionIdleDeadline) with { HistoryRecovery = _historyRecovery };
+                if (input.EnableTransportPayloadGuard)
+                {
+                    Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                        Workflow.PayloadConverter,
+                        recoveredInput,
+                        input.MaximumTransportPayloadSizeBytes,
+                        input.PayloadCodecExpansionAllowanceBytes,
+                        "continue-as-new workflow input");
+                }
+                throw CreateContinueAsNewException(recoveredInput);
+            }
+            var reducerActivityOptions = hasConfiguredReducer
+                ? new ActivityOptions
                 {
                     StartToCloseTimeout = input.ActivityTimeout,
                     HeartbeatTimeout = input.HeartbeatTimeout,
-                };
-                carriedHistory = await ApplyKeyedHistoryReducerAsync(
-                    input.HistoryReducerKey, historySnapshotAtReduction, reducerActivityOptions).ConfigureAwait(true);
-            }
-            else
-            {
-                carriedHistory = DefaultBoundedTrim(historySnapshotAtReduction, input.MaxEntryCount);
-            }
-            // The reducer can yield while another admitted turn completes. Stop accepting new
-            // turns, drain those already admitted, then reduce again until history is stable.
-            // Patching keeps the old command sequence for histories recorded before this fix.
-            _sessionAdmissionClosed = true;
-            _continueAsNewPending = true;
-            var drainBeforeSnapshot = Workflow.Patched("meai-can-drain-before-snapshot");
-            ValidateHistoryProjection(historySnapshotAtReduction, carriedHistory);
-            DurableChatWorkflowInput? carriedInput = null;
-            if (!drainBeforeSnapshot)
-            {
-                // Preserve the original snapshot timing when replaying pre-patch histories.
-                carriedInput = CreateContinueAsNewInput(
-                    input,
-                    carriedHistory,
-                    _approvalMixin.GetResolvedApprovals(),
-                    sessionCreatedAt,
-                    SnapshotTerminalTurnOutcomes(),
-                    _turnCount,
-                    _sessionIdleDeadline);
-            }
-            if (!drainBeforeSnapshot)
-            {
-                await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished)
-                    .ConfigureAwait(true);
-            }
-            else
-            {
-                while (true)
-                {
-                    await Workflow.WaitConditionAsync(
-                        () => Workflow.AllHandlersFinished
-                              && !_isProcessing
-                              && !HasPendingBackgroundTurns).ConfigureAwait(true);
-                    if (_shutdownRequested)
-                        return;
-                    if (_history.Count == historyCountAtReduction)
-                        break;
-
-                    historySnapshotAtReduction = _history.ToList();
-                    historyCountAtReduction = historySnapshotAtReduction.Count;
-                    carriedHistory = input.HistoryReducerKey is not null
-                        ? await ApplyKeyedHistoryReducerAsync(
-                            input.HistoryReducerKey, historySnapshotAtReduction, reducerActivityOptions!).ConfigureAwait(true)
-                        : DefaultBoundedTrim(historySnapshotAtReduction, input.MaxEntryCount);
-                    ValidateHistoryProjection(historySnapshotAtReduction, carriedHistory);
+                    RetryPolicy = explicitHistoryRecovery
+                        ? new Temporalio.Common.RetryPolicy
+                        {
+                            MaximumAttempts = 3,
+                            MaximumInterval = TimeSpan.FromSeconds(2),
+                        }
+                        : null,
                 }
-                carriedInput = CreateContinueAsNewInput(
+                : null;
+            List<DurableSessionEntry> carriedHistory;
+            try
+            {
+                if (_preparedHistory is not null)
+                {
+                    carriedHistory = _preparedHistory;
+                }
+                else if (hasConfiguredReducer)
+                {
+                    carriedHistory = await ApplyKeyedHistoryReducerAsync(
+                        input.HistoryReducerKey!,
+                        historySnapshot,
+                        reducerActivityOptions!).ConfigureAwait(true);
+                }
+                else if (needsReduction && noStrategyReductionRequired)
+                {
+                    carriedHistory = DefaultBoundedTrim(historySnapshot, input.MaxEntryCount);
+                }
+                else if (needsReduction)
+                {
+                    carriedHistory = await ApplyConfiguredHistoryCompactionAsync(historySnapshot)
+                        .ConfigureAwait(true);
+                }
+                else
+                {
+                    carriedHistory = historySnapshot;
+                }
+
+                _sessionAdmissionClosed = true;
+                _continueAsNewPending = true;
+                var drainBeforeSnapshot = Workflow.Patched("meai-can-drain-before-snapshot");
+                if (_preparedHistory is null && (hasConfiguredReducer || noStrategyReductionRequired))
+                {
+                    ValidateHistoryProjection(historySnapshot, carriedHistory);
+                }
+                ValidateHistoryCompactionProgress(input, historySnapshot, carriedHistory);
+                DurableChatWorkflowInput? carriedInput = null;
+                if (!drainBeforeSnapshot)
+                {
+                    carriedInput = CreateContinueAsNewInput(
+                        input,
+                        carriedHistory,
+                        _approvalMixin.GetResolvedApprovals(),
+                        sessionCreatedAt,
+                        SnapshotTerminalTurnOutcomes(),
+                        _turnCount,
+                        _sessionIdleDeadline) with { HistoryRecovery = _historyRecovery };
+                    await Workflow.WaitConditionAsync(() => Workflow.AllHandlersFinished)
+                        .ConfigureAwait(true);
+                }
+                else
+                {
+                    while (true)
+                    {
+                        await Workflow.WaitConditionAsync(
+                            () => Workflow.AllHandlersFinished
+                                  && !_isProcessing
+                                  && !HasPendingBackgroundTurns).ConfigureAwait(true);
+                        if (_shutdownRequested)
+                        {
+                            return;
+                        }
+
+                        if (_history.Count == historyCountAtReduction)
+                        {
+                            break;
+                        }
+
+                        historySnapshot = _history.ToList();
+                        historyCountAtReduction = historySnapshot.Count;
+                        if (hasConfiguredReducer)
+                        {
+                            carriedHistory = await ApplyKeyedHistoryReducerAsync(
+                                input.HistoryReducerKey!,
+                                historySnapshot,
+                                reducerActivityOptions!).ConfigureAwait(true);
+                            ValidateHistoryProjection(historySnapshot, carriedHistory);
+                        }
+                        else if (_preparedHistory is not null && _history.Count == _preparedHistory.Count)
+                        {
+                            carriedHistory = _preparedHistory;
+                        }
+                        else if (historySnapshot.Count >= input.MaxEntryCount)
+                        {
+                            carriedHistory = await ApplyConfiguredHistoryCompactionAsync(historySnapshot)
+                                .ConfigureAwait(true);
+                        }
+                        else
+                        {
+                            carriedHistory = historySnapshot;
+                        }
+
+                        ValidateHistoryCompactionProgress(input, historySnapshot, carriedHistory);
+                    }
+
+                    carriedInput = CreateContinueAsNewInput(
+                        input,
+                        carriedHistory,
+                        _approvalMixin.GetResolvedApprovals(),
+                        sessionCreatedAt,
+                        SnapshotTerminalTurnOutcomes(),
+                        _turnCount,
+                        _sessionIdleDeadline) with { HistoryRecovery = _historyRecovery };
+                }
+
+                if (input.EnableTransportPayloadGuard)
+                {
+                    Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                        Workflow.PayloadConverter,
+                        carriedInput!,
+                        input.MaximumTransportPayloadSizeBytes,
+                        input.PayloadCodecExpansionAllowanceBytes,
+                        "continue-as-new workflow input");
+                }
+                throw CreateContinueAsNewException(carriedInput!);
+            }
+            catch (ContinueAsNewException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                RecordHistoryRecoveryFailure(exception, "compaction-blocked");
+                _continueAsNewPending = false;
+                await WaitForHistoryRecoveryAsync(input, sessionCreatedAt).ConfigureAwait(true);
+                if (_shutdownRequested)
+                {
+                    return;
+                }
+                if (_historyRecovery.IsBlocked)
+                {
+                    return;
+                }
+
+                var recoveredInput = CreateContinueAsNewInput(
                     input,
-                    carriedHistory,
+                    _preparedHistory ?? _history.ToList(),
                     _approvalMixin.GetResolvedApprovals(),
                     sessionCreatedAt,
                     SnapshotTerminalTurnOutcomes(),
                     _turnCount,
-                    _sessionIdleDeadline);
+                    _sessionIdleDeadline) with { HistoryRecovery = _historyRecovery };
+                if (input.EnableTransportPayloadGuard)
+                {
+                    Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                        Workflow.PayloadConverter,
+                        recoveredInput,
+                        input.MaximumTransportPayloadSizeBytes,
+                        input.PayloadCodecExpansionAllowanceBytes,
+                        "continue-as-new workflow input");
+                }
+                throw CreateContinueAsNewException(recoveredInput);
             }
-            if (input.EnableTransportPayloadGuard)
-            {
-                Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
-                    Workflow.PayloadConverter,
-                    carriedInput,
-                    input.MaximumTransportPayloadSizeBytes,
-                    input.PayloadCodecExpansionAllowanceBytes,
-                    "continue-as-new workflow input");
-            }
-            throw CreateContinueAsNewException(carriedInput!);
         }
 
         // Shutdown closes new-turn admission, but admitted handlers must finish before the
@@ -911,27 +1093,22 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     }
 
     /// <summary>
-    /// Deterministic default history trim applied at continue-as-new when no
-    /// <see cref="DurableChatWorkflowInput.HistoryReducerKey"/> is configured (C-2).
+    /// Deterministic complete-turn trim used only by the explicitly selected trim strategy or
+    /// the one-time blocked-history recovery update.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The CAN trigger is <c>history.Count &gt;= maxEntryCount</c>. Without a trim, the no-reducer
-    /// path carried the full history into the fresh run, which immediately re-tripped the same
-    /// threshold — a back-to-back CAN loop. This keeps only the most-recent entries and guarantees
-    /// the carried count is <strong>strictly below</strong> <paramref name="maxEntryCount"/>, so the
-    /// new run has headroom before the next CAN.
+    /// The CAN trigger is <c>history.Count &gt;= maxEntryCount</c>. Keeping the latest complete
+    /// turns and recording a truncation marker is an explicit lossy choice, never an implicit
+    /// fallback for an unconfigured strategy. When the count trigger fires, the carried count is
+    /// strictly below <paramref name="maxEntryCount"/> so the new run has headroom before the
+    /// next count-triggered CAN.
     /// </para>
     /// <para>
-    /// The target is half of <paramref name="maxEntryCount"/> (floored, minimum 1) — a
-    /// conservative default that leaves room for several turns and avoids trimming on every turn
-    /// near the cap. When that entry boundary would begin with a response whose immediately
-    /// preceding entry is its matching request, the response is also omitted. This retains only
-    /// complete request/response turns in the carried suffix rather than presenting an orphaned
-    /// response as the first context entry. When the history is already at or below the target it
-    /// is returned unchanged (so an SDK-suggested CAN with a small history is not perturbed).
-    /// Pure and order-preserving — no wall-clock, no <see cref="Workflow.NewGuid"/> — hence
-    /// replay-safe.
+    /// The target is half of <paramref name="maxEntryCount"/> (floored, minimum 1). The helper
+    /// retains complete request/response turns and avoids starting the carried suffix with an
+    /// orphaned response. A small history already below the target is returned unchanged. The
+    /// projection is pure and order-preserving, so it is replay-safe.
     /// </para>
     /// </remarks>
     private static List<DurableSessionEntry> DefaultBoundedTrim(
@@ -970,10 +1147,286 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         return trimmed;
     }
 
+    private async Task<List<DurableSessionEntry>> ApplyConfiguredHistoryCompactionAsync(
+        List<DurableSessionEntry> history)
+    {
+        var input = RequiredInput;
+        var activityOptions = new ActivityOptions
+        {
+            StartToCloseTimeout = input.ActivityTimeout,
+            HeartbeatTimeout = input.HeartbeatTimeout,
+            RetryPolicy = new Temporalio.Common.RetryPolicy
+            {
+                MaximumAttempts = 3,
+                MaximumInterval = TimeSpan.FromSeconds(2),
+            },
+        };
+
+        List<DurableSessionEntry> projection;
+        if (input.HistoryReducerKey is { } reducerKey)
+        {
+            projection = await ApplyKeyedHistoryReducerAsync(reducerKey, history, activityOptions)
+                .ConfigureAwait(true);
+            ValidateHistoryProjection(history, projection);
+        }
+        else
+        {
+            projection = input.HistoryCompactionStrategy switch
+            {
+                DurableHistoryCompactionStrategy.TrimRecentTurns =>
+                    CreateExplicitTrimProjection(history),
+                DurableHistoryCompactionStrategy.SummarizeOldestTurns =>
+                    await CreateSummaryCompactionProjectionAsync(history, activityOptions).ConfigureAwait(true),
+                _ => throw new Exceptions.DurableConfigurationException(
+                    "History reduction is required, but no retained-history compaction strategy is configured."),
+            };
+        }
+
+        if (projection.Count >= history.Count
+            || (history.Count >= input.MaxEntryCount && projection.Count >= input.MaxEntryCount))
+        {
+            throw new ApplicationFailureException(
+                "The configured history strategy did not reduce retained history below its active trigger.",
+                errorType: "DurableHistoryCompactionNoProgress",
+                nonRetryable: true);
+        }
+
+        if (input.EnableTransportPayloadGuard)
+        {
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                projection,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "compacted retained history");
+        }
+
+        return projection;
+    }
+
+    private List<DurableSessionEntry> CreateExplicitTrimProjection(
+        IReadOnlyList<DurableSessionEntry> history)
+    {
+        var input = RequiredInput;
+        var source = history.ToList();
+        var retained = DefaultBoundedTrim(source, input.MaxEntryCount);
+        if (retained.Count == 0)
+        {
+            throw new ApplicationFailureException(
+                "The explicit trim could not retain a complete request/response turn.",
+                errorType: "DurableHistoryCompactionProtectedContent",
+                nonRetryable: true);
+        }
+
+        var firstRetainedIndex = source.FindIndex(entry => ReferenceEquals(entry, retained[0]));
+        if (firstRetainedIndex <= 0)
+        {
+            throw new ApplicationFailureException(
+                "The explicit trim would not make progress.",
+                errorType: "DurableHistoryCompactionNoProgress",
+                nonRetryable: true);
+        }
+
+        var removed = source.Take(firstRetainedIndex).ToList();
+        ValidateHistoryProjection(source, retained);
+        var markerId = Workflow.NewGuid().ToString("N");
+        var marker = new TruncationMarkerEntry
+        {
+            EntryId = markerId,
+            TurnId = markerId,
+            CorrelationId = markerId,
+            CreatedAt = Workflow.UtcNow,
+            FirstRemovedEntryId = GetFirstRemovedEntryId(removed[0]),
+            LastRemovedEntryId = GetLastRemovedEntryId(removed[^1]),
+            RemovedEntryCount = removed.Sum(GetRepresentedEntryCount),
+            FirstRemovedTurnId = GetFirstRemovedTurnId(removed[0]),
+            LastRemovedTurnId = GetLastRemovedTurnId(removed[^1]),
+            RemovedTurnCount = removed.Sum(GetRepresentedTurnCount),
+        };
+        return [marker, .. retained];
+    }
+
+    private async Task<List<DurableSessionEntry>> CreateSummaryCompactionProjectionAsync(
+        IReadOnlyList<DurableSessionEntry> history,
+        ActivityOptions activityOptions)
+    {
+        var source = history.ToList();
+        var turns = new List<(DurableHistorySummaryTurn Turn, int Start, int End, int Entries, int Turns,
+            string FirstEntryId, string LastEntryId, string FirstTurnId, string LastTurnId)>();
+        var index = 0;
+        if (source.FirstOrDefault() is TruncationMarkerEntry)
+        {
+            index = 1;
+        }
+
+        var latestTurnStart = source.FindLastIndex(entry => entry is DurableSessionRequest);
+        while (index < source.Count)
+        {
+            if (source[index] is CompactionMarkerEntry priorMarker)
+            {
+                turns.Add((
+                    new DurableHistorySummaryTurn
+                    {
+                        TurnId = priorMarker.TurnId ?? priorMarker.EntryId ?? priorMarker.FirstReplacedTurnId,
+                        Messages =
+                        [
+                            new ChatMessage(ChatRole.User, "Previously summarized conversation:"),
+                            new ChatMessage(ChatRole.Assistant, priorMarker.Summary.Text),
+                        ],
+                    },
+                    index,
+                    index,
+                    priorMarker.ReplacedEntryCount,
+                    priorMarker.ReplacedTurnCount,
+                    priorMarker.FirstReplacedEntryId,
+                    priorMarker.LastReplacedEntryId,
+                    priorMarker.FirstReplacedTurnId,
+                    priorMarker.LastReplacedTurnId));
+                index++;
+                continue;
+            }
+
+            if (source[index] is not DurableSessionRequest request
+                || index + 1 >= source.Count
+                || source[index + 1] is not DurableSessionResponse response
+                || !SameLogicalTurn(request, response))
+            {
+                break;
+            }
+
+            var turnId = request.TurnId ?? request.CorrelationId;
+            var protectedTurn = index == latestTurnStart
+                                || response.CompletionReason == DurableTurnCompletionReason.Interrupted
+                                || ContainsApprovalContent(request.Messages)
+                                || ContainsApprovalContent(response.Messages)
+                                || ContainsInstructionContent(request.Messages)
+                                || ContainsInstructionContent(response.Messages);
+            if (protectedTurn)
+            {
+                break;
+            }
+
+            turns.Add((
+                new DurableHistorySummaryTurn
+                {
+                    TurnId = turnId,
+                    Messages = [.. request.Messages, .. response.Messages],
+                },
+                index,
+                index + 1,
+                2,
+                1,
+                request.EntryId ?? request.CorrelationId,
+                response.EntryId ?? response.CorrelationId,
+                turnId,
+                response.TurnId ?? turnId));
+            index += 2;
+        }
+
+        if (turns.Count == 0)
+        {
+            throw new ApplicationFailureException(
+                "No oldest complete, unprotected turn is available to summarize.",
+                errorType: "DurableHistoryCompactionProtectedContent",
+                nonRetryable: true);
+        }
+
+        var result = await SummarizeHistoryPrefixAsync(
+            new DurableHistorySummarizationInput
+            {
+                Turns = turns.Select(item => item.Turn).ToArray(),
+                ClientKey = RequiredInput.HistorySummarizerClientKey,
+                MaxContextTokens = RequiredInput.HistorySummarizerMaxContextTokens,
+                OutputTokenReserve = RequiredInput.HistorySummarizerOutputTokenReserve,
+            },
+            activityOptions).ConfigureAwait(true);
+        if (result.SummarizedTurnCount <= 0 || result.SummarizedTurnCount > turns.Count)
+        {
+            throw new ApplicationFailureException(
+                "The history summarizer returned an invalid replaced-turn count.",
+                errorType: "DurableHistorySummaryInvalidOutput",
+                nonRetryable: true);
+        }
+
+        var selected = turns.Take(result.SummarizedTurnCount).ToArray();
+        var lastSelected = selected[^1];
+        var suffix = source.Skip(lastSelected.End + 1).ToList();
+        ValidateHistoryProjection(source, suffix);
+        var markerId = Workflow.NewGuid().ToString("N");
+        var marker = new CompactionMarkerEntry
+        {
+            EntryId = markerId,
+            TurnId = markerId,
+            CorrelationId = markerId,
+            CreatedAt = Workflow.UtcNow,
+            FirstReplacedEntryId = selected[0].FirstEntryId,
+            LastReplacedEntryId = lastSelected.LastEntryId,
+            ReplacedEntryCount = selected.Sum(item => item.Entries),
+            FirstReplacedTurnId = selected[0].FirstTurnId,
+            LastReplacedTurnId = lastSelected.LastTurnId,
+            ReplacedTurnCount = selected.Sum(item => item.Turns),
+            Strategy = "summarize-oldest-turns",
+            ModelId = result.Summary.ModelId ?? string.Empty,
+            Summary = result.Summary,
+        };
+        return [.. source.Take(selected[0].Start), marker, .. suffix];
+    }
+
+    private static string GetFirstRemovedEntryId(DurableSessionEntry entry) => entry switch
+    {
+        CompactionMarkerEntry marker => marker.FirstReplacedEntryId,
+        TruncationMarkerEntry marker => marker.FirstRemovedEntryId,
+        _ => entry.EntryId ?? entry.CorrelationId,
+    };
+
+    private static string GetLastRemovedEntryId(DurableSessionEntry entry) => entry switch
+    {
+        CompactionMarkerEntry marker => marker.LastReplacedEntryId,
+        TruncationMarkerEntry marker => marker.LastRemovedEntryId,
+        _ => entry.EntryId ?? entry.CorrelationId,
+    };
+
+    private static string GetFirstRemovedTurnId(DurableSessionEntry entry) => entry switch
+    {
+        CompactionMarkerEntry marker => marker.FirstReplacedTurnId,
+        TruncationMarkerEntry marker => marker.FirstRemovedTurnId,
+        _ => entry.TurnId ?? entry.CorrelationId,
+    };
+
+    private static string GetLastRemovedTurnId(DurableSessionEntry entry) => entry switch
+    {
+        CompactionMarkerEntry marker => marker.LastReplacedTurnId,
+        TruncationMarkerEntry marker => marker.LastRemovedTurnId,
+        _ => entry.TurnId ?? entry.CorrelationId,
+    };
+
+    private static int GetRepresentedEntryCount(DurableSessionEntry entry) => entry switch
+    {
+        CompactionMarkerEntry marker => marker.ReplacedEntryCount,
+        TruncationMarkerEntry marker => marker.RemovedEntryCount,
+        _ => 1,
+    };
+
+    private static int GetRepresentedTurnCount(DurableSessionEntry entry) => entry switch
+    {
+        CompactionMarkerEntry marker => marker.ReplacedTurnCount,
+        TruncationMarkerEntry marker => marker.RemovedTurnCount,
+        DurableSessionRequest => 1,
+        _ => 0,
+    };
+
     private static void ValidateHistoryProjection(
         IReadOnlyList<DurableSessionEntry> source,
         IReadOnlyList<DurableSessionEntry> projection)
     {
+        if (projection is null)
+        {
+            throw new ApplicationFailureException(
+                "The configured history strategy returned no projection.",
+                errorType: "DurableHistoryProjectionInvalid",
+                nonRetryable: true);
+        }
+
         try
         {
             Internal.DurableHistoryProjectionValidator.Validate(source, projection);
@@ -984,6 +1437,21 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 exception.Message,
                 exception,
                 errorType: "DurableHistoryProjectionInvalid",
+                nonRetryable: true);
+        }
+    }
+
+    private static void ValidateHistoryCompactionProgress(
+        DurableChatWorkflowInput input,
+        IReadOnlyList<DurableSessionEntry> source,
+        IReadOnlyList<DurableSessionEntry> projection)
+    {
+        if (source.Count >= input.MaxEntryCount
+            && (projection.Count >= source.Count || projection.Count >= input.MaxEntryCount))
+        {
+            throw new ApplicationFailureException(
+                "The configured history strategy did not reduce retained history below its active trigger.",
+                errorType: "DurableHistoryCompactionNoProgress",
                 nonRetryable: true);
         }
     }
@@ -1012,6 +1480,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             throw TurnAdmissionFailure(
                 "The session is closing admission and no longer accepts new turns.",
                 "DurableSessionAdmissionClosed");
+        }
+
+        if (_historyRecovery.IsBlocked && !matchesActiveTurn)
+        {
+            throw new ApplicationFailureException(
+                "The session is blocked until retained history is compacted or explicitly trimmed.",
+                errorType: "DurableHistoryBlocked",
+                nonRetryable: true);
         }
 
         if (IsHistoryAdmissionRestricted && !matchesActiveTurn)
@@ -1164,9 +1640,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     protected void ValidateInitializedTurnAdmission(TurnAdmission admission)
     {
         ArgumentNullException.ThrowIfNull(admission);
-        if (admission.IsOwner && IsHistoryAdmissionRestricted)
+        if (admission.IsOwner && (_historyRecovery.IsBlocked || IsHistoryAdmissionRestricted))
         {
-            var failure = HistoryBudgetFailure();
+            var failure = _historyRecovery.IsBlocked
+                ? new ApplicationFailureException(
+                    "The session is blocked until retained history is compacted or explicitly trimmed.",
+                    errorType: "DurableHistoryBlocked",
+                    nonRetryable: true)
+                : HistoryBudgetFailure();
             RejectTurnAdmission(admission, failure);
             throw failure;
         }
@@ -1929,10 +2410,295 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             HistorySizeReserveLimitBytes = input.HistorySizeReserveLimitBytes,
             MaxConcurrentTurnJoiners = input.MaxConcurrentTurnJoiners,
             ConcurrentTurnJoiners = _activeTurn?.JoinerCount ?? 0,
+            IsHistoryBlocked = _historyRecovery.IsBlocked,
+            HistoryBlockReason = _historyRecovery.BlockReason,
+            HistoryRecoveryRetriesThisRun = _historyRecoveryRetriesThisRun,
+            HistoryRecoveryRetriesThisIncident = _historyRecovery.RetryCountThisIncident,
+            HistoryRecoveryTrimUsed = _historyRecovery.TrimUsedThisIncident,
+            HistoryRecoveryLastOutcome = _historyRecovery.LastOutcome,
+            RetainedHistoryEntryCount = _history.Count,
         };
     }
 
     // ── Updates ─────────────────────────────────────────────────────────────
+
+    /// <summary>Validates an idempotent recovery retry before Temporal accepts it.</summary>
+    [WorkflowUpdateValidator(nameof(RetryHistoryCompactionAsync))]
+    public void ValidateRetryHistoryCompaction(string operationId) =>
+        ValidateHistoryRecoveryOperation(operationId, isTrim: false);
+
+    /// <summary>
+    /// Runs one explicitly requested, bounded compaction retry while the session is blocked.
+    /// </summary>
+    [WorkflowUpdate("RetryHistoryCompaction")]
+    public async Task<DurableHistoryRecoveryResult> RetryHistoryCompactionAsync(string operationId)
+    {
+        AcceptHistoryRecoveryOperation(operationId, isTrim: false);
+        try
+        {
+            var projection = await ApplyConfiguredHistoryCompactionAsync(_history.ToList())
+                .ConfigureAwait(true);
+            CompleteHistoryRecovery(projection, "retry-succeeded");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            RecordHistoryRecoveryFailure(exception, "retry-failed");
+        }
+        finally
+        {
+            _historyRecoveryOperationActive = false;
+        }
+
+        return BuildHistoryRecoveryResult(operationId);
+    }
+
+    /// <summary>Validates the incident's single explicitly authorized lossy trim.</summary>
+    [WorkflowUpdateValidator(nameof(TrimBlockedHistoryAsync))]
+    public void ValidateTrimBlockedHistory(string operationId) =>
+        ValidateHistoryRecoveryOperation(operationId, isTrim: true);
+
+    /// <summary>
+    /// Removes an oldest complete-turn prefix once for the current blocked incident and records
+    /// a truncation marker for the removed range.
+    /// </summary>
+    [WorkflowUpdate("TrimBlockedHistory")]
+    public Task<DurableHistoryRecoveryResult> TrimBlockedHistoryAsync(string operationId)
+    {
+        AcceptHistoryRecoveryOperation(operationId, isTrim: true);
+        try
+        {
+            var projection = CreateExplicitTrimProjection(_history);
+            CompleteHistoryRecovery(projection, "trim-succeeded");
+        }
+        catch (Exception exception)
+        {
+            RecordHistoryRecoveryFailure(exception, "trim-failed");
+        }
+        finally
+        {
+            _historyRecoveryOperationActive = false;
+        }
+
+        return Task.FromResult(BuildHistoryRecoveryResult(operationId));
+    }
+
+    private void ValidateHistoryRecoveryOperation(string operationId, bool isTrim)
+    {
+        if (string.IsNullOrWhiteSpace(operationId))
+        {
+            throw new ApplicationFailureException(
+                "A non-empty history-recovery operation ID is required.",
+                errorType: "DurableHistoryRecoveryInvalidRequest",
+                nonRetryable: true);
+        }
+        if (!_historyRecovery.IsBlocked)
+        {
+            throw new ApplicationFailureException(
+                "History recovery is only accepted while history is blocked.",
+                errorType: "DurableHistoryRecoveryNotBlocked",
+                nonRetryable: true);
+        }
+        if (IsHistoryReserveReached)
+        {
+            throw new ApplicationFailureException(
+                "History recovery cannot be admitted after the configured history reserve is reached.",
+                errorType: "DurableHistoryRecoveryReserveReached",
+                nonRetryable: true);
+        }
+        if (_historyRecoveryOperationActive)
+        {
+            throw new ApplicationFailureException(
+                "Another history-recovery operation is already active.",
+                errorType: "DurableHistoryRecoveryBusy",
+                nonRetryable: true);
+        }
+        if (_historyRecovery.AcceptedOperationIds.Contains(operationId, StringComparer.Ordinal))
+        {
+            throw new ApplicationFailureException(
+                "This history-recovery operation ID was already accepted.",
+                errorType: "DurableHistoryRecoveryDuplicate",
+                nonRetryable: true);
+        }
+
+        if (isTrim)
+        {
+            if (_historyRecovery.TrimUsedThisIncident)
+            {
+                throw new ApplicationFailureException(
+                    "The explicitly authorized trim was already used in this blocked incident.",
+                    errorType: "DurableHistoryRecoveryTrimLimitReached",
+                    nonRetryable: true);
+            }
+        }
+        else
+        {
+            if (RequiredInput.HistoryCompactionStrategy == DurableHistoryCompactionStrategy.None
+                && RequiredInput.HistoryReducerKey is null)
+            {
+                throw new ApplicationFailureException(
+                    "No history-compaction strategy is configured for retry.",
+                    errorType: "DurableHistoryRecoveryConfigurationMissing",
+                    nonRetryable: true);
+            }
+            if (_historyRecoveryRetriesThisRun >= MaximumHistoryRecoveryRetriesPerRun
+                || _historyRecovery.RetryCountThisIncident >= MaximumHistoryRecoveryRetriesPerIncident)
+            {
+                throw new ApplicationFailureException(
+                    "The bounded history-compaction retry limit has been reached.",
+                    errorType: "DurableHistoryRecoveryRetryLimitReached",
+                    nonRetryable: true);
+            }
+        }
+    }
+
+    private void AcceptHistoryRecoveryOperation(string operationId, bool isTrim)
+    {
+        ValidateHistoryRecoveryOperation(operationId, isTrim);
+        _historyRecoveryOperationActive = true;
+        var acceptedOperationIds = _historyRecovery.AcceptedOperationIds.Append(operationId).ToArray();
+        _historyRecovery = _historyRecovery with
+        {
+            RetryCountThisIncident = _historyRecovery.RetryCountThisIncident + (isTrim ? 0 : 1),
+            TrimUsedThisIncident = _historyRecovery.TrimUsedThisIncident || isTrim,
+            AcceptedOperationIds = acceptedOperationIds,
+            LastOutcome = isTrim ? "trim-started" : "retry-started",
+        };
+        if (Input is { } input)
+        {
+            Input = input with { HistoryRecovery = _historyRecovery };
+        }
+        if (!isTrim)
+        {
+            _historyRecoveryRetriesThisRun++;
+        }
+    }
+
+    private void CompleteHistoryRecovery(List<DurableSessionEntry> projection, string outcome)
+    {
+        _preparedHistory = projection;
+        _historyRecovery = new DurableHistoryRecoveryState { LastOutcome = outcome };
+        if (Input is { } input)
+        {
+            Input = input with { HistoryRecovery = _historyRecovery };
+        }
+        _historyRecoveryRetriesThisRun = 0;
+        _sessionAdmissionClosed = true;
+        _continueAsNewPending = true;
+    }
+
+    private void RecordHistoryRecoveryFailure(Exception exception, string outcome)
+    {
+        var reason = exception switch
+        {
+            Exceptions.DurableContextBudgetExceededException => "context-budget-exceeded",
+            ApplicationFailureException applicationFailure
+                when applicationFailure.ErrorType?.StartsWith("DurableHistory", StringComparison.Ordinal) == true =>
+                applicationFailure.ErrorType ?? "compaction-failed",
+            Exceptions.DurableConfigurationException => "configuration-invalid",
+            _ => "compaction-failed",
+        };
+        if (reason.Length > 96)
+        {
+            reason = reason[..96];
+        }
+        _historyRecovery = _historyRecovery with
+        {
+            IsBlocked = true,
+            BlockReason = string.IsNullOrWhiteSpace(reason) ? "compaction-failed" : reason,
+            LastOutcome = outcome,
+        };
+        if (Input is { } input)
+        {
+            Input = input with { HistoryRecovery = _historyRecovery };
+        }
+        _sessionAdmissionClosed = true;
+    }
+
+    private DurableHistoryRecoveryResult BuildHistoryRecoveryResult(string operationId) =>
+        new()
+        {
+            OperationId = operationId,
+            IsBlocked = _historyRecovery.IsBlocked,
+            Outcome = _historyRecovery.LastOutcome ?? "unknown",
+        };
+
+    private bool CanContinueAsNewForHistoryRecovery =>
+        !_historyRecoveryCanAttemptedThisRun
+        && _historyRecoveryRetriesThisRun >= MaximumHistoryRecoveryRetriesPerRun
+        && _historyRecovery.RetryCountThisIncident < MaximumHistoryRecoveryRetriesPerIncident;
+
+    private async Task WaitForHistoryRecoveryAsync(
+        DurableChatWorkflowInput input,
+        DateTimeOffset originalCreatedAt)
+    {
+        while (_historyRecovery.IsBlocked && !_shutdownRequested)
+        {
+            await Workflow.WaitConditionAsync(
+                () => !_historyRecovery.IsBlocked
+                      || _shutdownRequested
+                      || CanContinueAsNewForHistoryRecovery).ConfigureAwait(true);
+            if (_shutdownRequested || !_historyRecovery.IsBlocked)
+            {
+                return;
+            }
+
+            _historyRecoveryCanAttemptedThisRun = true;
+            if (IsHistoryAdmissionRestricted || IsHistoryReserveReached)
+            {
+                RecordHistoryRecoveryFailure(
+                    new ApplicationFailureException(
+                        "There is insufficient event-history headroom for continue-as-new.",
+                        errorType: "DurableHistoryRecoveryHeadroomInsufficient",
+                        nonRetryable: true),
+                    "continue-as-new-unavailable");
+                continue;
+            }
+
+            _sessionAdmissionClosed = true;
+            await Workflow.WaitConditionAsync(
+                () => Workflow.AllHandlersFinished
+                      && !_isProcessing
+                      && !HasPendingBackgroundTurns).ConfigureAwait(true);
+            if (_shutdownRequested)
+            {
+                return;
+            }
+
+            try
+            {
+                var carriedInput = CreateContinueAsNewInput(
+                    input,
+                    _history.ToList(),
+                    _approvalMixin.GetResolvedApprovals(),
+                    originalCreatedAt,
+                    SnapshotTerminalTurnOutcomes(),
+                    _turnCount,
+                    _sessionIdleDeadline) with { HistoryRecovery = _historyRecovery };
+                if (input.EnableTransportPayloadGuard)
+                {
+                    Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                        Workflow.PayloadConverter,
+                        carriedInput,
+                        input.MaximumTransportPayloadSizeBytes,
+                        input.PayloadCodecExpansionAllowanceBytes,
+                        "blocked continue-as-new workflow input");
+                }
+                throw CreateContinueAsNewException(carriedInput);
+            }
+            catch (ContinueAsNewException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                RecordHistoryRecoveryFailure(exception, "continue-as-new-unavailable");
+            }
+        }
+    }
 
     /// <summary>Validates that the requested logical turn is active and not already cancelled.</summary>
     [WorkflowUpdateValidator(nameof(CancelTurnAsync))]

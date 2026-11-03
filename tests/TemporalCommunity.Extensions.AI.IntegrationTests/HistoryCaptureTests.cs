@@ -432,6 +432,7 @@ public class HistoryCaptureTests
                 opts.ActivityTimeout = TimeSpan.FromSeconds(30);
                 opts.HeartbeatTimeout = TimeSpan.FromSeconds(10);
                 opts.SessionTimeToLive = TimeSpan.FromMinutes(5);
+                opts.DefaultHistoryCompactionStrategy = DurableHistoryCompactionStrategy.TrimRecentTurns;
             });
 
         return builder.Build();
@@ -498,6 +499,7 @@ public class HistoryCaptureTests
                 opts.ActivityTimeout = TimeSpan.FromSeconds(30);
                 opts.HeartbeatTimeout = TimeSpan.FromSeconds(10);
                 opts.SessionTimeToLive = TimeSpan.FromMinutes(5);
+                opts.DefaultHistoryCompactionStrategy = DurableHistoryCompactionStrategy.TrimRecentTurns;
             });
 
         return builder.Build();

@@ -870,7 +870,39 @@ The history-budget query is read-only and adds no workflow history:
 ```csharp
 var status = await client.GetHistoryBudgetAsync(sessionId);
 Console.WriteLine($"History events: {status.HistoryEventCount}/{status.HistoryEventSoftLimit}");
+if (status.IsHistoryBlocked)
+{
+    var recovery = await client.RetryHistoryCompactionAsync(
+        sessionId,
+        operationId: Guid.NewGuid().ToString("N"));
+    if (recovery.IsBlocked)
+    {
+        await client.TrimBlockedHistoryAsync(
+            sessionId,
+            operationId: Guid.NewGuid().ToString("N"));
+    }
+}
 ```
+
+<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/Usage/HistoryBudget.cs. -->
+
+Agent history is retained workflow state, not an unlimited archive. `DefaultMaxEntryCount` (1000
+by default) triggers Continue-as-New. MAF sessions can configure a worker/per-agent
+`HistoryReducerKey` for a deterministic retained-history projection. There is no implicit suffix
+trim: if the trigger is reached without a reducer, or the reducer fails/returns no progress, the
+workflow retains its last valid history, closes new-turn admission, suspends idle expiry, and
+reports `IsHistoryBlocked` in the history-budget query.
+Reducers must preserve complete request/response turns and ordering, including every protected
+current, approval, or interrupted turn; simple entry-count slicing is rejected.
+
+While blocked, `RetryHistoryCompactionAsync` retries the configured keyed reducer; it cannot
+recover a session with no reducer configured. `TrimBlockedHistoryAsync` is the separately
+authorized lossy fallback and records a truncation marker. Recovery accepts at most three retries
+per run and nine per incident across Continue-as-New, plus one explicit trim per incident.
+Operation IDs must be unique and persisted by the caller; duplicate, concurrent, and over-limit
+operations are rejected before acceptance. If protected history or Temporal headroom prevents
+recovery, the session remains blocked. The API does not authenticate the reviewer: authorize every
+recovery call against application-owned session access.
 
 ### Workflow-Parked Approval (compute-free, multi-day waits)
 

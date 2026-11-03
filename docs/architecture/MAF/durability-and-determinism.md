@@ -320,12 +320,19 @@ invokes the `CreateContinueAsNewException` hook that `AgentWorkflow` overrides t
 MAF-specific carried input (StateBag snapshot, agent approval archive, and the base-class CAN
 fields).
 
-**Carry-forward is lossy by default — history is not fully preserved.** With no
-`HistoryReducerKey` configured, the base applies `DefaultBoundedTrim`, which keeps only the most
-recent `MaxEntryCount / 2` entries (floored, minimum 1) and additionally drops a leading orphaned
-response whose matching request was just cut. The half-window is deliberate: carrying the full
-history forward would immediately re-trip the same entry-count threshold and produce a back-to-back
-CAN loop. Configure a `HistoryReducerKey` when a smarter retention policy is required.
+**Carry-forward requires an explicit retained-history policy.** With no `HistoryReducerKey`
+configured, the workflow does not silently trim. If a Continue-as-New boundary requires history
+reduction, it preserves the last valid history, closes new-turn admission, suspends idle expiry,
+and reports `HistoryBlocked`. Configure a deterministic `HistoryReducerKey` for a worker-owned
+projection, or use `ITemporalAgentClient.TrimBlockedHistoryAsync` as an explicitly lossy recovery
+operation. The trim records a truncation marker. `GetHistory` returns retained state, not an
+archive, and compaction does not erase prior Temporal events.
+
+Blocked sessions expose retry and trim counters through `GetHistoryBudgetAsync`. Manual retries
+are bounded to three accepted operations per run and nine per incident across Continue-as-New;
+one explicit trim is available per incident. Duplicate, concurrent, and over-limit operations are
+rejected before acceptance. These limits do not guarantee recovery if protected content or
+Temporal's remaining event/command headroom prevents progress.
 
 So the accurate statement is: **the run rolls over transparently, the workflow ID is unchanged, the
 StateBag and approval archive are preserved in full, and an unpinned handle automatically follows
@@ -434,7 +441,7 @@ For unit-testing agent behaviour (as opposed to replay safety), see
 | Is the session workflow separately durable? | ✅ On Path A — `AgentWorkflow` has its own history. ❌ On Path B — there is no second workflow; the sub-agent's activities live in the orchestrator's history |
 | Can a workflow resume after partial completion? | ✅ Yes — from the last checkpoint |
 | Will conversation history be lost on crash? | ❌ No — reconstructed on replay from workflow state |
-| Will conversation history be lost at continue-as-new? | ⚠️ Partially — `DefaultBoundedTrim` keeps only the most recent `MaxEntryCount / 2` entries unless a `HistoryReducerKey` is configured |
+| Will conversation history be lost at continue-as-new? | Only under an explicitly configured reducer or recovery trim; without a strategy the workflow blocks and preserves the last valid history |
 | Is the StateBag preserved across continue-as-new? | ✅ Yes — carried in full as `CarriedStateBag`, with a 64 KB warning threshold |
 | Is the StateBag preserved when a turn fails? | ✅ Yes — rolled back to its pre-turn snapshot, retaining reserved approval-scope records |
 | Should activities be idempotent? | ✅ Yes — the body can run once per retry attempt. Use `opts.NoRetry()` for write tools |

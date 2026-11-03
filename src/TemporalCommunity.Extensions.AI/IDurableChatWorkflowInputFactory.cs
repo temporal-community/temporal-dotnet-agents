@@ -97,6 +97,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         HistorySizeReserveLimitBytes = _options.HistorySizeReserveLimitBytes,
         MaxConcurrentTurnJoiners = _options.MaxConcurrentTurnJoiners,
         HistoryReducerKey = _options.DefaultHistoryReducerKey,
+        HistoryCompactionStrategy = _options.DefaultHistoryCompactionStrategy,
         ContextReducerKey = _options.DefaultContextReducerKey,
         ToolActivityOptions = _useWorkerToolsets ? null : _toolActivityOptions.Value,
         IdempotentTools = _useWorkerToolsets ? null : _idempotentTools.Value,

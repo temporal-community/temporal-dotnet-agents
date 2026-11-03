@@ -121,6 +121,36 @@ internal sealed class DefaultTemporalAgentClient(
     }
 
     /// <inheritdoc/>
+    public async Task<DurableHistoryRecoveryResult> RetryHistoryCompactionAsync(
+        TemporalAgentSessionId sessionId,
+        string operationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+
+        var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
+        return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableHistoryRecoveryResult>(
+            workflow => workflow.RetryHistoryCompactionAsync(operationId),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async Task<DurableHistoryRecoveryResult> TrimBlockedHistoryAsync(
+        TemporalAgentSessionId sessionId,
+        string operationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+
+        var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
+        return await handle.ExecuteUpdateAsync<AgentWorkflow, DurableHistoryRecoveryResult>(
+            workflow => workflow.TrimBlockedHistoryAsync(operationId),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
     public async Task<DurableTurnCancellationResult> CancelTurnAsync(
         TemporalAgentSessionId sessionId,
         string requestId,

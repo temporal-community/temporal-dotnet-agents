@@ -40,6 +40,24 @@ public interface ITemporalAgentClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Retries the configured retained-history reducer for a blocked agent session once.
+    /// Use a distinct, persisted operation ID for each retry attempt.
+    /// </summary>
+    Task<DurableHistoryRecoveryResult> RetryHistoryCompactionAsync(
+        TemporalAgentSessionId sessionId,
+        string operationId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Explicitly trims an oldest complete-turn prefix once for the current blocked incident.
+    /// Removed history is represented by a truncation marker.
+    /// </summary>
+    Task<DurableHistoryRecoveryResult> TrimBlockedHistoryAsync(
+        TemporalAgentSessionId sessionId,
+        string operationId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Requests workflow-owned cancellation of the active turn identified by
     /// <paramref name="requestId"/>.
     /// </summary>

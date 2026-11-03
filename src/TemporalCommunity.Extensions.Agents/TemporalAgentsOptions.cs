@@ -178,7 +178,7 @@ public sealed class TemporalAgentsOptions
     /// Register the reducer in DI before calling <c>AddTemporalAgents</c>:
     /// <code>
     /// services.AddKeyedSingleton&lt;Func&lt;IList&lt;DurableSessionEntry&gt;, IList&lt;DurableSessionEntry&gt;&gt;&gt;(
-    ///     "my-reducer", (sp, key) => history => history.TakeLast(50).ToList());
+    ///     "my-reducer", (sp, key) => MyHistoryReducers.KeepRecentCompleteTurns);
     /// opts.DefaultHistoryReducerKey = "my-reducer";
     /// </code>
     /// </para>
@@ -186,6 +186,10 @@ public sealed class TemporalAgentsOptions
     /// <b>Determinism requirement:</b> the registered delegate must be pure and deterministic.
     /// An implementation that changes behaviour between deployments without a key change is a
     /// nondeterminism hazard for in-flight sessions.
+    /// </para>
+    /// <para>
+    /// The projection must preserve complete request/response turns, ordering, and protected
+    /// current, approval, or interrupted turns. Entry-count slicing can split a turn and is rejected.
     /// </para>
     /// </remarks>
     public string? DefaultHistoryReducerKey { get; set; }

@@ -37,7 +37,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         // history + the request that was just appended (which is the last entry in History
         // by the time ExecuteTurnAsync runs).
         var accumulated = History
-            .SelectMany(e => e.Messages)
+            .SelectMany(ProjectHistoryEntryMessages)
             .ToList();
 
         List<ChatMessage> allTurnMessages = [];

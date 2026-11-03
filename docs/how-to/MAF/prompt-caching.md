@@ -289,7 +289,7 @@ Register the reducer in the worker's DI container, then configure its key:
 ```csharp
 services.AddKeyedSingleton<Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
     "keep-recent-30",
-    (_, _) => entries => entries.TakeLast(30).ToList());
+    (_, _) => MyHistoryReducers.KeepRecentCompleteTurns);
 
 opts.DefaultMaxEntryCount = 50;
 opts.DefaultHistoryReducerKey = "keep-recent-30";
@@ -297,7 +297,13 @@ opts.DefaultHistoryReducerKey = "keep-recent-30";
 
 At continue-as-new, the workflow dispatches a Temporal activity that resolves the keyed reducer and
 passes it the full history. The activity result becomes the initial history for the new run and is
-recorded in workflow history. Without a configured key, the library applies its bounded default trim.
+recorded in workflow history. Without a configured key, the library does not trim implicitly; a
+required reduction enters `HistoryBlocked` and preserves the last valid history. Inspect the
+history budget and use the explicit retry or one-time truncating recovery through
+`ITemporalAgentClient` as appropriate. A custom reducer must retain complete request/response
+turns, preserve ordering, and retain every protected current, approval, or interrupted turn; simple
+entry-count slicing can split a turn and will be rejected. Use the built-in explicit trim strategy
+when no application-specific projection is needed.
 
 ### 5c. Bound the Estimated Model Context
 

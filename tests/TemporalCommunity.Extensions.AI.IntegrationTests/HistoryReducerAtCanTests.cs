@@ -22,8 +22,8 @@ namespace TemporalCommunity.Extensions.AI.IntegrationTests;
 /// <para>
 /// This test uses a keep-last-turn sentinel reducer: if the reducer fires, the carried
 /// history after CAN must begin with that complete request/response pair (ignoring turns added after the CAN
-/// but before the query). With <c>maxEntryCount = 6</c>, <c>DefaultBoundedTrim</c> retains the
-/// final complete request/response pair, so checking the carried pair cleanly distinguishes
+/// but before the query). With <c>maxEntryCount = 6</c>, an explicit trim would retain the final
+/// complete request/response pair, so checking the carried pair cleanly distinguishes
 /// reducer-fired from reducer-dropped.
 /// </para>
 /// </summary>
@@ -37,12 +37,12 @@ public class HistoryReducerAtCanTests
     /// <summary>
     /// A keep-last-turn reducer fires at CAN and the carried history has a complete final turn.
     /// Before the fix this fails because the reducer was silently stripped on the wire
-    /// and DefaultBoundedTrim produced the final completed turn instead.
+    /// and an explicit trim projection produced the final completed turn instead.
     /// </summary>
     [Fact]
     public async Task ConfiguredReducer_ViaKey_AcrossCan_CarriesExactlyOneEntry()
     {
-        const int maxEntryCount = 6; // DefaultBoundedTrim retains the final pair; reducer produces 1.
+        const int maxEntryCount = 6; // Explicit trim retains the final pair; reducer produces 1.
         const string reducerKey = "keep-last-turn-test";
 
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();

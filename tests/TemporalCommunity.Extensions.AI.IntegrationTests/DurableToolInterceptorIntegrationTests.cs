@@ -693,7 +693,11 @@ public class DurableToolInterceptorIntegrationTests
             taskQueue,
             scripted,
             builder => builder.AddDurableTool(tool, o => o.RequireApproval()),
-            options => options.MaxEntryCount = 4);
+            options =>
+            {
+                options.MaxEntryCount = 4;
+                options.DefaultHistoryCompactionStrategy = DurableHistoryCompactionStrategy.TrimRecentTurns;
+            });
         await host.StartAsync();
 
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();

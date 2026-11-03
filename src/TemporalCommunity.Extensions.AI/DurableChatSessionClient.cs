@@ -333,6 +333,40 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
     }
 
+    /// <summary>Retries the configured retained-history strategy once for a blocked session.</summary>
+    public async Task<DurableHistoryRecoveryResult> RetryHistoryCompactionAsync(
+        string conversationId,
+        string operationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+
+        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
+        return await handle.ExecuteUpdateAsync<DurableChatWorkflow, DurableHistoryRecoveryResult>(
+            wf => wf.RetryHistoryCompactionAsync(operationId),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Explicitly trims an oldest complete-turn prefix once for the current blocked incident.
+    /// </summary>
+    public async Task<DurableHistoryRecoveryResult> TrimBlockedHistoryAsync(
+        string conversationId,
+        string operationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+
+        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
+        return await handle.ExecuteUpdateAsync<DurableChatWorkflow, DurableHistoryRecoveryResult>(
+            wf => wf.TrimBlockedHistoryAsync(operationId),
+            new WorkflowUpdateOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
     // ── HITL: Tool Approval ─────────────────────────────────────────────
 
     /// <summary>

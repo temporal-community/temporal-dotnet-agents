@@ -430,11 +430,12 @@ By extending `DurableChatWorkflowBase<TOutput>` you get the following shared wor
 - **`[WorkflowQuery("GetHistory")]`** — returns the current conversation history.
 - **`[WorkflowUpdate("RequestShutdown")]`** — validates and closes session admission, then unblocks the session loop.
 
-The base's default `MaxEntryCount` is 1000 session entries. Without a keyed history reducer, a
-count-triggered Continue-as-New carries a recent complete-turn suffix of about half that limit so
-the next run has headroom; with a reducer, that reducer determines the carried entries. This is an
-entry-count bound, not a token or byte limit, and old turns are not an archival transcript. A
-custom subclass that configures a keyed reducer must implement
+The base's default `MaxEntryCount` is 1000 session entries. A configured keyed history reducer
+determines the carried entries; otherwise, when reduction is required, the workflow preserves its
+last valid history and enters queryable `HistoryBlocked` rather than trimming implicitly. Use the
+explicit recovery updates to retry the configured reducer or request a one-time truncating trim.
+This is an entry-count bound, not a token or byte limit, and old turns are not an archival
+transcript. A custom subclass that configures a keyed reducer must implement
 `ApplyKeyedHistoryReducerAsync`.
 
 The inherited approval handlers provide request, resolution, and query endpoints; they do not

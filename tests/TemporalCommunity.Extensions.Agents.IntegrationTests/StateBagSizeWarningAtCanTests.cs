@@ -9,6 +9,7 @@ using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Session;
 using Temporalio.Testing;
 using Xunit;
 using Xunit.Abstractions;
@@ -30,6 +31,8 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 [Trait("Category", "Integration")]
 public class StateBagSizeWarningAtCanTests
 {
+    private const string HistoryReducerKey = "statebag-warning-history-reducer";
+
     [Fact]
     public async Task StateBagOverThreshold_AtContinueAsNew_FiresWarning()
     {
@@ -131,6 +134,10 @@ public class StateBagSizeWarningAtCanTests
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(client);
         builder.Services.AddSingleton<IChatClient>(scripted);
+        builder.Services.AddKeyedSingleton<
+            Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
+            HistoryReducerKey,
+            (_, _) => entries => entries.TakeLast(2).ToList());
         builder.Services.AddLogging(b =>
         {
             b.SetMinimumLevel(LogLevel.Debug);
@@ -145,6 +152,7 @@ public class StateBagSizeWarningAtCanTests
                 {
                     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
                     agent.MaxEntryCount = maxEntryCount;
+                    agent.HistoryReducerKey = HistoryReducerKey;
                     agent.TimeToLive = TimeSpan.FromMinutes(10);
                     agent.AddContextProvider(provider);
                 });

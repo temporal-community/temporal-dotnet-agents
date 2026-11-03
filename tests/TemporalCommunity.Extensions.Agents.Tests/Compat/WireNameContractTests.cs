@@ -72,6 +72,7 @@ public class WireNameContractTests
         "TemporalCommunity.Extensions.AI.GetResponse",
         "TemporalCommunity.Extensions.AI.GetChatStep",
         "TemporalCommunity.Extensions.AI.ReduceHistoryByKey",
+        "TemporalCommunity.Extensions.AI.SummarizeHistoryPrefix",
         "TemporalCommunity.Extensions.AI.RunToolInterceptor",
         "TemporalCommunity.Extensions.AI.InvokeFunction",
         "TemporalCommunity.Extensions.AI.ResolveDurableToolsets",

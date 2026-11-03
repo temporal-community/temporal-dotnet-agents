@@ -90,8 +90,19 @@ complete turns fitting an independent token budget, applies the output reserve, 
 calls/results as serialized data, and rejects protected turns, unsupported content, or a single
 turn that cannot fit before invoking the provider. `DurableAIDataConverterTests` round-trips the
 summary activity's tool-bearing input and result through the configured converter. The summarizer
-returns text plus model/usage metadata; Phase 4.4 owns when a validated summary is committed to
-retained history.
+returns text plus model/usage metadata; integration coverage verifies that configured summary
+compaction commits a bounded marker and projects it into later model requests.
+
+## Retained-history recovery verification
+
+`DurableChatLifecycleRegressionTests` exercises the safe-boundary strategy selection, blocked
+history when no strategy is configured, explicitly authorized trimming, summary-marker projection
+into a subsequent model request, and the bounded retry state across Continue-as-New. It verifies
+that duplicate, concurrent, and over-limit retry updates are rejected before acceptance; retry
+limits are three accepted attempts per run and nine per incident; and one explicit trim can recover
+the blocked session. These are local-server tests, so they exercise update validators, workflow
+history events, activities, and Continue-as-New together. Event/byte reserve estimates remain
+deployment-dependent and do not guarantee that the server will accept every later command.
 
 **Unavailable prerequisite experiment:** the assumption that the pinned summarizer returns a
 persistent incremental marker is false. This blocks adopting that marker as a compaction wire

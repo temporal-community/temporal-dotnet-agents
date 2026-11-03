@@ -19,9 +19,9 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 /// C-2 — history bounding across continue-as-new (in-workflow history, no external store).
 ///
 /// <list type="bullet">
-/// <item><b>No-reducer fallback:</b> with a low <c>MaxEntryCount</c> and no reducer, a count-driven
-/// CAN must carry a BOUNDED history (a recent, complete-turn suffix strictly below the trigger)
-/// so the next turn does NOT immediately re-trigger CAN — no back-to-back CAN loop.</item>
+/// <item><b>No-reducer recovery:</b> with a low <c>MaxEntryCount</c> and no reducer, a count-driven
+/// boundary blocks without trimming. An explicit recovery trim carries a bounded history and the
+/// next turn does NOT immediately re-trigger CAN.</item>
 /// <item><b>Reducer-configured path unchanged:</b> a sentinel reducer (keep-last-1) across CAN carries
 /// the reduced shape — the original C-2 intent.</item>
 /// </list>
@@ -39,12 +39,12 @@ public class HistoryReducerAtCanTests
     public HistoryReducerAtCanTests(ITestOutputHelper output) => _output = output;
 
     [Fact]
-    public async Task NoReducer_CountDrivenCan_BoundsHistory_AndDoesNotReTriggerImmediately()
+    public async Task NoReducer_BlocksUntilExplicitTrim_ThenContinuesWithoutImmediateRetrigger()
     {
         await using var env = await TestEnvironmentHelper.StartLocalAsync();
         env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
 
-        const int maxEntryCount = 6; // raw trim target = 3; paired fallback retains the final 2 entries.
+        const int maxEntryCount = 6;
         var scripted = new ScriptedChatClient(
             Enumerable.Range(1, 40).Select(i => new ChatResponse(new ChatMessage(ChatRole.Assistant, $"r{i}"))));
 
@@ -59,29 +59,35 @@ public class HistoryReducerAtCanTests
             await proxy.RunAsync("turn 1", session);
             var initialRunId = (await handle.DescribeAsync()).RunId;
 
-            // Drive turns until CAN fires (run id changes).
-            string runAfterCan = initialRunId;
-            for (var i = 2; i <= 12; i++)
+            await proxy.RunAsync("turn 2", session);
+            await proxy.RunAsync("turn 3", session);
+            var budget = await host.Services.GetRequiredService<ITemporalAgentClient>()
+                .GetHistoryBudgetAsync(session.SessionId);
+            Assert.True(budget.IsHistoryBlocked);
+            Assert.Equal(6, budget.RetainedHistoryEntryCount);
+
+            var originalRunId = (await handle.DescribeAsync()).RunId;
+            var recovery = await host.Services.GetRequiredService<ITemporalAgentClient>()
+                .TrimBlockedHistoryAsync(session.SessionId, "trim-history-1");
+            Assert.False(recovery.IsBlocked);
+            Assert.Equal("trim-succeeded", recovery.Outcome);
+
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            while (DateTime.UtcNow < deadline
+                && (await handle.DescribeAsync()).RunId == originalRunId)
             {
-                try { await proxy.RunAsync($"turn {i}", session); }
-                catch (Temporalio.Exceptions.WorkflowUpdateFailedException) { /* CAN in flight */ }
-
-                var rid = (await handle.DescribeAsync()).RunId;
-                if (rid != initialRunId) { runAfterCan = rid; break; }
+                await Task.Delay(TimeSpan.FromMilliseconds(50));
             }
-            Assert.NotEqual(initialRunId, runAfterCan);
-            _output.WriteLine($"CAN fired: {initialRunId} -> {runAfterCan}");
+            Assert.NotEqual(originalRunId, (await handle.DescribeAsync()).RunId);
 
-            // After CAN, the carried history must be bounded strictly below MaxEntryCount
-            // (DefaultBoundedTrim begins from MaxEntryCount/2 = 3 but preserves complete turns).
-            await Task.Delay(TimeSpan.FromSeconds(1));
+            // After explicit trim, carried history is below the trigger and includes the
+            // marker that records the intentionally removed range.
             var carried = await handle.QueryAsync<AgentWorkflow, IReadOnlyList<DurableSessionEntry>>(
                 wf => wf.GetHistory());
             _output.WriteLine($"Carried history count after CAN: {carried.Count}");
             Assert.True(carried.Count < maxEntryCount,
                 $"Carried history ({carried.Count}) must be strictly below MaxEntryCount ({maxEntryCount}).");
-            Assert.True(carried.Count <= maxEntryCount / 2 + 1,
-                $"Carried history ({carried.Count}) should remain a small complete-turn suffix.");
+            Assert.Contains(carried, entry => entry is TruncationMarkerEntry);
 
             // NO back-to-back CAN: run one more turn and confirm the run id does NOT immediately
             // change again (the fresh run had headroom; one turn must not re-trigger CAN).
@@ -101,10 +107,10 @@ public class HistoryReducerAtCanTests
     }
 
     /// <summary>
-    /// Reproduces the [JsonIgnore] silent-failure bug: a keep-last-1 reducer configured via
-    /// <c>HistoryReducerKey</c> must produce exactly 1 carried entry after CAN.
-    /// Before the fix the reducer was silently stripped on the wire and DefaultBoundedTrim
-    /// produced the final completed turn instead.
+    /// Reproduces the [JsonIgnore] silent-failure bug: a keep-last-turn reducer configured via
+    /// <c>HistoryReducerKey</c> must preserve a complete request/response turn after CAN.
+    /// Before the fix the reducer was silently stripped on the wire and an explicit trim
+    /// projection would have produced the final completed turn instead.
     /// </summary>
     [Fact]
     public async Task ConfiguredReducer_ViaKey_AcrossCan_CarriesExactlyOneEntry()
@@ -117,11 +123,11 @@ public class HistoryReducerAtCanTests
         var scripted = new ScriptedChatClient(
             Enumerable.Range(1, 40).Select(i => new ChatResponse(new ChatMessage(ChatRole.Assistant, $"r{i}"))));
 
-        // Keep-last-1 sentinel: if the reducer fires, carried.Count == 1.
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> keepLast1 =
-            entries => entries.Count > 0 ? [entries[^1]] : [];
+        // Keep-last-turn sentinel: projections must preserve complete request/response pairs.
+        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> keepLastTurn =
+            entries => entries.TakeLast(2).ToList();
 
-        using var host = BuildHostWithReducerKey(env.Client, scripted, maxEntryCount, reducerKey, keepLast1);
+        using var host = BuildHostWithReducerKey(env.Client, scripted, maxEntryCount, reducerKey, keepLastTurn);
         await host.StartAsync();
         try
         {
@@ -166,17 +172,19 @@ public class HistoryReducerAtCanTests
             // appending a req/resp pair. That is a benign timing artifact, not a reducer failure
             // — and it is exactly what CI timing surfaced as an intermittent "collection had 3 items".
             //
-            // The deterministic discriminator is the FIRST carried entry — the reduced base:
-            //   keep-last-1 reducer → carried[0] is the single last pre-CAN response ("r3")
-            //   DefaultBoundedTrim  → carried[0] would be the final retained completed turn (the raw
+            // The deterministic discriminator is the reduced complete turn:
+            //   keep-last-turn reducer → carried contains the request and response for "r3"
+            //   Explicit trim → carried[0] would be the final retained completed turn (the raw
             //                         TakeLast(maxEntryCount/2)=3 suffix is narrowed at its pair boundary)
-            //                         [req1,r1,req2,r2,req3,r3] starts at r2)
+            //                         [req1,r1,req2,r2,req3,r3] starts at req2)
             // CAN fires deterministically at history count == maxEntryCount (6), i.e. after turn 3,
             // so the reduced entry is reliably "r3".
             // IsAssignableFrom (not IsType): the MAF entry is AgentSessionResponse, a subtype
             // of DurableSessionResponse.
-            var reducedBase = Assert.IsAssignableFrom<DurableSessionResponse>(Assert.Single(carried));
-            Assert.Equal("r3", reducedBase.Text);
+            Assert.Collection(
+                carried,
+                entry => Assert.IsAssignableFrom<DurableSessionRequest>(entry),
+                entry => Assert.Equal("r3", Assert.IsAssignableFrom<DurableSessionResponse>(entry).Text));
 
             await host.StopAsync();
         }

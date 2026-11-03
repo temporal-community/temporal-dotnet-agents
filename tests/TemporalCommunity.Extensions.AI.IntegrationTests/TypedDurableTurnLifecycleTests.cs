@@ -583,7 +583,7 @@ public class TypedDurableTurnLifecycleTests
         builder.Services.AddChatClient(chatClient).Build();
         builder.Services.AddKeyedSingleton<Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
             ReducerKey,
-            (_, _) => history => history.TakeLast(1).ToList());
+            (_, _) => history => history.TakeLast(2).ToList());
 
         var worker = builder.Services
             .AddHostedTemporalWorker(taskQueue)

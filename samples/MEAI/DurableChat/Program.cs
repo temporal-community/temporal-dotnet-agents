@@ -122,8 +122,11 @@ var durableWorker = builder.Services
         opts.DefaultToolsetIds = ["information", "operations"];
         opts.MaxModelContextTokens = 8192;
         opts.ModelOutputTokenReserve = 1024;
-        // Reserved for an explicitly selected retained-history compaction strategy.
-        // These independent limits do not compact history by themselves.
+        // Retained-history compaction is explicit. Trimming drops old complete turns
+        // but records the removed range with a truncation marker.
+        opts.DefaultHistoryCompactionStrategy = DurableHistoryCompactionStrategy.TrimRecentTurns;
+        // The summarizer budget is independent and is used only when SummarizeOldestTurns
+        // is selected instead.
         opts.HistorySummarizerMaxContextTokens = 8192;
         opts.HistorySummarizerOutputTokenReserve = 1024;
         opts.MaximumTransportPayloadSizeBytes = 1024 * 1024;

@@ -365,6 +365,7 @@ var summaryOptions = new DurableExecutionOptions
     DefaultHistorySummarizerClientKey = "summarizer",
     HistorySummarizerMaxContextTokens = 8192,
     HistorySummarizerOutputTokenReserve = 1024,
+    DefaultHistoryCompactionStrategy = DurableHistoryCompactionStrategy.SummarizeOldestTurns,
 };
 ```
 
@@ -383,9 +384,69 @@ to the activity policy, so retries can incur additional cost. Summary text can c
 conversation data and, when later committed by the compaction strategy, remains part of Temporal
 workflow history; compaction does not erase prior events.
 
-These settings and the activity are available for the selected compaction strategy, but this unit
-does not schedule compaction. Automatic bounded compaction and recovery behavior is covered by the
-subsequent history-recovery phase; configuring a summarizer alone does not rewrite `GetHistory`.
+The strategy is applied only at a safe Continue-as-New boundary when the entry-count trigger fires.
+The library validates the projection, stores a bounded compaction marker in retained history, and
+projects that summary into later model requests. Prior Temporal events are not erased.
+
+### Retained-history compaction and recovery
+
+`GetHistoryAsync` returns the session's current retained history, not an archive. `MaxEntryCount`
+defaults to 1000 entries and triggers Continue-as-New. Unlike context-only `IChatReducer`s, the
+retained-history strategy can replace old complete turns with a summary or a truncation marker.
+No strategy is selected by default: if history reaches its trigger without a configured keyed
+history reducer or compaction strategy, the workflow preserves the last valid history, closes new
+turn admission, and enters queryable `HistoryBlocked` rather than silently deleting entries.
+
+Select one explicit strategy when registering the worker:
+
+```csharp
+var trimOptions = new DurableExecutionOptions
+{
+    TaskQueue = "durable-chat",
+    DefaultHistoryCompactionStrategy = DurableHistoryCompactionStrategy.TrimRecentTurns,
+};
+```
+
+<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/MEAI/HistorySummarizer.cs#retained-history-compaction-options. -->
+
+`HistoryReducerKey`, when configured, takes precedence and remains the custom retained-history
+projection path. `TrimRecentTurns` is intentionally lossy and records the removed range with a
+truncation marker. `SummarizeOldestTurns` uses the worker-owned `IChatClient` activity described
+above. Both protect the current turn and validate the resulting message/tool grammar and payload
+limits before changing retained state.
+
+Inspect `GetHistoryBudgetAsync` for `IsHistoryBlocked`, `HistoryBlockReason`, retained entry count,
+and recovery counters. While blocked, new turns are rejected and idle TTL does not discard the
+session. A caller may use `RetryHistoryCompactionAsync` with a distinct persisted operation ID to
+retry the configured reducer/strategy, at most three accepted retry operations per workflow run
+and nine per incident across Continue-as-New. A single `TrimBlockedHistoryAsync` operation is
+available per incident as an explicitly lossy fallback; it is not automatic. Duplicate,
+concurrent, over-limit, or reserve-exhausted recovery requests are rejected by update validators
+before acceptance. If history headroom or protected content prevents recovery, the session remains
+blocked; Temporal/server command limits can still prevent progress.
+
+```csharp
+var status = await sessionClient.GetHistoryBudgetAsync(conversationId);
+if (status.IsHistoryBlocked)
+{
+    var recovery = await sessionClient.RetryHistoryCompactionAsync(
+        conversationId,
+        operationId: Guid.NewGuid().ToString("N"));
+    if (recovery.IsBlocked)
+    {
+        await sessionClient.TrimBlockedHistoryAsync(
+            conversationId,
+            operationId: Guid.NewGuid().ToString("N"));
+    }
+}
+```
+
+<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/MEAI/HistorySummarizer.cs#retained-history-compaction-and-recovery. -->
+
+These supported updates are covered by the library's event-history budget. Arbitrary direct
+Temporal signals or updates outside this API are not; accepted raw signals are recorded even when
+no workflow signal handler exists. Restrict direct workflow access and apply appropriate
+application/deployment access controls.
 
 ### Send a turn and read history
 
@@ -586,11 +647,11 @@ See [custom workflow output](custom-workflow-output.md) and the runnable
 complete typed-turn contract.
 
 Session history is retained workflow state, not an unlimited archive. `MaxEntryCount` defaults to
-1000 entries and triggers Continue-as-New. Without a keyed history reducer, the workflow carries
-forward a recent suffix (about half the configured entry limit, preserving complete adjacent
-turns) to leave headroom for the next run. A configured reducer controls the carried history
-instead. The limit counts session entries, not tokens or serialized bytes, and older entries may no
-longer be available from `GetHistoryAsync` after Continue-as-New.
+1000 entries and triggers Continue-as-New. Configure `DefaultHistoryCompactionStrategy` or a keyed
+history reducer to choose how eligible old turns are projected. There is no implicit suffix trim:
+without an explicit strategy, a required reduction blocks new turns and exposes the retained state
+for recovery. The limit counts session entries, not tokens or serialized bytes, and older entries
+may no longer be available from `GetHistoryAsync` after an explicit compaction.
 
 While a run is preparing to Continue-as-New, it stops admitting new turns: once the history
 reduction for that boundary has run, a new `SendAsync` can be rejected with `Session is continuing

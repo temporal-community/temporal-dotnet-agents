@@ -1271,6 +1271,7 @@ public class DurableToolDispatchIntegrationTests
                 // Each turn produces a request + response. The minimum valid threshold of four
                 // triggers continue-as-new after the second completed turn.
                 opts.MaxEntryCount = 4;
+                opts.DefaultHistoryCompactionStrategy = DurableHistoryCompactionStrategy.TrimRecentTurns;
             });
         await host.StartAsync();
 
