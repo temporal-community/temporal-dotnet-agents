@@ -712,6 +712,30 @@ signals sent directly by other clients. Temporal records an accepted signal even
 has no matching handler; restrict direct workflow access and use application/deployment access
 controls rather than relying on the absence of a signal handler to bound history.
 
+### Per-request overrides with `ChatOptions`
+
+`TemporalChatOptionsExtensions` writes per-request settings onto `ChatOptions.AdditionalProperties`.
+Each extension mutates the options instance in place and returns it. For custom workflows using
+`DurableChatClient`, a per-request timeout or retry value takes precedence over the matching
+`DurableExecutionOptions` default. Managed sessions use their captured activity policies instead;
+these timeout and retry extensions do not override those policies.
+
+| Extension | Key constant | Overrides |
+|---|---|---|
+| `WithActivityTimeout(TimeSpan)` | `ActivityTimeoutKey` | `DurableExecutionOptions.ActivityTimeout` |
+| `WithMaxRetryAttempts(int)` | `MaxRetryAttemptsKey` | Maximum attempts of the retry policy |
+| `WithHeartbeatTimeout(TimeSpan)` | `HeartbeatTimeoutKey` | `DurableExecutionOptions.HeartbeatTimeout` |
+| `WithChatClientKey(string)` | `ChatClientKeySettingKey` | Per-call keyed `IChatClient` for custom workflows; must match the captured managed-session profile |
+| `WithChatClientTag(string, string)` | `ChatClientTagsKeyPrefix` (prefix) | Adds a tag to the durable model-activity span |
+
+For custom workflows using `DurableChatClient`, client resolution order is: per-call
+`WithChatClientKey`, then `DurableExecutionOptions.DefaultChatClientKey`, then the unkeyed
+`IChatClient`. Managed sessions freeze the profile at session creation; see
+[Keyed client profiles](#keyed-client-profiles). The keys are
+`public const string` members of `TemporalChatOptionsExtensions`. The library strips every
+Temporal-owned key before the call reaches the provider; see
+[Chat options boundaries](../../architecture/MEAI/durable-chat-pipeline.md#chat-options-boundaries).
+
 ## Durable tool calls with `AIFunction.AsDurable()`
 
 > **Most applications that own a custom workflow and want durable LLM calls should start with

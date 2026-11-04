@@ -1363,4 +1363,4 @@ Activity start ─────┘                                              �
 
 - [durability-and-determinism.md](./durability-and-determinism.md) — Step-by-step walkthrough of deterministic replay with agent calls
 - [session-statebag-and-context-providers.md](./session-statebag-and-context-providers.md) — StateBag semantics and the `AIContextProvider` contract
-- [CLAUDE.md](../../../CLAUDE.md) — Project architecture overview and quick reference
+- [CLAUDE.md](../../../CLAUDE.md) — Repository-wide invariants and gotchas for contributors

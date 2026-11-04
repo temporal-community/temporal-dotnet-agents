@@ -1,406 +1,141 @@
-# TemporalAgents Project Guide
-
-**Two Temporal .NET SDK integrations for durable AI applications:**
-- `TemporalCommunity.Extensions.Agents` — durable agent sessions built on Microsoft Agent Framework (`Microsoft.Agents.AI`)
-- `TemporalCommunity.Extensions.AI` — makes any plain `IChatClient` (MEAI) durable, no Agent Framework required
-
-This document gives load-bearing project context: structure, gotchas, behavioral guarantees. For API how-tos, see `docs/how-to/`.
-
----
-
-## Quick Facts
-
-- **Development target**: C# (.NET 10.0). The two published libraries also ship
-  `netstandard2.1` assets; samples and tests remain `net10.0`.
-- **Solution File**: `TemporalAgents.slnx` (.slnx format, not .sln)
-- **Minimum Temporal Service**: 1.31.0. Embedded tests pin Temporal CLI `v1.8.0` and verify its
-  Server 1.31.2 through `GetSystemInfo`; Temporalio NuGet packages use 1.17.0.
-
----
-
-## Project Structure
-
-```
-TemporalAgents/
-├── TemporalAgents.slnx        # Solution file (.slnx — use this, not .sln)
-├── docs/
-│   ├── architecture/          # Internal design docs (durability, sessions, statebag, a2a, pub/sub, etc.)
-│   └── how-to/MAF + MEAI/     # Practical guides per library
-├── src/
-│   ├── TemporalCommunity.Extensions.Agents/   # Agent Framework integration (depends on Extensions.AI)
-│   └── TemporalCommunity.Extensions.AI/       # MEAI IChatClient middleware (no Agent Framework)
-├── tests/                     # Four projects: {Agents,AI} × {Tests, IntegrationTests}
-└── samples/
-    ├── MAF/                   # 19 samples — run: ls samples/MAF
-    └── MEAI/                  # 7 samples  — run: ls samples/MEAI
-```
-
-Use `Glob` / `ls` to discover specific files. Notable types and their locations are documented inline elsewhere in this guide (Key Type Locations, JSON Serialization, etc.).
-
----
-
-## TemporalCommunity.Extensions.AI — Key Concepts
-
-**Entry point**:
-- `services.AddHostedTemporalWorker(...).AddDurableAI(opts => ...)` — the only registration path.
-  The package ships no plugin-registration wrappers; add your own plugins through Temporal's own
-  surface (`TemporalWorkerOptions.Plugins` / `TemporalClientConnectOptions.Plugins`). See
-  [`docs/library-combinations.md`](./docs/library-combinations.md#using-temporal-sdk-plugins).
-
-**External usage**: `host.Services.GetRequiredService<DurableChatSessionClient>().SendAsync(...)` returns `Task<DurableSessionResponse>` (post-Layer-2). `GetHistoryAsync` returns `Task<IReadOnlyList<DurableSessionEntry>>`.
-
-**Required for MEAI types**: `DurableAIDataConverter.Instance` must be set on the Temporal client. Without it, `FunctionCallContent` / `FunctionResultContent` / other `AIContent` subtypes lose `$type` and deserialize as base `AIContent`. **Auto-wired** when using `AddTemporalClient(...)`, `AddHostedTemporalWorker(addr, ns, queue)`, or any of the plugin paths. **Manual `TemporalClient.ConnectAsync` callers** must set it explicitly.
-
-**Per-request overrides** via `ChatOptions` extensions:
-- `.WithActivityTimeout(TimeSpan)` / `.WithMaxRetryAttempts(int)` / `.WithHeartbeatTimeout(TimeSpan)` / `.WithChatClientKey(string)`
-- Keys are `public const string` constants on `TemporalChatOptionsExtensions`.
-
-**Durable tools**: `AddDurableTools(workerBuilder, params aiFunctions)` registers functions for managed durable sessions; each model-requested call becomes an `InvokeFunction` activity. A per-tool overload — `AddDurableTool(tool, opts => opts.NoRetry().WithTimeout(...))` — accepts a `DurableChatToolOptions` configuration callback that mirrors MAF's `DurableToolOptions` (`StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` properties + `NoRetry()` / `WithMaxAttempts(int)` / `WithTimeout(TimeSpan)` fluent methods). `AIFunction.AsDurable()` remains the separate adapter for direct calls from custom workflow code. Managed sessions reject caller-supplied `ChatOptions.Tools` and inline `UseFunctionInvocation()` loops; see `docs/how-to/MEAI/tool-functions.md`.
-
-`AIFunction.AsDurable()` activities intentionally use the calling workflow's task queue. They do
-not use `DurableExecutionOptions.TaskQueue`; that property routes managed sessions and direct
-chat/embedding adapters.
-
-**HITL**: see `docs/how-to/MEAI/hitl-patterns.md`. Activity timeout on the underlying `[WorkflowUpdate]` must accommodate human review time.
-
-**Important notes**:
-- `DurableChatActivities` is `internal`; registered as `AddSingletonActivities`. Don't instantiate directly.
-- `DurableFunctionRegistry` is internal (`Dictionary<string, AIFunction>`, case-insensitive).
-- `IChatClient` must be registered in DI **before** `AddDurableAI` (constructor-injected on activity).
-- Use `AddChatClient(innerClient).UseFunctionInvocation().Build()` (idiomatic MEAI DI) over `AddSingleton<IChatClient>`. `UseDurableExecution()` chains onto the same builder.
-- `IChatClient` resolution is layered: per-call `ChatOptions.WithChatClientKey("k")` → worker-level `DurableExecutionOptions.DefaultChatClientKey` → unkeyed fallback.
-- **Options naming asymmetry** (intentional — do not rename): `DurableExecutionOptions` properties use unprefixed names (e.g. `ActivityTimeout`, `HeartbeatTimeout`, `RetryPolicy`). `TemporalAgentsOptions` worker-level defaults use the `Default*` prefix (e.g. `DefaultActivityTimeout`, `DefaultHeartbeatTimeout`, `DefaultRetryPolicy`). The prefix distinguishes worker-level defaults from per-agent overrides on `DurableAgentBuilder`, which use the unprefixed names.
-
-For full API surface, see `docs/how-to/MEAI/usage.md`.
-
----
-
-## TemporalCommunity.Extensions.Agents — Key Concepts
-
-**Entry point**:
-- `services.AddHostedTemporalWorker(...).AddTemporalAgents(opts => opts.AddDurableAgent("Name", a => { a.ChatClient = sp => ...; a.AddTool(...); }))` — the only registration path.
-  The package ships no plugin-registration wrappers; add your own plugins through Temporal's own
-  surface (`TemporalWorkerOptions.Plugins` / `TemporalClientConnectOptions.Plugins`). See
-  [`docs/library-combinations.md`](./docs/library-combinations.md#using-temporal-sdk-plugins).
-
-**`AddDurableAgent` is the only registration path.** A single fluent `DurableAgentBuilder` consolidates `ChatClient`, tools (with per-tool retry overrides via `DurableToolOptions`), context providers, per-agent timeouts, and external history. DI access happens via per-slot factories on the builder — no `BuildServiceProvider` bootstrap, no string-keyed dictionaries. Each LLM call dispatches a separate `RunDurableAgentStep` activity; each tool call dispatches its own `InvokeAgentTool` activity, resolved against a per-agent local registry (distinct from MEAI's flat `InvokeFunction`); all tools share that one activity type name and differ only in the options resolved per tool. The library composes the chat pipeline with `UseProvidedChatClientAsIs = true` so users do NOT call `.UseFunctionInvocation` on their `IChatClient`.
-
-`ConfigureAgentPipeline` is dry-built once at startup in a validation scope and built once per
-`RunDurableAgentStep` activity attempt in that attempt's DI scope. No pipeline is cached in the
-blueprint. Custom wrappers must be transparent, non-disposable `DelegatingAIAgent` instances;
-MAF's built-in `OpenTelemetryAgent` is owned and disposed by the per-build pipeline lease,
-including when local validation rejects a successfully built chain. A partial chain hidden by an
-exception from MAF's `AIAgentBuilder.Build()` is not available for package-side cleanup.
-During a live run, outer middleware and `TemporalAgentContext.Current.CurrentSession` share the
-exact restored `TemporalAgentSession`; middleware may make retry-safe StateBag changes but cannot
-replace the session. An innermost boundary passes `null` only to `ChatClientAgent`, which creates
-its required transient `ChatClientAgentSession`.
-
-**Configuration**: see `docs/how-to/MAF/usage.md` for the full `TemporalAgentsOptions` reference. Worker-level defaults are prefixed `Default*` (e.g. `DefaultActivityTimeout`, `DefaultHeartbeatTimeout`, `DefaultApprovalTimeout`, `DefaultMaxEntryCount`, `DefaultRetryPolicy`, `DefaultHistoryReducer`, `DefaultTimeToLive`); per-agent overrides on `DurableAgentBuilder` use the unprefixed names. Inheritance rule: `effective = registration.X ?? options.DefaultX`.
-
-**Two agent types** (use the right one for context):
-- `TemporalAIAgent` — workflow-context sub-agent. Access via `WorkflowAgents.GetTemporalAgent("Name")`.
-- `TemporalAIAgentProxy` — external-context proxy. Access via `services.GetTemporalAgentProxy("Name")`.
-
-**Session ownership**: `TemporalAgentSession` — not the agent instance — owns the
-conversation history and the StateBag. One agent may drive many sessions; nothing conversational
-lives on the agent. Consequences:
-- `TemporalAIAgent.RunAsync` **requires** a `TemporalAgentSession`; a foreign `AgentSession` is rejected.
-- Two overlapping `RunAsync()` calls on the **same** session throw `InvalidOperationException`
-  (`EnterRun`/`ExitRun` guard). Parallel conversations on one agent are fine — give each its own session.
-- State survives continue-as-new only if the orchestrating workflow explicitly carries the
-  serialized session forward. The library does not guess.
-- Worker config (`MaxToolCallsPerTurn`, per-tool activity options, interceptor caches) stays
-  agent-scoped — it describes the agent, not the conversation.
-- StateBag updates: LLM-step output is **overlaid** (trusted, unfiltered, preserves untouched keys);
-  tool/interceptor write-backs are **merged in tool-call index order** (later index wins) with the
-  reserved approval-scope deny-list applied. Never let activity completion order drive the merge.
-
-**HITL**: see `docs/how-to/MAF/hitl-patterns.md`. Activity timeout must accommodate human review time.
-
-**StateBag persistence**: **64 KB size guard** — `CreateContinueAsNewException` emits `LogWarning` when the serialized `CarriedStateBag` exceeds 64 KB. Prune or externalize StateBag contents when this fires.
-
-**Per-tool Temporal activities** are the default behavior: every `AddDurableAgent` runs the durable loop (each LLM call is a `RunDurableAgentStep` activity; each tool call is its own `InvokeAgentTool` activity, all sharing that one activity type name). Configure per-tool retry/timeout via the `DurableToolOptions` callback on `agent.AddTool(tool, opts => opts.NoRetry())` — write tools must call `.NoRetry()` (or set `MaximumAttempts = 1`) to prevent double-execution on retry. Cap loop iterations via `agent.MaxToolCallsPerTurn` (default 20). See `docs/how-to/MAF/durable-agents.md`.
-
-**OpenTelemetry**: Register all four `ActivitySource` names with the tracer provider. **Never** call `ActivitySource.StartActivity()` inside `[Workflow]` — non-deterministic during replay; use `ActivitySourceExtensions.TrackWorkflowDiagnosticActivity` instead. See `docs/how-to/MAF/observability.md`.
-
-For full API surface, see `docs/how-to/MAF/usage.md`.
-
----
-
-## Critical: Durability and Determinism
-
-**MUST READ**: [`docs/architecture/MAF/durability-and-determinism.md`](./docs/architecture/MAF/durability-and-determinism.md)
-
-When a worker crashes:
-- ✅ Completed agent calls are **not re-executed** — results replay from history
-- ✅ `_currentStateBag` carries forward through `AgentWorkflowInput.CarriedStateBag`
-- ✅ Conversation history is serialized in workflow state across continue-as-new transitions
-
----
-
-## Important Dependencies and Notes
-
-### Microsoft Agent Framework
-- `TemporalCommunity.Extensions.Agents` depends on `TemporalCommunity.Extensions.AI` (which transitively brings in MEAI).
-- HITL types are MEAI-side: `DurableApprovalRequest` / `DurableApprovalDecision` (from `TemporalCommunity.Extensions.AI.Approvals`).
-- `AgentResponse`, `AIAgent`, `DelegatingAIAgent`, `AgentRunOptions` → `Microsoft.Agents.AI`.
-- `ChatClientAgentRunOptions` → `Microsoft.Agents.AI` (not the Hosting package).
-- `AgentSessionStateBag.Count` available; `AgentSessionStateBag.Serialize()` uses its own `AgentAbstractionsJsonUtilities.DefaultOptions`.
-
-### Key Type Locations (gotchas)
-- `RpcException` — `Temporalio.Exceptions` (NOT `Grpc.Core`)
-- `Workflow.CreateContinueAsNewException` — takes `Expression<Func<TWorkflow, Task>>` (no collection expressions inside)
-- `WorkflowIdConflictPolicy.UseExisting` — `Temporalio.Api.Enums.V1`
-- `CompactionMarkerEntry` — `TemporalCommunity.Extensions.AI.Session` (lives in the AI library so both source-gen contexts see the `"compaction-marker"` discriminator). Polymorphic subtype of `DurableSessionEntry`. `CompactedAt` is a `[JsonIgnore]` alias of `CreatedAt` (no wire duplication).
-- `DurableCompactionMarkerException`, `DurableMixedPatternException`, `DurableChatClientFactoryNotFoundException` — `TemporalCommunity.Extensions.AI.Exceptions`. Marker exception is `[Experimental("TA002")]`; the others are stable.
-- `DurableChatStepResult` — `TemporalCommunity.Extensions.AI` (internal sealed) — Pattern 3 activity return type from `GetChatStepAsync`; carries `IsFinal`, `AssistantMessage`, optional `ToolCalls` and `Usage`.
-- `DurableChatToolOptions` — `TemporalCommunity.Extensions.AI` (public sealed) — per-tool options builder for Pattern 3; mirrors MAF's `DurableToolOptions` verbatim.
-- `IDurableToolInterceptor<in TContext>` — `TemporalCommunity.Extensions.AI.Tools` — cross-library interceptor interface. `BeforeToolCallAsync(TContext, CancellationToken) → Task<DurableToolDecision>`. `in` variance: `IDurableToolInterceptor<DurableToolContext>` is assignable to `IDurableToolInterceptor<AgentToolContext>`.
-- `DurableToolDecision` — `TemporalCommunity.Extensions.AI.Tools` — return type of `BeforeToolCallAsync`. Static factories: `Proceed(...)`, `PauseForApproval(description)`, `Skip(syntheticResult)`, `Block(reason)`. Not wire-serialized (internal DTO is the serialized form).
-- `DurableToolContext` — `TemporalCommunity.Extensions.AI.Tools` — cross-library base context. Properties: `ToolName`, `Arguments`, `CallId`, `SessionId?`. Non-sealed — `AgentToolContext` extends it.
-- `IAgentToolInterceptor` — `TemporalCommunity.Extensions.Agents.Tools` — convenience alias for `IDurableToolInterceptor<AgentToolContext>`. Register via `agent.AddToolInterceptor(sp => ...)` or `opts.DefaultToolInterceptor`. Returns `DurableToolDecision` from the AI library.
-- `AgentToolContext` — `TemporalCommunity.Extensions.Agents.Tools` — extends `DurableToolContext`. Adds `AgentName` (required) and `StateBag?` (read-only snapshot). The inherited `SessionId` is populated from `ActivityExecutionContext.Current.Info.WorkflowId` in the interceptor activity.
-- `TemporalAgentSessionSnapshot` — `TemporalCommunity.Extensions.Agents.Session` (internal sealed) — the wire contract for a serialized `TemporalAgentSession`. Registered in `AgentSessionJsonContext`. Members: `sessionId` (lossless `ta-{agent}-{key}` string), `stateBag`, `history` — the last two omitted when null via member-level `JsonIgnore`. A snapshot without `history` is the supported legacy shape and restores as empty history.
-
-### DI Patterns
-- `TemporalAgentsOptions` has an **internal constructor** — always access via the `AddTemporalAgents(opts => ...)` delegate.
-- `TryAddSingleton` for `ITemporalAgentClient` — allows custom implementations.
-- `ActivatorUtilities.CreateInstance<T>(provider, taskQueue)` — pattern for extra constructor args.
-
-### JSON Serialization (gotchas)
-- `AgentSessionJsonContext` (Agents) and `DurableAIJsonContext` (AI) — source-gen contexts for conversation history types.
-- `TemporalAgentSession` is **NOT** in any source-gen context. Don't try `DefaultOptions.GetTypeInfo(typeof(TemporalAgentSession))` — it resolves through `DefaultJsonTypeInfoResolver` (reflection). Serialize the session via `TemporalAgentSessionSnapshot` instead; that DTO *is* registered.
-- `TemporalAgentSession.SerializeStateBag()` delegates to `StateBag.Serialize()`, not session serialization.
-- The `agent_request` / `agent_response` discriminators on `DurableSessionEntry` come from a **runtime resolver modifier** in `TemporalAgentJsonUtilities`, not from `[JsonDerivedType]` attributes. Options lacking that modifier throw `NotSupportedException` on any session holding history — `TemporalAgentSession.ResolveSnapshotOptions` detects this and falls back to `TemporalAgentJsonUtilities.DefaultOptions`. Derive custom options from `DefaultOptions`.
-- `AgentSessionStateBag` is backed by a `ConcurrentDictionary`, so a bag serialized straight from `SetValue` calls emits keys in hash order. Don't byte-compare multi-key snapshots. (`StateBagMerge` output *is* ordinal-sorted and stable.)
-- Agents library reuses `DurableAIDataConverter` from the AI library (re-exposed via `TemporalAgentDataConverter`) for chat-content polymorphism.
-
----
-
-## Testing Gotchas
-
-For full testing patterns, see `docs/how-to/MAF/testing-agents.md` and `docs/how-to/MEAI/testing.md`. Cross-cutting gotchas worth knowing here:
-
-- **`Assert.Throws<T>` requires exact type, not subtype.** Use `Assert.Throws<ArgumentNullException>` for null, not `ArgumentException`. xUnit will fail the test if the thrown exception is a subtype of the expected.
-- **Hand-written stubs preferred** over FakeItEasy/Moq in this project. See `StubAIAgent` and `TestChatClient` in the test helpers.
-- **Search-attribute pre-registration is required by default.** `EnableSearchAttributes` now defaults to `true`. Agents integration tests must use `TestEnvironmentHelper.StartLocalAsync()` (which pre-registers `AgentName`/`SessionCreatedAt`/`TurnCount`) unless `opts.EnableSearchAttributes = false` is explicitly set. Bare `WorkflowEnvironment.StartLocalAsync()` is only sufficient when search attributes are disabled. AI integration tests never need pre-registration.
-- **Both suites use a pinned embedded server** —
-  `TemporalServiceTestEnvironment.StartLocalAsync()` uses Temporal CLI `v1.8.0` (Server 1.31.2)
-  and verifies `GetSystemInfo`. Agents tests call it through `TestEnvironmentHelper` for search
-  attributes. Do not add bare `WorkflowEnvironment.StartLocalAsync()` calls.
-
----
-
-## Workflow Best Practices
-
-### ✅ DO
-- Use the fluent `.AddTemporalAgents()` builder
-- Use `GetTemporalAgent()` inside workflows for sub-agent orchestration
-- Use `Workflow.UtcNow` and `Workflow.NewGuid()` (not `DateTime.UtcNow` / `Guid.NewGuid()`)
-- Set appropriate per-agent TTLs (default: 14 days)
-- Validate config eagerly — `string.IsNullOrEmpty` + `InvalidOperationException` for missing config (not `is null` + `ArgumentNullException`)
-- Keep OTel spans out of workflows — `agent.turn` lives in `AgentActivities`; `agent.client.send` in `DefaultTemporalAgentClient`
-- For non-idempotent write-style tools (send email, write record), pass `opts => opts.NoRetry()` to `agent.AddTool(...)` so the tool's activity does not re-execute on transient failure
-
-### ❌ DON'T
-- **Never** call `ActivitySource.StartActivity()` inside `[Workflow]` — non-deterministic on replay
-- Don't use wall-clock time in workflows (`DateTime.UtcNow`, `DateTimeOffset.Now`)
-- Don't use `Random` or `Guid.NewGuid()` in workflows
-- Don't construct `DurableChatClient`/`ChatClientBuilder` composition inside `[WorkflowRun]`/`[WorkflowUpdate]` methods — see `docs/architecture/MEAI/direct-adapter-anti-pattern.md`
-
----
-
-## Build Automation
-
-Build automation uses [`just`](https://just.systems). All recipes in `justfile`. .NET SDK pinned via `global.json` (10.0.x). Versioning via `minver-cli` (local `dotnet tool restore`).
-
-### Core recipes
-
-```bash
-just --list             # All recipes
-just build              # Restore + Release build; use `just build Debug` for Debug
-just clean              # Clean solution project outputs; leaves artifacts/ intact
-just test-unit          # All libraries' unit tests — no server required
-just test-integration   # All libraries' integration tests — embedded servers
-just test               # All unit + integration tests
-just pack               # clean → build → pack → artifacts/packages/*.nupkg
-just _verify-doc-links  # Markdown link + #anchor checker; runs its own self-test first
-just ci                 # Local build/unit/repo checks/package pipeline; no integration/canary tests
-```
-
-`just ci` runs the local clean, build, unit-test, repository/documentation-check, and package
-pipeline. It does **not** run integration tests or the external-credential sample canaries; use
-`just test` for integration tests and `just test-samples` for sample canaries.
-
-**The doc gates deliberately depend on nothing beyond POSIX tools, `python3`, and what the workflow
-already installs.** They previously used `ripgrep`, which neither GitHub runner image ships; because
-every `rg` call site wrapped it in `|| true` (grep and rg both report "no matches" as exit 1), a
-missing binary produced exit 127, zero hits, and a confident "0 targets checked" success. Two
-lessons from that outage still apply to anything added here:
-
-- **A tool that reports "nothing found" as exit 1 needs `|| true` — and `|| true` also swallows
-  "command not found".** Prefer `grep -Eo | wc -l` over `grep -c` when counting matches rather than
-  matching lines, and make sure a missing dependency fails loudly. `doc_snippet_fidelity.py` is
-  invoked bare, so an absent `python3` exits 127 with a message rather than passing vacuously.
-- **No apostrophes in comments inside `<( ... )`.** Bash tracks quote state while scanning for the
-  closing paren, comments included, so a lone `'` inside a process substitution breaks the parse.
-
-### Diagnostic + hang recovery (Tank + Trinity, reviewed by Cypher)
-
-```bash
-# When an integration suite hangs and you can't tell which test:
-just _test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests       # per-test loop, 180s default cap, reports PASS/FAIL/HANG
-just _test-individual tests/TemporalCommunity.Extensions.AI.IntegrationTests Pattern3 300  # filter + custom cap
-
-# When a single test command hangs (pipe-buffering hides output):
-just _test-logged tests/TemporalCommunity.Extensions.Agents.IntegrationTests       # writes to /tmp log, 600s default cap
-
-# Orphaned embedded Temporal servers (.NET SDK extracts a CLI to /var/folders/.../T/):
-just list-orphans                                                          # read-only — show, don't kill
-just kill-orphans                                                          # narrow — temporal-sdk-dotnet only (safe across projects)
-just kill-test-hosts                                                       # opt-in — path-scoped to TemporalAgents (Rider/sibling repos untouched)
-just _test-clean                                                            # alias: pre-test cleanup
-
-# Worktree cleanup after parallel agent work:
-just cleanup-stale-worktrees                                               # SAFE — checks dirty state, single -f only
-```
-
-### Sample-canary (verify samples still run end-to-end)
-
-```bash
-just test-samples          # non-interactive MEAI + MAF samples
-just _verify-sample-coverage # maintenance drift check for internal sample-canary lists
-just _remove-test-artifacts # remove artifacts/{test-individual,sample-runs}/ only
-```
-
-**Exit code is not the assertion.** All 26 entries carry application-owned output markers
-(`name:dir:cap:marker1|marker2`), checked with `grep -qF` against the sample's log; a sample that
-exits 0 without printing them is a FAIL, not a PASS. Should an entry ever lose its markers it is
-listed under "Exit-code only" instead of being silently counted as covered. Three samples once
-shipped broken while passing on exit code alone.
-
-**Skipped from sample-canary** (must run manually):
-- `samples/MAF/HumanInTheLoop` — interactive (Console.ReadLine). Note `samples/MEAI/HumanInTheLoop` **is** covered — it drives its approval non-interactively.
-- `samples/MAF/ApprovalScopes` — interactive (Console.ReadLine)
-- `samples/MAF/SplitWorkerClient` — two processes (Worker + Client)
-
-**Pre-requisites for sample-canary:** GNU coreutils `timeout` (macOS: `brew install coreutils`),
-`nc` (netcat), `OPENAI_API_KEY` in env or user-secrets, and Temporal Service 1.31.0 or newer on
-`localhost:7233` (local: `temporal server start-dev`). `_sample-preflight` queries the connected
-service version with the Temporal CLI and fails closed; it does not infer the service version from
-the CLI binary's own version.
-
-### Versioning
-
-**Versions** auto-derive from git tags via MinVer: exactly on `X.Y.Z` tag → `X.Y.Z`; N commits after → `X.Y.(Z+1)-preview.N`. Cut a release by tagging the commit — `git tag -a X.Y.Z -m "..."` — then `just pack`. **Tags must NOT have a `v` prefix** — `Directory.Build.props` does not set `<MinVerTagPrefix>`, so MinVer's default (no prefix) applies. Existing tags follow this convention — `0.1.0` through `0.14.2` (`git tag` for the full list; the stray `v0.1.0` predates the convention and MinVer ignores it).
-
-**Both packages are published on NuGet.org**, currently through `0.14.2` — do not assume this is an undeployed library. Breaking changes are still fine (pre-v1 policy; no migration guides or changelogs are wanted), but a behaviour change under an existing key or signature is a real break for consumers: state the new contract in the docs rather than narrating the old one.
-
-**Publish**: use `just publish-nuget` for either a preview or official version; MinVer derives the version from the current tag/branch context (local publishing needs `NUGET_API_KEY`). Alternatively, use the `.github/workflows/publish.yml` workflow (`workflow_dispatch`, OIDC Trusted Publishing — no stored API key/secret; the `nuget-publish` GitHub environment must be configured). Remember: tags carry no `v` prefix.
-
----
-
-## CI/CD — GitHub Actions
-
-`.github/workflows/build.yml`. Two jobs: `build` (ubuntu+macOS matrix on push to `main`, runs `just build` + `just test-unit`) and `package` (after `build`, `just pack`, uploads artifact).
-
-`.github/workflows/integration.yml`. Runs both integration suites on pull requests to `main`, pushes to `main`, and manual dispatch. The matrix lists them literally — the former `discover` job and its script were deleted, since the set has been the same two projects (one per library) since 2026-03-18 and is already spelled out in `TemporalAgents.slnx` and the justfile. **Adding a third integration project means adding two lines to that matrix**; nothing detects the omission for you. Each entry restores, builds, and runs its suite with `Category!=HistoryCapture` (those tests generate the replay fixtures the unit suites consume).
-
-`.github/workflows/publish.yml`. `workflow_dispatch`-only `publish` job (`nuget-publish` environment, `id-token: write`). Verifies MinVer resolved a real tag (fails on the `0.0.0-*` fallback), `just pack`, then publishes to NuGet.org via OIDC Trusted Publishing (`NuGet/login@v1` exchanges the GitHub OIDC token for a short-lived key — no long-lived secret stored).
-
-**Required secrets**: none — publishing uses OIDC Trusted Publishing.
-
----
-
-## Run Samples
-
-Prerequisites: `temporal server start-dev` running + `OPENAI_API_KEY` (and optionally `OPENAI_API_BASE_URL`) configured via `dotnet user-secrets` or environment variables.
-
-```bash
-# MEAI samples
-dotnet run --project samples/MEAI/{DurableChat,DurableTools,HumanInTheLoop,DurableEmbeddings,CustomWorkflow}/...csproj
-dotnet run --project samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj
-
-# MAF samples
-dotnet run --project samples/MAF/{BasicAgent,WorkflowOrchestration,EvaluatorOptimizer,MultiAgentRouting,WorkflowRouting,HumanInTheLoop,AmbientAgent,ConfigurableAgent}/...csproj
-
-# Feature-specific demos
-dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj         # per-tool Temporal activities with write-tool no-retry
-dotnet run --project samples/MAF/ContextProviders/ContextProviders.csproj           # TodoProvider + AgentModeProvider via AddContextProvider
-dotnet run --project samples/MAF/Skills/Skills.csproj                               # UseSkills: file-based + inline skills with progressive-disclosure load_skill
-
-# SplitWorkerClient — Worker first, then Client in a separate terminal
-dotnet run --project samples/MAF/SplitWorkerClient/Worker/Worker.csproj
-dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
-```
-
----
-
-## Quick Troubleshooting
-
-| Issue | Solution |
-|---|---|
-| "Cannot find Temporalio package" | Use NuGet, not project refs; `dotnet restore` |
-| "Agent not registered" | Verify `.AddTemporalAgents()` includes the agent |
-| `InvalidOperationException` from `TemporalAIAgent` (called outside workflow) | `TemporalAIAgent` is workflow-context only. Obtain it via `WorkflowAgents.GetTemporalAgent` inside a `[Workflow]` method. For external callers, use `services.GetTemporalAgentProxy("Name")` instead. |
-| `GetTypeInfo metadata not provided` for `TemporalAgentSession` | Don't serialize via `DefaultOptions`; use `StateBag.Serialize()` |
-| Activity timeout (HITL) | Increase `DefaultActivityTimeout` (or per-agent `ActivityTimeout`) to accommodate human review time |
-| Worker won't start | `temporal server start-dev` running on `localhost:7233`? |
-| Search attributes missing in UI, or workflow start fails with "no mapping defined for search attribute" | `opts.EnableSearchAttributes` defaults to `true`; `AgentName`/`SessionCreatedAt`/`TurnCount` must be pre-registered before the worker starts — this is **not** automatic, even for a local `temporal server start-dev`. Start it with `--search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`; production clusters need the equivalent one-time CLI commands. |
-| Integration test "Unexpected workflow task failure" | `EnableSearchAttributes` defaults to `true` — use `TestEnvironmentHelper.StartLocalAsync()`, or set `opts.EnableSearchAttributes = false` to disable search attribute upserts |
-| Integration test suite hangs; can't tell which test | `just _test-individual <project>` — per-test loop, reports PASS/FAIL/HANG. Default 180s cap, parameterizable. |
-| Test command hangs and pipe-buffering hides output | `just _test-logged <project>` — writes to `/tmp/temporalagents-test-*.log`; `tail -f` separately. 600s default cap. |
-| Orphaned `temporal-sdk-dotnet` processes after `pkill` | `just list-orphans` + `just kill-orphans` — narrow to .NET SDK's extracted binary; safe across projects. |
-| Cross-project test hosts being killed | Use `just kill-test-hosts` (path-scoped) not unscoped `pkill`. Documented in `justfile` Process hygiene block. |
-| Locked agent worktrees won't remove | `just cleanup-stale-worktrees` — checks dirty state first, single `-f` only. Never use `-f -f` directly. |
-| New sample added but the canary misses it | Hardcoded internal lists intentionally skip interactive/multi-process samples. Run `just _verify-sample-coverage` to catch drift. |
-
----
-
-## References
-
-- **Temporal Documentation**: https://docs.temporal.io/
-- **Temporal .NET SDK**: https://github.com/temporalio/sdk-dotnet
-- **Microsoft Agent Framework**: https://github.com/microsoft/agent-framework
-
-### TemporalCommunity.Extensions.Agents (MAF)
-
-- **Quickstart**: [`docs/how-to/MAF/quickstart.md`](./docs/how-to/MAF/quickstart.md)
-- **Usage Reference**: [`docs/how-to/MAF/usage.md`](./docs/how-to/MAF/usage.md)
-- **Routing Patterns**: [`docs/how-to/MAF/routing.md`](./docs/how-to/MAF/routing.md)
-- **Testing Agents**: [`docs/how-to/MAF/testing-agents.md`](./docs/how-to/MAF/testing-agents.md)
-- **Observability**: [`docs/how-to/MAF/observability.md`](./docs/how-to/MAF/observability.md)
-- **LLM-Call Interception**: [`docs/how-to/MAF/llm-call-interception.md`](./docs/how-to/MAF/llm-call-interception.md)
-- **Scheduling**: [`docs/how-to/MAF/scheduling.md`](./docs/how-to/MAF/scheduling.md)
-- **Structured Output**: [`docs/how-to/MAF/structured-output.md`](./docs/how-to/MAF/structured-output.md)
-- **HITL Patterns**: [`docs/how-to/MAF/hitl-patterns.md`](./docs/how-to/MAF/hitl-patterns.md)
-- **History & Token Optimization**: [`docs/how-to/MAF/prompt-caching.md`](./docs/how-to/MAF/prompt-caching.md)
-- **Durable Agents (per-tool activities)**: [`docs/how-to/MAF/durable-agents.md`](./docs/how-to/MAF/durable-agents.md)
-- **Tool Interceptor**: [`docs/how-to/MAF/tool-interceptor.md`](./docs/how-to/MAF/tool-interceptor.md)
-- **Context Providers**: [`docs/how-to/MAF/context-providers.md`](./docs/how-to/MAF/context-providers.md)
-- **Skills**: [`docs/how-to/MAF/skills.md`](./docs/how-to/MAF/skills.md)
-- **MCP Tools**: [`docs/how-to/MAF/mcp-tools.md`](./docs/how-to/MAF/mcp-tools.md)
-- **Harness Agent Compatibility**: [`docs/how-to/MAF/harness-agent-compatibility.md`](./docs/how-to/MAF/harness-agent-compatibility.md)
-- **Do's and Don'ts**: [`docs/how-to/MAF/dos-and-donts.md`](./docs/how-to/MAF/dos-and-donts.md)
-- **Durability Guarantees**: [`docs/architecture/MAF/durability-and-determinism.md`](./docs/architecture/MAF/durability-and-determinism.md)
-- **Sessions and Workflow Loop**: [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](./docs/architecture/MAF/agent-sessions-and-workflow-loop.md)
-- **Pub/Sub Equivalents**: [`docs/architecture/MAF/pub-sub-and-event-driven.md`](./docs/architecture/MAF/pub-sub-and-event-driven.md)
-- **StateBag and AIContextProvider**: [`docs/architecture/MAF/session-statebag-and-context-providers.md`](./docs/architecture/MAF/session-statebag-and-context-providers.md)
-- **Agent-to-Agent Communication**: [`docs/architecture/MAF/agent-to-agent-communication.md`](./docs/architecture/MAF/agent-to-agent-communication.md)
-
-### TemporalCommunity.Extensions.AI (MEAI)
-
-- **Usage Guide**: [`docs/how-to/MEAI/usage.md`](./docs/how-to/MEAI/usage.md)
-- **Tool Functions**: [`docs/how-to/MEAI/tool-functions.md`](./docs/how-to/MEAI/tool-functions.md) (direct durable calls, managed sessions, worker-owned toolsets, and invocation-scoped factories)
-- **Embeddings**: [`docs/how-to/MEAI/embeddings.md`](./docs/how-to/MEAI/embeddings.md)
-- **Managed-Session Tool Rules**: [`docs/how-to/MEAI/managed-session-tool-rules.md`](./docs/how-to/MEAI/managed-session-tool-rules.md)
-- **MCP Tools**: [`docs/how-to/MEAI/mcp-tools.md`](./docs/how-to/MEAI/mcp-tools.md)
-- **Payload Codecs**: [`docs/how-to/MEAI/payload-codecs.md`](./docs/how-to/MEAI/payload-codecs.md)
-- **Testing**: [`docs/how-to/MEAI/testing.md`](./docs/how-to/MEAI/testing.md)
-- **Observability**: [`docs/how-to/MEAI/observability.md`](./docs/how-to/MEAI/observability.md)
-- **HITL Patterns**: [`docs/how-to/MEAI/hitl-patterns.md`](./docs/how-to/MEAI/hitl-patterns.md)
-- **Custom Workflow Output**: [`docs/how-to/MEAI/custom-workflow-output.md`](./docs/how-to/MEAI/custom-workflow-output.md)
-- **Durable Chat Pipeline**: [`docs/architecture/MEAI/durable-chat-pipeline.md`](./docs/architecture/MEAI/durable-chat-pipeline.md)
-- **Direct-Adapter Anti-Pattern**: [`docs/architecture/MEAI/direct-adapter-anti-pattern.md`](./docs/architecture/MEAI/direct-adapter-anti-pattern.md)
-- **Cross-Library Integration**: [`docs/architecture/MEAI/cross-library-integration.md`](./docs/architecture/MEAI/cross-library-integration.md)
+# TemporalAgents
+
+Two Temporal .NET SDK integrations for durable AI applications:
+
+- `TemporalCommunity.Extensions.Agents` — durable agent sessions on Microsoft Agent Framework. Depends on the AI library. Library guide: [`docs/how-to/MAF/usage.md`](./docs/how-to/MAF/usage.md).
+- `TemporalCommunity.Extensions.AI` — makes a plain MEAI `IChatClient` durable, no Agent Framework. Library guide: [`docs/how-to/MEAI/usage.md`](./docs/how-to/MEAI/usage.md).
+
+Docs: how-to guides in `docs/how-to/{MAF,MEAI}/`, design docs in `docs/architecture/`, combining the
+libraries or adding plugins in [`docs/library-combinations.md`](./docs/library-combinations.md).
+**Read before touching workflow code:** [`docs/architecture/MAF/durability-and-determinism.md`](./docs/architecture/MAF/durability-and-determinism.md).
+
+## Basics
+
+- .NET 10; both libraries also ship `netstandard2.1`. Solution is `TemporalAgents.slnx` (not `.sln`).
+- Minimum Temporal Service is 1.31.0. SDK pin is `global.json`; versions come from MinVer.
+- All build/test/pack entry points are `just` recipes: `just --list`.
+
+## Policy and release
+
+- Both packages are published on NuGet.org. Pre-v1, breaking changes are fine and no migration
+  guides or changelogs are wanted. But a behaviour change under an existing key or signature is a
+  real break for consumers: state the new contract in the docs instead of narrating the old one.
+- MinVer tags have **no `v` prefix** (`0.14.2`, not `v0.14.2`). Untagged commits version as a
+  prerelease of the next patch.
+- Publish with `just publish-nuget` (needs `NUGET_API_KEY`), or `.github/workflows/publish.yml`
+  (`workflow_dispatch`, `nuget-publish` environment, OIDC Trusted Publishing, no stored secret).
+  The workflow takes a `release_type` input. `preview` requires MinVer to compute a prerelease
+  version. `official` requires the dispatched commit to carry an exact tag that matches MinVer and
+  is stable SemVer (`X.Y.Z`). Either way it packs, runs the packed-package and down-level-runtime
+  gates, then pushes.
+
+## Registration (both libraries)
+
+- For co-hosted applications, register `services.AddHostedTemporalWorker(...)` then
+  `.AddDurableAI(...)` or `.AddTemporalAgents(...)`. Split MEAI deployments use
+  `services.AddDurableAIClient(...)` and worker-builder `.AddDurableAIWorker(...)`.
+  No plugin wrappers are shipped; add plugins through
+  `TemporalWorkerOptions.Plugins` / `TemporalClientConnectOptions.Plugins` (see
+  [`library-combinations.md`](./docs/library-combinations.md#using-temporal-sdk-plugins)).
+- `DurableAIDataConverter.Instance` must be on the Temporal client or `AIContent` subtypes lose
+  `$type` and silently deserialize as the base type. Both libraries fail fast on
+  a manual client with an incompatible converter. `AddTemporalClient(...)` swaps it in only while the
+  converter is still the SDK default; `AddHostedTemporalWorker(addr, ns, queue)` and the plugin
+  paths also wire it. Callers of `TemporalClient.ConnectAsync` must set it themselves.
+- Do not add `.UseFunctionInvocation()` to managed MEAI session clients or Agents clients;
+  the durable workflow owns the tool loop.
+
+## Determinism
+
+- Never call `ActivitySource.StartActivity()` inside `[Workflow]`; it is non-deterministic on
+  replay. Spans live in activities and clients (see `docs/how-to/MAF/observability.md`).
+- Use `Workflow.UtcNow` and `Workflow.NewGuid()`; never `DateTime.UtcNow`, `Random` or
+  `Guid.NewGuid()` in workflows.
+- Do not construct `DurableChatClient`/`ChatClientBuilder` composition inside
+  `[WorkflowRun]` / `[WorkflowUpdate]` methods:
+  [`direct-adapter-anti-pattern.md`](./docs/architecture/MEAI/direct-adapter-anti-pattern.md).
+- OpenTelemetry sources to register: each library's `ActivitySourceName` constant
+  (`DurableChatTelemetry`, `TemporalAgentTelemetry`) plus Temporalio's `TracingInterceptor`
+  `ClientSource` / `WorkflowsSource` / `ActivitiesSource`. See `docs/how-to/MAF/observability.md`.
+
+## Cross-library invariants
+
+- **Interceptor contract lives in the AI library** (`TemporalCommunity.Extensions.AI.Tools`):
+  `IDurableToolInterceptor<in TContext>`, `DurableToolDecision`, `DurableToolContext`.
+  `IAgentToolInterceptor` and `AgentToolContext` (Agents) extend them. The `in` variance is
+  load-bearing: a `DurableToolContext` interceptor must stay assignable to the agent one.
+  `DurableToolDecision` is not wire-serialized.
+- **Agent pipeline** (`ConfigureAgentPipeline`): wrappers must be transparent, non-disposable
+  `DelegatingAIAgent` instances. The pipeline is built per `RunDurableAgentStep` attempt and
+  no pipeline is cached. Middleware may make retry-safe StateBag changes but cannot replace the
+  session. Details: `docs/how-to/MAF/llm-call-interception.md`.
+- `AIFunction.AsDurable()` activities run on the calling workflow's task queue.
+  `DurableExecutionOptions.TaskQueue` does not apply to them.
+- MEAI managed sessions reject caller-supplied `ChatOptions.Tools` and inline
+  `UseFunctionInvocation()` loops: `docs/how-to/MEAI/managed-session-tool-rules.md`.
+- Write-style (non-idempotent) tools must not retry: `agent.AddTool(tool, opts => opts.NoRetry())`
+  (Agents) or `AddDurableTool(tool, opts => opts.NoRetry())` (AI). Otherwise a transient failure
+  re-executes the side effect.
+- `TemporalAgentSession` is **not** in any source-gen context; resolving it through
+  `DefaultOptions.GetTypeInfo` silently uses reflection or fails with
+  `GetTypeInfo metadata not provided`. Serialize through
+  `TemporalAgentSessionSnapshot` (registered in `AgentSessionJsonContext`). Its `stateBag` and
+  `history` are omitted when null, and a snapshot without `history` is the supported legacy shape
+  that restores as empty history. `TemporalAgentSession.SerializeStateBag()` delegates to
+  `StateBag.Serialize()`, not session serialization.
+- **Options naming asymmetry is intentional; do not rename.** `DurableExecutionOptions` uses
+  unprefixed names (`ActivityTimeout`). `TemporalAgentsOptions` worker-level defaults use
+  `Default*` (`DefaultActivityTimeout`). Per-agent `DurableAgentBuilder` uses unprefixed names.
+  Rule: `effective = registration.X ?? options.DefaultX`.
+- Session ownership and StateBag merge rules: see
+  [`session-statebag-and-context-providers.md`](./docs/architecture/MAF/session-statebag-and-context-providers.md).
+
+## SDK and type gotchas
+
+- `RpcException` is in `Temporalio.Exceptions`, not `Grpc.Core`.
+- `WorkflowIdConflictPolicy` is in `Temporalio.Api.Enums.V1`.
+- `Workflow.CreateContinueAsNewException` takes `Expression<Func<TWorkflow, Task>>`; no collection
+  expressions inside the lambda.
+- `CompactionMarkerEntry` lives in the AI library (`TemporalCommunity.Extensions.AI.Session`) so
+  both source-gen contexts see its discriminator.
+- HITL types `DurableApprovalRequest` / `DurableApprovalDecision` are in
+  `TemporalCommunity.Extensions.AI.Approvals`, for both libraries.
+
+## Build, test, triage
+
+Core recipes: `just build`, `just test-unit` (no server), `just test-integration` (embedded
+servers), `just test`, `just pack`, `just _verify-doc-links`. `just ci` runs clean, build, unit
+tests, the sample-catalog, doc-link and doc-snippet gates, then pack. It does **not** run
+integration tests or sample canaries (`just test`, `just test-samples`).
+
+- **Search attributes.** Agents `EnableSearchAttributes` defaults to `true`; the AI library
+  defaults to `false`. Pre-register before the worker starts, including on
+  `temporal server start-dev` (`--search-attribute AgentName=Keyword ...`): Agents needs
+  `AgentName` (Keyword), `SessionCreatedAt` (Datetime) and `TurnCount` (Int); the AI library, when
+  enabled, needs only `SessionCreatedAt` (Datetime) and `TurnCount` (Long). Otherwise workflows fail with "no mapping defined
+  for search attribute" or "Unexpected workflow task failure". Production needs the equivalent
+  one-time CLI commands.
+- Integration tests start servers via `TemporalServiceTestEnvironment.StartLocalAsync()` (Agents:
+  through `TestEnvironmentHelper`, which registers the attributes), never bare
+  `WorkflowEnvironment.StartLocalAsync()`.
+- **Hung suite:** `just _test-individual <project> [filter] [limit]` reports PASS/FAIL/HANG per
+  test; `just _test-logged <project>` writes to a `/tmp` log. Both are `_`-prefixed, so hidden
+  from `just --list`. Never pipe `dotnet test` through `tail`; pipe buffering hides output.
+- **Orphaned servers:** `just list-orphans`, then `just kill-orphans` (the SDK's extracted
+  `temporal-sdk-dotnet` binary only) or `just kill-test-hosts` (path-scoped to this repo). Never
+  bare `pkill`; it kills other projects' test hosts.
+- **Worktrees:** `just cleanup-stale-worktrees` checks dirty state first and uses a single `-f`;
+  never `git worktree remove -f -f` directly.
+- **Sample canary:** exit code is not the assertion. Each sample must print its output markers.
+  Interactive and multi-process samples are skipped on purpose; `just _verify-sample-coverage`
+  catches drift. Needs `OPENAI_API_KEY`, GNU `timeout`, `nc`, and a server on `localhost:7233`;
+  `_sample-preflight` checks them (`just doctor` covers only the temporal CLI, the OpenAI env vars
+  and server reachability).
+- **Doc gates** may use only POSIX tools and `python3`. `|| true` also swallows "command not
+  found", so a missing dependency must fail loudly. No apostrophes in comments inside `<( ... )`;
+  bash tracks quotes there and the parse breaks.
+- **CI:** `.github/workflows/integration.yml` lists the two integration projects literally. Adding
+  a third needs two new matrix lines; nothing detects the omission.
+- Test authoring: `Assert.Throws<T>` requires the exact type, not a subtype. Prefer hand-written
+  stubs (`StubAIAgent`, `TestChatClient`) over Moq/FakeItEasy. Patterns:
+  `docs/how-to/MAF/testing-agents.md`, `docs/how-to/MEAI/testing.md`.

@@ -84,6 +84,20 @@ The history-summarizer activity applies the same telemetry content-capture polic
 activities, including an explicit `CaptureTelemetryContent = false` override on discoverable MEAI
 OpenTelemetry wrappers.
 
+## Compaction markers
+
+`CompactionMarkerEntry` is a polymorphic subtype of `DurableSessionEntry` that records a history
+compaction of a bounded contiguous range of entries and complete turns, identified by endpoint IDs
+and counts, with a `DurableSessionSummary` replacement. It lives in the AI library
+(`TemporalCommunity.Extensions.AI.Session`), not the Agents
+library, so that both libraries' source-generated JSON contexts see the `"compaction-marker"`
+discriminator. Defining it in Agents would leave the AI context unable to round-trip it.
+
+`CompactedAt` is a `[JsonIgnore]` alias of `CreatedAt`, so the timestamp is not duplicated on the
+wire. `CompactionMarkerEntry` and `DurableCompactionMarkerException` are both
+`[Experimental("TA002")]` while compaction is in active development; the wire shape may change.
+`DurableMixedPatternException` is stable.
+
 ## Direct-adapter task-queue boundary
 
 The public `DurableChatClient` adapter can be constructed inside a custom workflow. Its
