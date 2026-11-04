@@ -22,7 +22,10 @@ internal static class DurableModelContextBudget
             return messages.ToList();
         }
 
-        var estimate = Estimate(messages, options, estimator);
+        var heuristicEstimator = estimator is null
+            ? new HeuristicDurableChatTokenEstimator(messages, options)
+            : null;
+        var estimate = heuristicEstimator?.EstimateFrom(0) ?? Estimate(messages, options, estimator);
         if (Fits(estimate, outputTokenReserve, maximumContextTokens.Value))
         {
             return messages.ToList();
@@ -42,6 +45,16 @@ internal static class DurableModelContextBudget
             }
 
             dropThrough = range.EndIndex;
+            if (heuristicEstimator is not null)
+            {
+                estimate = heuristicEstimator.EstimateFrom(dropThrough);
+                if (Fits(estimate, outputTokenReserve, maximumContextTokens.Value))
+                {
+                    return messages.Skip(dropThrough).ToArray();
+                }
+                continue;
+            }
+
             var candidate = messages.Skip(dropThrough).ToArray();
             estimate = Estimate(candidate, options, estimator);
             if (Fits(estimate, outputTokenReserve, maximumContextTokens.Value))
@@ -84,7 +97,7 @@ internal static class DurableModelContextBudget
         IDurableChatTokenEstimator? estimator)
     {
         var estimate = estimator?.EstimateInputTokens(messages, options)
-            ?? HeuristicDurableChatTokenEstimator.EstimateInputTokens(messages, options);
+            ?? new HeuristicDurableChatTokenEstimator(messages, options).EstimateFrom(0);
         ArgumentOutOfRangeException.ThrowIfNegative(estimate);
         return estimate;
     }
@@ -126,12 +139,21 @@ internal static class DurableModelContextBudget
 
     private sealed class HeuristicDurableChatTokenEstimator
     {
-        internal static int EstimateInputTokens(IReadOnlyList<ChatMessage> messages, ChatOptions options)
-        {
-            var byteCount = JsonSerializer.SerializeToUtf8Bytes(
-                messages,
-                AIJsonUtilities.DefaultOptions).Length;
+        private readonly long[] cumulativeMessageByteCounts;
+        private readonly int fixedContextByteCount;
 
+        internal HeuristicDurableChatTokenEstimator(IReadOnlyList<ChatMessage> messages, ChatOptions options)
+        {
+            this.cumulativeMessageByteCounts = new long[messages.Count + 1];
+            for (var index = 0; index < messages.Count; index++)
+            {
+                this.cumulativeMessageByteCounts[index + 1] = this.cumulativeMessageByteCounts[index]
+                    + JsonSerializer.SerializeToUtf8Bytes(
+                        messages[index],
+                        AIJsonUtilities.DefaultOptions).Length;
+            }
+
+            var byteCount = 0;
             if (!string.IsNullOrEmpty(options.Instructions))
             {
                 byteCount += Encoding.UTF8.GetByteCount(options.Instructions);
@@ -157,9 +179,23 @@ internal static class DurableModelContextBudget
                 }
             }
 
+            this.fixedContextByteCount = byteCount;
+        }
+
+        internal int EstimateFrom(int startIndex)
+        {
+            var messageCount = this.cumulativeMessageByteCounts.Length - startIndex - 1;
+            var messageByteCount = this.cumulativeMessageByteCounts[^1]
+                - this.cumulativeMessageByteCounts[startIndex];
+            // A JSON array has two brackets, with one comma between each adjacent pair.
+            var serializedMessagesByteCount = messageCount == 0
+                ? 2
+                : messageByteCount + messageCount + 1;
+            var byteCount = checked((int)(serializedMessagesByteCount + this.fixedContextByteCount));
+
             // JSON byte length overestimates many tokenizers while remaining a deterministic,
             // provider-independent fallback. Applications can register a model-specific estimator.
-            return checked((byteCount + 2) / 3 + (messages.Count * 4));
+            return checked((byteCount + 2) / 3 + (messageCount * 4));
         }
     }
 }
