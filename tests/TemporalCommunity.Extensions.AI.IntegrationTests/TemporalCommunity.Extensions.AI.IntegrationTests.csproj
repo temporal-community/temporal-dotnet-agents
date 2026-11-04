@@ -12,6 +12,7 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../../src/TemporalCommunity.Extensions.AI/TemporalCommunity.Extensions.AI.csproj" />
     <ProjectReference Include="../../samples/MCP/WorkflowToolServer/WorkflowToolServer.csproj" />
+    <ProjectReference Include="../../samples/MEAI/ScheduledChat/ScheduledChat.csproj" />
     <ProjectReference Include="../TemporalCommunity.Extensions.Tests.Shared/TemporalCommunity.Extensions.Tests.Shared.csproj" />
     <Compile Include="../TemporalCommunity.Extensions.AI.Tests/Compat/DurableChatClientWorkflow.cs"
              Link="Compat/DurableChatClientWorkflow.cs" />

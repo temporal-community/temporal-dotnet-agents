@@ -29,6 +29,7 @@ Welcome to the documentation for **Temporal .NET Agents**, providing durable exe
 *`TemporalCommunity.Extensions.AI`*
 
 - **[Usage & Getting Started](how-to/MEAI/usage.md)** — Setting up `DurableChatSessionClient` and `AddDurableAI`.
+- **[Scheduled Chat Turns](how-to/MEAI/scheduling.md)** — Native schedules, trigger workflows, occurrence deduplication and bounded backfills.
 - **[Durable Tools](how-to/MEAI/tool-functions.md)** — Converting `AIFunction` into durable activities (`AsDurable`).
 - **[Human-in-the-Loop (HITL)](how-to/MEAI/hitl-patterns.md)** — Approval requests, signals, and workflow updates.
 - **[Embeddings](how-to/MEAI/embeddings.md)** — Use an application-owned Temporal activity for MEAI embedding generation.

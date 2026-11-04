@@ -18,6 +18,7 @@
     <Project Path="benchmarks/TemporalCommunity.Extensions.AI.Benchmarks/TemporalCommunity.Extensions.AI.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/samples/MEAI/">
+    <Project Path="samples/MEAI/ScheduledChat/ScheduledChat.csproj" />
     <Project Path="samples/MEAI/DurableChat/DurableChat.csproj" />
     <Project Path="samples/MEAI/DurableTools/DurableTools.csproj" />
     <Project Path="samples/MEAI/OpenTelemetry/DurableOpenTelemetry.csproj" />

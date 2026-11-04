@@ -97,6 +97,10 @@ See [Phase 0 research and harness](testing.md#phase-0-research-and-harness) for 
 
 ## Built-in managed session
 
+For recurring turns, see [scheduled durable chat](scheduling.md): use a native Temporal Schedule
+to start a trigger workflow whose activity submits the turn, rather than scheduling a session
+workflow directly.
+
 Register a `ChatClient`, a durable tool, and the worker in one place. This is close to the
 package README's quick start but shows a couple of production-shaped defaults (bounded activity
 timeout, session TTL, tool-call cap, and a per-tool override) together in one block:

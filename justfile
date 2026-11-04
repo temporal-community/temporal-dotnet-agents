@@ -714,6 +714,7 @@ _test-samples-meai: build _sample-preflight
         "DurableEmbeddings:samples/MEAI/DurableEmbeddings:90:Generated embedding with" \
         "CustomWorkflow:samples/MEAI/CustomWorkflow:90:Cart actions:" \
         "DirectAdapters:samples/MEAI/DirectAdapters:90:City      : Seattle|Done." \
+        "ScheduledChat:samples/MEAI/ScheduledChat:90:Scheduled turns retained: 2" \
         "OpenTelemetry:samples/MEAI/OpenTelemetry:90:telemetry.sdk.name: opentelemetry" \
         "ToolInterceptor:samples/MEAI/ToolInterceptor:120:delete_file ran after human approval" \
         "HumanInTheLoop:samples/MEAI/HumanInTheLoop:120:messages persisted in workflow state.|Done." \

@@ -162,6 +162,18 @@ usage_snippet='// BEGIN SNIPPET docs/how-to/MEAI/usage.md#send
 run_case meai-usage-uncovered reject "$usage_doc" '' '' 'docs/how-to/MEAI/usage.md'
 run_case meai-usage-covered pass "$usage_doc" "$usage_snippet" '' 'docs/how-to/MEAI/usage.md'
 
+scheduling_doc='# Scheduling
+
+## Backfill
+
+```csharp
+await schedule.BackfillAsync(backfills);
+```'
+scheduling_snippet='// BEGIN SNIPPET docs/how-to/MEAI/scheduling.md#backfill
+// END SNIPPET docs/how-to/MEAI/scheduling.md#backfill'
+run_case meai-scheduling-uncovered reject "$scheduling_doc" '' '' 'docs/how-to/MEAI/scheduling.md'
+run_case meai-scheduling-covered pass "$scheduling_doc" "$scheduling_snippet" '' 'docs/how-to/MEAI/scheduling.md'
+
 custom_workflow_doc='# Custom workflow output
 
 ## Package-managed typed turns
