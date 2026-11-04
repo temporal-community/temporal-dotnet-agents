@@ -33,7 +33,7 @@ public class DurableFunctionActivitiesTests
         var ex = await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(
             () => env.RunAsync(() => activities.InvokeFunctionAsync(input)));
 
-        Assert.Equal("DurableToolInvocationFailed", ex.ErrorType);
+        Assert.Equal(nameof(InvalidOperationException), ex.ErrorType);
         Assert.False(ex.NonRetryable);
         Assert.DoesNotContain("nonexistent_tool", ex.Message, StringComparison.Ordinal);
     }
@@ -60,7 +60,7 @@ public class DurableFunctionActivitiesTests
         var ex = await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(
             () => env.RunAsync(() => activities.InvokeFunctionAsync(input)));
 
-        Assert.Equal("DurableToolInvocationFailed", ex.ErrorType);
+        Assert.Equal(nameof(InvalidOperationException), ex.ErrorType);
         Assert.False(ex.NonRetryable);
         Assert.Equal("Durable activity failed; failure details were omitted.", ex.Message);
         Assert.Null(ex.InnerException);
@@ -158,7 +158,7 @@ public class DurableFunctionActivitiesTests
                 new DurableFunctionInput { FunctionName = function.Name })));
 
         Assert.False(env.CancellationTokenSource.IsCancellationRequested);
-        Assert.Equal("DurableToolInvocationFailed", exception.ErrorType);
+        Assert.Equal(nameof(TaskCanceledException), exception.ErrorType);
         Assert.False(exception.NonRetryable);
         Assert.Equal("Durable activity failed; failure details were omitted.", exception.Message);
         Assert.Null(exception.InnerException);
@@ -210,7 +210,7 @@ public class DurableFunctionActivitiesTests
         var exception = await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(
             () => env.RunAsync(() => activities.InvokeFunctionAsync(input)));
 
-        Assert.Equal("DurableToolInvocationFailed", exception.ErrorType);
+        Assert.Equal(nameof(InvalidOperationException), exception.ErrorType);
         Assert.False(exception.NonRetryable);
         Assert.DoesNotContain(new string('s', 100), exception.Message, StringComparison.Ordinal);
         Assert.Null(exception.InnerException);

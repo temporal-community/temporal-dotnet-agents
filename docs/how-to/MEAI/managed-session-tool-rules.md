@@ -81,6 +81,19 @@ the same call ID; the tool is not retried just to obtain a smaller response. Ret
 or an external reference for large data. Activity failure messages are also bounded and do not
 carry original exception details or stack traces across the Temporal boundary.
 
+Failure sanitization retains ordinary CLR exception class names for Temporal
+`RetryPolicy.NonRetryableErrorTypes` matching and retains an `ApplicationFailureException`'s
+`NextRetryDelay`. Explicit permanent provider and result-transport classifications keep their
+library-defined error types. Dynamic application error types remain UTF-8 bounded; use short,
+stable error identities rather than embedding exception content in them.
+
+Permanent model-step failures, including `DurableContextBudgetExceeded`,
+`DurableContextReducerNotFound`, and `DurableContextReducerInvalidOutput`, end the turn with
+their specific error type. They do not consume the managed consecutive-error allowance or
+schedule another model activity. The same applies to application failures explicitly marked
+non-retryable or excluded by the model activity's `NonRetryableErrorTypes`. Retryable failures
+still use the configured activity retry policy and then the managed consecutive-error allowance.
+
 ### `NoRetry()` for side-effecting tools
 
 A tool with an external, non-idempotent effect (send email, charge a card, post a message) should

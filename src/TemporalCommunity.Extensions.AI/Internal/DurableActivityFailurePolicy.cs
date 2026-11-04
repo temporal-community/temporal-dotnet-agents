@@ -22,7 +22,11 @@ internal static class DurableActivityFailurePolicy
         var errorType = applicationFailure?.ErrorType;
         if (string.IsNullOrWhiteSpace(errorType))
         {
-            errorType = fallbackErrorType;
+            // Explicit permanent classifications (provider/result-transport failures) use the
+            // caller's stable type. Otherwise match the SDK's CLR exception retry identity.
+            errorType = applicationFailure is not null || nonRetryable == true
+                ? fallbackErrorType
+                : exception.GetType().Name;
         }
 
         var isKnownSafeConfigurationFailure =
@@ -41,8 +45,13 @@ internal static class DurableActivityFailurePolicy
         return new ApplicationFailureException(
             message,
             boundedInner,
-            errorType: TruncateUtf8(errorType, MaximumErrorTypeBytes),
-            nonRetryable: nonRetryable ?? applicationFailure?.NonRetryable ?? false);
+            // CLR type names are static metadata, not exception content. Truncating them would
+            // silently break RetryPolicy.NonRetryableErrorTypes matching.
+            errorType: applicationFailure is null && nonRetryable != true
+                ? errorType
+                : TruncateUtf8(errorType, MaximumErrorTypeBytes),
+            nonRetryable: nonRetryable ?? applicationFailure?.NonRetryable ?? false,
+            nextRetryDelay: applicationFailure?.NextRetryDelay);
     }
 
     internal static string TruncateUtf8(string value, int maximumBytes)

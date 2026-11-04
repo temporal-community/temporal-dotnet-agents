@@ -113,7 +113,7 @@ public class DurableChatActivitiesStreamingTests
         var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
             () => env.RunAsync(() => activities.GetResponseAsync(SimpleInput())));
 
-        Assert.Equal("DurableChatActivityFailed", exception.ErrorType);
+        Assert.Equal(nameof(InvalidOperationException), exception.ErrorType);
         Assert.False(exception.NonRetryable);
         Assert.DoesNotContain(new string('s', 100), exception.Message, StringComparison.Ordinal);
         Assert.Null(exception.InnerException);

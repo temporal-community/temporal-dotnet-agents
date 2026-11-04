@@ -131,6 +131,18 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         nonRetryable: true);
                 }
 
+                var permanentStepFailure = FindPermanentModelStepFailure(llmFailure, stepActivityOptions);
+                if (permanentStepFailure is not null)
+                {
+                    // Context fitting/reduction happens in this activity too. A permanent
+                    // failure cannot be repaired by dispatching the identical input again.
+                    throw new ApplicationFailureException(
+                        "The model activity failed with a non-retryable error.",
+                        permanentStepFailure,
+                        errorType: permanentStepFailure.ErrorType,
+                        nonRetryable: true);
+                }
+
                 // Retry-hardening (Part 3): the LLM-step activity exhausted its RetryPolicy (bounded
                 // backstop). This arrives as an ActivityFailureException. Route it through the SAME consecutive-error
                 // counter that tool failures use so the MaximumConsecutiveErrorsPerRequest bound
@@ -845,6 +857,41 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             declaration.Name,
             toolName,
             StringComparison.Ordinal));
+
+    private static ApplicationFailureException? FindPermanentModelStepFailure(
+        Exception exception,
+        ActivityOptions activityOptions)
+    {
+        var pending = new Stack<Exception>();
+        pending.Push(exception);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (current is ApplicationFailureException failure
+                && (failure.NonRetryable
+                    || (failure.ErrorType is { } errorType
+                        && activityOptions.RetryPolicy?.NonRetryableErrorTypes?.Contains(
+                            errorType,
+                            StringComparer.Ordinal) == true)))
+            {
+                return failure;
+            }
+
+            if (current is AggregateException aggregate)
+            {
+                foreach (var inner in aggregate.InnerExceptions)
+                {
+                    pending.Push(inner);
+                }
+            }
+            else if (current.InnerException is { } inner)
+            {
+                pending.Push(inner);
+            }
+        }
+
+        return null;
+    }
 
     private static ApplicationFailureException? CreateFatalToolFailure(
         Exception? exception,
