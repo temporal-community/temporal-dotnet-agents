@@ -47,6 +47,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private bool _historyRecoveryOperationActive;
     private bool _historyRecoveryCanAttemptedThisRun;
     private List<DurableSessionEntry>? _preparedHistory;
+    private int _preparedHistorySourceCount;
 
     private const int MaximumHistoryRecoveryRetriesPerRun = 3;
     private const int MaximumHistoryRecoveryRetriesPerIncident = 9;
@@ -2771,6 +2772,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 "continue-as-new workflow input");
         }
         _preparedHistory = projection;
+        _preparedHistorySourceCount = _history.Count;
         _historyRecovery = recoveredState;
         Input = input with { HistoryRecovery = _historyRecovery };
         _historyRecoveryRetriesThisRun = 0;
@@ -2838,7 +2840,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         DurableChatWorkflowInput input,
         DateTimeOffset originalCreatedAt)
     {
-        while (_historyRecovery.IsBlocked && !_shutdownRequested)
+        while (true)
         {
             await Workflow.WaitConditionAsync(
                 () => !_historyRecovery.IsBlocked
@@ -2846,6 +2848,36 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                       || CanContinueAsNewForHistoryRecovery).ConfigureAwait(true);
             if (_shutdownRequested || !_historyRecovery.IsBlocked)
             {
+                await Workflow.WaitConditionAsync(
+                    () => Workflow.AllHandlersFinished
+                          && !_isProcessing
+                          && !HasPendingBackgroundTurns).ConfigureAwait(true);
+                if (!_shutdownRequested && _preparedHistory is not null
+                    && _history.Count != _preparedHistorySourceCount)
+                {
+                    // Recovery can finish while an already-admitted turn is still running.
+                    // Rebuild its projection from the drained history, not the partial turn.
+                    var outcome = _historyRecovery.LastOutcome!;
+                    try
+                    {
+                        var projection = outcome == "trim-succeeded"
+                            ? CreateExplicitTrimProjection(_history)
+                            : await ApplyConfiguredHistoryCompactionAsync(_history.ToList())
+                                .ConfigureAwait(true);
+                        CompleteHistoryRecovery(projection, outcome);
+                        continue;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        RecordHistoryRecoveryFailure(exception, "compaction-blocked");
+                        _continueAsNewPending = false;
+                        continue;
+                    }
+                }
                 return;
             }
 

@@ -440,6 +440,15 @@ concurrent, over-limit, or reserve-exhausted recovery requests are rejected by u
 before acceptance. If history headroom or protected content prevents recovery, the session remains
 blocked; Temporal/server command limits can still prevent progress.
 
+Successful recovery closes new-turn admission and drains all already-admitted handlers and
+background turns before restarting. A recovery result reports that its projection succeeded,
+not that Continue-as-New has already happened. If an admitted turn finishes during the drain,
+the projection is rebuilt from the completed history and validated again; a failure leaves the
+session blocked rather than carrying a partial or stale turn. Pending approvals stay in the old
+run until resolved, cancelled with their turn, or expired by their finite approval timeout or
+history reserve. As with normal compaction, an elapsed idle deadline or `RequestShutdown` does
+not abandon admitted handlers: shutdown waits for that drain and then completes without restarting.
+
 ```csharp
 var status = await sessionClient.GetHistoryBudgetAsync(conversationId);
 if (status.IsHistoryBlocked)
