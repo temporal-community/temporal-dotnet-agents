@@ -10,6 +10,34 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 public sealed class DurableHistorySummarizerTests
 {
     [Fact]
+    public async Task SummarizeHistoryPrefix_AcceptsInformationalCallWithoutResult()
+    {
+        var client = new CapturingChatClient();
+        using var services = new ServiceCollection()
+            .AddSingleton<IChatClient>(client)
+            .BuildServiceProvider();
+        var activities = new DurableChatActivities(services, loggerFactory: null);
+
+        var result = await activities.SummarizeHistoryPrefixAsync(new DurableHistorySummarizationInput
+        {
+            Turns =
+            [
+                Turn("informational-turn",
+                    new ChatMessage(ChatRole.User, "historical request"),
+                    new ChatMessage(ChatRole.Assistant,
+                    [
+                        new FunctionCallContent("information-only", "lookup") { InformationalOnly = true },
+                    ]),
+                    new ChatMessage(ChatRole.Assistant, "historical answer")),
+            ],
+        });
+
+        Assert.Equal(1, result.SummarizedTurnCount);
+        Assert.Equal("summary result", result.Summary.Text);
+        Assert.Contains("information-only", Assert.Single(client.LastMessages!).Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SummarizeHistoryPrefix_SelectsLargestFittingPrefixAndRendersToolContentAsData()
     {
         var client = new CapturingChatClient();

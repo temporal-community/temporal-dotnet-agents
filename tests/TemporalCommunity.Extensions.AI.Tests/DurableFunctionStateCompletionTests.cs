@@ -64,10 +64,57 @@ public class DurableFunctionStateCompletionTests
         Assert.Equal(1, invocationCount);
     }
 
+    [Fact]
+    public async Task CompletionInternalTimeout_IsNonRetryableAfterToolEffectCompletes()
+    {
+        var invocationCount = 0;
+        using var timeout = new CancellationTokenSource();
+        timeout.Cancel();
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => InvokeAsync(
+                DurableToolDispatchMode.Sequential,
+                (_, activityToken) =>
+                {
+                    Assert.False(activityToken.IsCancellationRequested);
+                    throw new OperationCanceledException("completion timeout", timeout.Token);
+                },
+                () => invocationCount++));
+
+        Assert.True(exception.NonRetryable);
+        Assert.Equal(nameof(DurableConfigurationException), exception.ErrorType);
+        Assert.Null(exception.InnerException);
+        Assert.Equal(1, invocationCount);
+    }
+
+    [Fact]
+    public async Task CompletionActivityCancellation_PreservesActivityCancellation()
+    {
+        var invocationCount = 0;
+        var environment = new ActivityEnvironment();
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => InvokeAsync(
+                DurableToolDispatchMode.Sequential,
+                (_, activityToken) =>
+                {
+                    environment.Cancel();
+                    activityToken.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(DurableStateUpdate<TurnState>.Unchanged);
+                },
+                () => invocationCount++,
+                environment));
+
+        Assert.Equal(environment.CancellationTokenSource.Token, exception.CancellationToken);
+        Assert.True(exception.CancellationToken.IsCancellationRequested);
+        Assert.Equal(1, invocationCount);
+    }
+
     private static Task<DurableFunctionOutput> InvokeAsync(
         DurableToolDispatchMode dispatchMode,
         Func<object?, CancellationToken, ValueTask<DurableStateUpdate<TurnState>>> completion,
-        Action? onInvoke = null)
+        Action? onInvoke = null,
+        ActivityEnvironment? environment = null)
     {
         var declarationFunction = AIFunctionFactory.Create(() => "ok", "stateful_tool");
         var declaration = DurableFunctionDeclarationSnapshot.Create(
@@ -106,7 +153,7 @@ public class DurableFunctionStateCompletionTests
             TurnNumber = 1,
             IdempotencyKeyVersion = DurableToolIdempotencyKey.CurrentVersion,
         };
-        var environment = new ActivityEnvironment
+        environment ??= new ActivityEnvironment
         {
             Info = ActivityEnvironment.DefaultInfo with
             {

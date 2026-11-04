@@ -33,11 +33,14 @@ internal sealed class DurableFunctionActivities(
     private async Task<DurableFunctionOutput> RunBoundedActivityAsync(
         DurableFunctionInput input)
     {
+        var context = ActivityExecutionContext.Current;
         try
         {
-            return await InvokeFunctionCoreAsync(input).ConfigureAwait(false);
+            return await Internal.DurableActivityHeartbeat.RunWithHeartbeatsAsync(
+                context,
+                () => InvokeFunctionCoreAsync(input)).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
         {
             throw;
         }
@@ -54,6 +57,7 @@ internal sealed class DurableFunctionActivities(
     {
         var ctx = ActivityExecutionContext.Current;
         var ct = ctx.CancellationToken;
+        ct.ThrowIfCancellationRequested();
 
         Internal.DurableToolFactoryActivation? activation = null;
         AIFunction function;
@@ -168,7 +172,19 @@ internal sealed class DurableFunctionActivities(
                 : new AIFunctionArguments();
             arguments.Services = serviceProvider;
 
-            var result = await function.InvokeAsync(arguments, ct).ConfigureAwait(false);
+            object? result;
+            try
+            {
+                result = await function.InvokeAsync(arguments, ct).ConfigureAwait(false);
+            }
+            catch (JsonException exception)
+            {
+                throw new ApplicationFailureException(
+                    "The durable tool result could not be serialized after invocation.",
+                    exception,
+                    errorType: "DurableToolResultSerializationFailed",
+                    nonRetryable: true);
+            }
 
             Internal.DurableStateUpdateJson stateUpdate = default;
             if (activation?.CompleteState is not null)
@@ -177,7 +193,7 @@ internal sealed class DurableFunctionActivities(
                 {
                     stateUpdate = await activation.CompleteState(result, ct).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
                     throw;
                 }
@@ -271,10 +287,26 @@ internal sealed class DurableFunctionActivities(
     {
         if (!string.IsNullOrEmpty(value))
         {
-            activity?.SetTag(name, value.Length <= maximumLength
-                ? value
-                : value[..maximumLength]);
+            activity?.SetTag(name, TruncateTelemetryValue(value, maximumLength));
         }
+    }
+
+    private static string TruncateTelemetryValue(string value, int maximumLength)
+    {
+        if (value.Length <= maximumLength)
+        {
+            return value;
+        }
+
+        var length = maximumLength;
+        if (length > 0
+            && char.IsHighSurrogate(value[length - 1])
+            && char.IsLowSurrogate(value[length]))
+        {
+            length--;
+        }
+
+        return value[..length];
     }
 
     private string? SerializeBoundedTelemetryContent(object? value)
@@ -285,7 +317,7 @@ internal sealed class DurableFunctionActivities(
             const string truncatedMarker = "...[truncated]";
             return serialized.Length <= 4096
                 ? serialized
-                : serialized[..(4096 - truncatedMarker.Length)] + truncatedMarker;
+                : TruncateTelemetryValue(serialized, 4096 - truncatedMarker.Length) + truncatedMarker;
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -302,7 +334,7 @@ internal sealed class DurableFunctionActivities(
         var errorType = exception is ApplicationFailureException { ErrorType: { Length: > 0 } type }
             ? type
             : exception.GetType().Name;
-        return errorType.Length <= 64 ? errorType : errorType[..64];
+        return TruncateTelemetryValue(errorType, 64);
     }
 
     private void ValidateWorkerOwnedBinding(DurableFunctionInput input)

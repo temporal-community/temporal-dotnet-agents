@@ -170,6 +170,56 @@ public sealed class DurableToolsetTelemetryTests
     }
 
     [Fact]
+    public async Task ToolInvocation_MetadataTruncationDoesNotSplitSurrogatePairs()
+    {
+        using var capture = new TelemetryCapture();
+        var descriptionPrefix = new string('d', 255);
+        var identifierPrefix = new string('i', 127);
+        var function = AIFunctionFactory.Create(
+            () => "ok",
+            "unicode_tool",
+            descriptionPrefix + "\U0001F600suffix");
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [function.Name] = function });
+
+        await new ActivityEnvironment().RunAsync(() => activities.InvokeFunctionAsync(new()
+        {
+            FunctionName = function.Name,
+            Declaration = DurableFunctionDeclarationSnapshot.Create(function.AsDeclarationOnly()),
+            ToolCallId = identifierPrefix + "\U0001F600suffix",
+            ConversationId = identifierPrefix + "\U0001F600suffix",
+        }));
+
+        var span = Assert.Single(capture.Activities);
+        Assert.Equal(descriptionPrefix, span.GetTagItem(DurableChatTelemetry.ToolDescriptionAttribute));
+        Assert.Equal(identifierPrefix, span.GetTagItem(DurableChatTelemetry.ToolCallIdAttribute));
+        Assert.Equal(identifierPrefix, span.GetTagItem(DurableChatTelemetry.GenAiConversationIdAttribute));
+    }
+
+    [Fact]
+    public async Task ToolInvocationFailure_ErrorTypeTruncationDoesNotSplitSurrogatePairs()
+    {
+        using var capture = new TelemetryCapture();
+        var errorTypePrefix = new string('e', 63);
+        Func<string> throwing = () => throw new Temporalio.Exceptions.ApplicationFailureException(
+            "private details",
+            errorType: errorTypePrefix + "\U0001F600suffix");
+        var function = AIFunctionFactory.Create(throwing, "unicode_failure");
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [function.Name] = function });
+
+        await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(() =>
+            new ActivityEnvironment().RunAsync(() => activities.InvokeFunctionAsync(new()
+            {
+                FunctionName = function.Name,
+            })));
+
+        var span = Assert.Single(capture.Activities);
+        Assert.Equal(errorTypePrefix, span.GetTagItem(DurableChatTelemetry.ErrorTypeAttribute));
+        Assert.Equal(ActivityStatusCode.Error, span.Status);
+    }
+
+    [Fact]
     public async Task ToolInvocation_ContentAttributesAreTruncatedToConfiguredBound()
     {
         using var capture = new TelemetryCapture();

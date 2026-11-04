@@ -65,6 +65,25 @@ The default converter preserves arbitrary user properties by JSON content. Becau
 runtime types are not promised. Library-owned getters normalize this shape for client keys,
 tags, activity and heartbeat timeouts, and maximum retry attempts.
 
+## Context reduction and history projection
+
+A configured context reducer receives eligible complete prior turns before the final model-budget
+check. Protected instruction messages, approval/interrupted ranges, and the active turn are not
+passed to the reducer. Reduced output must fit together with those protected ranges; the library
+does not silently discard the reducer's output to satisfy the budget. Tool grammar requires results
+for actionable calls, not for `InformationalOnly` calls.
+
+Retained-history reducers select entries, rather than rewriting them. After validating identities,
+ordering, and complete protected turns, the workflow reconstructs the projection from its canonical
+source entries. Changes to content or other non-identity fields in an activity's returned entries
+are not carried forward. Instruction-bearing request/response turns cannot be dropped. Both
+`TrimRecentTurns` and explicit `TrimBlockedHistoryAsync` refuse a prefix trim that would remove
+system/developer instructions, leaving the retained history intact and the session blocked.
+
+The history-summarizer activity applies the same telemetry content-capture policy as normal model
+activities, including an explicit `CaptureTelemetryContent = false` override on discoverable MEAI
+OpenTelemetry wrappers.
+
 ## Direct-adapter task-queue boundary
 
 The public `DurableChatClient` adapter can be constructed inside a custom workflow. Its

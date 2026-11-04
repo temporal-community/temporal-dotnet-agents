@@ -349,7 +349,7 @@ public class DurableToolDispatchIntegrationTests
     }
 
     [Fact]
-    public async Task InformationalCall_IsPreservedButNotDispatched()
+    public async Task InformationalCall_WithContextReducer_IsPreservedWithoutRequiringAResult()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
@@ -383,7 +383,15 @@ public class DurableToolDispatchIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTools(tool));
+            builder =>
+            {
+                builder.AddDurableTools(tool);
+#pragma warning disable MEAI001
+                builder.Services.AddKeyedSingleton<IChatReducer>(
+                    "informational-context", new MessageCountingChatReducer(20));
+#pragma warning restore MEAI001
+            },
+            options => options.DefaultContextReducerKey = "informational-context");
         await host.StartAsync();
 
         try
@@ -1054,7 +1062,7 @@ public class DurableToolDispatchIntegrationTests
     }
 
     [Fact]
-    public async Task CancelTurnAsync_CancelsActiveToolAndReplays()
+    public async Task CancelTurnAsync_CancelsLongRunningToolWithoutToolHeartbeatsAndReplays()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
@@ -1062,19 +1070,16 @@ public class DurableToolDispatchIntegrationTests
         var toolStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var toolCancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var toolTokenWasCancelled = false;
+        var toolInvocationCount = 0;
         var blockingTool = AIFunctionFactory.Create(
             async (string? _ = null, CancellationToken cancellationToken = default) =>
             {
+                Interlocked.Increment(ref toolInvocationCount);
                 toolStarted.TrySetResult();
                 try
                 {
-                    while (!cancellationToken.IsCancellationRequested)
-                    {
-                        ActivityExecutionContext.Current.Heartbeat();
-                        await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken)
-                            .ConfigureAwait(false);
-                    }
-                    cancellationToken.ThrowIfCancellationRequested();
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+                        .ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -1095,7 +1100,11 @@ public class DurableToolDispatchIntegrationTests
             env.Client,
             taskQueue,
             scripted,
-            builder => builder.AddDurableTool(blockingTool, options => options.NoRetry()));
+            builder => builder.AddDurableTool(blockingTool, options =>
+            {
+                options.NoRetry();
+                options.HeartbeatTimeout = TimeSpan.FromSeconds(1);
+            }));
         await host.StartAsync();
 
         var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
@@ -1107,6 +1116,11 @@ public class DurableToolDispatchIntegrationTests
             requestId: requestId);
 
         await toolStarted.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        // Stay in the tool for several heartbeat windows without tool-owned heartbeats.
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        Assert.False(turnTask.IsCompleted);
+        Assert.False(toolCancelled.Task.IsCompleted);
+        Assert.Equal(1, Volatile.Read(ref toolInvocationCount));
         var cancellation = await sessionClient.CancelTurnAsync(conversationId, requestId)
             .WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Equal(DurableTurnCancellationStatus.CancellationRequested, cancellation.Status);
@@ -1164,9 +1178,17 @@ public class DurableToolDispatchIntegrationTests
         };
         replayOptions.AddWorkflow<DurableChatWorkflow>();
         var history = await workflow.FetchHistoryAsync();
+        var scheduledTool = Assert.Single(history.Events, item =>
+            item.ActivityTaskScheduledEventAttributes?.ActivityType.Name
+                == "TemporalCommunity.Extensions.AI.InvokeFunction");
+        Assert.Contains(history.Events, item =>
+            item.ActivityTaskCanceledEventAttributes?.ScheduledEventId == scheduledTool.EventId);
+        Assert.DoesNotContain(history.Events, item =>
+            item.ActivityTaskTimedOutEventAttributes?.ScheduledEventId == scheduledTool.EventId);
         var replay = await new WorkflowReplayer(replayOptions)
             .ReplayWorkflowAsync(history, throwOnReplayFailure: false);
         Assert.Null(replay.ReplayFailure);
+        Assert.Equal(1, Volatile.Read(ref toolInvocationCount));
 
         await host.StopAsync();
 

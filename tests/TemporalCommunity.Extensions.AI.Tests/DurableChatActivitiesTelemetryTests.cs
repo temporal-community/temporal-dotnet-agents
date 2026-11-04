@@ -78,6 +78,52 @@ public class DurableChatActivitiesTelemetryTests
         return captured;
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SummarizeHistoryPrefix_ExplicitContentCaptureControlsMEAIWrapper(bool enabled)
+    {
+        var captured = StartCapture();
+        var wrapper = Assert.IsType<OpenTelemetryChatClient>(
+            new ChatClientBuilder(new UsageReportingChatClient()).UseOpenTelemetry().Build());
+        wrapper.EnableSensitiveData = !enabled;
+        var activities = BuildActivities(
+            wrapper,
+            telemetryMode: DurableInferenceTelemetryMode.RequireVisibleOpenTelemetryClient,
+            captureTelemetryContent: enabled);
+
+        await activities.SummarizeHistoryPrefixAsync(new DurableHistorySummarizationInput
+        {
+            Turns =
+            [
+                new DurableHistorySummaryTurn
+                {
+                    TurnId = "prior-turn",
+                    Messages =
+                    [
+                        new ChatMessage(ChatRole.User, "private summary input"),
+                        new ChatMessage(ChatRole.Assistant, "private prior answer"),
+                    ],
+                },
+            ],
+        });
+
+        Assert.Equal(enabled, wrapper.EnableSensitiveData);
+        var span = Assert.Single(captured, IsInferenceSpan);
+        var inputContent = span.GetTagItem("gen_ai.input.messages")?.ToString();
+        var outputContent = span.GetTagItem("gen_ai.output.messages")?.ToString();
+        if (enabled)
+        {
+            Assert.Contains("private summary input", inputContent, StringComparison.Ordinal);
+            Assert.Contains("hello", outputContent, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Null(inputContent);
+            Assert.Null(outputContent);
+        }
+    }
+
     private static DurableChatInput InputWithModel() => new()
     {
         ConversationId = "conv-test-1",
@@ -288,7 +334,10 @@ public class DurableChatActivitiesTelemetryTests
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("activities use streaming");
+            Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "hello"))
+            {
+                ModelId = ResponseModel,
+            });
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,

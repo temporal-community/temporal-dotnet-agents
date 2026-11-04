@@ -6,7 +6,7 @@ namespace TemporalCommunity.Extensions.AI.Internal;
 
 internal static class DurableHistoryProjectionValidator
 {
-    internal static void Validate(
+    internal static List<DurableSessionEntry> Validate(
         IReadOnlyList<DurableSessionEntry> source,
         IReadOnlyList<DurableSessionEntry> projection)
     {
@@ -23,6 +23,7 @@ internal static class DurableHistoryProjectionValidator
         }
 
         var projectedIndices = new HashSet<int>();
+        var canonicalProjection = new List<DurableSessionEntry>(projection.Count);
         var priorIndex = -1;
         foreach (var entry in projection)
         {
@@ -35,6 +36,7 @@ internal static class DurableHistoryProjectionValidator
                 throw InvalidProjection("Reducer output must preserve original order without duplicates.");
             }
             priorIndex = sourceIndex;
+            canonicalProjection.Add(source[sourceIndex]);
         }
 
         foreach (var (firstIndex, lastIndex, isProtected) in GetTurnRanges(source))
@@ -47,9 +49,11 @@ internal static class DurableHistoryProjectionValidator
             }
             if (isProtected && !firstRetained)
             {
-                throw InvalidProjection("Reducer output removed protected current, approval, or interrupted history.");
+                throw InvalidProjection("Reducer output removed protected current, instruction, approval, or interrupted history.");
             }
         }
+
+        return canonicalProjection;
     }
 
     private static IEnumerable<(int FirstIndex, int LastIndex, bool IsProtected)> GetTurnRanges(
@@ -67,6 +71,8 @@ internal static class DurableHistoryProjectionValidator
                     index,
                     index + 1,
                     response.CompletionReason == DurableTurnCompletionReason.Interrupted
+                        || ContainsInstructionContent(request.Messages)
+                        || ContainsInstructionContent(response.Messages)
                         || ContainsApprovalContent(request.Messages)
                         || ContainsApprovalContent(response.Messages)));
                 index++;
@@ -95,6 +101,9 @@ internal static class DurableHistoryProjectionValidator
     private static bool ContainsApprovalContent(IReadOnlyList<ChatMessage> messages) =>
         messages.SelectMany(message => message.Contents)
             .Any(content => content is ToolApprovalRequestContent or ToolApprovalResponseContent);
+
+    private static bool ContainsInstructionContent(IReadOnlyList<ChatMessage> messages) =>
+        messages.Any(message => message.Role == ChatRole.System || message.Role == new ChatRole("developer"));
 
     private static DurableHistoryProjectionException InvalidProjection(string reason) =>
         new(reason);

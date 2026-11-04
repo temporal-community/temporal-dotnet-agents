@@ -38,6 +38,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private bool _continueAsNewPending;
     private bool _sessionAdmissionClosed;
     private DateTimeOffset? _sessionIdleDeadline;
+    private DateTimeOffset _sessionCreatedAt;
     private int _turnCount;
     private int _currentTurnStartIndex;
     private IReadOnlyList<DurableChatTurnRange> _previousTurnRanges = [];
@@ -747,6 +748,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         // Capture the original creation time on the first run; carry it forward on CAN transitions.
         var sessionCreatedAt = input.OriginalCreatedAt ?? Workflow.UtcNow;
+        _sessionCreatedAt = sessionCreatedAt;
 
         // Opt-in: upsert search attributes only when explicitly requested.
         // Guards against failure on servers where the attributes are not pre-registered.
@@ -835,6 +837,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             var explicitHistoryRecovery = Workflow.Patched("meai-history-recovery-v1");
             var hasConfiguredReducer = input.HistoryReducerKey is not null;
             var needsReduction = historySnapshot.Count >= input.MaxEntryCount;
+            // Event/size rollovers also compact an eligible prefix. A marker plus the latest
+            // complete turn already needs three entries, so smaller transcripts just roll over.
+            var compactOnAnyTransition = input.HistoryCompactionStrategy != DurableHistoryCompactionStrategy.None
+                && Workflow.Patched("meai-compaction-on-history-budget-v1");
             var noStrategyReductionRequired = _preparedHistory is null
                 && !hasConfiguredReducer
                 && input.HistoryCompactionStrategy == DurableHistoryCompactionStrategy.None
@@ -903,7 +909,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 {
                     carriedHistory = DefaultBoundedTrim(historySnapshot, input.MaxEntryCount);
                 }
-                else if (needsReduction)
+                else if (needsReduction || (compactOnAnyTransition && historySnapshot.Count > 3))
                 {
                     carriedHistory = await ApplyConfiguredHistoryCompactionAsync(historySnapshot)
                         .ConfigureAwait(true);
@@ -967,7 +973,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         {
                             carriedHistory = _preparedHistory;
                         }
-                        else if (historySnapshot.Count >= input.MaxEntryCount)
+                        else if (historySnapshot.Count >= input.MaxEntryCount
+                                 || (compactOnAnyTransition && historySnapshot.Count > 3))
                         {
                             carriedHistory = await ApplyConfiguredHistoryCompactionAsync(historySnapshot)
                                 .ConfigureAwait(true);
@@ -1227,7 +1234,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     {
         var input = RequiredInput;
         var source = history.ToList();
-        var retained = DefaultBoundedTrim(source, input.MaxEntryCount);
+        var trimWindow = input.MaxEntryCount;
+        if (source.Count < trimWindow && Workflow.Patched("meai-trim-budget-trigger-v1"))
+        {
+            trimWindow = Math.Max(4, source.Count);
+        }
+        var retained = DefaultBoundedTrim(source, trimWindow);
         if (retained.Count == 0)
         {
             throw new ApplicationFailureException(
@@ -1460,7 +1472,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
     private static void ValidateHistoryProjection(
         IReadOnlyList<DurableSessionEntry> source,
-        IReadOnlyList<DurableSessionEntry> projection)
+        List<DurableSessionEntry> projection)
     {
         if (projection is null)
         {
@@ -1472,7 +1484,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         try
         {
-            Internal.DurableHistoryProjectionValidator.Validate(source, projection);
+            var canonical = Internal.DurableHistoryProjectionValidator.Validate(source, projection);
+            projection.Clear();
+            projection.AddRange(canonical);
         }
         catch (Exceptions.DurableHistoryProjectionException exception)
         {
@@ -1509,13 +1523,6 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(admissionFingerprint);
 
-        if (requestId is not null
-            && _terminalTurns.TryGetValue(requestId, out var terminal))
-        {
-            EnsureAdmissionFingerprint(terminal, requestId, admissionFingerprint);
-            return;
-        }
-
         var matchesActiveTurn = _activeTurn is not null
                                 && string.Equals(requestId, _activeTurn.RequestId, StringComparison.Ordinal);
         if (_sessionAdmissionClosed && !matchesActiveTurn)
@@ -1540,6 +1547,13 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         if (IsHistoryAdmissionRestricted && !matchesActiveTurn)
         {
             throw HistoryBudgetFailure();
+        }
+
+        if (requestId is not null
+            && _terminalTurns.TryGetValue(requestId, out var terminal))
+        {
+            EnsureAdmissionFingerprint(terminal, requestId, admissionFingerprint);
+            return;
         }
 
         if (_activeTurn is null)
@@ -2090,8 +2104,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
     private void EnforceTerminalTurnLedgerBounds()
     {
-        while (_terminalTurnOrder.Count > _maxTerminalOutcomeCount
-               || _terminalTurnLedgerBytes > _maxTerminalOutcomeBytes)
+        while (_terminalTurnOrder.Count > 0
+               && (_terminalTurnOrder.Count > _maxTerminalOutcomeCount
+                   || _terminalTurnLedgerBytes > _maxTerminalOutcomeBytes))
         {
             var oldestRequestId = _terminalTurnOrder[0];
             _terminalTurnOrder.RemoveAt(0);
@@ -2303,7 +2318,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 rollbackParticipant!.RestoreTurnRollbackState(participantStateBeforeTurn);
             }
 
-            var terminalException = IsCurrentTurnCancellationRequested()
+            var wasCancelled = IsCurrentTurnCancellationRequested();
+            var terminalException = wasCancelled
                 ? CreateTurnCancellationFailure(exception)
                 : exception;
 
@@ -2312,7 +2328,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 var interruptedResponse = CreateInterruptedResponseEntry(
                     requestEntryToAppend.CorrelationId,
                     requestEntry.RequestId,
-                    IsCurrentTurnCancellationRequested());
+                    wasCancelled);
                 interruptedResponse.EntryId ??= Workflow.NewGuid().ToString("N");
                 interruptedResponse.TurnId = requestEntryToAppend.TurnId;
                 _history.Add(requestEntryToAppend);
@@ -2322,7 +2338,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             }
 
             CompleteTurnFailure(turnRecord, terminalException);
-            if (!IsCurrentTurnCancellationRequested())
+            if ((!wasCancelled || !Workflow.Patched("meai-cancel-preserve-idle-deadline-v1"))
+                && !IsCurrentTurnCancellationRequested())
             {
                 RenewSessionIdleDeadline();
             }
@@ -2502,6 +2519,29 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 "workflow query result");
         }
         return _history;
+    }
+
+    /// <summary>
+    /// Returns a retained terminal outcome without creating a workflow-history update event.
+    /// Use this to resolve an ambiguous send while turn admission is restricted or blocked.
+    /// </summary>
+    [WorkflowQuery("GetTerminalTurnOutcome")]
+    public DurableChatTerminalOutcome? GetTerminalTurnOutcome(string requestId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+        if (!_terminalTurns.TryGetValue(requestId, out var record))
+        {
+            return null;
+        }
+
+        return new DurableChatTerminalOutcome
+        {
+            RequestId = record.RequestId,
+            Response = record.ResponseEntry,
+            FailureErrorType = record.Failure?.ErrorType,
+            FailureMessage = record.Failure?.Message,
+            FailureNonRetryable = record.Failure?.NonRetryable ?? false,
+        };
     }
 
     /// <summary>Returns the opaque epoch identifying this session lineage.</summary>
@@ -2702,12 +2742,35 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
     private void CompleteHistoryRecovery(List<DurableSessionEntry> projection, string outcome)
     {
-        _preparedHistory = projection;
-        _historyRecovery = new DurableHistoryRecoveryState { LastOutcome = outcome };
-        if (Input is { } input)
+        var input = RequiredInput;
+        ValidateHistoryCompactionProgress(input, _history, projection);
+        var recoveredState = new DurableHistoryRecoveryState { LastOutcome = outcome };
+        var candidate = CreateContinueAsNewInput(
+            input,
+            projection,
+            _approvalMixin.GetResolvedApprovals(),
+            _sessionCreatedAt,
+            SnapshotTerminalTurnOutcomes(),
+            _turnCount,
+            _sessionIdleDeadline) with { HistoryRecovery = recoveredState };
+        if (input.EnableTransportPayloadGuard)
         {
-            Input = input with { HistoryRecovery = _historyRecovery };
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                projection,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "compacted retained history");
+            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                candidate,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "continue-as-new workflow input");
         }
+        _preparedHistory = projection;
+        _historyRecovery = recoveredState;
+        Input = input with { HistoryRecovery = _historyRecovery };
         _historyRecoveryRetriesThisRun = 0;
         _sessionAdmissionClosed = true;
         _continueAsNewPending = true;

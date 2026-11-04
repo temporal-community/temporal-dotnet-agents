@@ -461,6 +461,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 foreach (var (idx, funcInput, opts) in pendingToolDispatches)
                 {
                     funcInput.TurnState = currentTurnState;
+                    EnsureToolActivityInputFits(funcInput);
                     var task = Workflow.ExecuteActivityAsync(
                         (DurableFunctionActivities a) => a.InvokeFunctionAsync(funcInput),
                         ApplyCurrentTurnCancellation(opts));
@@ -750,6 +751,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         foreach (var (_, input, _) in dispatches)
         {
+            EnsureToolActivityInputFits(input);
+        }
+    }
+
+    private void EnsureToolActivityInputFits(DurableFunctionInput input)
+    {
+        if (RequiredInput.EnableTransportPayloadGuard)
+        {
             Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
                 Workflow.PayloadConverter,
                 input,
@@ -841,17 +850,23 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         Exception? exception,
         string toolName)
     {
-        var fatalConfigurationFailure =
+        var fatalFailure =
             Internal.TemporalFailureInspector.FindNonRetryableApplicationFailure(
                 exception,
-                nameof(Exceptions.DurableConfigurationException));
-        return fatalConfigurationFailure is null
+                nameof(Exceptions.DurableConfigurationException))
+            ?? Internal.TemporalFailureInspector.FindNonRetryableApplicationFailure(
+                exception,
+                "DurableToolResultTooLarge")
+            ?? Internal.TemporalFailureInspector.FindNonRetryableApplicationFailure(
+                exception,
+                "DurableToolResultSerializationFailed");
+        return fatalFailure is null
             ? null
             : new ApplicationFailureException(
                 $"Durable tool '{toolName}' failed with a non-recoverable " +
-                "configuration or state-completion error.",
-                fatalConfigurationFailure,
-                errorType: nameof(Exceptions.DurableConfigurationException),
+                "configuration, state-completion, or result-transport error. Its external effect outcome is unknown.",
+                fatalFailure,
+                errorType: fatalFailure.ErrorType,
                 nonRetryable: true);
     }
 

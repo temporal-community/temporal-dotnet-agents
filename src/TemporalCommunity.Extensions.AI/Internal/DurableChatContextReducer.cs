@@ -194,7 +194,7 @@ internal static class DurableChatContextReducer
             {
                 switch (content)
                 {
-                    case FunctionCallContent call:
+                    case FunctionCallContent call when !call.InformationalOnly:
                         if (string.IsNullOrEmpty(call.CallId) || !pendingCallIds.Add(call.CallId))
                         {
                             throw new DurableContextReductionException(

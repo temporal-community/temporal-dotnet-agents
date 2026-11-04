@@ -39,6 +39,7 @@ namespace TemporalCommunity.Extensions.AI;
 [JsonSerializable(typeof(DurableSessionEntry))]
 [JsonSerializable(typeof(DurableSessionRequest))]
 [JsonSerializable(typeof(DurableSessionResponse))]
+[JsonSerializable(typeof(DurableChatTerminalOutcome))]
 [JsonSerializable(typeof(DurableSessionSummary))]
 [JsonSerializable(typeof(CompactionMarkerEntry))]
 [JsonSerializable(typeof(TruncationMarkerEntry))]

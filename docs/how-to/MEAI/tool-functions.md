@@ -361,6 +361,15 @@ external effect; if an effect may have completed before cancellation was observe
 authoritative state and use the logical operation key for downstream idempotency. A caller
 cancelling the `SendAsync` RPC wait is not a turn-cancellation request.
 
+Tool activities heartbeat in the background while the function and any turn-state completion
+callback are running. This keeps long-running tools healthy under `HeartbeatTimeout` and lets
+Temporal deliver cancellation to the `CancellationToken` supplied to the tool and completion
+callback. Pass that token to downstream operations; heartbeats do not forcibly interrupt a tool
+that ignores it. An `OperationCanceledException` is treated as activity cancellation only when
+the activity token is cancelled. A tool's independent timeout is otherwise a bounded, retryable
+tool failure, subject to its configured retry policy. An independent timeout in a state-completion
+callback remains non-retryable because the tool invocation has already completed.
+
 When a turn terminates after dispatch, retained history includes protocol-valid call/result pairs:
 known completed values are kept, uncertain dispatched calls receive an explicit unknown result,
 and calls never dispatched receive a not-executed result. The bounded assistant marker omits

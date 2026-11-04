@@ -41,6 +41,7 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
     {
         ArgumentNullException.ThrowIfNull(input);
         InitializeInput(input);
+        input = RequiredInput;
         var authority = Internal.DurableToolsetAuthority.Resolve(input);
         if (authority == Internal.DurableToolsetAuthorityKind.None)
         {
@@ -137,6 +138,8 @@ public abstract class DurableToolWorkflowBase<TRequestData, TTurnState>
                 () => _toolAuthorityReady,
                 cancellationToken: CurrentTurnCancellationToken).ConfigureAwait(true);
 
+            admission = RefreshTurnAdmission(admission, requestId, admissionFingerprint);
+            ValidateInitializedTurnAdmission(admission);
             var requestEntry = DurableSessionRequest.FromMessages(
                 request.Messages,
                 request.CorrelationId,

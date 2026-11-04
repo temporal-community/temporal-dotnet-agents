@@ -314,7 +314,7 @@ public sealed class TemporalAgentContext
                 return;
             }
 
-            ctx.Heartbeat("awaiting approval decision");
+            ctx.Heartbeat();
         }
     }
 }

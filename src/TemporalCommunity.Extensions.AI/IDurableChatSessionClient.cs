@@ -116,6 +116,20 @@ public interface IDurableChatSessionClient
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Retrieves a completed request from the bounded terminal ledger without adding a workflow
+    /// history event. The request outcome may be evicted when the ledger reaches its configured
+    /// count or size limit.
+    /// </summary>
+    /// <param name="conversationId">The conversation identifier.</param>
+    /// <param name="requestId">The logical request ID to retrieve.</param>
+    /// <param name="cancellationToken">Cancellation token for this query.</param>
+    /// <returns>The retained terminal outcome, or <see langword="null"/> when it is unavailable.</returns>
+    Task<DurableChatTerminalOutcome?> GetTerminalTurnOutcomeAsync(
+        string conversationId,
+        string requestId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns the currently pending tool approval request for a session, or <see langword="null"/>
     /// if no approval is pending.
     /// </summary>

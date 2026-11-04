@@ -473,6 +473,9 @@ internal sealed class DurableChatActivities(
                 errorType: nameof(DurableConfigurationException),
                 nonRetryable: true);
         }
+        Internal.DurableTelemetryContentCapturePolicy.ConfigureChatClient(
+            chatClient,
+            services.GetService<DurableExecutionOptions>());
         var response = await chatClient.GetResponseAsync(
             [new ChatMessage(ChatRole.User, string.Join("\n\n", selectedTurns))],
             options,
@@ -768,10 +771,9 @@ internal sealed class DurableChatActivities(
         ChatOptions options,
         ActivityExecutionContext? ctx)
     {
-        var messagesForModel = FitModelContext(input, options);
         if (input.ContextReducerKey is not { } reducerKey)
         {
-            return messagesForModel;
+            return FitModelContext(input, options);
         }
 
         var reducer = services.GetKeyedService<IChatReducer>(reducerKey)
@@ -780,30 +782,22 @@ internal sealed class DurableChatActivities(
                 errorType: "DurableContextReducerNotFound",
                 nonRetryable: true);
 
-        var prefixRemoved = input.Messages.Count - messagesForModel.Count;
-        var currentTurnStartIndex = Math.Max(0, input.CurrentTurnStartIndex - prefixRemoved);
-        var previousTurnRanges = (input.PreviousTurnRanges ?? [])
-            .Where(range => range.EndIndex > prefixRemoved)
-            .Select(range => new DurableChatTurnRange(
-                Math.Max(0, range.StartIndex - prefixRemoved),
-                range.EndIndex - prefixRemoved,
-                range.IsProtected))
-            .ToArray();
         try
         {
             var projection = await Internal.DurableChatContextReducer.ReduceAsync(
                 reducer,
-                messagesForModel.ToList(),
-                currentTurnStartIndex,
-                previousTurnRanges,
+                input.Messages.ToList(),
+                input.CurrentTurnStartIndex,
+                input.PreviousTurnRanges ?? [],
                 ctx?.CancellationToken ?? CancellationToken.None).ConfigureAwait(false);
-            Internal.DurableModelContextBudget.EnsureFits(
+            return Internal.DurableModelContextBudget.Fit(
                 projection.Messages,
+                projection.CurrentTurnStartIndex,
+                projection.PreviousTurnRanges,
                 options,
                 input.MaxModelContextTokens,
                 input.ModelOutputTokenReserve,
                 services.GetService<IDurableChatTokenEstimator>());
-            return projection.Messages.ToList();
         }
         catch (Internal.DurableContextReductionException exception)
         {
@@ -880,7 +874,7 @@ internal sealed class DurableChatActivities(
                 nonRetryable: true);
         }
 
-        ctx.Heartbeat($"intercepting tool '{input.ToolName}'");
+        ctx.Heartbeat();
 
         var toolContext = new DurableToolContext
         {

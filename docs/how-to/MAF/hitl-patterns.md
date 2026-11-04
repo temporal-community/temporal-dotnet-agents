@@ -166,9 +166,10 @@ issues a *fresh* approval request while the first is still pending, so every att
 fails with `DurableApprovalAlreadyPending`.
 
 **The heartbeat pump is on by default.** Every package-managed tool activity receives an effective
-heartbeat timeout (2 minutes unless overridden), and the package heartbeats at exactly a third of
-it for the whole wait. The public options do not provide a supported way to disable this pump. The
-hazard to watch is `ActivityTimeout`, not a missing heartbeat.
+heartbeat timeout (2 minutes unless overridden), and the package heartbeats at most once per second
+and no later than half that timeout for the whole invocation. Heartbeat details are empty; streamed
+assistant text and tool output are not included. The public options do not provide a supported way
+to disable this pump. The hazard to watch is `ActivityTimeout`, not a missing heartbeat.
 
 **Heartbeating is not durability.** The wait is resident on one worker for its entire duration. A
 deploy, crash, or scale-down ends it — heartbeats or not — and with `NoRetry()` on a write tool that

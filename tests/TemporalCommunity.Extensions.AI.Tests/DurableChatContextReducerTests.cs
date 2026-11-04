@@ -145,6 +145,78 @@ public sealed class DurableChatContextReducerTests
                 new CountingEstimator()));
     }
 
+    [Fact]
+    public async Task Reducer_AllowsInformationalCallsWithoutResultsAlongsideCompletedActionableCalls()
+    {
+        ChatMessage[] messages =
+        [
+            new(ChatRole.User, "old request"),
+            new(ChatRole.Assistant,
+            [
+                new FunctionCallContent("information", "lookup") { InformationalOnly = true },
+                new FunctionCallContent("action", "lookup"),
+            ]),
+            new(ChatRole.Tool, [new FunctionResultContent("action", "result")]),
+            new(ChatRole.Assistant, "old response"),
+            new(ChatRole.User, "current"),
+        ];
+
+        var projection = await DurableChatContextReducer.ReduceAsync(
+            new FixedReducer(messages.Take(4).ToArray()),
+            messages,
+            currentTurnStartIndex: 4,
+            previousTurnRanges: [new(0, 4, false)],
+            CancellationToken.None);
+
+        Assert.Equal(5, projection.Messages.Count);
+        Assert.True(Assert.IsType<FunctionCallContent>(projection.Messages[1].Contents[0]).InformationalOnly);
+        Assert.Single(projection.Messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>());
+    }
+
+    [Fact]
+    public void ValidateToolGrammar_StillRejectsUnresolvedActionableCallAlongsideInformationalCall()
+    {
+        Assert.Throws<DurableContextReductionException>(() =>
+            DurableChatContextReducer.ValidateToolGrammar(
+            [
+                new ChatMessage(ChatRole.Assistant,
+                [
+                    new FunctionCallContent("information", "lookup") { InformationalOnly = true },
+                    new FunctionCallContent("action", "lookup"),
+                ]),
+            ]));
+    }
+
+    [Fact]
+    public async Task Reducer_PreservesProtectedRangeBetweenEligibleBatches()
+    {
+        ChatMessage[] messages =
+        [
+            new(ChatRole.User, "old request"),
+            new(ChatRole.Assistant, "old answer"),
+            new(ChatRole.User, "interrupted request"),
+            new(ChatRole.Assistant, "interrupted answer"),
+            new(ChatRole.User, "another request"),
+            new(ChatRole.Assistant, "another answer"),
+            new(ChatRole.User, "current"),
+        ];
+
+        var projection = await DurableChatContextReducer.ReduceAsync(
+            new MessageCountingChatReducer(1),
+            messages,
+            currentTurnStartIndex: 6,
+            previousTurnRanges: [new(0, 2, false), new(2, 4, true), new(4, 6, false)],
+            CancellationToken.None);
+
+        Assert.Equal(
+            ["old answer", "interrupted request", "interrupted answer", "another answer", "current"],
+            projection.Messages.Select(message => message.Text));
+        Assert.Same(messages[2], projection.Messages[1]);
+        Assert.Same(messages[3], projection.Messages[2]);
+        Assert.Equal(4, projection.CurrentTurnStartIndex);
+        Assert.All(projection.PreviousTurnRanges, range => Assert.True(range.IsProtected));
+    }
+
     private sealed class FixedReducer(IReadOnlyList<ChatMessage> output) : IChatReducer
     {
         public Task<IEnumerable<ChatMessage>> ReduceAsync(

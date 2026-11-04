@@ -255,6 +255,71 @@ public class DurableModelContextBudgetTests
                 new CountingEstimator()));
     }
 
+    [Theory]
+    [InlineData("system")]
+    [InlineData("developer")]
+    public void Fit_DoesNotDropInstructionBearingPriorTurn(string role)
+    {
+        Assert.Throws<DurableContextBudgetExceededException>(() =>
+            DurableModelContextBudget.Fit(
+                [new ChatMessage(new ChatRole(role), "keep instructions"), new(ChatRole.User, "current")],
+                currentTurnStartIndex: 1,
+                previousTurnRanges: [new(0, 1, false)],
+                new ChatOptions(),
+                maximumContextTokens: 10,
+                outputTokenReserve: 0,
+                new CountingEstimator()));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ContextReducer_RunsBeforeBudgetFitAndPreservesProtectedPrefix(
+        bool managedStep,
+        bool protectedPrefix)
+    {
+        var client = new CapturingChatClient();
+        using var services = new ServiceCollection()
+            .AddSingleton<IChatClient>(client)
+            .AddSingleton<IDurableChatTokenEstimator>(new CountingEstimator())
+            .AddKeyedSingleton<IChatReducer>("recent", new MessageCountingChatReducer(1))
+            .BuildServiceProvider();
+        var input = new DurableChatInput
+        {
+            Messages =
+            [
+                new ChatMessage(protectedPrefix ? ChatRole.System : ChatRole.User, "prefix"),
+                new ChatMessage(ChatRole.User, "old request"),
+                new ChatMessage(ChatRole.Assistant, "old response"),
+                new ChatMessage(ChatRole.User, "current"),
+            ],
+            CurrentTurnStartIndex = 3,
+            PreviousTurnRanges = protectedPrefix ? [new(1, 3, false)] : [new(0, 3, false)],
+            ContextReducerKey = "recent",
+            MaxModelContextTokens = protectedPrefix ? 30 : 20,
+            ModelOutputTokenReserve = 0,
+        };
+        var activities = new DurableChatActivities(services, loggerFactory: null);
+
+        if (managedStep)
+        {
+            await activities.GetChatStepAsync(input);
+        }
+        else
+        {
+            await activities.GetResponseAsync(input);
+        }
+
+        var expected = protectedPrefix
+            ? new[] { "prefix", "old response", "current" }
+            : new[] { "old response", "current" };
+        Assert.Equal(expected, client.Messages!.Select(message => message.Text));
+        Assert.Equal(4, input.Messages.Count);
+        Assert.Equal("old request", input.Messages[1].Text);
+    }
+
     private sealed class CountingEstimator : IDurableChatTokenEstimator
     {
         public int EstimateInputTokens(IReadOnlyList<ChatMessage> messages, ChatOptions options) =>

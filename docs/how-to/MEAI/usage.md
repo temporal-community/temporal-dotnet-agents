@@ -41,6 +41,13 @@ particular, `correlationId` is not an idempotency key and current Continue-as-Ne
 | Tool safety | Reuse per-tool policies; unknown/effectful tools default to one attempt. Supply stable logical operation keys (epoch, request/turn, distinct call), enforced downstream for idempotency. Timeout/cancellation may mean `unknown`. Guard result and failure-detail bytes inside the activity before returning. |
 | Telemetry | Configure MEAI `OpenTelemetryChatClient` on the worker-owned `IChatClient` for inference spans/GenAI metrics; the library owns durable/tool telemetry. `InferenceTelemetryMode` can require one visible wrapper or explicitly trust an opaque application-owned chain. Content capture affects telemetry only, not persistence or model input. |
 
+When a send result is ambiguous, `GetTerminalTurnOutcomeAsync(conversationId, requestId)` reads the
+bounded terminal ledger through a workflow query, without adding an update event. It returns the
+retained response or bounded failure details, or `null` if the request has no retained terminal
+outcome. Matching retries are rejected before acceptance once admission is restricted or blocked;
+use the query to resolve the outcome instead. The ledger may evict old outcomes at its configured
+count or byte bound.
+
 Phase 0 introduced no numeric ledger, joiner, token, event-reserve, or recovery limits; later units
 now define and test those boundaries explicitly rather than relying on provider or service payload
 caps. The default terminal-outcome ledger is bounded to 128 outcomes and 1 MiB; tool activities

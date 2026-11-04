@@ -108,6 +108,21 @@ internal sealed class AgentActivities(
         var blueprint = ResolveBlueprint(input.AgentName);
         var registration = blueprint.Registration;
         var agentsOptions = blueprint.AgentsOptions;
+        // Every dispatch path reaches this boundary, including the first proxy/sub-agent step
+        // and jobs without a settings handshake. Frontend snapshots are not worker policy.
+        AgentModelContextBudget modelContextBudget;
+        try
+        {
+            modelContextBudget = AgentModelContextBudget.Resolve(registration, agentsOptions);
+        }
+        catch (InvalidOperationException exception)
+        {
+            throw new ApplicationFailureException(
+                exception.Message,
+                exception,
+                errorType: nameof(DurableConfigurationException),
+                nonRetryable: true);
+        }
 
         // Resolve all live DI instances fresh per call from a scoped service provider.
         // The scope is disposed at the end of this activity call, ensuring scoped services
@@ -194,8 +209,9 @@ internal sealed class AgentActivities(
         chatOptions.Tools = selectedTools.Count > 0 ? [.. selectedTools] : null;
         chatOptions.ResponseFormat = input.Request.ResponseFormat;
 
-        messagesForLlm = FitModelContext(input, messagesForLlm, chatOptions, scopedServices).ToList();
         var contextReducerKey = registration.ContextReducerKey ?? agentsOptions.DefaultContextReducerKey;
+        var currentTurnStartIndex = input.CurrentTurnStartIndex;
+        IReadOnlyList<DurableChatTurnRange> previousTurnRanges = input.PreviousTurnRanges ?? [];
         if (contextReducerKey is not null)
         {
             var reducer = scopedServices.GetKeyedService<IChatReducer>(contextReducerKey)
@@ -203,15 +219,6 @@ internal sealed class AgentActivities(
                     $"No IChatReducer is registered under key '{contextReducerKey}'.",
                     errorType: "DurableContextReducerNotFound",
                     nonRetryable: true);
-            var prefixRemoved = input.AccumulatedMessages.Count - messagesForLlm.Count;
-            var currentTurnStartIndex = Math.Max(0, input.CurrentTurnStartIndex - prefixRemoved);
-            var previousTurnRanges = (input.PreviousTurnRanges ?? [])
-                .Where(range => range.EndIndex > prefixRemoved)
-                .Select(range => new DurableChatTurnRange(
-                    Math.Max(0, range.StartIndex - prefixRemoved),
-                    range.EndIndex - prefixRemoved,
-                    range.IsProtected))
-                .ToArray();
             try
             {
                 var projection = await TemporalCommunity.Extensions.AI.Internal.DurableChatContextReducer
@@ -223,6 +230,8 @@ internal sealed class AgentActivities(
                         ct)
                     .ConfigureAwait(false);
                 messagesForLlm = projection.Messages.ToList();
+                currentTurnStartIndex = projection.CurrentTurnStartIndex;
+                previousTurnRanges = projection.PreviousTurnRanges;
             }
             catch (TemporalCommunity.Extensions.AI.Internal.DurableContextReductionException exception)
             {
@@ -233,6 +242,13 @@ internal sealed class AgentActivities(
                     nonRetryable: true);
             }
         }
+        messagesForLlm = FitModelContext(
+            messagesForLlm,
+            currentTurnStartIndex,
+            previousTurnRanges,
+            chatOptions,
+            modelContextBudget,
+            scopedServices).ToList();
 
         // LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
         // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire
@@ -334,7 +350,7 @@ internal sealed class AgentActivities(
             }
         }
 
-        EnsureModelContextFits(input, augmentedMessages, chatOptions, scopedServices);
+        EnsureModelContextFits(augmentedMessages, chatOptions, modelContextBudget, scopedServices);
 
         var temporalContext = new TemporalAgentContext(ctx.TemporalClient, session, scopedServices);
         TemporalAgentContext.SetCurrent(temporalContext);
@@ -374,7 +390,7 @@ internal sealed class AgentActivities(
                     augmentedMessages, session, runOptions, ct).WithCancellation(ct).ConfigureAwait(false))
             {
                 collected.Add(update);
-                ctx.Heartbeat(update.Text);
+                ctx.Heartbeat();
             }
 
             var response = collected.ToAgentResponse();
@@ -791,20 +807,22 @@ internal sealed class AgentActivities(
     }
 
     private static IList<ChatMessage> FitModelContext(
-        AgentStepInput input,
         IReadOnlyList<ChatMessage> messages,
+        int currentTurnStartIndex,
+        IReadOnlyList<DurableChatTurnRange> previousTurnRanges,
         ChatOptions options,
+        AgentModelContextBudget budget,
         IServiceProvider scopedServices)
     {
         try
         {
             return TemporalCommunity.Extensions.AI.Internal.DurableModelContextBudget.Fit(
                 messages,
-                input.CurrentTurnStartIndex,
-                input.PreviousTurnRanges ?? [],
+                currentTurnStartIndex,
+                previousTurnRanges,
                 options,
-                input.MaxModelContextTokens,
-                input.ModelOutputTokenReserve,
+                budget.MaximumTokens,
+                budget.OutputTokenReserve,
                 scopedServices.GetService<IDurableChatTokenEstimator>());
         }
         catch (DurableContextBudgetExceededException exception)
@@ -814,9 +832,9 @@ internal sealed class AgentActivities(
     }
 
     private static void EnsureModelContextFits(
-        AgentStepInput input,
         IReadOnlyList<ChatMessage> messages,
         ChatOptions options,
+        AgentModelContextBudget budget,
         IServiceProvider scopedServices)
     {
         try
@@ -824,8 +842,8 @@ internal sealed class AgentActivities(
             TemporalCommunity.Extensions.AI.Internal.DurableModelContextBudget.EnsureFits(
                 messages,
                 options,
-                input.MaxModelContextTokens,
-                input.ModelOutputTokenReserve,
+                budget.MaximumTokens,
+                budget.OutputTokenReserve,
                 scopedServices.GetService<IDurableChatTokenEstimator>());
         }
         catch (DurableContextBudgetExceededException exception)
@@ -1003,7 +1021,7 @@ internal sealed class AgentActivities(
             return new DurableToolInterceptorResult { Outcome = DurableToolOutcome.Proceed };
         }
 
-        ctx.Heartbeat($"intercepting tool '{input.ToolName}'");
+        ctx.Heartbeat();
 
         // Deserialize the state bag snapshot when present. Parsing the workflow ID is only
         // valid when this activity runs inside AgentWorkflow (ID = ta-{agent}-{key} format).
@@ -1096,7 +1114,7 @@ internal sealed class AgentActivities(
                 $"Tool '{input.ToolName}' is not registered on agent '{input.AgentName}'.");
         }
 
-        ctx.Heartbeat($"invoking tool '{input.ToolName}'");
+        ctx.Heartbeat();
 
         using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
             TemporalAgentTelemetry.AgentToolInvokeSpanName,
@@ -1180,7 +1198,11 @@ internal sealed class AgentActivities(
                 ? new AIFunctionArguments()
                 : new AIFunctionArguments(input.Arguments);
 
-            var result = await fn.InvokeAsync(arguments, ct).ConfigureAwait(false);
+            var result = await TemporalCommunity.Extensions.AI.Internal.DurableActivityHeartbeat
+                .RunWithHeartbeatsAsync(
+                    ctx,
+                    async () => await fn.InvokeAsync(arguments, ct).ConfigureAwait(false))
+                .ConfigureAwait(false);
 
             _logger.LogAgentToolInvocationCompleted(input.AgentName, input.ToolName);
 

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using System.Reflection;
 using TemporalCommunity.Extensions.AI.Session;
 using Temporalio.Workflows;
 using Xunit;
@@ -13,6 +14,22 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 /// </summary>
 public class DurableChatWorkflowBaseHooksTests
 {
+    [Fact]
+    public void TerminalLedgerEviction_WithByteDriftAndNoEntries_DoesNotIndexEmptyOrder()
+    {
+        var workflow = new TestableWorkflow();
+        var type = typeof(DurableChatWorkflowBase<ChatResponse>);
+        var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        type.GetField("_terminalTurnLedgerBytes", flags)!.SetValue(workflow, 2L * 1024 * 1024);
+
+        var exception = Record.Exception(() =>
+            type.GetMethod("EnforceTerminalTurnLedgerBounds", flags)!.Invoke(workflow, null));
+
+        Assert.Null(exception);
+        Assert.Empty(Assert.IsType<List<string>>(
+            type.GetField("_terminalTurnOrder", flags)!.GetValue(workflow)));
+    }
+
     /// <summary>
     /// Test subclass that exposes the protected hooks for direct unit testing without
     /// spinning up a full workflow runtime.

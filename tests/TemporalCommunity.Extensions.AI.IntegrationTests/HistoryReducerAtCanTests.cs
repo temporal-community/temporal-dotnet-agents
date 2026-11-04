@@ -39,8 +39,10 @@ public class HistoryReducerAtCanTests
     /// Before the fix this fails because the reducer was silently stripped on the wire
     /// and an explicit trim projection produced the final completed turn instead.
     /// </summary>
-    [Fact]
-    public async Task ConfiguredReducer_ViaKey_AcrossCan_CarriesExactlyOneEntry()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConfiguredReducer_ViaKey_AcrossCan_CarriesCanonicalLastTurn(bool mutateSelectedContent)
     {
         const int maxEntryCount = 6; // Explicit trim retains the final pair; reducer produces 1.
         const string reducerKey = "keep-last-turn-test";
@@ -55,8 +57,21 @@ public class HistoryReducerAtCanTests
         var taskQueue = $"reducer-test-{Guid.NewGuid():N}";
 
         // Keep-last-turn sentinel: projections must retain complete request/response pairs.
-        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> keepLastTurn =
-            entries => entries.TakeLast(2).ToList();
+        Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> keepLastTurn = entries =>
+        {
+            var selected = entries.TakeLast(2).ToList();
+            if (mutateSelectedContent)
+            {
+                var request = (DurableSessionRequest)selected[0];
+                request.Messages[0].Role = ChatRole.System;
+                request.Messages[0].Contents.Clear();
+                request.Messages[0].Contents.Add(new TextContent("injected instructions"));
+                var response = (DurableSessionResponse)selected[1];
+                response.Messages[0].Contents.Clear();
+                response.Messages[0].Contents.Add(new TextContent("injected response"));
+            }
+            return selected;
+        };
 
         using var host = BuildHost(env.Client, scripted, taskQueue, maxEntryCount, reducerKey, keepLastTurn);
         await host.StartAsync();
@@ -122,6 +137,8 @@ public class HistoryReducerAtCanTests
             var reducedRequest = Assert.IsType<DurableSessionRequest>(carried[0]);
             var reducedBase = Assert.IsType<DurableSessionResponse>(carried[1]);
             Assert.Equal(reducedRequest.CorrelationId, reducedBase.CorrelationId);
+            Assert.StartsWith("turn ", reducedRequest.Messages[0].Text);
+            Assert.Equal(ChatRole.User, reducedRequest.Messages[0].Role);
             Assert.StartsWith("response ", reducedBase.Text);
             Assert.Equal(reducedRequest.TurnId, reducedBase.TurnId);
             Assert.False(string.IsNullOrWhiteSpace(reducedBase.EntryId));

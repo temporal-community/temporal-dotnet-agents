@@ -322,6 +322,26 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Retrieves a completed request from the bounded terminal ledger without adding a workflow
+    /// history event. The request outcome may be evicted when the ledger reaches its configured
+    /// count or size limit.
+    /// </summary>
+    public async Task<DurableChatTerminalOutcome?> GetTerminalTurnOutcomeAsync(
+        string conversationId,
+        string requestId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+
+        var handle = _client.GetWorkflowHandle<DurableChatWorkflow>(GetWorkflowId(conversationId));
+        return await handle.QueryAsync<DurableChatWorkflow, DurableChatTerminalOutcome?>(
+            wf => wf.GetTerminalTurnOutcome(requestId),
+            new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+            .ConfigureAwait(false);
+    }
+
     /// <summary>Retries the configured retained-history strategy once for a blocked session.</summary>
     public async Task<DurableHistoryRecoveryResult> RetryHistoryCompactionAsync(
         string conversationId,

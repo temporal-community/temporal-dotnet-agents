@@ -263,13 +263,14 @@ With this configuration:
   restarts and continue-as-new transitions.
 - The reducer receives only eligible prior turns. The active turn, system/developer
   instructions, approval turns, and interrupted turns are protected from reduction.
-- Reducer output is validated for complete tool-call/result exchanges and checked
-  against the final model-context budget. Invalid output or output that still exceeds
+- Reduction runs before budget fitting, so eligible prior context can be reduced before
+  the worker considers trimming complete turns. Reducer output is validated for complete
+  tool-call/result exchanges and checked against the final model-context budget. Invalid output or output that still exceeds
   the configured limit fails before the provider is called.
 - Querying `_history` (e.g., for audit) still returns the full unreduced log.
 - `MaxModelContextTokens` optionally bounds estimated input plus `ModelOutputTokenReserve`.
-  The worker trims only complete eligible prior turns before context providers run, then validates
-  the final messages, instructions, tools, and response schema after provider contributions. If
+  After reduction, the worker trims only complete eligible prior turns before context providers
+  run, then validates the final messages, instructions, tools, and response schema after provider contributions. If
   provider-added or protected content still exceeds the limit, the model activity fails with a
   non-retryable `DurableContextBudgetExceeded` outcome instead of silently omitting content.
 

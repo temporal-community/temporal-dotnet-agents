@@ -54,6 +54,47 @@ public class DurableHistoryProjectionValidatorTests
                 [firstTurn[0], firstTurn[0], firstTurn[1], currentTurn[0], currentTurn[1]]));
     }
 
+    [Theory]
+    [InlineData("system", false)]
+    [InlineData("developer", false)]
+    [InlineData("system", true)]
+    [InlineData("developer", true)]
+    public void Validate_RejectsDroppingInstructionBearingTurn(string role, bool inResponse)
+    {
+        var oldTurn = CreateTurn("old");
+        var entry = inResponse ? oldTurn[1] : oldTurn[0];
+        var messages = entry is DurableSessionRequest request
+            ? request.Messages
+            : ((DurableSessionResponse)entry).Messages;
+        messages[0].Role = new ChatRole(role);
+        var current = CreateTurn("current");
+
+        Assert.Throws<DurableHistoryProjectionException>(() =>
+            DurableHistoryProjectionValidator.Validate(oldTurn.Concat(current).ToArray(), current));
+    }
+
+    [Fact]
+    public void Validate_ReconstructsSelectedEntriesFromCanonicalSourceDespiteIdentityPreservingMutation()
+    {
+        var history = CreateTurn("current");
+        var canonicalRequest = (DurableSessionRequest)history[0];
+        var replacement = new DurableSessionRequest
+        {
+            EntryId = canonicalRequest.EntryId,
+            TurnId = "mutated-turn",
+            CorrelationId = canonicalRequest.CorrelationId,
+            CreatedAt = canonicalRequest.CreatedAt,
+            Messages = [new ChatMessage(ChatRole.System, "injected instructions")],
+        };
+
+        var projection = DurableHistoryProjectionValidator.Validate(history, [replacement, history[1]]);
+
+        Assert.Same(canonicalRequest, projection[0]);
+        Assert.Equal("current", projection[0].TurnId);
+        Assert.Equal("request-current", ((DurableSessionRequest)projection[0]).Messages[0].Text);
+        Assert.Equal(ChatRole.User, ((DurableSessionRequest)projection[0]).Messages[0].Role);
+    }
+
     private static DurableSessionEntry[] CreateTurn(string id)
     {
         var now = DateTimeOffset.UnixEpoch;

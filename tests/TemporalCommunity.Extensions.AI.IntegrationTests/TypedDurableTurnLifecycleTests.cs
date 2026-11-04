@@ -1,14 +1,17 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tests.Compat;
 using TemporalCommunity.Extensions.Tests.Shared;
+using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Exceptions;
 using Temporalio.Extensions.Hosting;
+using Temporalio.Worker;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.AI.IntegrationTests;
@@ -18,6 +21,223 @@ public class TypedDurableTurnLifecycleTests
     private const string GetChatStepActivity = "TemporalCommunity.Extensions.AI.GetChatStep";
     private const string InvokeFunctionActivity = "TemporalCommunity.Extensions.AI.InvokeFunction";
     private const string ReducerKey = "typed-lifecycle-v1";
+
+    [Theory]
+    [InlineData("blocked")]
+    [InlineData("terminal-failure")]
+    [InlineData("terminal-success")]
+    [InlineData("terminal-conflict")]
+    public async Task UpdateWithStart_ReconcilesRestoredAdmissionBeforeExecutingModel(string scenario)
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var chatClient = new ScriptedChatClient(
+            [new ChatResponse(new ChatMessage(ChatRole.Assistant, "must not run"))]);
+        var taskQueue = $"typed-restored-admission-{Guid.NewGuid():N}";
+        using var host = BuildHost(env.Client, taskQueue, chatClient);
+        await host.StartAsync();
+        var request = CreateRequest("restored request", requestId: "restored-id");
+        var retainedResponse = new ChatResponse(new ChatMessage(ChatRole.Assistant, "retained answer"));
+        var retainedOutput = new DurableTurnResult<TypedTurnState>
+        {
+            Response = retainedResponse,
+            CompletionReason = DurableTurnCompletionReason.FinalResponse,
+            FinalTurnState = new TypedTurnState(7, ["retained"]),
+        };
+        var retainedEntry = DurableSessionResponse.FromChatResponse(
+            request.CorrelationId!,
+            retainedResponse,
+            DateTimeOffset.UtcNow,
+            DurableTurnCompletionReason.FinalResponse,
+            request.RequestId);
+        var input = host.Services.GetRequiredService<IDurableChatWorkflowInputFactory>().Create() with
+        {
+            HistoryRecovery = scenario == "blocked"
+                ? new DurableHistoryRecoveryState { IsBlocked = true, BlockReason = "test-block" }
+                : null,
+            CarriedTerminalOutcomes = scenario == "blocked" ? null :
+            [
+                new Internal.DurableTerminalTurnOutcome
+                {
+                    RequestId = request.RequestId!,
+                    AdmissionFingerprint = scenario == "terminal-conflict"
+                        ? "different-fingerprint"
+                        : Internal.DurableRequestFingerprint.CreateTurnAdmission(request),
+                    Output = scenario == "terminal-success"
+                        ? JsonSerializer.SerializeToElement(retainedOutput, DurableAIJsonUtilities.DefaultOptions)
+                        : null,
+                    ResponseEntry = scenario == "terminal-success"
+                        ? JsonSerializer.SerializeToElement<DurableSessionEntry>(
+                            retainedEntry, DurableAIJsonUtilities.DefaultOptions)
+                        : null,
+                    Failure = scenario == "terminal-success" ? null : new Internal.DurableTerminalTurnFailure
+                    {
+                        ErrorType = "RetainedFailure",
+                        Message = "previous turn failed",
+                        NonRetryable = true,
+                    },
+                },
+            ],
+        };
+        var workflowId = $"typed-restored-admission-{Guid.NewGuid():N}";
+        var handle = env.Client.GetWorkflowHandle<TypedDurableTurnWorkflow>(workflowId);
+        var start = WithStartWorkflowOperation.Create(
+            (TypedDurableTurnWorkflow workflow) => workflow.RunAsync(input),
+            new WorkflowOptions(workflowId, taskQueue)
+            {
+                IdConflictPolicy = WorkflowIdConflictPolicy.UseExisting,
+            });
+
+        try
+        {
+            var update = env.Client.ExecuteUpdateWithStartWorkflowAsync<
+                TypedDurableTurnWorkflow, DurableTurnResult<TypedTurnState>>(
+                workflow => workflow.TurnAsync(request),
+                new WorkflowUpdateWithStartOptions(start));
+            if (scenario == "terminal-success")
+            {
+                var result = await update.WaitAsync(TimeSpan.FromSeconds(30));
+                Assert.Equal("retained answer", result.Response.Text);
+                Assert.Equal(7, result.FinalTurnState!.Revision);
+                var duplicate = await handle.ExecuteUpdateAsync(
+                    workflow => workflow.TurnAsync(request),
+                    new WorkflowUpdateOptions { Id = "repeat-retained" });
+                Assert.Equal("retained answer", duplicate.Response.Text);
+                Assert.Equal(7, duplicate.FinalTurnState!.Revision);
+            }
+            else
+            {
+                var exception = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                    update.WaitAsync(TimeSpan.FromSeconds(30)));
+                var failure = Assert.IsType<ApplicationFailureException>(exception.InnerException);
+                Assert.Equal(scenario switch
+                {
+                    "blocked" => "DurableHistoryBlocked",
+                    "terminal-conflict" => "DurableTurnConflict",
+                    _ => "RetainedFailure",
+                }, failure.ErrorType);
+            }
+
+            Assert.Equal(0, chatClient.CallCount);
+            Assert.Equal(0, await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, GetChatStepActivity));
+            Assert.Empty(await handle.QueryAsync(workflow => workflow.GetHistory()));
+        }
+        finally
+        {
+            await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
+            await handle.GetResultAsync();
+            await AssertTypedReplayAsync(handle);
+            await host.StopAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData("post-replacement-input", "DurableTransportPayloadTooLarge")]
+    [InlineData("oversized-state", "DurableToolResultTooLarge")]
+    [InlineData("cyclic-result", "DurableToolResultSerializationFailed")]
+    [InlineData("bounded-sentinel", null)]
+    public async Task SequentialDispatch_StopsOnUnsafePayloadButContinuesAfterBoundedSentinel(
+        string scenario,
+        string? expectedErrorType)
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var chatClient = ScriptedChatClient.WithToolCallsThenFinal(
+        [
+            new FunctionCallContent("first-call", "first_tool",
+                new Dictionary<string, object?> { ["value"] = "value" }),
+            new FunctionCallContent("later-call", "later_tool",
+                new Dictionary<string, object?> { ["value"] = "value" }),
+        ], "final answer");
+        var firstInvocations = 0;
+        var laterInvocations = 0;
+        var laterRevision = -1;
+        var taskQueue = $"typed-sequential-payload-{Guid.NewGuid():N}";
+        using var host = BuildSequentialPayloadHost(
+            env.Client, taskQueue, chatClient,
+            scenario == "post-replacement-input" ? 70_000 : 65_536,
+            _ =>
+            {
+                Interlocked.Increment(ref firstInvocations);
+                if (scenario == "cyclic-result")
+                {
+                    var cyclic = new CyclicToolResult();
+                    cyclic.Next = cyclic;
+                    return cyclic;
+                }
+                return scenario == "bounded-sentinel" ? new string('r', 150_000) : "effect completed";
+            },
+            (_, _) => ValueTask.FromResult(DurableStateUpdate<TypedTurnState>.Replace(
+                new TypedTurnState(1, [scenario switch
+                {
+                    "post-replacement-input" => new string('s', 68_000),
+                    "oversized-state" => new string('s', 100_000),
+                    _ => "first",
+                }]))),
+            context =>
+            {
+                Interlocked.Increment(ref laterInvocations);
+                laterRevision = context.TurnState?.Revision ?? -1;
+                return "later result";
+            });
+        await host.StartAsync();
+        var handle = await StartAsync(env.Client, host.Services, taskQueue);
+        var request = CreateRequest(
+            "payload request",
+            requestId: "payload-request",
+            requestData: scenario == "post-replacement-input" ? new string('d', 4_000) : null);
+
+        try
+        {
+            var update = handle.ExecuteUpdateAsync(
+                workflow => workflow.TurnAsync(request),
+                new WorkflowUpdateOptions { Id = "sequential-payload" });
+            if (expectedErrorType is null)
+            {
+                var result = await update.WaitAsync(TimeSpan.FromSeconds(30));
+                Assert.Equal(DurableTurnCompletionReason.FinalResponse, result.CompletionReason);
+                Assert.Equal(2, result.FinalTurnState!.Revision);
+                Assert.Equal(1, laterRevision);
+                Assert.Equal(1, laterInvocations);
+                Assert.Contains(result.Response.Messages.SelectMany(message => message.Contents)
+                    .OfType<FunctionResultContent>(),
+                    item => item.CallId == "first-call"
+                        && item.Result?.ToString() == DurableFunctionOutput.ResultTooLargeMessage);
+                Assert.Equal(2, chatClient.CallCount);
+            }
+            else
+            {
+                var exception = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                    update.WaitAsync(TimeSpan.FromSeconds(30)));
+                var failure = Assert.IsType<ApplicationFailureException>(exception.InnerException);
+                Assert.Equal(expectedErrorType, failure.ErrorType);
+                Assert.Equal(0, laterInvocations);
+                Assert.Equal(1, chatClient.CallCount);
+                var history = await handle.QueryAsync(workflow => workflow.GetHistory());
+                var interrupted = Assert.IsType<DurableSessionResponse>(history[^1]);
+                Assert.Equal(DurableTurnCompletionReason.Interrupted, interrupted.CompletionReason);
+                var results = interrupted.Messages.SelectMany(message => message.Contents)
+                    .OfType<FunctionResultContent>().ToDictionary(result => result.CallId);
+                Assert.Contains("not executed", results["later-call"].Result?.ToString(),
+                    StringComparison.OrdinalIgnoreCase);
+                if (scenario != "post-replacement-input")
+                {
+                    Assert.Contains("unknown", results["first-call"].Result?.ToString(),
+                        StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            Assert.Equal(1, firstInvocations);
+            Assert.Equal(expectedErrorType is null ? 2 : 1,
+                await WorkflowHistoryAssertions.CountActivityScheduledAsync(handle, InvokeFunctionActivity));
+        }
+        finally
+        {
+            await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
+            await handle.GetResultAsync();
+            await AssertTypedReplayAsync(handle);
+            await host.StopAsync();
+        }
+    }
 
     [Fact]
     public async Task ContinueAsNew_PreservesTypedWorkflowAndFrozenConfiguration()
@@ -570,6 +790,68 @@ public class TypedDurableTurnLifecycleTests
     }
 #pragma warning restore MEAI001
 
+    private static IHost BuildSequentialPayloadHost(
+        ITemporalClient client,
+        string taskQueue,
+        IChatClient chatClient,
+        int maximumPayloadBytes,
+        Func<DurableToolInvocationContext<TypedTurnRequestData, TypedTurnState>, object?> firstFunction,
+        Func<object?, DurableToolInvocationContext<TypedTurnRequestData, TypedTurnState>,
+            ValueTask<DurableStateUpdate<TypedTurnState>>> firstState,
+        Func<DurableToolInvocationContext<TypedTurnRequestData, TypedTurnState>, object?> laterFunction)
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton(client);
+        builder.Services.AddChatClient(chatClient).Build();
+        var worker = builder.Services.AddHostedTemporalWorker(taskQueue)
+            .AddDurableAI(options =>
+            {
+                options.RegisterDefaultWorkflow = false;
+                options.ActivityTimeout = TimeSpan.FromSeconds(15);
+                options.MaximumTransportPayloadSizeBytes = maximumPayloadBytes;
+                options.RetryPolicy = new RetryPolicy { MaximumAttempts = 1 };
+            })
+            .AddWorkflow<TypedDurableTurnWorkflow>();
+        RegisterPayloadTool("first_tool", firstFunction, firstState);
+        RegisterPayloadTool("later_tool", laterFunction, (_, context) =>
+            ValueTask.FromResult(DurableStateUpdate<TypedTurnState>.Replace(
+                new TypedTurnState((context.TurnState?.Revision ?? 0) + 1, ["later"]))));
+        return builder.Build();
+
+        void RegisterPayloadTool(
+            string name,
+            Func<DurableToolInvocationContext<TypedTurnRequestData, TypedTurnState>, object?> function,
+            Func<object?, DurableToolInvocationContext<TypedTurnRequestData, TypedTurnState>,
+                ValueTask<DurableStateUpdate<TypedTurnState>>> completeState)
+        {
+            var declaration = AIFunctionFactory.Create(
+                (string value) => (object?)string.Empty, name, $"Runs {name}.").AsDeclarationOnly();
+            worker.AddDurableToolFactory<TypedTurnRequestData, TypedTurnState>(
+                declaration,
+                (_, context) => new DurableToolActivation<TypedTurnState>
+                {
+                    Function = AIFunctionFactory.Create(
+                        (string value) => function(context), name, $"Runs {name}."),
+                    CompleteState = (result, _) => completeState(result, context),
+                },
+                options => options.WithMaxAttempts(1));
+        }
+    }
+
+    private static async Task AssertTypedReplayAsync(WorkflowHandle<TypedDurableTurnWorkflow> handle)
+    {
+        var options = new WorkflowReplayerOptions { DataConverter = DurableAIDataConverter.Instance };
+        options.AddWorkflow<TypedDurableTurnWorkflow>();
+        var replay = await new WorkflowReplayer(options).ReplayWorkflowAsync(
+            await handle.FetchHistoryAsync(), throwOnReplayFailure: false);
+        Assert.Null(replay.ReplayFailure);
+    }
+
+    public sealed class CyclicToolResult
+    {
+        public CyclicToolResult? Next { get; set; }
+    }
+
     private static IHost BuildHost(
         ITemporalClient client,
         string taskQueue,
@@ -643,10 +925,13 @@ public class TypedDurableTurnLifecycleTests
     }
 
     private static DurableTurnRequest<TypedTurnRequestData, TypedTurnState> CreateRequest(
-        string operationId) => new()
+        string operationId,
+        string? requestId = null,
+        string? requestData = null) => new()
         {
+            RequestId = requestId,
             Messages = [new ChatMessage(ChatRole.User, operationId)],
-            RequestData = new TypedTurnRequestData(operationId),
+            RequestData = new TypedTurnRequestData(requestData ?? operationId),
             InitialTurnState = new TypedTurnState(0, []),
             CorrelationId = operationId,
         };

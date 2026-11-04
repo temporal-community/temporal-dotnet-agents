@@ -66,6 +66,104 @@ public class DurableFunctionActivitiesTests
         Assert.Null(ex.InnerException);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task InvokeFunctionAsync_HeartbeatsDuringLongToolAndPropagatesActivityCancellation(
+        bool synchronousTool)
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken receivedToken = default;
+        var heartbeatsDuringTool = 0;
+        ActivityEnvironment? env = null;
+        env = new ActivityEnvironment
+        {
+            Info = ActivityEnvironment.DefaultInfo with
+            {
+                HeartbeatTimeout = TimeSpan.FromMilliseconds(100),
+            },
+            Heartbeater = _ =>
+            {
+                if (started.Task.IsCompleted
+                    && Interlocked.Increment(ref heartbeatsDuringTool) == 3)
+                {
+                    env!.Cancel();
+                }
+            },
+        };
+        var function = synchronousTool
+            ? AIFunctionFactory.Create(
+                (CancellationToken cancellationToken) =>
+                {
+                    receivedToken = cancellationToken;
+                    started.SetResult();
+                    if (!cancellationToken.WaitHandle.WaitOne(TimeSpan.FromSeconds(10)))
+                    {
+                        throw new TimeoutException("Activity cancellation was not delivered.");
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return "unexpected success";
+                },
+                "long_tool")
+            : AIFunctionFactory.Create(
+                async (CancellationToken cancellationToken) =>
+                {
+                    receivedToken = cancellationToken;
+                    started.SetResult();
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken)
+                        .WaitAsync(TimeSpan.FromSeconds(10));
+                    return "unexpected success";
+                },
+                "long_tool");
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [function.Name] = function });
+
+        try
+        {
+            var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => env.RunAsync(() => activities.InvokeFunctionAsync(
+                    new DurableFunctionInput { FunctionName = function.Name })));
+
+            Assert.True(started.Task.IsCompletedSuccessfully);
+            Assert.True(Volatile.Read(ref heartbeatsDuringTool) >= 3);
+            Assert.True(receivedToken.IsCancellationRequested);
+            Assert.Equal(env.CancellationTokenSource.Token, receivedToken);
+            Assert.Equal(receivedToken, exception.CancellationToken);
+        }
+        finally
+        {
+            env.Cancel();
+        }
+    }
+
+    [Fact]
+    public async Task InvokeFunctionAsync_ToolInternalTimeoutIsBoundedRetryableFailure()
+    {
+        using var toolTimeout = new CancellationTokenSource();
+        toolTimeout.Cancel();
+        var function = AIFunctionFactory.Create(
+            async (CancellationToken cancellationToken) =>
+            {
+                Assert.False(cancellationToken.IsCancellationRequested);
+                await Task.Delay(Timeout.InfiniteTimeSpan, toolTimeout.Token);
+                return "unexpected success";
+            },
+            "timeout_tool");
+        var activities = new DurableFunctionActivities(
+            new Dictionary<string, AIFunction> { [function.Name] = function });
+        var env = new ActivityEnvironment();
+
+        var exception = await Assert.ThrowsAsync<Temporalio.Exceptions.ApplicationFailureException>(
+            () => env.RunAsync(() => activities.InvokeFunctionAsync(
+                new DurableFunctionInput { FunctionName = function.Name })));
+
+        Assert.False(env.CancellationTokenSource.IsCancellationRequested);
+        Assert.Equal("DurableToolInvocationFailed", exception.ErrorType);
+        Assert.False(exception.NonRetryable);
+        Assert.Equal("Durable activity failed; failure details were omitted.", exception.Message);
+        Assert.Null(exception.InnerException);
+    }
+
     [Fact]
     public async Task InvokeFunctionAsync_ReturnsTypedResultTooLargeAfterToolEffectCompletes()
     {

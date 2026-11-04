@@ -351,18 +351,7 @@ internal sealed class DefaultTemporalAgentClient(
         var perAgentToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
             configuredRetryPolicy);
         var perAgentMaxEntryCount = registration.MaxEntryCount ?? options.DefaultMaxEntryCount;
-        var perAgentModelContextTokens =
-            registration.MaxModelContextTokens ?? options.DefaultMaxModelContextTokens;
-        var perAgentOutputReserve =
-            registration.ModelOutputTokenReserve ?? options.DefaultModelOutputTokenReserve;
-        if (perAgentModelContextTokens is <= 0
-            || perAgentOutputReserve < 0
-            || (perAgentModelContextTokens is { } contextLimit
-                && perAgentOutputReserve >= contextLimit))
-        {
-            throw new InvalidOperationException(
-                $"The effective model-context token budget for agent '{agentName}' is invalid.");
-        }
+        var modelContextBudget = AgentModelContextBudget.Resolve(registration, options);
         var perAgentHistoryReducerKey = registration.HistoryReducerKey ?? options.DefaultHistoryReducerKey;
 
         var toolActivityOptions = BuildDurableAgentToolActivityOptions(
@@ -496,8 +485,8 @@ internal sealed class DefaultTemporalAgentClient(
             ApprovalTimeout = perAgentApprovalTimeout,
             RetryPolicy = perAgentModelRetryPolicy,
             MaxEntryCount = perAgentMaxEntryCount,
-            MaxModelContextTokens = perAgentModelContextTokens,
-            ModelOutputTokenReserve = perAgentOutputReserve,
+            MaxModelContextTokens = modelContextBudget.MaximumTokens,
+            ModelOutputTokenReserve = modelContextBudget.OutputTokenReserve,
             // HistoryReducerKey is serialized for durable workflows. When set,
             //   the workflow dispatches a ReduceHistoryByKey activity that resolves the delegate
             //   from DI — surviving wire serialization, worker restarts, and replay correctly.
@@ -580,6 +569,7 @@ internal sealed class DefaultTemporalAgentClient(
 
         if (options.DurableAgentRegistrations.TryGetValue(agentName, out var registration))
         {
+            _ = AgentModelContextBudget.Resolve(registration, options);
             effectiveActivityTimeout = registration.ActivityTimeout ?? options.DefaultActivityTimeout;
             effectiveHeartbeatTimeout = registration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
             configuredRetryPolicy = retryPolicyOverride ?? registration.RetryPolicy ?? options.DefaultRetryPolicy;

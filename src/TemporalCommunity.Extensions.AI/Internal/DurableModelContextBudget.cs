@@ -34,7 +34,9 @@ internal static class DurableModelContextBudget
             if (range.StartIndex != dropThrough
                 || range.EndIndex <= range.StartIndex
                 || range.EndIndex > currentTurnStartIndex
-                || range.IsProtected)
+                || range.IsProtected
+                || messages.Skip(range.StartIndex).Take(range.EndIndex - range.StartIndex)
+                    .Any(message => message.Role == ChatRole.System || message.Role == new ChatRole("developer")))
             {
                 break;
             }
