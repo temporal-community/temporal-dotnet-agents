@@ -485,10 +485,19 @@ internal sealed class DurableChatActivities(
         Internal.DurableTelemetryContentCapturePolicy.ConfigureChatClient(
             chatClient,
             services.GetService<DurableExecutionOptions>());
-        var response = await chatClient.GetResponseAsync(
-            [new ChatMessage(ChatRole.User, string.Join("\n\n", selectedTurns))],
-            options,
-            cancellationToken).ConfigureAwait(false);
+        var summaryMessages = new[]
+        {
+            new ChatMessage(ChatRole.User, string.Join("\n\n", selectedTurns)),
+        };
+        var response = context is null
+            ? await chatClient.GetResponseAsync(
+                summaryMessages,
+                options,
+                cancellationToken).ConfigureAwait(false)
+            : await Internal.DurableActivityHeartbeat.RunWithHeartbeatsAsync(
+                context,
+                () => chatClient.GetResponseAsync(summaryMessages, options, cancellationToken))
+                .ConfigureAwait(false);
         var summaryText = ExtractHistorySummaryText(response);
         if (string.IsNullOrWhiteSpace(summaryText))
         {
@@ -786,16 +795,29 @@ internal sealed class DurableChatActivities(
         }
     }
 
-    private async Task<IList<ChatMessage>> PrepareModelContextAsync(
+    private Task<IList<ChatMessage>> PrepareModelContextAsync(
         DurableChatInput input,
         ChatOptions options,
         ActivityExecutionContext? ctx)
     {
         if (input.ContextReducerKey is not { } reducerKey)
         {
-            return FitModelContext(input, options);
+            return Task.FromResult(FitModelContext(input, options));
         }
 
+        return ctx is null
+            ? PrepareModelContextWithReducerAsync(input, options, ctx, reducerKey)
+            : Internal.DurableActivityHeartbeat.RunWithHeartbeatsAsync(
+                ctx,
+                () => PrepareModelContextWithReducerAsync(input, options, ctx, reducerKey));
+    }
+
+    private async Task<IList<ChatMessage>> PrepareModelContextWithReducerAsync(
+        DurableChatInput input,
+        ChatOptions options,
+        ActivityExecutionContext? ctx,
+        string reducerKey)
+    {
         var reducer = services.GetKeyedService<IChatReducer>(reducerKey)
             ?? throw new ApplicationFailureException(
                 $"No IChatReducer is registered under key '{reducerKey}'.",

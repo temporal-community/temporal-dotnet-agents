@@ -147,6 +147,10 @@ assistant text is never included in Temporal activity heartbeat details. Content
 sensitive-data policy choice, not a storage or payload-codec setting: exporters, access controls,
 sampling, and retention still apply.
 
+Long-running buffered history summarization and asynchronous context-reducer preparation send
+detail-free activity heartbeats while awaiting the provider or reducer. These heartbeats keep the
+configured heartbeat timeout active without including conversation content.
+
 A tool span uses `ActivityKind.Internal` and includes `gen_ai.operation.name=execute_tool`,
 `gen_ai.tool.name`, `gen_ai.tool.type=function`, and the available
 `gen_ai.tool.call.id`, `gen_ai.tool.description`, and `gen_ai.conversation.id`. Call IDs,
