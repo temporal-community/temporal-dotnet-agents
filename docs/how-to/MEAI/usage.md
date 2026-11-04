@@ -128,6 +128,9 @@ builder.Services
 The optional model-context limit is independent of Temporal payload limits. The default
 deterministic heuristic estimates messages, instructions, tools and response schema; register an
 `IDurableChatTokenEstimator` in worker DI to replace it with a provider/model-specific estimator.
+The built-in heuristic caches message byte estimates within each fitting operation rather than
+reserializing each candidate suffix. Custom estimators still receive each complete candidate
+in order; their estimates need not be additive or monotonic.
 The output reserve is included in `MaxModelContextTokens`. When over budget, the activity removes
 only complete, eligible prior turns, preserving the active turn and protected approval or
 interrupted history. If the protected request still cannot fit, it fails with
@@ -204,17 +207,17 @@ workflow/activity services in the worker process. The client process does not ne
 ```csharp
 // Client process
 clientBuilder.Services.AddTemporalClient("localhost:7233", "default");
-clientBuilder.Services.AddDurableAIClient("durable-chat");
+clientBuilder.Services.AddDurableAIClient("durable-chat", options =>
+{
+    options.SessionTimeToLive = TimeSpan.FromHours(24);
+    options.MaxToolCallsPerTurn = 10;
+});
 
 // Worker process
 workerBuilder.Services.AddChatClient(innerChatClient);
 workerBuilder.Services
     .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
-    .AddDurableAIWorker(options =>
-    {
-        options.SessionTimeToLive = TimeSpan.FromHours(24);
-        options.MaxToolCallsPerTurn = 10;
-    })
+    .AddDurableAIWorker()
     .AddDurableTool(weatherTool);
 ```
 
@@ -225,6 +228,11 @@ a DI `ITemporalClient`, and auto-configures the durable converter when it is cre
 `DataConverter = DurableAIDataConverter.Instance` explicitly. The client and worker must use the
 same task queue. The client-only registration can be added before or after `AddTemporalClient`; a
 missing client is reported when `DurableChatSessionClient` is resolved.
+
+The client freezes session policies such as lifetime, iteration caps, context and transport
+budgets into the workflow start input. Configure those on `AddDurableAIClient`; worker-only
+settings cannot override an already-started session's frozen input. Provider implementations,
+credentials, and activity-local services remain worker-owned.
 
 `AddDurableAIClient` validates the client process's task queue and validates its converter when
 `DurableChatSessionClient` is resolved; it cannot inspect a remote worker's provider registrations
@@ -443,7 +451,8 @@ blocked; Temporal/server command limits can still prevent progress.
 Successful recovery closes new-turn admission and drains all already-admitted handlers and
 background turns before restarting. A recovery result reports that its projection succeeded,
 not that Continue-as-New has already happened. If an admitted turn finishes during the drain,
-the projection is rebuilt from the completed history and validated again; a failure leaves the
+the projection's source snapshot is tracked across the reducer await, then rebuilt from the
+completed history and validated again; a failure leaves the
 session blocked rather than carrying a partial or stale turn. Pending approvals stay in the old
 run until resolved, cancelled with their turn, or expired by their finite approval timeout or
 history reserve. As with normal compaction, an elapsed idle deadline or `RequestShutdown` does
@@ -591,7 +600,12 @@ If a turn fails after a tool activity was dispatched, `GetHistoryAsync` retains 
 preserve known completed results, use an explicit unknown result for dispatched calls whose
 outcome cannot be confirmed, and mark undispatched calls as not executed. Partial assistant prose
 is omitted. The interruption response is capped at 64 KiB; if necessary, tool arguments and
-results are replaced with bounded placeholders while preserving call/result grammar. This is model
+results are replaced with bounded placeholders while preserving call/result grammar. Before each
+tool batch is dispatched, the workflow reserves space for all call identities and worst-case
+bounded results across the turn. A batch that would exceed this budget fails with
+`DurableInterruptionRecordBudgetExceeded` before any of its calls run; previously dispatched
+calls retain their completed or uncertain outcomes. Large call IDs and multi-batch turns can
+therefore hit this limit even when an individual model response fits the transport budget. This is model
 context for later turns, not proof of an external effect; reconcile with the system of record
 before retrying an effectful operation. A failure before any tool dispatch continues to roll back
 the request and response.

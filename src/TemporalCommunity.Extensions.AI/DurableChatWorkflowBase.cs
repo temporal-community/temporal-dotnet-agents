@@ -2331,6 +2331,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 var interruptedResponse = CreateInterruptedResponseEntry(
                     requestEntryToAppend.CorrelationId,
                     requestEntry.RequestId,
+                    requestEntryToAppend.TurnId,
                     wasCancelled);
                 interruptedResponse.EntryId ??= Workflow.NewGuid().ToString("N");
                 interruptedResponse.TurnId = requestEntryToAppend.TurnId;
@@ -2365,6 +2366,25 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     {
         ArgumentNullException.ThrowIfNull(calls);
         _interruptedToolBatches.Add(new InterruptedToolBatch(calls));
+        try
+        {
+            var request = (DurableSessionRequest)_history[^1];
+            var reservation = CreateInterruptedResponseEntryCore(
+                request.CorrelationId, request.RequestId, wasCancelled: false,
+                compact: true, reserveMaximumResult: true);
+            reservation.EntryId = new string('0', 32);
+            reservation.TurnId = request.TurnId;
+            EnsureInterruptedResponseWithinLimit(reservation);
+        }
+        catch (ApplicationFailureException exception)
+            when (exception.ErrorType == "DurableTransportPayloadTooLarge")
+        {
+            _interruptedToolBatches.RemoveAt(_interruptedToolBatches.Count - 1);
+            throw new ApplicationFailureException(
+                "The tool batch cannot fit the bounded interrupted-turn record; no calls in this batch were dispatched.",
+                errorType: "DurableInterruptionRecordBudgetExceeded",
+                nonRetryable: true);
+        }
         return _interruptedToolBatches.Count - 1;
     }
 
@@ -2409,29 +2429,20 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private DurableSessionResponse CreateInterruptedResponseEntry(
         string correlationId,
         string? requestId,
+        string? turnId,
         bool wasCancelled)
     {
-        const int maximumInterruptedResponseBytes = 64 * 1024;
-        var maximumPayloadBytes = Math.Min(
-            maximumInterruptedResponseBytes,
-            RequiredInput.MaximumTransportPayloadSizeBytes);
-        var expansionAllowanceBytes = Math.Min(
-            RequiredInput.PayloadCodecExpansionAllowanceBytes,
-            maximumPayloadBytes - 1);
         var response = CreateInterruptedResponseEntryCore(
             correlationId,
             requestId,
             wasCancelled,
             compact: false);
+        response.EntryId = Workflow.NewGuid().ToString("N");
+        response.TurnId = turnId;
 
         try
         {
-            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
-                Workflow.PayloadConverter,
-                response,
-                maximumPayloadBytes,
-                expansionAllowanceBytes,
-                "interrupted-turn history entry");
+            EnsureInterruptedResponseWithinLimit(response);
             return response;
         }
         catch (ApplicationFailureException exception)
@@ -2442,21 +2453,30 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 requestId,
                 wasCancelled,
                 compact: true);
-            Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
-                Workflow.PayloadConverter,
-                compactResponse,
-                maximumPayloadBytes,
-                expansionAllowanceBytes,
-                "compact interrupted-turn history entry");
+            compactResponse.EntryId = response.EntryId;
+            compactResponse.TurnId = response.TurnId;
+            EnsureInterruptedResponseWithinLimit(compactResponse);
             return compactResponse;
         }
+    }
+
+    private void EnsureInterruptedResponseWithinLimit(DurableSessionResponse response)
+    {
+        var maximumPayloadBytes = Math.Min(64 * 1024, RequiredInput.MaximumTransportPayloadSizeBytes);
+        Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+            Workflow.PayloadConverter,
+            response,
+            maximumPayloadBytes,
+            Math.Min(RequiredInput.PayloadCodecExpansionAllowanceBytes, maximumPayloadBytes - 1),
+            "interrupted-turn history entry");
     }
 
     private DurableSessionResponse CreateInterruptedResponseEntryCore(
         string correlationId,
         string? requestId,
         bool wasCancelled,
-        bool compact)
+        bool compact,
+        bool reserveMaximumResult = false)
     {
         var messages = new List<ChatMessage>();
         foreach (var batch in _interruptedToolBatches)
@@ -2471,7 +2491,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             var results = new List<AIContent>(batch.Calls.Count);
             foreach (var call in batch.Calls)
             {
-                var result = compact
+                var result = reserveMaximumResult
+                    ? "Tool effect may have completed; result unknown and omitted from the bounded interruption record."
+                    : compact
                     ? call.Dispatched && call.HasResult
                         ? "Tool activity completed; result omitted from the bounded interruption record."
                         : call.Dispatched
@@ -2602,9 +2624,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         AcceptHistoryRecoveryOperation(operationId, isTrim: false);
         try
         {
-            var projection = await ApplyConfiguredHistoryCompactionAsync(_history.ToList())
+            var source = _history.ToList();
+            var projection = await ApplyConfiguredHistoryCompactionAsync(source)
                 .ConfigureAwait(true);
-            CompleteHistoryRecovery(projection, "retry-succeeded");
+            CompleteHistoryRecovery(projection, "retry-succeeded", source.Count);
         }
         catch (OperationCanceledException)
         {
@@ -2638,7 +2661,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         try
         {
             var projection = CreateExplicitTrimProjection(_history);
-            CompleteHistoryRecovery(projection, "trim-succeeded");
+            CompleteHistoryRecovery(projection, "trim-succeeded", _history.Count);
         }
         catch (Exception exception)
         {
@@ -2743,7 +2766,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         }
     }
 
-    private void CompleteHistoryRecovery(List<DurableSessionEntry> projection, string outcome)
+    private void CompleteHistoryRecovery(
+        List<DurableSessionEntry> projection, string outcome, int sourceCount)
     {
         var input = RequiredInput;
         ValidateHistoryCompactionProgress(input, _history, projection);
@@ -2772,7 +2796,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 "continue-as-new workflow input");
         }
         _preparedHistory = projection;
-        _preparedHistorySourceCount = _history.Count;
+        _preparedHistorySourceCount = sourceCount;
         _historyRecovery = recoveredState;
         Input = input with { HistoryRecovery = _historyRecovery };
         _historyRecoveryRetriesThisRun = 0;
@@ -2860,11 +2884,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     var outcome = _historyRecovery.LastOutcome!;
                     try
                     {
+                        var source = _history.ToList();
                         var projection = outcome == "trim-succeeded"
-                            ? CreateExplicitTrimProjection(_history)
-                            : await ApplyConfiguredHistoryCompactionAsync(_history.ToList())
+                            ? CreateExplicitTrimProjection(source)
+                            : await ApplyConfiguredHistoryCompactionAsync(source)
                                 .ConfigureAwait(true);
-                        CompleteHistoryRecovery(projection, outcome);
+                        CompleteHistoryRecovery(projection, outcome, source.Count);
                         continue;
                     }
                     catch (OperationCanceledException)

@@ -83,17 +83,17 @@ internal static class Usage
         // BEGIN SNIPPET docs/how-to/MEAI/usage.md#split-client-and-worker-hosting
         // Client process
         clientBuilder.Services.AddTemporalClient("localhost:7233", "default");
-        clientBuilder.Services.AddDurableAIClient("durable-chat");
+        clientBuilder.Services.AddDurableAIClient("durable-chat", options =>
+        {
+            options.SessionTimeToLive = TimeSpan.FromHours(24);
+            options.MaxToolCallsPerTurn = 10;
+        });
 
         // Worker process
         workerBuilder.Services.AddChatClient(innerChatClient);
         workerBuilder.Services
             .AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
-            .AddDurableAIWorker(options =>
-            {
-                options.SessionTimeToLive = TimeSpan.FromHours(24);
-                options.MaxToolCallsPerTurn = 10;
-            })
+            .AddDurableAIWorker()
             .AddDurableTool(weatherTool);
         // END SNIPPET docs/how-to/MEAI/usage.md#split-client-and-worker-hosting
     }

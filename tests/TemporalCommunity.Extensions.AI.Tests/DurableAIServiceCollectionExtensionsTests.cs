@@ -70,6 +70,40 @@ public class DurableAIServiceCollectionExtensionsTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
+    public void SplitHosting_ClientOwnsFrozenSessionPolicies(bool configureWorkerDifferently)
+    {
+        var clientServices = new ServiceCollection();
+        clientServices.AddLogging();
+        clientServices.AddDurableAIClient("durable-chat", options =>
+        {
+            options.SessionTimeToLive = TimeSpan.FromHours(24);
+            options.MaxToolCallsPerTurn = 10;
+        });
+        var workerServices = new ServiceCollection();
+        workerServices.AddLogging();
+        workerServices.AddChatClient(A.Fake<IChatClient>());
+        workerServices.AddHostedTemporalWorker("localhost:7233", "default", "durable-chat")
+            .AddDurableAIWorker(options =>
+            {
+                if (configureWorkerDifferently)
+                {
+                    options.SessionTimeToLive = TimeSpan.FromHours(2);
+                    options.MaxToolCallsPerTurn = 3;
+                }
+            });
+        using var clientProvider = clientServices.BuildServiceProvider();
+        using var workerProvider = workerServices.BuildServiceProvider();
+        var input = clientProvider.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
+        Assert.Equal(TimeSpan.FromHours(24), input.TimeToLive);
+        Assert.Equal(10, input.MaxToolCallsPerTurn);
+        Assert.Null(clientProvider.GetService<IChatClient>());
+        var workerInput = workerProvider.GetRequiredService<IDurableChatWorkflowInputFactory>().Create();
+        Assert.Equal(configureWorkerDifferently ? 3 : 20, workerInput.MaxToolCallsPerTurn);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     public void AddDurableAIClient_RegistersWithoutWorker_RegardlessOfTemporalClientOrder(
         bool addTemporalClientFirst)
     {

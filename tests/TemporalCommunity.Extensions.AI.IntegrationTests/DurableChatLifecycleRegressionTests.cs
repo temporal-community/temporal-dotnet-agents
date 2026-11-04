@@ -619,22 +619,32 @@ public class DurableChatLifecycleRegressionTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task HistoryRecovery_DrainsPendingTurnAndApprovalBeforeRestart(bool explicitTrim)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task HistoryRecovery_DrainsPendingTurnAndApprovalBeforeRestart(
+        bool explicitTrim, bool completeDuringRecovery)
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var reducerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseReducer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var recoveryReducerEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRecoveryReducer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var reducerCalls = 0;
         Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>> reducer = entries =>
         {
-            if (Interlocked.Increment(ref reducerCalls) == 1)
+            var call = Interlocked.Increment(ref reducerCalls);
+            if (call == 1)
             {
                 reducerEntered.TrySetResult();
                 releaseReducer.Task.GetAwaiter().GetResult();
                 return entries.ToList();
+            }
+            if (call == 2 && completeDuringRecovery)
+            {
+                recoveryReducerEntered.TrySetResult();
+                releaseRecoveryReducer.Task.GetAwaiter().GetResult();
             }
             return entries.TakeLast(entries.Last() is DurableSessionRequest ? 3 : 2).ToList();
         };
@@ -667,10 +677,17 @@ public class DurableChatLifecycleRegressionTests
             await model.Entered.WaitAsync(Deadline);
             releaseReducer.TrySetResult();
             await WaitForHistoryBlockedAsync(workflow);
-            var recovery = await (explicitTrim
+            var recoveryTask = explicitTrim
                 ? session.TrimBlockedHistoryAsync(conversationId, "recover-drain")
-                : session.RetryHistoryCompactionAsync(conversationId, "recover-drain"))
-                .WaitAsync(Deadline);
+                : session.RetryHistoryCompactionAsync(conversationId, "recover-drain");
+            if (completeDuringRecovery)
+            {
+                await recoveryReducerEntered.Task.WaitAsync(Deadline);
+                model.Release();
+                await turn.WaitAsync(Deadline);
+                releaseRecoveryReducer.TrySetResult();
+            }
+            var recovery = await recoveryTask.WaitAsync(Deadline);
             Assert.False(recovery.IsBlocked);
 
             // A query round trip makes this independent of client-side update completion timing.
@@ -688,7 +705,7 @@ public class DurableChatLifecycleRegressionTests
             Assert.NotNull(pendingApproval);
             Assert.Equal(oldRunId, (await workflow.DescribeAsync()).RunId);
             Assert.False(approval.IsCompleted);
-            Assert.False(turn.IsCompleted);
+            Assert.Equal(completeDuringRecovery, turn.IsCompleted);
 
             model.Release();
             Assert.Equal("completed admitted turn", (await turn.WaitAsync(Deadline)).Text);
@@ -729,6 +746,7 @@ public class DurableChatLifecycleRegressionTests
         finally
         {
             releaseReducer.TrySetResult();
+            releaseRecoveryReducer.TrySetResult();
             model.Release();
             await host.StopAsync();
         }

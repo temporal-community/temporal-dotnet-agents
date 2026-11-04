@@ -387,6 +387,82 @@ public class ExtensibleDurableTurnIntegrationTests
         await host.StopAsync();
     }
 
+    [Theory]
+    [InlineData(800, 24)]
+    [InlineData(10000, 0)]
+    public async Task InterruptedTurnHistory_ReservesIdentityBudgetBeforeDispatchingLaterBatches(
+        int identityLength, int expectedInvocations)
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var invocations = 0;
+        var batches = Enumerable.Range(0, 4)
+            .Select(batch => new ChatResponse(new ChatMessage(
+                ChatRole.Assistant,
+                Enumerable.Range(0, 12).Select(index => (AIContent)new FunctionCallContent(
+                    $"{batch}-{index}-" + new string('i', identityLength), "success_tool")).ToList())))
+            .ToArray();
+        var model = new ScriptedChatClient(
+        [
+            new ChatResponse(
+            [
+                new ChatMessage(ChatRole.Assistant, "prior response part one"),
+                new ChatMessage(ChatRole.Assistant, "prior response part two"),
+            ]),
+            .. batches,
+        ]);
+        var taskQueue = $"interrupted-identity-budget-{Guid.NewGuid():N}";
+        using var host = BuildStateCompletionFailureHost(
+            env.Client, taskQueue, model, static () => { },
+            onSuccessfulInvoke: () => Interlocked.Increment(ref invocations));
+        await host.StartAsync();
+        try
+        {
+            var handle = await StartWorkflowAsync(env.Client, host.Services, taskQueue);
+            await handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+                wf => wf.TurnAsync(CreateRequest("Seed multi-message history.")));
+            var failure = await Assert.ThrowsAsync<Temporalio.Exceptions.WorkflowUpdateFailedException>(() =>
+                handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
+                    wf => wf.TurnAsync(CreateRequest()),
+                    new WorkflowUpdateOptions { Id = "identity-budget" }));
+            Assert.Equal("DurableInterruptionRecordBudgetExceeded",
+                Assert.IsType<Temporalio.Exceptions.ApplicationFailureException>(failure.InnerException).ErrorType);
+            Assert.Equal(expectedInvocations, invocations);
+            var retained = await handle.QueryAsync<IntegrationDurableTurnWorkflow, IReadOnlyList<DurableSessionEntry>>(
+                wf => wf.GetHistory());
+            if (expectedInvocations == 0)
+            {
+                Assert.Equal(2, retained.Count);
+            }
+            else
+            {
+                var interrupted = Assert.IsType<DurableSessionResponse>(retained[^1]);
+                Assert.Equal(DurableTurnCompletionReason.Interrupted, interrupted.CompletionReason);
+                var calls = interrupted.Messages.SelectMany(message => message.Contents)
+                    .OfType<FunctionCallContent>().ToList();
+                var results = interrupted.Messages.SelectMany(message => message.Contents)
+                    .OfType<FunctionResultContent>().ToList();
+                Assert.Equal(expectedInvocations, calls.Count);
+                Assert.Equal(calls.Select(call => call.CallId), results.Select(result => result.CallId));
+                Assert.All(results, result => Assert.Equal("ordinary result", result.Result?.ToString()));
+                Assert.True(DurableAIDataConverter.Instance.PayloadConverter.ToPayload(interrupted).CalculateSize() <= 64 * 1024);
+            }
+            await handle.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync());
+            await handle.GetResultAsync();
+            var replayOptions = new WorkflowReplayerOptions
+            {
+                DataConverter = DurableAIDataConverter.Instance,
+            }.AddWorkflow<IntegrationDurableTurnWorkflow>();
+            var replay = await new WorkflowReplayer(replayOptions).ReplayWorkflowAsync(
+                await handle.FetchHistoryAsync(), throwOnReplayFailure: false);
+            Assert.Null(replay.ReplayFailure);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     [Fact]
     public async Task SequentialStateCompletionFailure_DoesNotScheduleLaterTool()
     {
@@ -981,7 +1057,8 @@ public class ExtensibleDurableTurnIntegrationTests
         IChatClient chatClient,
         Action onInvoke,
         Action? onLaterInvoke = null,
-        string successfulToolResult = "ordinary result")
+        string successfulToolResult = "ordinary result",
+        Action? onSuccessfulInvoke = null)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton(client);
@@ -999,7 +1076,11 @@ public class ExtensibleDurableTurnIntegrationTests
 
         worker.AddDurableTool(
             AIFunctionFactory.Create(
-                () => successfulToolResult,
+                () =>
+                {
+                    onSuccessfulInvoke?.Invoke();
+                    return successfulToolResult;
+                },
                 "success_tool",
                 "Returns a result before a later fatal failure."),
             options => options.WithMaxAttempts(1));
