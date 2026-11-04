@@ -101,6 +101,10 @@ For recurring turns, see [scheduled durable chat](scheduling.md): use a native T
 to start a trigger workflow whose activity submits the turn, rather than scheduling a session
 workflow directly.
 
+For capacity isolation, [the operating guide](operations.md) shows optional `ModelTaskQueue`
+and per-tool `TaskQueue` routing. Defaults remain on the workflow queue; routing is frozen for
+the session, not chosen per turn.
+
 Register a `ChatClient`, a durable tool, and the worker in one place. This is close to the
 package README's quick start but shows a couple of production-shaped defaults (bounded activity
 timeout, session TTL, tool-call cap, and a per-tool override) together in one block:

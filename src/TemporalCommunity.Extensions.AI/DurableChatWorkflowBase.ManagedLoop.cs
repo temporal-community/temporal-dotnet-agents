@@ -31,6 +31,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         DurableToolDispatchMode dispatchMode = DurableToolDispatchMode.Parallel,
         Internal.DurableToolsetManifest? effectiveToolsetManifest = null)
     {
+        stepActivityOptions = (ActivityOptions)stepActivityOptions.Clone();
+        stepActivityOptions.TaskQueue = RequiredInput.ModelTaskQueue ?? stepActivityOptions.TaskQueue;
         stepActivityOptions = ApplyCurrentTurnCancellation(stepActivityOptions);
 
         // Seed the LLM with the flattened conversation transcript: prior turns from

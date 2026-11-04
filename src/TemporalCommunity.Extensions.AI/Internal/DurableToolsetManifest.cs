@@ -198,6 +198,8 @@ internal sealed record DurableToolsetManifestMember
                     Declaration),
                 StringComparison.Ordinal)
             || !ToolActivityOptions.StartToCloseTimeout.HasValue
+            || (ToolActivityOptions.TaskQueue is not null
+                && string.IsNullOrWhiteSpace(ToolActivityOptions.TaskQueue))
             || ToolActivityOptions.StartToCloseTimeout.Value <= TimeSpan.Zero
             || !ToolActivityOptions.HeartbeatTimeout.HasValue
             || ToolActivityOptions.HeartbeatTimeout.Value <= TimeSpan.Zero

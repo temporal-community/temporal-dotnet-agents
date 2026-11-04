@@ -131,6 +131,7 @@ internal sealed class DurableToolsetCatalog
         string toolsetId,
         DurableToolsetMemberRegistration member)
     {
+        member.Options.Validate();
         var retryPolicy = DurableManagedToolRetryPolicy.Resolve(
             member.Options.RetryPolicy,
             options.RetryPolicy,
@@ -148,6 +149,7 @@ internal sealed class DurableToolsetCatalog
             Declaration = member.Declaration,
             ToolActivityOptions = new ActivityOptions
             {
+                TaskQueue = member.Options.TaskQueue,
                 StartToCloseTimeout = member.Options.StartToCloseTimeout ?? options.ActivityTimeout,
                 HeartbeatTimeout = member.Options.HeartbeatTimeout ?? options.HeartbeatTimeout,
                 RetryPolicy = Clone(retryPolicy),

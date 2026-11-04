@@ -14,6 +14,12 @@ registrations.
 The session workflow supplies frozen function schemas to the model, and each model-requested
 invocation is a Temporal activity.
 
+Set `DurableChatToolOptions.TaskQueue` to execute a managed tool on a separate worker pool; null
+keeps it on the workflow queue. This is independent of `DurableExecutionOptions.ModelTaskQueue`.
+The session records the tool route with its policy, including across continue-as-new. Register
+compatible implementations on every target queue; see the [operating guide](operations.md) for
+worker setup, capacity controls and unpolled-queue behavior.
+
 ```csharp
 var weatherTool = AIFunctionFactory.Create(
     (string city) => weather.GetCurrent(city),

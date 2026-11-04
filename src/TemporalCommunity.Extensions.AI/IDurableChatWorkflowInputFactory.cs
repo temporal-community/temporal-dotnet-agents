@@ -72,6 +72,7 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
 
     public DurableChatWorkflowInput Create() => new()
     {
+        ModelTaskQueue = _options.ModelTaskQueue,
         DefaultChatClientKey = _options.DefaultChatClientKey,
         HistorySummarizerClientKey =
             _options.DefaultHistorySummarizerClientKey ?? _options.DefaultChatClientKey,
@@ -134,9 +135,11 @@ internal sealed class DurableChatWorkflowInputFactory : IDurableChatWorkflowInpu
         {
             DurableChatToolOptions? perTool = null;
             _toolOptionsRegistry?.TryGetValue(toolName, out perTool);
+            perTool?.Validate();
 
             result[toolName] = new ActivityOptions
             {
+                TaskQueue = perTool?.TaskQueue,
                 StartToCloseTimeout = perTool?.StartToCloseTimeout ?? _options.ActivityTimeout,
                 HeartbeatTimeout = perTool?.HeartbeatTimeout ?? _options.HeartbeatTimeout,
                 RetryPolicy = Internal.DurableManagedToolRetryPolicy.Resolve(

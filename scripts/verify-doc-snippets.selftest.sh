@@ -174,6 +174,18 @@ scheduling_snippet='// BEGIN SNIPPET docs/how-to/MEAI/scheduling.md#backfill
 run_case meai-scheduling-uncovered reject "$scheduling_doc" '' '' 'docs/how-to/MEAI/scheduling.md'
 run_case meai-scheduling-covered pass "$scheduling_doc" "$scheduling_snippet" '' 'docs/how-to/MEAI/scheduling.md'
 
+operations_doc='# Operations
+
+## Workers
+
+```csharp
+services.AddHostedTemporalWorker("model");
+```'
+operations_snippet='// BEGIN SNIPPET docs/how-to/MEAI/operations.md#workers
+// END SNIPPET docs/how-to/MEAI/operations.md#workers'
+run_case meai-operations-uncovered reject "$operations_doc" '' '' 'docs/how-to/MEAI/operations.md'
+run_case meai-operations-covered pass "$operations_doc" "$operations_snippet" '' 'docs/how-to/MEAI/operations.md'
+
 custom_workflow_doc='# Custom workflow output
 
 ## Package-managed typed turns

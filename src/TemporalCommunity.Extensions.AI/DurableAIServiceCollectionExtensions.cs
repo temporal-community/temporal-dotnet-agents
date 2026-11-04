@@ -399,6 +399,7 @@ public static class DurableAIServiceCollectionExtensions
         var snapshot = DurableFunctionDeclarationSnapshot.Create(declaration);
         var perToolOptions = new DurableChatToolOptions();
         configure?.Invoke(perToolOptions);
+        perToolOptions.Validate();
 
         builder.Services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
             registry => registry[snapshot.Name] = snapshot);
@@ -432,6 +433,7 @@ public static class DurableAIServiceCollectionExtensions
         var snapshot = DurableFunctionDeclarationSnapshot.Create(declaration);
         var perToolOptions = new DurableChatToolOptions();
         configure?.Invoke(perToolOptions);
+        perToolOptions.Validate();
         services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(
             registry => registry[snapshot.Name] = snapshot);
         services.AddSingleton<Action<DurableChatToolOptionsRegistry>>(
@@ -469,6 +471,7 @@ public static class DurableAIServiceCollectionExtensions
     {
         var perToolOptions = new DurableChatToolOptions();
         configure?.Invoke(perToolOptions);
+        perToolOptions.Validate();
 
         services.AddSingleton<Action<DurableFunctionRegistry>>(
             registry => registry.Register(tool));
@@ -489,6 +492,7 @@ public static class DurableAIServiceCollectionExtensions
         var snapshot = DurableFunctionDeclarationSnapshot.Create(declaration);
         var perToolOptions = new DurableChatToolOptions();
         configure?.Invoke(perToolOptions);
+        perToolOptions.Validate();
         var activationFactory = new DurableToolActivationFactory<TRequestData, TTurnState>(factory);
 
         services.AddSingleton<Action<DurableFunctionDeclarationRegistry>>(

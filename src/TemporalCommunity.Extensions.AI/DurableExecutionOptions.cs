@@ -19,6 +19,14 @@ public sealed class DurableExecutionOptions
     public string? TaskQueue { get; set; }
 
     /// <summary>
+    /// Gets or sets the task queue for managed chat model-step activities only. When null, model
+    /// steps use the session workflow's queue. Captured in workflow input when the session starts;
+    /// configure this on the session-starting client in split deployments. Does not route history,
+    /// interceptor or direct-adapter activities, and does not register a worker on the target queue.
+    /// </summary>
+    public string? ModelTaskQueue { get; set; }
+
+    /// <summary>
     /// Gets or sets the activity start-to-close timeout for LLM calls. Defaults to 5 minutes.
     /// </summary>
     public TimeSpan ActivityTimeout { get; set; } = TimeSpan.FromMinutes(5);
@@ -384,6 +392,12 @@ public sealed class DurableExecutionOptions
         {
             throw new InvalidOperationException(
                 $"{nameof(TaskQueue)} must be set in {nameof(DurableExecutionOptions)}.");
+        }
+
+        if (ModelTaskQueue is not null && string.IsNullOrWhiteSpace(ModelTaskQueue))
+        {
+            throw new InvalidOperationException(
+                $"{nameof(ModelTaskQueue)} must be null or a non-empty task queue.");
         }
 
         if (ActivityTimeout <= TimeSpan.Zero)

@@ -208,6 +208,21 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         var firstInitialization = Input is null;
         ValidateTerminalOutcomeLimits(input);
         ValidateHistoryBudgetLimits(input);
+        if (input.ModelTaskQueue is not null && string.IsNullOrWhiteSpace(input.ModelTaskQueue))
+        {
+            throw new InvalidOperationException("ModelTaskQueue must be null or a non-empty task queue.");
+        }
+        if (input.ToolActivityOptions is not null)
+        {
+            foreach (var options in input.ToolActivityOptions.Values)
+            {
+                if (options.TaskQueue is not null && string.IsNullOrWhiteSpace(options.TaskQueue))
+                {
+                    throw new InvalidOperationException(
+                        "A tool activity TaskQueue must be null or a non-empty task queue.");
+                }
+            }
+        }
         if (input.MaxModelContextTokens is <= 0
             || input.ModelOutputTokenReserve < 0
             || (input.MaxModelContextTokens is { } modelLimit

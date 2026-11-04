@@ -34,6 +34,22 @@ namespace TemporalCommunity.Extensions.AI;
 public sealed class DurableChatToolOptions
 {
     /// <summary>
+    /// Gets or sets the task queue for this managed tool's invocation activity. Null keeps the
+    /// session workflow's queue. Frozen with the tool's policy at session initialization and carried
+    /// across continue-as-new. Does not route its interceptor or register target-queue workers.
+    /// </summary>
+    public string? TaskQueue { get; set; }
+
+    internal void Validate()
+    {
+        if (TaskQueue is not null && string.IsNullOrWhiteSpace(TaskQueue))
+        {
+            throw new InvalidOperationException(
+                $"{nameof(TaskQueue)} must be null or a non-empty task queue.");
+        }
+    }
+
+    /// <summary>
     /// Gets or sets the Temporal <c>StartToCloseTimeout</c> applied to this tool's
     /// activity dispatch. When <see langword="null"/>, the worker-level default is used.
     /// </summary>

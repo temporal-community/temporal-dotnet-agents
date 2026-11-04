@@ -17,6 +17,13 @@ public record class DurableChatWorkflowInput
     internal Internal.DurableToolsetManifest? ToolsetManifest { get; init; }
 
     /// <summary>
+    /// The replay-frozen task queue for managed model steps. Null keeps the workflow's queue.
+    /// Preserved across continue-as-new; does not route history or policy activities.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ModelTaskQueue { get; init; }
+
+    /// <summary>
     /// The chat-client profile selected when the session was created. Managed sessions retain
     /// this route for their lifetime, including across continue-as-new transitions.
     /// </summary>

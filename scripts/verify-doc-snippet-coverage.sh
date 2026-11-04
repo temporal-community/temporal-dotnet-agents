@@ -63,7 +63,7 @@ fail() {
 }
 
 # Emits one `key` line per qualifying fenced block: a ```csharp block whose body contains
-# `AddDurableAgent(` or `AddTool(`, every MEAI usage/embeddings/scheduling block, selected MEAI tool/HITL
+# `AddDurableAgent(` or `AddTool(`, every MEAI usage/embeddings/scheduling/operations block, selected MEAI tool/HITL
 # examples, or phase harness examples.
 # Headings inside fences are skipped, matching the slugger in
 # verify-markdown-links.sh — `# comment` in a shell example is not a section heading.
@@ -93,6 +93,7 @@ scan_docs() {
                 FILENAME == "docs/how-to/MEAI/embeddings.md" ||
                 FILENAME == "docs/how-to/MEAI/usage.md" ||
                 FILENAME == "docs/how-to/MEAI/scheduling.md" ||
+                FILENAME == "docs/how-to/MEAI/operations.md" ||
                 (FILENAME == "docs/how-to/MEAI/observability.md" &&
                  (heading == "opentelemetry-setup" || heading == "w3c-propagator" ||
                   heading == "workflow-diagnostic" ||

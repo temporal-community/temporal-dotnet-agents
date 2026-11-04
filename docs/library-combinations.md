@@ -84,6 +84,9 @@ var response = await sessionClient.SendAsync(
 - Custom workflow output — subclass `DurableChatWorkflowBase<TOutput>` to return domain-specific types from workflow Update handlers. The session loop, history, HITL, and continue-as-new are all inherited. See [custom-workflow-output.md](how-to/MEAI/custom-workflow-output.md).
 - Extensible typed turns — subclass `DurableToolWorkflowBase<TRequestData, TTurnState>` to retain
   package-owned per-tool activities while supplying typed request data and sequential turn state.
+- Managed model/tool capacity isolation — optional frozen `ModelTaskQueue` and per-tool
+  `TaskQueue` routes. See the [operating guide](how-to/MEAI/operations.md); separate queues do not
+  themselves guarantee priority and do not change MAF or direct-adapter routing.
 - MCP client tools are ordinary `AIFunction` registrations; choose trusted dynamic discovery or
   reviewed pinned schemas as described in the [MEAI MCP guide](how-to/MEAI/mcp-tools.md).
 - An ordinary MCP server tool can start or join an application workflow without another library

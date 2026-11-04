@@ -46,5 +46,9 @@ plain-text search attributes must not contain secrets or sensitive user identifi
 - The demo has no provider charges. Real providers charge for inference/tools separately from
   Temporal execution; backfills and retries can increase both.
 
+For production capacity isolation, see the
+[separate-queue operating guide](../../../docs/how-to/MEAI/operations.md). This sample deliberately
+keeps model and tool work on its workflow queue; schedule overlap policy is not worker priority.
+
 See the [scheduling guide](../../../docs/how-to/MEAI/scheduling.md) for configuration, costs,
 backfill boundary behavior, privacy and replay-tested scenarios.
