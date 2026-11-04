@@ -49,6 +49,9 @@ immediately before deletion. See the repository [security boundary](../../../doc
 
 - `RequireApproval()` is a workflow-owned gate. The tool does not call Temporal APIs and no
   activity remains running while a human reviews the request.
+- Submit the approval once. A second `ResolveApprovalAsync` call, even with an identical decision,
+  is rejected by the update validator as already resolved; it is not a second successful approval.
+  The sample shuts down its session after reading the completed history.
 - `SessionTimeToLive` must outlast the approval timeout; this sample uses a 24-hour
   per-tool timeout (`WithApprovalTimeout`) and a 26-hour session lifetime.
 - `NoRetry()` is deliberate: deleting records is a write operation and should not be repeated by

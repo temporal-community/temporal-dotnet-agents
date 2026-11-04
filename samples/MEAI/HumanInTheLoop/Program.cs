@@ -209,7 +209,7 @@ static async Task RunHitlDemoAsync(DurableChatSessionClient sessionClient)
         //   • Any external decision mechanism
         Console.WriteLine(" [Reviewer] Auto-approving request to demonstrate the full flow...");
 
-        // ResolveApprovalAsync sends the retry-safe ResolveApproval [WorkflowUpdate].
+        // ResolveApprovalAsync sends the validated ResolveApproval [WorkflowUpdate].
         // This satisfies the workflow's durable approval wait. The workflow then schedules
         // the delete_records activity and resumes the model/tool loop.
         var decision = new DurableApprovalDecision
@@ -223,8 +223,6 @@ static async Task RunHitlDemoAsync(DurableChatSessionClient sessionClient)
 
         var resolution = await sessionClient.ResolveApprovalAsync(conversationId, decision);
         Console.WriteLine($" [Reviewer] Approval submitted: {resolution.Status}");
-        var duplicate = await sessionClient.ResolveApprovalAsync(conversationId, decision);
-        Console.WriteLine($" [Reviewer] Identical retry: {duplicate.Status}");
         Console.WriteLine(" [Reviewer] Waiting for assistant response...\n");
     }
     else
@@ -248,6 +246,7 @@ static async Task RunHitlDemoAsync(DurableChatSessionClient sessionClient)
     var history = await sessionClient.GetHistoryAsync(conversationId);
     var messageCount = history.Sum(e => e.Messages.Count);
     Console.WriteLine($" [History] {messageCount} messages persisted in workflow state.");
+    await sessionClient.ShutdownAsync(conversationId);
 
     Console.WriteLine("════════════════════════════════════════════════════════════\n");
 }

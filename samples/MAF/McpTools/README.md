@@ -22,6 +22,9 @@ the server's unexpected `server_admin` tool is excluded.
 - no model API key—the sample uses a deterministic in-process chat client;
 - no external MCP service—the sample MCP transport and server run in-process.
 
+Set `TEMPORAL_ADDRESS` to target a different local endpoint; the namespace remains `default`.
+That namespace must have the three search attributes shown above registered before running.
+
 Ownership:
 
 - the application process owns the MCP connection and Temporal worker;

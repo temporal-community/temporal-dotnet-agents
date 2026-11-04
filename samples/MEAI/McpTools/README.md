@@ -31,6 +31,9 @@ trusted catalog and is therefore intended for development or controlled servers.
 - no model API key—the sample uses a deterministic in-process chat client;
 - no external MCP service—the sample MCP transport and server run in-process.
 
+Set `TEMPORAL_ADDRESS` to target a different local endpoint (namespace `default`). The sample
+shuts down its chat session after printing the completed result.
+
 Ownership:
 
 - the application process owns the Temporal worker and MCP connection;

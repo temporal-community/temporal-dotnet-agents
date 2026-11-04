@@ -10,7 +10,8 @@ using Temporalio.Extensions.Hosting;
 const string taskQueue = "extensible-durable-turns";
 var builder = Host.CreateApplicationBuilder(args);
 
-var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions("localhost:7233")
+var temporalAddress = builder.Configuration["TEMPORAL_ADDRESS"] ?? "localhost:7233";
+var temporalClient = await TemporalClient.ConnectAsync(new TemporalClientConnectOptions(temporalAddress)
 {
     Namespace = "default",
     // This client is created manually, so DI option configurators cannot apply the converter.

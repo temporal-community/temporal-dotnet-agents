@@ -24,7 +24,8 @@ var delete = byName.TryGetValue("delete_inventory", out var writeTool)
     : throw new InvalidOperationException("Required MCP tool 'delete_inventory' is missing.");
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddTemporalClient("localhost:7233", "default");
+var temporalAddress = builder.Configuration["TEMPORAL_ADDRESS"] ?? "localhost:7233";
+builder.Services.AddTemporalClient(temporalAddress, "default");
 builder.Services.AddChatClient(new McpSampleChatClient());
 
 builder.Services

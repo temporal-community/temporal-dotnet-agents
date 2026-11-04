@@ -717,7 +717,7 @@ _test-samples-meai: build _sample-preflight
         "ScheduledChat:samples/MEAI/ScheduledChat:90:Scheduled turns retained: 2" \
         "OpenTelemetry:samples/MEAI/OpenTelemetry:90:telemetry.sdk.name: opentelemetry" \
         "ToolInterceptor:samples/MEAI/ToolInterceptor:120:delete_file ran after human approval" \
-        "HumanInTheLoop:samples/MEAI/HumanInTheLoop:120:messages persisted in workflow state.|Done." \
+        "HumanInTheLoop:samples/MEAI/HumanInTheLoop:120:Approval submitted: Accepted|[Tool] Deleting records older than 30 days...|messages persisted in workflow state.|Done." \
         "ExtensibleDurableTurns:samples/MEAI/ExtensibleDurableTurns:120:Denied turn failed before the ordinary function effect:" \
         "McpTools:samples/MEAI/McpTools:90:SKU-123 has 12 units available." \
         "PayloadCodec:samples/MEAI/PayloadCodec:90:Round-trip succeeded:" ; do
@@ -788,7 +788,7 @@ _test-samples-maf: build _sample-preflight _sample-preflight-maf
     echo "Logs: $LOGDIR"
     PASS=0; FAIL=0; HANG=0; UNCHECKED=""
     for entry in \
-        "BasicAgent:samples/MAF/BasicAgent:90:Shutdown signal sent to agent workflow.|Done." \
+        "BasicAgent:samples/MAF/BasicAgent:90:Shutdown update accepted by agent workflow.|Done." \
         "WorkflowOrchestration:samples/MAF/WorkflowOrchestration:90:Orchestration workflow result:" \
         "EvaluatorOptimizer:samples/MAF/EvaluatorOptimizer:120:Final Draft" \
         "MultiAgentRouting:samples/MAF/MultiAgentRouting:90:Parallel responses:" \
@@ -798,7 +798,7 @@ _test-samples-maf: build _sample-preflight _sample-preflight-maf
         "PerToolActivities:samples/MAF/PerToolActivities:90:Scenario 4: Tool calls disabled" \
         "ContextProviders:samples/MAF/ContextProviders:90:[TurnCounter] LLM call #1|[TurnCounter] LLM call #2" \
         "ToolInterceptor:samples/MAF/ToolInterceptor:240:[Approval requested]" \
-        "Skills:samples/MAF/Skills:90:Shutdown signal sent to agent workflow." \
+        "Skills:samples/MAF/Skills:90:Shutdown update accepted by agent workflow.|Done." \
         "MixedActivities:samples/MAF/MixedActivities:120:FetchDocumentAsync|StoreAnalysisAsync" \
         "DurableContextProvider:samples/MAF/DurableContextProvider:90:=== Approach A: IDurableToolSource ===|=== Approach B: DurableToolRegistrationSpec ===" \
         "McpTools:samples/MAF/McpTools:90:SKU-123 has 12 units available." ; do
