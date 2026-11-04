@@ -168,13 +168,16 @@ public sealed class DurableExecutionOptions
 
     /// <summary>
     /// Gets or sets whether inference and tool telemetry may include message, tool-argument, and
-    /// tool-result content. When unset, the MEAI
+    /// tool-result content, and whether package-owned activity logs include full exception details
+    /// at Error level. When unset, the MEAI
     /// <c>OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT</c> environment default is used.
     /// </summary>
     /// <remarks>
     /// Enabling capture can expose sensitive application data to telemetry exporters. This value
     /// configures visible MEAI <see cref="OpenTelemetryChatClient"/> wrappers and library tool
-    /// spans consistently. Opaque application-owned wrappers must be configured to the same value.
+    /// spans consistently. When disabled, package-owned activity logs include sanitized failure
+    /// details at Error and the full exception at Debug. Opaque application-owned wrappers must be
+    /// configured to the same value; provider and application logs are unaffected.
     /// </remarks>
     public bool? CaptureTelemetryContent { get; set; }
 

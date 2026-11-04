@@ -16,6 +16,9 @@ internal sealed class DurableToolsetCatalog
         this.options = options;
     }
 
+    internal bool CaptureTelemetryContent =>
+        DurableTelemetryContentCapturePolicy.Resolve(options);
+
     internal DurableToolsetManifest Resolve(DurableToolsetResolutionRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);

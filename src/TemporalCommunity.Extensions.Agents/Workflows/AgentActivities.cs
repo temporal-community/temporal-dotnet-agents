@@ -129,6 +129,9 @@ internal sealed class AgentActivities(
         // (e.g. DbContext) are not captured as captive singletons.
         using var scope = serviceScopeFactory.CreateScope();
         var scopedServices = scope.ServiceProvider;
+        var captureTelemetryContent =
+            TemporalCommunity.Extensions.AI.Internal.DurableTelemetryContentCapturePolicy.Resolve(
+                scope.ServiceProvider.GetService<TemporalCommunity.Extensions.AI.DurableExecutionOptions>());
 
         var chatClient = registration.ChatClient(scopedServices);
         AIContextProvider[] contextProviders = registration.ContextProviderFactories.Count == 0
@@ -434,13 +437,13 @@ internal sealed class AgentActivities(
                         // the same LLM step. The model call itself succeeded and its response is
                         // already collected; a post-invocation notification failing is not a
                         // reason to discard it and pay for the call again on retry.
-                        _logger.LogError(
+                        TemporalCommunity.Extensions.AI.Internal.DurableFailureLogger.LogException(
+                            _logger,
                             providerEx,
-                            "Context provider {ProviderType} threw from InvokedAsync for agent " +
-                            "{AgentName}. The step's result is unaffected; the provider did not " +
-                            "observe this call to completion.",
-                            provider.GetType().Name,
-                            input.AgentName);
+                            captureTelemetryContent,
+                            "AIContextProvider.InvokedAsync",
+                            $"provider {provider.GetType().Name}, agent {input.AgentName}; " +
+                            "step result unaffected");
                     }
                 }
             }
@@ -612,7 +615,13 @@ internal sealed class AgentActivities(
         catch (Exception ex)
         {
             span?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            _logger.LogAgentActivityFailed(input.AgentName, sessionId.WorkflowId, ex);
+            TemporalCommunity.Extensions.AI.Internal.DurableFailureLogger.LogException(
+                _logger,
+                ex,
+                captureTelemetryContent,
+                "RunDurableAgentStep",
+                $"agent {input.AgentName}, workflow {sessionId.WorkflowId}",
+                "DurableAgentStepFailed");
 
             if (contextProviders.Length > 0)
             {
@@ -1066,10 +1075,15 @@ internal sealed class AgentActivities(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex,
-                "IAgentToolInterceptor.BeforeToolCallAsync threw for agent '{AgentName}' tool '{ToolName}'. " +
-                "Defaulting to Block.",
-                input.AgentName, input.ToolName);
+            var captureTelemetryContent =
+                TemporalCommunity.Extensions.AI.Internal.DurableTelemetryContentCapturePolicy.Resolve(
+                    scope.ServiceProvider.GetService<TemporalCommunity.Extensions.AI.DurableExecutionOptions>());
+            TemporalCommunity.Extensions.AI.Internal.DurableFailureLogger.LogException(
+                _logger,
+                ex,
+                captureTelemetryContent,
+                "BeforeToolCallAsync",
+                $"agent {input.AgentName}, tool {input.ToolName}; defaulting to Block");
             return new DurableToolInterceptorResult
             {
                 Outcome = DurableToolOutcome.Block,
@@ -1229,7 +1243,16 @@ internal sealed class AgentActivities(
         catch (Exception ex)
         {
             span?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            _logger.LogAgentToolInvocationFailed(input.AgentName, input.ToolName, ex);
+            var captureTelemetryContent =
+                TemporalCommunity.Extensions.AI.Internal.DurableTelemetryContentCapturePolicy.Resolve(
+                    scope.ServiceProvider.GetService<TemporalCommunity.Extensions.AI.DurableExecutionOptions>());
+            TemporalCommunity.Extensions.AI.Internal.DurableFailureLogger.LogException(
+                _logger,
+                ex,
+                captureTelemetryContent,
+                "InvokeAgentTool",
+                $"agent {input.AgentName}, tool {input.ToolName}",
+                "DurableAgentToolFailed");
             throw;
         }
         finally

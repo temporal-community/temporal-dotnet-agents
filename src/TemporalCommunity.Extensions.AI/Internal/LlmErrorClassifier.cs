@@ -64,6 +64,20 @@ internal static class LlmErrorClassifier
         return false;
     }
 
+    internal static bool TryGetHttpStatusCode(Exception? exception, out int status)
+    {
+        foreach (var candidate in Unwrap(exception))
+        {
+            if (TryGetHttpStatus(candidate, out status))
+            {
+                return true;
+            }
+        }
+
+        status = 0;
+        return false;
+    }
+
     /// <summary>
     /// Yields the exception and any relevant inner/aggregated exceptions so a status buried in an
     /// <see cref="AggregateException"/> or wrapped by a delegating chat client is still inspected.

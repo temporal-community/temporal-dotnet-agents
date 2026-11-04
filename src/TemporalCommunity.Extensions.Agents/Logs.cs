@@ -22,11 +22,6 @@ internal static partial class Logs
         long? outputTokenCount,
         long? totalTokenCount);
 
-    [LoggerMessage(EventId = 3, Level = LogLevel.Error,
-        Message = "[{AgentName}/{WorkflowId}] Agent activity failed")]
-    public static partial void LogAgentActivityFailed(
-        this ILogger logger, string agentName, string workflowId, Exception ex);
-
     [LoggerMessage(EventId = 4, Level = LogLevel.Debug,
         Message = "[{AgentName}/{WorkflowId}] Rebuilding conversation context from {HistoryEntryCount} history entries ({MessageCount} messages)")]
     public static partial void LogActivityHistoryRebuilt(
@@ -171,11 +166,6 @@ internal static partial class Logs
         Message = "[{AgentName}] Tool '{ToolName}' completed")]
     public static partial void LogAgentToolInvocationCompleted(
         this ILogger logger, string agentName, string toolName);
-
-    [LoggerMessage(EventId = 28, Level = LogLevel.Error,
-        Message = "[{AgentName}] Tool '{ToolName}' failed")]
-    public static partial void LogAgentToolInvocationFailed(
-        this ILogger logger, string agentName, string toolName, Exception ex);
 
     // ── Durable-agent workflow loop (Phase 3) ────────────────────────────
 

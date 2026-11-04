@@ -306,7 +306,7 @@ public sealed class DurableToolsetTelemetryTests
         Assert.Equal(DurableToolsetValidationReasons.DuplicateSelection, span.GetTagItem("reason"));
         AssertSafeTelemetry(capture);
         AssertLog(logs, 20, "LogToolsetResolverStarted", LogLevel.Debug);
-        AssertLog(logs, 22, "LogToolsetResolverFailed", LogLevel.Warning);
+        AssertLog(logs, 27, "LogActivityFailureSanitized", LogLevel.Error);
     }
 
     [Fact]
@@ -398,7 +398,11 @@ public sealed class DurableToolsetTelemetryTests
         return new DurableToolsetActivities(
             new DurableToolsetCatalog(
                 [registration],
-                new DurableExecutionOptions { TaskQueue = "telemetry-test" }),
+                new DurableExecutionOptions
+                {
+                    TaskQueue = "telemetry-test",
+                    CaptureTelemetryContent = false,
+                }),
             loggerFactory);
     }
 
@@ -452,7 +456,11 @@ public sealed class DurableToolsetTelemetryTests
             new DurableToolsetActivities(
                 new DurableToolsetCatalog(
                     registrations,
-                    new DurableExecutionOptions { TaskQueue = "telemetry-test" }),
+                    new DurableExecutionOptions
+                    {
+                        TaskQueue = "telemetry-test",
+                        CaptureTelemetryContent = false,
+                    }),
                 loggerFactory),
             request);
     }

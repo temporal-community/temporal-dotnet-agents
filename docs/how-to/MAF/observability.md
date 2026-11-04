@@ -142,6 +142,14 @@ turn with three tool calls in one round produces three `agent.tool.invoke` spans
 
 ### Optional MAF/MEAI child spans
 
+The worker's MEAI `CaptureTelemetryContent` policy also controls package-owned activity failure
+logs for durable MAF agents. When capture is disabled, Error entries contain only bounded exception
+and error type names, an HTTP status when available, and non-content operation identifiers; the
+full exception is logged at Debug. When capture is enabled, the full exception remains at Error.
+When `DurableExecutionOptions` is not registered, the policy follows the
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` environment default. Provider and application
+logger output is not controlled by this package policy.
+
 With MAF `OpenTelemetryAgent`, its sampled `invoke_agent` descendant receives the same
 `temporal.agent.correlation_id` as `agent.turn`. The library selects the nearest active ancestor
 whose `gen_ai.operation.name` is exactly `invoke_agent`; it never tags an arbitrary current span.

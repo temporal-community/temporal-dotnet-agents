@@ -49,7 +49,12 @@ internal sealed class DurableToolsetActivities(
             span?.SetTag("outcome", "failure");
             span?.SetTag("reason", reason);
             span?.SetStatus(ActivityStatusCode.Error);
-            _logger.LogToolsetResolverFailed(exception, reason);
+            Internal.DurableFailureLogger.LogException(
+                _logger,
+                exception,
+                catalog.CaptureTelemetryContent,
+                "ResolveDurableToolsets",
+                $"reason {reason}");
             throw;
         }
     }

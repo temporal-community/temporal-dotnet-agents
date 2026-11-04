@@ -22,6 +22,9 @@ internal sealed class DurableFunctionActivities(
 {
     private readonly ILogger _logger = (loggerFactory ?? NullLoggerFactory.Instance)
         .CreateLogger<DurableFunctionActivities>();
+    private readonly bool _captureTelemetryContent =
+        Internal.DurableTelemetryContentCapturePolicy.Resolve(
+            serviceProvider?.GetService<DurableExecutionOptions>());
 
     /// <summary>
     /// Invokes a named <see cref="AIFunction"/> with the given arguments.
@@ -46,7 +49,13 @@ internal sealed class DurableFunctionActivities(
         }
         catch (Exception exception)
         {
-            _logger.LogFunctionFailed(exception, input.FunctionName);
+            Internal.DurableFailureLogger.LogException(
+                _logger,
+                exception,
+                _captureTelemetryContent,
+                "InvokeFunction",
+                $"function {input.FunctionName}",
+                "DurableToolInvocationFailed");
             throw Internal.DurableActivityFailurePolicy.CreateBounded(
                 exception,
                 "DurableToolInvocationFailed");

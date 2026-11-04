@@ -30,15 +30,6 @@ public class LogsTests
     }
 
     [Fact]
-    public void LogAgentActivityFailed_NullAgentName_DoesNotThrow()
-    {
-        var logger = NullLogger.Instance;
-        var ex = Record.Exception(() => Logs.LogAgentActivityFailed(
-            logger, null!, null!, new InvalidOperationException("test")));
-        Assert.Null(ex);
-    }
-
-    [Fact]
     public void LogWorkflowStarted_NullAgentName_DoesNotThrow()
     {
         var logger = NullLogger.Instance;
@@ -90,19 +81,22 @@ public class LogsTests
     // ── Error path logging (6.2) ──────────────────────────────────────────────
 
     [Fact]
-    public void LogAgentActivityFailed_CapturesExceptionDetails()
+    public void AgentActivityFailureLogger_CapturesExceptionDetails()
     {
-        // Use a capturing logger to verify the exception is included in the log entry.
-        var entries = new List<LogEntry>();
-        var logger = new CapturingLogger(entries);
-
+        using var loggerProvider = new TemporalCommunity.Extensions.Tests.Shared.CapturingLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(builder =>
+            builder.SetMinimumLevel(LogLevel.Debug).AddProvider(loggerProvider));
         var testException = new InvalidOperationException("Simulated agent failure");
-        Logs.LogAgentActivityFailed(logger, "TestAgent", "ta-testagent-abc123", testException);
 
-        Assert.Single(entries);
-        var entry = entries[0];
+        TemporalCommunity.Extensions.AI.Internal.DurableFailureLogger.LogException(
+            loggerFactory.CreateLogger("agent"),
+            testException,
+            captureTelemetryContent: true,
+            operation: "RunDurableAgentStep",
+            context: "agent TestAgent, workflow ta-testagent-abc123");
+
+        var entry = Assert.Single(loggerProvider.Logs);
         Assert.Equal(LogLevel.Error, entry.Level);
-        Assert.Equal(3, entry.EventId.Id);
         Assert.Same(testException, entry.Exception);
         Assert.Contains("TestAgent", entry.Message);
         Assert.Contains("ta-testagent-abc123", entry.Message);

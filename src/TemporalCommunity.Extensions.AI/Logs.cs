@@ -21,11 +21,6 @@ internal static partial class Logs
     public static partial void LogChatActivityCompleted(
         this ILogger logger, string? conversationId, int turnNumber);
 
-    [LoggerMessage(EventId = 3, Level = LogLevel.Error,
-        Message = "Durable chat activity failed for conversation {ConversationId}, turn {TurnNumber}")]
-    public static partial void LogChatActivityFailed(
-        this ILogger logger, Exception ex, string? conversationId, int turnNumber);
-
     // ── Chat step activity logs ──────────────────────────────────────────────
 
     [LoggerMessage(EventId = 4, Level = LogLevel.Debug,
@@ -50,22 +45,12 @@ internal static partial class Logs
     public static partial void LogFunctionCompleted(
         this ILogger logger, string functionName);
 
-    [LoggerMessage(EventId = 8, Level = LogLevel.Error,
-        Message = "Durable function {FunctionName} failed")]
-    public static partial void LogFunctionFailed(
-        this ILogger logger, Exception ex, string functionName);
-
     // ── Tool interceptor activity logs ───────────────────────────────────────
 
     [LoggerMessage(EventId = 9, Level = LogLevel.Error,
         Message = "RunToolInterceptor dispatched for tool '{ToolName}' but no IDurableToolInterceptor<DurableToolContext> is registered in DI. Failing the turn before tool dispatch.")]
     public static partial void LogToolInterceptorNotRegistered(
         this ILogger logger, string toolName);
-
-    [LoggerMessage(EventId = 10, Level = LogLevel.Error,
-        Message = "IDurableToolInterceptor.BeforeToolCallAsync threw for tool '{ToolName}'. Defaulting to Block.")]
-    public static partial void LogToolInterceptorThrew(
-        this ILogger logger, Exception ex, string toolName);
 
     // ── Session client logs ──────────────────────────────────────────────────
 
@@ -109,11 +94,6 @@ internal static partial class Logs
     public static partial void LogToolsetResolverCompleted(
         this ILogger logger, int toolsetCount, int functionCount);
 
-    [LoggerMessage(EventId = 22, Level = LogLevel.Warning,
-        Message = "Durable toolset resolution failed ({Reason})")]
-    public static partial void LogToolsetResolverFailed(
-        this ILogger logger, Exception exception, string reason);
-
     [LoggerMessage(EventId = 23, Level = LogLevel.Warning,
         Message = "Durable toolset activity validation rejected input ({Reason})")]
     public static partial void LogToolsetValidationRejected(this ILogger logger, string reason);
@@ -140,4 +120,24 @@ internal static partial class Logs
         string finishReason,
         int toolCallCount,
         bool isContradictory);
+
+    [LoggerMessage(EventId = 27, Level = LogLevel.Error,
+        Message = "Durable operation {Operation} failed for {Context} (ExceptionType={ExceptionType}, ErrorType={ErrorType}, HttpStatusCode={HttpStatusCode})")]
+    public static partial void LogActivityFailureSanitized(
+        this ILogger logger,
+        string operation,
+        string context,
+        string exceptionType,
+        string errorType,
+        int? httpStatusCode);
+
+    [LoggerMessage(EventId = 28, Level = LogLevel.Error,
+        Message = "Durable operation {Operation} failed for {Context}")]
+    public static partial void LogActivityFailureWithException(
+        this ILogger logger, Exception exception, string operation, string context);
+
+    [LoggerMessage(EventId = 29, Level = LogLevel.Debug,
+        Message = "Durable operation {Operation} failure details for {Context}")]
+    public static partial void LogActivityFailureDetails(
+        this ILogger logger, Exception exception, string operation, string context);
 }
