@@ -426,7 +426,9 @@ var trimOptions = new DurableExecutionOptions
 projection path. `TrimRecentTurns` is intentionally lossy and records the removed range with a
 truncation marker. `SummarizeOldestTurns` uses the worker-owned `IChatClient` activity described
 above. Both protect the current turn and validate the resulting message/tool grammar and payload
-limits before changing retained state.
+limits before changing retained state. An existing summary marker is included only when another
+eligible older turn can be summarized with it; the worker does not spend a summarization call
+reprocessing a marker by itself when that cannot reduce retained history.
 
 Inspect `GetHistoryBudgetAsync` for `IsHistoryBlocked`, `HistoryBlockReason`, retained entry count,
 and recovery counters. While blocked, new turns are rejected and idle TTL does not discard the

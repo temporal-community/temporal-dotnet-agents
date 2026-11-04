@@ -1353,10 +1353,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             index += 2;
         }
 
-        if (turns.Count == 0)
+        if (turns.Count == 0
+            || (turns.Count == 1 && source[turns[0].Start] is CompactionMarkerEntry))
         {
             throw new ApplicationFailureException(
-                "No oldest complete, unprotected turn is available to summarize.",
+                "No oldest complete, unprotected turn is available to summarize without " +
+                "re-summarizing an existing summary.",
                 errorType: "DurableHistoryCompactionProtectedContent",
                 nonRetryable: true);
         }

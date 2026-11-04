@@ -313,6 +313,87 @@ public class DurableChatLifecycleRegressionTests
         }
     }
 
+    [Fact]
+    public async Task SummarizingCompaction_DoesNotResummarizeMarkerWithoutAnotherEligibleTurn()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new TestChatClient();
+        var taskQueue = $"summary-marker-no-progress-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            maxEntryCount: 4,
+            historyEventSoftLimit: 1,
+            historyEventReserveLimit: 12,
+            historyCompactionStrategy: DurableHistoryCompactionStrategy.SummarizeOldestTurns);
+        await host.StartAsync();
+        var factory = host.Services.GetRequiredService<IDurableChatWorkflowInputFactory>();
+        var now = DateTimeOffset.UtcNow;
+        var input = factory.Create() with
+        {
+            CarriedHistory =
+            [
+                new TruncationMarkerEntry
+                {
+                    EntryId = "trimmed-range",
+                    TurnId = "trimmed-range",
+                    CorrelationId = "trimmed-range",
+                    CreatedAt = now,
+                    FirstRemovedEntryId = "removed-1",
+                    LastRemovedEntryId = "removed-2",
+                    RemovedEntryCount = 2,
+                    FirstRemovedTurnId = "removed-turn-1",
+                    LastRemovedTurnId = "removed-turn-1",
+                    RemovedTurnCount = 1,
+                },
+                new CompactionMarkerEntry
+                {
+                    EntryId = "existing-summary",
+                    TurnId = "existing-summary",
+                    CorrelationId = "existing-summary",
+                    CreatedAt = now,
+                    FirstReplacedEntryId = "summary-source-1",
+                    LastReplacedEntryId = "summary-source-2",
+                    ReplacedEntryCount = 2,
+                    FirstReplacedTurnId = "summary-turn-1",
+                    LastReplacedTurnId = "summary-turn-1",
+                    ReplacedTurnCount = 1,
+                    Strategy = "test",
+                    ModelId = "test-model",
+                    Summary = new DurableSessionSummary { Text = "prior summary" },
+                },
+                DurableSessionRequest.FromMessages(
+                    [new ChatMessage(ChatRole.User, "latest question")],
+                    "latest-turn"),
+                DurableSessionResponse.FromChatResponse(
+                    "latest-turn",
+                    new ChatResponse(new ChatMessage(ChatRole.Assistant, "latest answer")),
+                    now,
+                    DurableTurnCompletionReason.FinalResponse),
+            ],
+        };
+        var workflowId = $"summary-marker-no-progress-{Guid.NewGuid():N}";
+        var handle = await env.Client.StartWorkflowAsync(
+            (DurableChatWorkflow workflow) => workflow.RunAsync(input),
+            new WorkflowOptions(workflowId, taskQueue));
+
+        try
+        {
+            var status = await WaitForHistoryBlockedAsync(handle);
+            Assert.True(status.IsHistoryBlocked);
+            Assert.Equal(0, model.CallCount);
+            await handle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
+            await handle.GetResultAsync().WaitAsync(Deadline);
+            await AssertChatReplayAsync(handle);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
