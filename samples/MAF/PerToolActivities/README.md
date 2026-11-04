@@ -105,7 +105,7 @@ Worker started. Running per-tool activity scenarios...
   Agent:     Your refund of $19.99 has been applied to ORD-001 and the confirmation email is on its way.
   This run    → LookupCalls = 2, RefundCalls = 1, SendCalls = 1
   Cumulative  → LookupCalls = 3, RefundCalls = 2, SendCalls = 2
-  ✓ Per-tool retry granularity confirmed: lookup retried, writes fired exactly once.
+  ✓ Per-tool retry granularity confirmed: lookup retried; write tools were configured with no retry.
 
 ─── View the activity timeline ──────────────────────────────
   Open http://localhost:8233 in the Temporal Web UI.
@@ -115,8 +115,10 @@ Done.
 ```
 
 The exact wording of the agent's final reply varies between runs — the model is
-non-deterministic. The retry scenario's deltas are the durable guarantee: lookup at least 2,
-while each write tool fires exactly once.
+non-deterministic. The retry scenario's deltas show that lookup was retried and write tools were
+configured for one activity attempt. This does not guarantee exactly-once external effects: a
+timeout or lost activity result can leave an effect's outcome uncertain. Use downstream idempotency
+and reconcile with the system of record before retrying an ambiguous write.
 
 On a turn failure after dispatch, the shared workflow keeps a bounded interrupted-turn projection
 for later model context: completed tool results remain paired with their calls, uncertain outcomes

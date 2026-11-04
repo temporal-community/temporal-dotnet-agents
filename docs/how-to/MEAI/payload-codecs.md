@@ -59,6 +59,28 @@ The codec passes through
 small payloads and payloads whose compressed representation does not meet the requested savings.
 Decode rejects unsupported versions, corrupt data, and payloads that cross either configured bound.
 
+### Size limits and errors
+
+The two bounds are inclusive and measure different representations:
+
+- `MaximumEncodedPayloadSizeBytes` limits the gzip data bytes, excluding the encoded payload's
+  metadata and protobuf framing. On encode, the codec first checks whether the **complete encoded
+  payload** meets `MinimumCompressionSavingsRatio`. If not, it returns the original payload, even
+  when the discarded gzip data exceeds the encoded bound. If compression meets the savings
+  requirement but its gzip data exceeds the bound, encode throws `DurableAIPayloadCodecException`
+  with `Error == DurableAIPayloadCodecError.EncodedPayloadTooLarge`; it does not fall back to the
+  original. Decode checks this bound before decompressing library-owned gzip data.
+- `MaximumDecodedPayloadSizeBytes` limits the **complete serialized original Temporal payload**,
+  including metadata. Encode checks this bound before compressing any payload at or above
+  `MinimumPayloadSizeBytes` and throws `DecodedPayloadTooLarge` when exceeded, even if the payload
+  would compress below the encoded limit or would not achieve the required savings. This prevents
+  writing compressed payloads that the same configuration could not restore. Decode enforces the
+  same bound while expanding gzip data.
+
+These are codec bounds, not general transport limits. Encode passes below-threshold payloads and
+already-v1-encoded payloads through without checking either bound; decode passes non-library
+payloads through unchanged. Temporal service and deployment limits still apply to those payloads.
+
 Managed durable chat also checks the configured payload converter's complete serialized payload
 against `DurableExecutionOptions.MaximumTransportPayloadSizeBytes` (1 MiB by default), reserving
 `PayloadCodecExpansionAllowanceBytes` for codec growth. The gzip codec is non-expanding and uses
@@ -110,10 +132,11 @@ authorization controls.
 
 The codec protects serialized Temporal payloads; it does not encrypt workflow IDs, activity
 summaries, search attributes, or memo fields. Keep prompts, tool arguments/results, credentials, and
-other sensitive content out of those UI-visible metadata fields. The built-in activity summary
-contains only `ChatOptions.ModelId` when configured; managed search attributes contain session
-creation time and completed-turn count. Custom workflows remain responsible for keeping their own
-IDs, summaries, memo, and custom search attributes content-free.
+other sensitive content out of those UI-visible metadata fields. Built-in activity summaries can
+include `ChatOptions.ModelId` for model activities, the registered tool name for tool activities,
+and a fixed label for toolset resolution. Managed search attributes contain session creation time
+and completed-turn count. Custom workflows remain responsible for keeping their own IDs, summaries,
+memo, and custom search attributes content-free.
 
 Payload codecs also do not protect OpenTelemetry output. MEAI inference message capture and the
 durable library's optional tool-argument/result span attributes are governed separately by

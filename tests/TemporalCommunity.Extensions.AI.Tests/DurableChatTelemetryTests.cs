@@ -26,7 +26,7 @@ public class DurableChatTelemetryTests
     public void AttributeNames_AreCorrect()
     {
         Assert.Equal("gen_ai.operation.name", DurableChatTelemetry.OperationNameAttribute);
-        Assert.Equal("conversation.id", DurableChatTelemetry.ConversationIdAttribute);
+        Assert.Equal("gen_ai.conversation.id", DurableChatTelemetry.GenAiConversationIdAttribute);
         Assert.Equal(
             "temporal.ai.chat.requested_model",
             DurableChatTelemetry.RequestedModelAttribute);
@@ -37,7 +37,6 @@ public class DurableChatTelemetryTests
         Assert.Equal("gen_ai.tool.call.id", DurableChatTelemetry.ToolCallIdAttribute);
         Assert.Equal("gen_ai.tool.type", DurableChatTelemetry.ToolTypeAttribute);
         Assert.Equal("gen_ai.tool.description", DurableChatTelemetry.ToolDescriptionAttribute);
-        Assert.Equal("gen_ai.conversation.id", DurableChatTelemetry.GenAiConversationIdAttribute);
         Assert.Equal("error.type", DurableChatTelemetry.ErrorTypeAttribute);
     }
 

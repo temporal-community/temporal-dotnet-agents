@@ -131,7 +131,7 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
             DurableChatTelemetry.ChatSendSpanName,
             ActivityKind.Client);
 
-        span?.SetTag(DurableChatTelemetry.ConversationIdAttribute, conversationId);
+        span?.SetTag(DurableChatTelemetry.GenAiConversationIdAttribute, conversationId);
         span?.SetTag(DurableChatTelemetry.RequestedModelAttribute, options?.ModelId);
 
         _logger.LogClientSendingChat(workflowId);

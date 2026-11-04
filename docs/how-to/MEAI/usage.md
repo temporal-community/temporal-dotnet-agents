@@ -21,8 +21,7 @@ how-to reference for all of them:
 
 ## Durable-chat redesign target contracts
 
-**Implementation status:** Phases 0, 1, 2.1–2.6, 3.1–3.7, and 4.1–4.2 are implemented; reducer and
-retained-history recovery work remains in progress. The current API supports request identity, active-turn admission,
+**Implementation status:** Phases 0–6 are implemented. The current API supports request identity, active-turn admission,
 bounded terminal outcomes, epoch-aware idle deadlines, per-payload transport guards, bounded turn
 joiners, event-history thresholds, validated session shutdown, stable logical tool-operation keys,
 validated tool dispatch, call-bound approval decisions, and bounded review projections. In
@@ -42,10 +41,12 @@ particular, `correlationId` is not an idempotency key and current Continue-as-Ne
 | Tool safety | Reuse per-tool policies; unknown/effectful tools default to one attempt. Supply stable logical operation keys (epoch, request/turn, distinct call), enforced downstream for idempotency. Timeout/cancellation may mean `unknown`. Guard result and failure-detail bytes inside the activity before returning. |
 | Telemetry | Configure MEAI `OpenTelemetryChatClient` on the worker-owned `IChatClient` for inference spans/GenAI metrics; the library owns durable/tool telemetry. `InferenceTelemetryMode` can require one visible wrapper or explicitly trust an opaque application-owned chain. Content capture affects telemetry only, not persistence or model input. |
 
-No numeric ledger, joiner, token, event-reserve, or recovery limits are introduced in Phase 0.
-Later units must expose explicit limits and exercise their exact boundaries, not rely on provider
-or service payload caps. New histories must replay deterministically; this redesign does not
-require old-history patching or backward compatibility.
+Phase 0 introduced no numeric ledger, joiner, token, event-reserve, or recovery limits; later units
+now define and test those boundaries explicitly rather than relying on provider or service payload
+caps. The default terminal-outcome ledger is bounded to 128 outcomes and 1 MiB; tool activities
+default to one attempt unless an idempotent retry policy is explicitly selected. New histories must
+replay deterministically; this redesign does not require old-history patching or backward
+compatibility.
 
 ### Retained-history identities
 
@@ -787,7 +788,8 @@ adapter directly inside workflow code, see
   specific to managed sessions (thin client, worker-resolved manifest)
 - [HITL patterns](hitl-patterns.md) — pausing a tool call for human approval
 - [Payload codecs](payload-codecs.md) — optional bounded gzip compression for durable payloads
-- [Embeddings](embeddings.md) — the `IEmbeddingGenerator` equivalent of `UseDurableExecution()`
+- [Embeddings](embeddings.md) — durable embedding calls in workflow-owned activities (the library
+  does not wrap `IEmbeddingGenerator` with `UseDurableExecution()`)
 - [Custom workflow output](custom-workflow-output.md) — subclassing `DurableChatWorkflowBase<TOutput>`
   or `DurableToolWorkflowBase<TRequestData, TTurnState>` for structured per-turn output
 - [Observability](observability.md) — the `ActivitySource`/`Meter`/`ILogger` surface

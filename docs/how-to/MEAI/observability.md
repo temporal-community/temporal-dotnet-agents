@@ -75,10 +75,9 @@ public class DiagnosticWorkflow
 }
 ```
 
-The Temporal workflow ID is the stable correlation key on SDK spans. The library's
-`durable_chat.send` span and tool spans use the application session ID (`conversation.id` and
-`gen_ai.conversation.id` respectively); when a workflow ID prefix is configured, these values are
-related by that prefix rather than being identical.
+The Temporal workflow ID is the stable correlation key on SDK spans. The library's `durable_chat.send` span and tool spans use the application session ID in
+`gen_ai.conversation.id`; when a workflow ID prefix is configured, this value is related to the
+Temporal workflow ID by that prefix rather than being identical.
 
 The library creates these spans:
 

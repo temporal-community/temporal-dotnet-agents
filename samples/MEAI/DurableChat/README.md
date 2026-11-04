@@ -8,8 +8,9 @@ The program demonstrates the concise co-hosted `AddDurableAI()` registration. Se
 worker deployments use `AddDurableAIClient(taskQueue)` and `AddDurableAIWorker()` respectively;
 see [split client and worker hosting](../../../docs/how-to/MEAI/usage.md#split-client-and-worker-hosting).
 
-This sample demonstrates the **current** API, not the
-[durable-chat redesign target](../../../docs/how-to/MEAI/usage.md#durable-chat-redesign-target-contracts).
+This sample demonstrates the implemented
+[durable-chat redesign contracts](../../../docs/how-to/MEAI/usage.md#durable-chat-redesign-target-contracts)
+using the current API.
 The string overload accepts one user message directly, while the message overload accepts MEAI
 `ChatMessage` history. Its application conversation ID is the durable identity; provider
 `ChatOptions.ConversationId`, `RawRepresentationFactory`, and `ContinuationToken` are rejected

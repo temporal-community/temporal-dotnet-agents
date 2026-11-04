@@ -7,12 +7,13 @@
 // Run:  dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj
 //
 // Five scenarios run back-to-back:
-//   1. Happy path — all tools succeed exactly once.
+//   1. Happy path — all tool activities complete successfully.
 //   2. Subset — only lookup_order is exposed and dispatchable.
 //   3. Empty list — no tools are exposed or dispatchable.
 //   4. Disabled — EnableToolCalls=false blocks every model-returned call.
 //   5. Transient lookup failure — the read tool fails on attempt 1 and retries; the
-//      write tools still fire exactly once. This is the per-tool retry guarantee.
+//      write tools use a one-attempt activity policy. This does not guarantee exactly-once
+//      external effects if an activity result is lost or the effect's outcome is uncertain.
 
 using System.ClientModel;
 using Microsoft.Extensions.AI;
@@ -193,7 +194,7 @@ Console.WriteLine($"  Cumulative  → LookupCalls = {orderService.LookupCalls}, 
 
 if (lookupDelta >= 2 && refundDelta == 1 && emailDelta == 1)
 {
-    Console.WriteLine("  ✓ Per-tool retry granularity confirmed: lookup retried, writes fired exactly once.");
+    Console.WriteLine("  ✓ Per-tool retry granularity confirmed: lookup retried; write tools were configured with no retry.");
 }
 Console.WriteLine();
 
