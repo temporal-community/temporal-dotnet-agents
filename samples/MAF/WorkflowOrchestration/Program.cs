@@ -124,9 +124,7 @@ public class WeatherOrchestrationWorkflow
     {
         var agent = GetTemporalAgent("WeatherAssistant");
         var session = await agent.CreateSessionAsync().ConfigureAwait(true);
-        var response = await agent.RunAsync(
-            [new ChatMessage(ChatRole.User, userQuestion)],
-            session).ConfigureAwait(true);
+        var response = await agent.RunAsync(userQuestion, session).ConfigureAwait(true);
 
         return response.Text ?? string.Empty;
     }

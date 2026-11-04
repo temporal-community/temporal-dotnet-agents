@@ -338,9 +338,10 @@ inside a custom `AIAgent` subclass. Both are rejected, because the library canno
 its `ChatClientAgent` is still the durable model-call leaf. Request-level short-circuiting inside a
 valid `DelegatingAIAgent` is supported.
 
-**Do not implement `IDisposable` / `IAsyncDisposable`.** MAF 1.17.0 does not expose whether a
-factory-created wrapper or DI owns the instance, so the library rejects that ambiguous shape. Put
-resource-owning dependencies in the activity DI scope. The one exception is MAF's built-in
+**Do not implement `IDisposable` / `IAsyncDisposable`.** The pinned MAF 1.23.0 builder API does
+not expose whether a factory-created wrapper is owned by its factory or by DI, so the library
+rejects that ambiguous shape. Put resource-owning dependencies in the activity DI scope. The one
+exception is MAF's built-in
 `OpenTelemetryAgent` — the library knows that wrapper owns its telemetry client and disposes it at
 the end of each validation or activity build. If `AIAgentBuilder.Build` throws before returning a
 root, MAF exposes no partially built wrappers, so the library cannot dispose what it cannot reach.

@@ -447,7 +447,7 @@ public class ResearchWorkflow
             $"Write a short article based on this outline:\n{outline.Messages[0].Text}",
             writerSession);
 
-        return draft.Messages[0].Text;
+        return draft.Messages[0].Text ?? string.Empty;
     }
 }
 ```

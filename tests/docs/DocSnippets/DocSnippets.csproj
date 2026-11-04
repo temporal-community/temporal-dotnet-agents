@@ -41,6 +41,8 @@
     <PackageReference Include="ModelContextProtocol" />
     <PackageReference Include="OpenAI" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="Temporalio.Extensions.OpenTelemetry" />
     <PackageReference Include="xunit" />
   </ItemGroup>

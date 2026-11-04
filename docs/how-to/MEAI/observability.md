@@ -5,16 +5,20 @@ primitives. Both diagnostics sources are named `TemporalCommunity.Extensions.AI`
 library has no OpenTelemetry SDK or exporter dependency; applications choose how to collect and
 export these signals.
 
+### OpenTelemetry setup
+
 ```csharp
-builder.Services
+builder
     .AddOpenTelemetry()
     .WithTracing(tracing => tracing
         .AddSource(DurableChatTelemetry.ActivitySourceName)
         .AddSource(TracingInterceptor.ClientSource.Name)
         .AddSource(TracingInterceptor.WorkflowsSource.Name)
         .AddSource(TracingInterceptor.ActivitiesSource.Name)
+        .AddSource("Experimental.Microsoft.Extensions.AI")
         .AddConsoleExporter())
     .WithMetrics(metrics => metrics
+        .AddMeter("Experimental.Microsoft.Extensions.AI")
         .AddMeter(DurableChatTelemetry.MeterName)
         .AddConsoleExporter());
 ```
@@ -101,7 +105,8 @@ builder.Services
 ```
 
 `UseOpenTelemetry()` follows the pinned MEAI GenAI conventions. Its content-capture default comes
-from `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`. Set
+from `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`; MEAI 10.10.0 emits its spans from
+`Experimental.Microsoft.Extensions.AI`, which must be added to the tracer provider's sources. Set
 `DurableExecutionOptions.InferenceTelemetryMode` to
 `RequireVisibleOpenTelemetryClient` to reject a resolved chat-client chain unless it contains
 exactly one discoverable MEAI wrapper. Chain discovery follows `DelegatingChatClient` inner links.

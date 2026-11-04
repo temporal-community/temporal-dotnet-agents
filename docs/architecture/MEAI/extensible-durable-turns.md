@@ -58,7 +58,8 @@ Application request data and turn state are captured when the tool activity crea
 function. Existing `DelegatingAIFunction` decorators remain part of that function chain and execute
 normally. The same undecorated or decorated function can still be invoked outside Temporal.
 
-MEAI 10.8.3 marshals the result of a reflected `AIFunction` through its configured result marshaller.
+The repository-pinned MEAI 10.10.0 marshals the result of a reflected `AIFunction` through its
+configured result marshaller.
 With the standard marshaller, the object returned by `AIFunction.InvokeAsync` is a `JsonElement`,
 including for a source method that returns a .NET string. A post-success state completion operation
 therefore observes the activity-side, model-visible marshalled result rather than the original CLR

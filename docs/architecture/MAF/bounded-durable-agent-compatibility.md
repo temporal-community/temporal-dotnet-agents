@@ -35,7 +35,7 @@ The extension builds a fresh `ChatClientAgent` inside each LLM-step activity fro
 | Arbitrary caller-built `AIAgent` | Not accepted | Durable registration takes an `IChatClient`; `A2AAgent`, graph agents, and their session protocols remain outside this contract. |
 | Middleware factory that returns an unrelated agent | Rejected | It removes the library-created `ChatClientAgent`, so the configured provider and durable model/tool boundary are no longer guaranteed. |
 | Opaque `AIAgent` wrapper | Rejected | A non-`DelegatingAIAgent` wrapper is not structurally inspectable, even if it privately stores and forwards to the supplied agent. |
-| Custom disposable `DelegatingAIAgent` wrapper | Rejected | MAF 1.17.0 exposes no factory/DI ownership metadata. Put resource-owning dependencies in the activity scope; the library only owns the known `OpenTelemetryAgent` wrapper. |
+| Custom disposable `DelegatingAIAgent` wrapper | Rejected | The pinned MAF 1.23.0 builder API exposes no factory/DI ownership metadata. Put resource-owning dependencies in the activity scope; the library only owns the known `OpenTelemetryAgent` wrapper. |
 | Middleware that replaces/removes the supplied session | Rejected | Only the original durable session's StateBag is serialized after the activity, so replacement state would be lost. |
 | Middleware that requires `ChatClientAgentSession` | Unsupported | Outer middleware receives `TemporalAgentSession`; only the innermost library boundary lets the leaf create its transient sealed session. |
 | Function-invocation middleware or `FunctionInvokingChatClient` | Rejected | Inline function invocation bypasses durable tool activities, retries, approval, and Temporal visibility. |

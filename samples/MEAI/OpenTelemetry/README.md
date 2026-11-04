@@ -83,16 +83,17 @@ the full list.
   covers inference. Omitting a source produces gaps in your trace.
 
   ```csharp
-  builder.Services
+  builder
       .AddOpenTelemetry()
       .WithTracing(tracing => tracing
           .AddSource(DurableChatTelemetry.ActivitySourceName)
           .AddSource(TracingInterceptor.ClientSource.Name)
           .AddSource(TracingInterceptor.WorkflowsSource.Name)
           .AddSource(TracingInterceptor.ActivitiesSource.Name)
-          .AddSource("Microsoft.Extensions.AI")
+          .AddSource("Experimental.Microsoft.Extensions.AI")
           .AddConsoleExporter())
       .WithMetrics(metrics => metrics
+          .AddMeter("Experimental.Microsoft.Extensions.AI")
           .AddMeter(DurableChatTelemetry.MeterName)
           .AddConsoleExporter());
   ```

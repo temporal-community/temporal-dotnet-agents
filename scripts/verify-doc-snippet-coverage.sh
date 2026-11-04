@@ -93,7 +93,8 @@ scan_docs() {
                 FILENAME == "docs/how-to/MEAI/embeddings.md" ||
                 FILENAME == "docs/how-to/MEAI/usage.md" ||
                 (FILENAME == "docs/how-to/MEAI/observability.md" &&
-                 (heading == "w3c-propagator" || heading == "workflow-diagnostic" ||
+                 (heading == "opentelemetry-setup" || heading == "w3c-propagator" ||
+                  heading == "workflow-diagnostic" ||
                   heading == "telemetry-content-capture")) ||
                 (FILENAME == "docs/how-to/MEAI/tool-functions.md" &&
                  heading == "logical-operation-identity" &&
@@ -106,7 +107,8 @@ scan_docs() {
                  body ~ /ToDurableDecision\(\)/) ||
                 (FILENAME == "docs/how-to/MAF/usage.md" &&
                  (heading == "request-id-recovery" || heading == "inspecting-workflow-history-budget" ||
-                  heading == "cancel-an-active-turn")) ||
+                  heading == "cancel-an-active-turn" ||
+                  heading == "agent-orchestration-inside-workflows")) ||
                 (FILENAME == "docs/how-to/MEAI/custom-workflow-output.md" &&
                  heading == "package-managed-typed-turns" &&
                  body ~ /DurableToolWorkflowBase/) ||

@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry;
 using OpenAI;
 using OpenTelemetry.Context.Propagation;
 using OpenTelemetry.Metrics;
@@ -49,13 +50,14 @@ if (string.IsNullOrEmpty(apiKey))
 
 // ── Setup: Register OpenTelemetry ─────────────────────────────────────────────
 
-builder.Services
+builder
     .AddOpenTelemetry()
     .WithTracing(tracing => tracing
         .AddSource(DurableChatTelemetry.ActivitySourceName)
         .AddSource(TracingInterceptor.ClientSource.Name)
         .AddSource(TracingInterceptor.WorkflowsSource.Name)
         .AddSource(TracingInterceptor.ActivitiesSource.Name)
+        .AddSource("Experimental.Microsoft.Extensions.AI")
         .AddSource("OpenAI.*")
         .AddHttpClientInstrumentation()
         .AddConsoleExporter()
@@ -68,6 +70,7 @@ builder.Services
         // .AddOtlpExporter()
         )
     .WithMetrics(metrics => metrics
+        .AddMeter("Experimental.Microsoft.Extensions.AI")
         .AddMeter(DurableChatTelemetry.MeterName)
         .AddConsoleExporter());
 

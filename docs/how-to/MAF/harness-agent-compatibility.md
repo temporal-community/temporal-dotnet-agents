@@ -4,11 +4,14 @@
 one rejects it at compile time and the other compiles but is rejected at worker startup.
 
 `HarnessAgent` ships in **`Microsoft.Agents.AI.Harness`**, a package separate from the
-`Microsoft.Agents.AI` this library depends on. Version `1.17.0` exists there, matching the MAF
-version pinned in `Directory.Packages.props`. This library does not reference it.
+`Microsoft.Agents.AI` this library depends on. This library does not reference the Harness package.
 
-Verified against the `Microsoft.Agents.AI.Harness` 1.17.0 and `Microsoft.Agents.AI` 1.17.0 packages,
-with both code samples below compiled against them.
+The API-level compatibility analysis below was verified against `Microsoft.Agents.AI.Harness`
+1.17.0 and `Microsoft.Agents.AI` 1.17.0. The repository now pins core MAF 1.23.0; the separate
+Harness package and the code samples below have not been revalidated against that newer release.
+Treat this page as the recorded 1.17.0 investigation, not a current compatibility guarantee.
+Re-run the sample compilation and behavioral checks before relying on it with a different Harness
+version.
 
 ---
 
