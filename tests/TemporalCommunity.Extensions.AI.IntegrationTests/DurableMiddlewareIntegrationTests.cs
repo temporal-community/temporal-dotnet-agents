@@ -4,8 +4,10 @@ using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using OpenTelemetry.Context.Propagation;
 using Temporalio.Client;
 using Temporalio.Common;
+using Temporalio.Extensions.OpenTelemetry;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Testing;
 using Temporalio.Worker.Interceptors;
@@ -46,11 +48,20 @@ public class DurableMiddlewareIntegrationTests
     public async Task DurableChatClientWorkflow_TagsReachActivityNotProvider()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
-        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var clientOptions = (TemporalClientOptions)env.Client.Options.Clone();
+        clientOptions.DataConverter = DurableAIDataConverter.Instance;
+        clientOptions.Interceptors =
+        [
+            new TracingInterceptor(new TracingInterceptorOptions
+            {
+                Propagator = new TraceContextPropagator(),
+            }),
+        ];
+        var client = new TemporalClient(env.Client.Connection, clientOptions);
 
         var providerClient = new MetadataRecordingChatClient();
         var builder = Host.CreateApplicationBuilder();
-        builder.Services.AddSingleton<ITemporalClient>(env.Client);
+        builder.Services.AddSingleton<ITemporalClient>(client);
         builder.Services.AddSingleton<IChatClient>(providerClient);
         builder.Services
             .AddHostedTemporalWorker(DurableChatClientWorkflow.TaskQueue)
@@ -65,7 +76,11 @@ public class DurableMiddlewareIntegrationTests
         using var host = builder.Build();
         using var listener = new ActivityListener
         {
-            ShouldListenTo = source => source.Name == DurableChatTelemetry.ActivitySourceName,
+            ShouldListenTo = source =>
+                source.Name == DurableChatTelemetry.ActivitySourceName
+                || source.Name.StartsWith(
+                    "Temporalio.Extensions.OpenTelemetry.",
+                    StringComparison.Ordinal),
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllData,
         };
@@ -73,7 +88,7 @@ public class DurableMiddlewareIntegrationTests
         await host.StartAsync();
         try
         {
-            var handle = await env.Client.StartWorkflowAsync(
+            var handle = await client.StartWorkflowAsync(
                 (DurableChatClientWorkflow workflow) => workflow.RunAsync(
                     new DurableChatClientWorkflowInput { IncludeCompatibilityMetadata = true }),
                 new WorkflowOptions(
