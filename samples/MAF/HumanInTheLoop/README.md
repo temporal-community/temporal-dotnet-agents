@@ -4,6 +4,9 @@
 
 Demonstrates how to pause an agent mid-turn and wait for a human decision before proceeding. The `send_email` tool suspends itself inside a running activity by issuing a `[WorkflowUpdate]`, and the workflow blocks on `WaitConditionAsync` until an external caller submits an approval or rejection.
 
+Email delivery is simulated with console output; no SMTP or external delivery service is called.
+After a completed turn, `quit` shuts down the durable session before stopping the worker.
+
 This sample demonstrates:
 - `TemporalAgentContext.Current.RequestApprovalAsync()` suspending a tool inside an activity
 - `ITemporalAgentClient.GetPendingApprovalAsync()` polling for pending approvals from outside the workflow

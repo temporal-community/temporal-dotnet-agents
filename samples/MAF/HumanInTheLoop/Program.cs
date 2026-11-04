@@ -258,4 +258,14 @@ while (true)
     Console.WriteLine();
 }
 
+try
+{
+    await client.ShutdownAsync(sessionId);
+}
+catch (Temporalio.Exceptions.RpcException ex)
+    when (ex.Code == Temporalio.Exceptions.RpcException.StatusCode.NotFound)
+{
+    // Quitting before the first turn leaves no workflow to shut down.
+}
+catch (OperationCanceledException) { }
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
