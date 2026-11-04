@@ -180,8 +180,7 @@ public class FunctionInvocationConflictTests
         {
             var agent = GetTemporalAgent("SubAgent");
             var session = await agent.CreateSessionAsync().ConfigureAwait(true);
-            var response = await agent.RunAsync(
-                [new ChatMessage(ChatRole.User, "hello")], session).ConfigureAwait(true);
+            var response = await agent.RunAsync("hello", session).ConfigureAwait(true);
             return response.Messages.Count > 0 ? response.Messages[^1].Text ?? string.Empty : string.Empty;
         }
     }

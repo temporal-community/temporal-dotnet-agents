@@ -455,6 +455,11 @@ public class ResearchWorkflow
 The session returned by `CreateSessionAsync` holds the conversation history, and it lives in workflow state. This means it
 survives worker restarts, supports retries, and is durable by design — all without any extra persistence code.
 
+Keep the value returned by `GetTemporalAgent` typed as `TemporalAIAgent` when calling `RunAsync`.
+Its overloads dispatch directly to the workflow-safe implementation so continuations remain on
+Temporal's deterministic scheduler. Upcasting it to MAF's `AIAgent` and calling the inherited
+`RunAsync` bypasses those overloads and is not supported inside workflow code.
+
 Reuse one session for the turns of one conversation; give each independent conversation its own. One `TemporalAIAgent`
 instance drives any number of sessions without their history or StateBag colliding. Two runs may not overlap on the same
 session, and a session may only be run by the agent that created it.

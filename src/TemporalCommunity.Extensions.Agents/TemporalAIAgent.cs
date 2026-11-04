@@ -104,6 +104,71 @@ public sealed class TemporalAIAgent : AIAgent
         return new ValueTask<AgentSession>(TemporalAgentSession.Deserialize(serializedState, jsonSerializerOptions));
     }
 
+    /// <summary>
+    /// Runs this agent without leaving Temporal's workflow task scheduler.
+    /// </summary>
+    /// <remarks>
+    /// This hides the corresponding <see cref="AIAgent.RunAsync(IEnumerable{ChatMessage}, AgentSession?, AgentRunOptions?, CancellationToken)"/>
+    /// overload because the base implementation uses <c>ConfigureAwait(false)</c>, which is not
+    /// safe for Temporal workflow continuations.
+    /// </remarks>
+    public new Task<AgentResponse> RunAsync(
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        RunWorkflowAsync([], session, options, cancellationToken);
+
+    /// <inheritdoc cref="AIAgent.RunAsync(string, AgentSession?, AgentRunOptions?, CancellationToken)"/>
+    public new Task<AgentResponse> RunAsync(
+        string message,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        return RunWorkflowAsync([new ChatMessage(ChatRole.User, message)], session, options, cancellationToken);
+    }
+
+    /// <inheritdoc cref="AIAgent.RunAsync(ChatMessage, AgentSession?, AgentRunOptions?, CancellationToken)"/>
+    public new Task<AgentResponse> RunAsync(
+        ChatMessage message,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        return RunWorkflowAsync([message], session, options, cancellationToken);
+    }
+
+    /// <inheritdoc cref="AIAgent.RunAsync(IEnumerable{ChatMessage}, AgentSession?, AgentRunOptions?, CancellationToken)"/>
+    public new Task<AgentResponse> RunAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        var requestMessages = messages as IReadOnlyCollection<ChatMessage> ?? messages.ToList();
+        return RunWorkflowAsync(requestMessages, session, options, cancellationToken);
+    }
+
+    private Task<AgentResponse> RunWorkflowAsync(
+        IReadOnlyCollection<ChatMessage> requestMessages,
+        AgentSession? session,
+        AgentRunOptions? options,
+        CancellationToken cancellationToken)
+    {
+        if (!Workflow.InWorkflow)
+        {
+            throw new InvalidOperationException(
+                "TemporalAIAgent must be used inside a Temporal workflow. " +
+                "Use TemporalAIAgentProxy for external-context invocation.");
+        }
+
+        CurrentRunContext = new AgentRunContext(this, session, requestMessages, options);
+        return RunCoreAsync(requestMessages, session, options, cancellationToken);
+    }
+
     protected override async Task<AgentResponse> RunCoreAsync(
         IEnumerable<ChatMessage> messages,
         AgentSession? session = null,
