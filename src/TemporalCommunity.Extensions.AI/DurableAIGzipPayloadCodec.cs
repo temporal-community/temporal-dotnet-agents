@@ -14,10 +14,16 @@ public sealed class DurableAIGzipPayloadCodecOptions
     /// <summary>Gets or sets the minimum complete Temporal payload size considered for compression.</summary>
     public int MinimumPayloadSizeBytes { get; init; } = 1024;
 
-    /// <summary>Gets or sets the maximum accepted compressed data size.</summary>
+    /// <summary>
+    /// Gets or sets the maximum compressed data size, excluding the encoded payload's metadata.
+    /// On encode, this bound applies only when the compressed form meets the required savings.
+    /// </summary>
     public int MaximumEncodedPayloadSizeBytes { get; init; } = 2 * 1024 * 1024;
 
-    /// <summary>Gets or sets the maximum accepted restored payload size.</summary>
+    /// <summary>
+    /// Gets or sets the maximum complete serialized payload size accepted for compression or restored
+    /// during decode. Encode checks this bound for payloads at or above the compression threshold.
+    /// </summary>
     public int MaximumDecodedPayloadSizeBytes { get; init; } = 4 * 1024 * 1024;
 
     /// <summary>
@@ -39,14 +45,14 @@ public enum DurableAIPayloadCodecError
     /// <summary>The compressed payload exceeds the configured encoded-size bound.</summary>
     EncodedPayloadTooLarge = 1,
 
-    /// <summary>The restored payload exceeds the configured decoded-size bound.</summary>
+    /// <summary>The payload considered for compression or restored payload exceeds the decoded-size bound.</summary>
     DecodedPayloadTooLarge = 2,
 
     /// <summary>The compressed data or restored Temporal payload is malformed.</summary>
     CorruptPayload = 3,
 }
 
-/// <summary>Thrown when a library-owned encoded payload cannot be safely decoded.</summary>
+/// <summary>Thrown when a payload cannot be safely encoded or decoded by the library-owned codec.</summary>
 public sealed class DurableAIPayloadCodecException : Exception
 {
     internal DurableAIPayloadCodecException(
@@ -66,7 +72,8 @@ public sealed class DurableAIPayloadCodecException : Exception
 /// <remarks>
 /// Compression is not encryption or authentication. Deploy compatible decoding to every reader
 /// before enabling encoding. Payloads below the threshold or without sufficient savings are passed
-/// through unchanged.
+/// through unchanged. Payloads at or above the threshold must fit the decoded-size bound before
+/// compression is attempted.
 /// </remarks>
 public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
 {
@@ -174,14 +181,6 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
             payload.WriteTo(gzip);
         }
 
-        if (output.Length > options.MaximumEncodedPayloadSizeBytes)
-        {
-            throw new DurableAIPayloadCodecException(
-                DurableAIPayloadCodecError.EncodedPayloadTooLarge,
-                $"Compressed payload size {output.Length} exceeds the configured encoded limit " +
-                $"of {options.MaximumEncodedPayloadSizeBytes} bytes.");
-        }
-
         var encoded = new Payload
         {
             Data = ByteString.CopyFrom(
@@ -192,7 +191,20 @@ public sealed class DurableAIGzipPayloadCodec : IPayloadCodec
         encoded.Metadata[EncodingMetadataKey] = ByteString.CopyFromUtf8(EncodingValue);
 
         var requiredMaximumSize = originalSize * (1 - options.MinimumCompressionSavingsRatio);
-        return encoded.CalculateSize() <= requiredMaximumSize ? encoded : payload;
+        if (!(encoded.CalculateSize() <= requiredMaximumSize))
+        {
+            return payload;
+        }
+
+        if (output.Length > options.MaximumEncodedPayloadSizeBytes)
+        {
+            throw new DurableAIPayloadCodecException(
+                DurableAIPayloadCodecError.EncodedPayloadTooLarge,
+                $"Compressed payload size {output.Length} exceeds the configured encoded limit " +
+                $"of {options.MaximumEncodedPayloadSizeBytes} bytes.");
+        }
+
+        return encoded;
     }
 
     private Payload Decode(Payload payload)

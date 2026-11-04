@@ -447,6 +447,7 @@ internal class AgentWorkflow :
             InitialFireAndForgetRequest = null,
             // Base class CAN fields — sourced from the base DurableChatWorkflowInput arg.
             TimeToLive = input.TimeToLive,
+            SessionIdleDeadline = input.SessionIdleDeadline,
             CarriedHistory = input.CarriedHistory,
             ApprovalTimeout = input.ApprovalTimeout,
             EnableSearchAttributes = input.EnableSearchAttributes,

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.IO.Compression;
 using System.Text;
 using Google.Protobuf;
 using Temporalio.Api.Common.V1;
@@ -76,6 +77,112 @@ public sealed class DurableAIGzipPayloadCodecTests
         var encoded = Assert.Single(await codec.EncodeAsync([payload]));
 
         Assert.Same(payload, encoded);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(0.05)]
+    public async Task IncompressiblePayload_AtSizeLimits_PassesThroughDespiteGzipExpansion(
+        double minimumSavingsRatio)
+    {
+        var bytes = new byte[32_768];
+        new Random(1729).NextBytes(bytes);
+        var payload = new Payload { Data = ByteString.CopyFrom(bytes) };
+        var originalSize = payload.CalculateSize();
+        using var output = new MemoryStream();
+        using (var gzip = new GZipStream(output, CompressionLevel.Fastest, leaveOpen: true))
+        {
+            payload.WriteTo(gzip);
+        }
+
+        Assert.True(output.Length > originalSize);
+        var codec = CreateCodec(
+            maximumEncodedSize: originalSize,
+            maximumDecodedSize: originalSize,
+            minimumSavingsRatio: minimumSavingsRatio);
+
+        var encoded = Assert.Single(await codec.EncodeAsync([payload]));
+
+        Assert.Same(payload, encoded);
+    }
+
+    [Fact]
+    public async Task Encode_BeneficialCompressionAboveEncodedLimit_FailsWithStableCategory()
+    {
+        var payload = CreatePayload(new string('x', 16_384));
+        var candidate = Assert.Single(await CreateCodec().EncodeAsync([payload]));
+        Assert.NotSame(payload, candidate);
+        var codec = CreateCodec(maximumEncodedSize: candidate.Data.Length - 1);
+
+        var exception = await Assert.ThrowsAsync<DurableAIPayloadCodecException>(
+            () => codec.EncodeAsync([payload]));
+
+        Assert.Equal(DurableAIPayloadCodecError.EncodedPayloadTooLarge, exception.Error);
+    }
+
+    [Fact]
+    public async Task Encode_InsufficientSavingsAboveEncodedLimit_PassesThrough()
+    {
+        var payload = CreatePayload(new string('x', 16_384));
+        var candidate = Assert.Single(await CreateCodec().EncodeAsync([payload]));
+        Assert.NotSame(payload, candidate);
+        const double minimumSavingsRatio = 0.999;
+        Assert.True(candidate.CalculateSize() > payload.CalculateSize() * (1 - minimumSavingsRatio));
+        var codec = CreateCodec(
+            maximumEncodedSize: candidate.Data.Length - 1,
+            minimumSavingsRatio: minimumSavingsRatio);
+
+        var encoded = Assert.Single(await codec.EncodeAsync([payload]));
+
+        Assert.Same(payload, encoded);
+    }
+
+    [Fact]
+    public async Task Encode_AboveDecodedLimit_FailsEvenWhenCompressionWouldFit()
+    {
+        var payload = CreatePayload(new string('x', 16_384));
+        var candidate = Assert.Single(await CreateCodec().EncodeAsync([payload]));
+        Assert.NotSame(payload, candidate);
+        var codec = CreateCodec(
+            maximumEncodedSize: candidate.Data.Length,
+            maximumDecodedSize: payload.CalculateSize() - 1);
+
+        var exception = await Assert.ThrowsAsync<DurableAIPayloadCodecException>(
+            () => codec.EncodeAsync([payload]));
+
+        Assert.Equal(DurableAIPayloadCodecError.DecodedPayloadTooLarge, exception.Error);
+    }
+
+    [Fact]
+    public async Task Encode_BelowThreshold_BypassesBothSizeLimits()
+    {
+        var payload = CreatePayload(new string('x', 1024));
+        var codec = CreateCodec(
+            minimumSize: payload.CalculateSize() + 1,
+            maximumEncodedSize: 1,
+            maximumDecodedSize: 1);
+
+        var encoded = Assert.Single(await codec.EncodeAsync([payload]));
+
+        Assert.Same(payload, encoded);
+    }
+
+    [Fact]
+    public async Task EncodeAndDecode_AtExactSizeLimits_AreAccepted()
+    {
+        var payload = CreatePayload(new string('x', 16_384));
+        var candidate = Assert.Single(await CreateCodec().EncodeAsync([payload]));
+        Assert.NotSame(payload, candidate);
+        var codec = CreateCodec(
+            maximumEncodedSize: candidate.Data.Length,
+            maximumDecodedSize: payload.CalculateSize());
+
+        var encoded = Assert.Single(await codec.EncodeAsync([payload]));
+        Assert.Equal(candidate.Data.Length, encoded.Data.Length);
+        Assert.True(encoded.CalculateSize() > candidate.Data.Length);
+        var decoded = Assert.Single(await codec.DecodeAsync([encoded]));
+
+        Assert.Equal(payload.ToByteArray(), decoded.ToByteArray());
     }
 
     [Fact]

@@ -10,6 +10,27 @@ namespace TemporalCommunity.Extensions.Agents.Tests.Workflows;
 public class ContinueAsNewInputTests
 {
     [Fact]
+    public void CreateContinueAsNewInput_PreservesRenewedAgentSessionIdleDeadline()
+    {
+        var originalDeadline = DateTimeOffset.UnixEpoch.AddMinutes(2);
+        var renewedDeadline = originalDeadline.AddMinutes(10);
+        var original = new AgentWorkflowInput
+        {
+            AgentName = "support",
+            TaskQueue = "agents",
+            SessionIdleDeadline = originalDeadline,
+        };
+
+        var cloned = DurableChatWorkflowBase<ChatResponse>.CreateContinueAsNewInput(
+            original, [], [], DateTimeOffset.UnixEpoch, [], completedTurnCount: 1,
+            sessionIdleDeadline: renewedDeadline);
+
+        var actual = Assert.IsType<AgentWorkflowInput>(cloned);
+        Assert.Equal(renewedDeadline, actual.SessionIdleDeadline);
+        Assert.Equal(originalDeadline, original.SessionIdleDeadline);
+    }
+
+    [Fact]
     public void CreateContinueAsNewInput_PreservesDerivedAgentInputRuntimeType()
     {
         var original = new AgentWorkflowInput

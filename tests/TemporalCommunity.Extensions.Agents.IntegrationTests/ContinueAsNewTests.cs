@@ -2,10 +2,13 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Converters;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
+using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Temporalio.Testing;
+using Temporalio.Worker;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -69,6 +72,78 @@ public class ContinueAsNewTests : IAsyncLifetime
         await _host.StopAsync();
         _host.Dispose();
         await _env.ShutdownAsync();
+    }
+
+    [Fact]
+    public async Task ContinueAsNew_RenewedIdleDeadlineSurvivesNewRunAndReplay()
+    {
+        var workflowId = $"ta-echoagent-idle-can-{Guid.NewGuid():N}";
+        var initialDeadline = DateTimeOffset.UtcNow.AddMinutes(2);
+        var timeToLive = TimeSpan.FromMinutes(10);
+        var input = new AgentWorkflowInput
+        {
+            AgentName = "EchoAgent",
+            TaskQueue = _taskQueue,
+            TimeToLive = timeToLive,
+            SessionIdleDeadline = initialDeadline,
+        };
+        var handle = await _env.Client.StartWorkflowAsync(
+            (AgentWorkflow workflow) => workflow.RunAsync(input),
+            new(workflowId, _taskQueue));
+        var initialRunId = (await handle.DescribeAsync()).RunId;
+
+        for (var turn = 1; turn <= 10; turn++)
+        {
+            var request = new RunRequest($"Turn {turn}")
+            {
+                CorrelationId = Guid.NewGuid().ToString("N"),
+            };
+            await handle.ExecuteUpdateAsync(
+                workflow => workflow.RunAgentAsync(request));
+            if ((await handle.DescribeAsync()).RunId != initialRunId)
+                break;
+        }
+
+        var continued = await PollUntilRunIdChangesAsync(
+            handle, initialRunId, TimeSpan.FromSeconds(30));
+        var originalHandle = _env.Client.GetWorkflowHandle<AgentWorkflow>(workflowId, initialRunId);
+        var originalHistory = await originalHandle.FetchHistoryAsync();
+        var continuation = Assert.Single(originalHistory.Events,
+            e => e.WorkflowExecutionContinuedAsNewEventAttributes is not null);
+        var carriedInput = await TemporalAgentDataConverter.Instance.ToValueAsync<AgentWorkflowInput>(
+            Assert.Single(continuation.WorkflowExecutionContinuedAsNewEventAttributes.Input.Payloads_));
+        var lastAdmission = originalHistory.Events.Last(
+            e => e.WorkflowExecutionUpdateAcceptedEventAttributes is not null);
+
+        Assert.NotNull(carriedInput.SessionIdleDeadline);
+        Assert.True(carriedInput.SessionIdleDeadline > initialDeadline);
+        Assert.InRange(
+            carriedInput.SessionIdleDeadline.Value,
+            new DateTimeOffset(lastAdmission.EventTime.ToDateTime()) + timeToLive,
+            new DateTimeOffset(continuation.EventTime.ToDateTime()) + timeToLive);
+
+        var resumedHandle = _env.Client.GetWorkflowHandle<AgentWorkflow>(workflowId, continued.RunId);
+        Assert.NotEmpty(await resumedHandle.QueryAsync(workflow => workflow.GetHistory()));
+        await resumedHandle.ExecuteUpdateAsync(workflow => workflow.RequestShutdownAsync());
+        await resumedHandle.GetResultAsync();
+        var resumedHistory = await resumedHandle.FetchHistoryAsync();
+        var started = Assert.Single(resumedHistory.Events,
+            e => e.WorkflowExecutionStartedEventAttributes is not null);
+        var resumedInput = await TemporalAgentDataConverter.Instance.ToValueAsync<AgentWorkflowInput>(
+            Assert.Single(started.WorkflowExecutionStartedEventAttributes.Input.Payloads_));
+        Assert.Equal(carriedInput.SessionIdleDeadline, resumedInput.SessionIdleDeadline);
+
+        var options = new WorkflowReplayerOptions
+        {
+            DataConverter = TemporalAgentDataConverter.Instance,
+        };
+        options.AddWorkflow<AgentWorkflow>();
+        var replayer = new WorkflowReplayer(options);
+        foreach (var history in new[] { originalHistory, resumedHistory })
+        {
+            var replay = await replayer.ReplayWorkflowAsync(history, throwOnReplayFailure: false);
+            Assert.Null(replay.ReplayFailure);
+        }
     }
 
     [Fact]
