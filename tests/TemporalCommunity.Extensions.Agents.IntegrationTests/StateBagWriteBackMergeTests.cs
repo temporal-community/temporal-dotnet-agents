@@ -252,6 +252,7 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             new AIFunctionFactoryOptions { Name = toolName });
 
         var taskQueue = $"failed-fire-and-forget-statebag-{Guid.NewGuid():N}";
+        const string failedRequestId = "failed-fire-and-forget-statebag";
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(Env.Client);
         builder.Services.AddSingleton<IChatClient>(scripted);
@@ -277,12 +278,30 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             var fireAndForgetResponse = await proxy.RunAsync(
                 "fail in the background",
                 session,
-                new TemporalAgentRunOptions { IsFireAndForget = true });
+                new TemporalAgentRunOptions
+                {
+                    IsFireAndForget = true,
+                    RequestId = failedRequestId,
+                });
             Assert.Empty(fireAndForgetResponse.Messages);
 
-            // Wait until the failing tool actually starts. The following synchronous Update then
-            // queues behind the background turn's gate and cannot proceed until rollback finishes.
+            // The admission validator rejects a different request while this turn is active.
             await toolInvoked.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var workflow = Env.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
+            DurableChatTerminalOutcome? terminalOutcome = null;
+            var terminalDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+            while (DateTime.UtcNow < terminalDeadline && terminalOutcome is null)
+            {
+                terminalOutcome = await workflow.QueryAsync<AgentWorkflow, DurableChatTerminalOutcome?>(
+                    wf => wf.GetTerminalTurnOutcome(failedRequestId));
+                if (terminalOutcome is null)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(50));
+                }
+            }
+
+            Assert.NotNull(terminalOutcome);
+            Assert.NotNull(terminalOutcome.FailureErrorType);
             var response = await proxy.RunAsync("recover", session)
                 .WaitAsync(TimeSpan.FromSeconds(15));
 
