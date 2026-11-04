@@ -150,6 +150,11 @@ results are additional content attributes only when the capture policy is enable
 messages are never span attributes. Failed tool spans use a bounded `error.type` and an error status
 without an exception-message description.
 
+`CaptureTelemetryContent` governs the library's and discoverable MEAI wrappers' span content; it
+does not redact arbitrary `ILogger` output from the provider, activity, or application. Configure
+logging sinks, exception-detail policies, access controls, and retention separately, and avoid
+logging sensitive exception content when those sinks are not approved for it.
+
 Workflow outcome counters use Temporal's replay-safe `Workflow.MetricMeter`; they are not emitted
 through `DurableChatTelemetry.MeterName`. Configure the Temporal runtime metrics sink separately
 if you need these counters exported. For example, the pinned SDK supports its runtime OpenTelemetry

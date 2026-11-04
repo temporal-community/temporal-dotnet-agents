@@ -57,6 +57,7 @@ public class DurableChatSessionIntegrationTests
             });
 
         using var host = builder.Build();
+        var clientSpans = new List<Activity>();
         using var listener = new ActivityListener
         {
             ShouldListenTo = source =>
@@ -66,6 +67,13 @@ public class DurableChatSessionIntegrationTests
                     StringComparison.Ordinal),
             Sample = (ref ActivityCreationOptions<ActivityContext> _) =>
                 ActivitySamplingResult.AllData,
+            ActivityStopped = activity =>
+            {
+                if (activity.Source.Name == DurableChatTelemetry.ActivitySourceName)
+                {
+                    clientSpans.Add(activity);
+                }
+            },
         };
         ActivitySource.AddActivityListener(listener);
         await host.StartAsync();
@@ -81,10 +89,17 @@ public class DurableChatSessionIntegrationTests
                 .WithMaxRetryAttempts(2);
             options.AdditionalProperties!["user.custom"] = "keep";
 
+            var conversationId = $"managed-metadata-{Guid.NewGuid():N}";
             await sessionClient.SendAsync(
-                $"managed-metadata-{Guid.NewGuid():N}",
+                conversationId,
                 [new ChatMessage(ChatRole.User, "hello")],
                 options);
+
+            var sendSpan = Assert.Single(clientSpans, span =>
+                span.DisplayName == DurableChatTelemetry.ChatSendSpanName);
+            Assert.Equal(
+                conversationId,
+                sendSpan.GetTagItem(DurableChatTelemetry.GenAiConversationIdAttribute));
 
             Assert.Equal("acme", providerClient.ActivityTags["tenant"]);
             Assert.Equal("keep", providerClient.Options?.AdditionalProperties?["user.custom"]?.ToString());

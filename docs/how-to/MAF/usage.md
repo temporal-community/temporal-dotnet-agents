@@ -225,6 +225,9 @@ as `TemporalCommunity.Extensions.AI`. Register the reducer in worker DI and sele
 it with `DefaultContextReducerKey` or the per-agent `ContextReducerKey`. The reducer
 runs in the model activity on isolated copies of eligible older turns; it never
 changes the retained history returned by `GetHistory`.
+The key selects a worker-registered reducer; it does not snapshot the reducer implementation into
+workflow history. Keep that keyed registration stable across retries and the lifetime of sessions
+that use it, or use a new key when deliberately deploying a different context policy.
 
 `MessageCountingChatReducer` is annotated `[Experimental("MEAI001")]`, so it needs a suppression
 until MEAI stabilizes the type — the pragma below, or `<NoWarn>$(NoWarn);MEAI001</NoWarn>` in the
