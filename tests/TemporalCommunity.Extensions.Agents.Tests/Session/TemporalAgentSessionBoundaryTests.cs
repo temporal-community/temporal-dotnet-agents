@@ -77,9 +77,10 @@ public class TemporalAgentSessionBoundaryTests
         var session = new TemporalAgentSession(new TemporalAgentSessionId("Assistant", "abc123"));
         var serialized = await agent.SerializeSessionAsync(session);
 
-        // Empty session: only sessionId is written.
-        Assert.Single(serialized.EnumerateObject());
+        // Empty session: only the identifier and initial state revision are written.
+        Assert.Equal(2, serialized.EnumerateObject().Count());
         Assert.Equal("ta-assistant-abc123", serialized.GetProperty("sessionId").GetString());
+        Assert.Equal(0, serialized.GetProperty("stateBagRevision").GetInt64());
     }
 
     [Fact]

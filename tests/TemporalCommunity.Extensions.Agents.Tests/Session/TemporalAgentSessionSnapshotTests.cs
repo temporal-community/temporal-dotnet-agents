@@ -149,9 +149,10 @@ public class TemporalAgentSessionSnapshotTests
 
         Assert.Equal(JsonValueKind.Object, element.ValueKind);
         Assert.Equal("ta-assistant-abc123", element.GetProperty("sessionId").GetString());
+        Assert.Equal(0, element.GetProperty("stateBagRevision").GetInt64());
         Assert.False(element.TryGetProperty("stateBag", out _));
         Assert.False(element.TryGetProperty("history", out _));
-        Assert.Single(element.EnumerateObject());
+        Assert.Equal(2, element.EnumerateObject().Count());
     }
 
     // Gate 4 (companion): omission must not depend on the caller's ambient options. MAF may hand

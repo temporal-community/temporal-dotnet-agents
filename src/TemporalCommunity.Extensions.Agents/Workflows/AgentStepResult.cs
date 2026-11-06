@@ -36,11 +36,10 @@ internal sealed class AgentStepResult
     public IReadOnlyList<FunctionCallContent>? ToolCalls { get; init; }
 
     /// <summary>
-    /// Updated <see cref="State.AgentSessionStateBag"/> serialization from this step.
-    /// Threaded back into the next iteration via <see cref="AgentStepInput.SerializedStateBag"/>.
+    /// Key-level StateBag changes produced by context providers during this step.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonElement? UpdatedStateBag { get; init; }
+    public StateBagDelta? StateBagDelta { get; init; }
 
     /// <summary>Optional usage metadata for the LLM call performed during this step.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

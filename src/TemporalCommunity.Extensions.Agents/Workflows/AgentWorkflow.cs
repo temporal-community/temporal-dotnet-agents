@@ -52,27 +52,9 @@ internal class AgentWorkflow :
 
     // GAP 6: StateBag persisted across turns so AIContextProvider state survives replay.
     private JsonElement? _currentStateBag;
+    private long _stateBagRevision;
+    private long _stateBagRevisionAtTurnStart;
 
-    // Item 9 (F1 + F3 content-hash gate): tracks the raw-text hash of the last StateBag
-    // value we serialized into an activity input. When the bag hasn't changed between
-    // dispatches we pass null instead of re-sending the full JSON, which at 64 KB × N
-    // activities would add ~700 KB of redundant history bytes per iteration.
-    //
-    // Determinism: we use StableHash(rawText) — a fixed-seed FNV-1a 32-bit hash — to detect
-    // whether the bag changed between dispatches. We deliberately do NOT use string.GetHashCode()
-    // because .NET randomizes it per-process to prevent hash-flooding; two runs of the workflow
-    // would compute different hashes for identical bytes, making the "did it change?" comparison
-    // diverge and producing a NonDeterministicWorkflowException in rare hash-collision cases.
-    //
-    // The hash is a workflow-thread local variable that is NEVER stored in Temporal history and
-    // never crosses a process boundary — it is reset on every CAN (line ~948). The only risk
-    // is a collision (probability ~1/2^32 per turn-pair); using a stable hash makes that risk
-    // consistent across replay runs instead of process-seed-dependent.
-    //
-    // Activities receiving null where they previously received a bag must behave identically
-    // to receiving the unchanged bag. The merge target (_currentStateBag) is always authoritative;
-    // passing null just avoids re-serializing unchanged bytes.
-    private int? _lastSentStateBagHash;
     private int _pendingFireAndForgetTurns;
 
     protected override bool HasPendingBackgroundTurns => _pendingFireAndForgetTurns > 0;
@@ -84,7 +66,8 @@ internal class AgentWorkflow :
         InitializeInput(input);
         input = (AgentWorkflowInput)RequiredInput;
         _input = input;
-        _currentStateBag = input.CarriedStateBag;
+        _currentStateBag = input.CarriedStateBag ?? StateBagMerge.EmptyStateBag;
+        _stateBagRevision = input.CarriedStateBagRevision;
         RestoreResolvedAgentApprovals(input.AgentApprovalResolutionHistory);
 
         Workflow.Logger.LogWorkflowStarted(input.AgentName, Workflow.Info.WorkflowId, input.TimeToLive);
@@ -152,6 +135,13 @@ internal class AgentWorkflow :
             throw new ArgumentException("At least one message is required.");
         if (request.RequestId is not null && string.IsNullOrWhiteSpace(request.RequestId))
             throw new ArgumentException("Request ID cannot be empty or whitespace.");
+        if (request.RequestId is { Length: > MaximumRequestIdLength })
+        {
+            throw new ApplicationFailureException(
+                $"Request IDs cannot exceed {MaximumRequestIdLength} characters.",
+                errorType: "DurableTurnInvalidRequest",
+                nonRetryable: true);
+        }
         ValidateTurnAdmission(
             request.RequestId,
             CreateAgentAdmissionFingerprint(request));
@@ -395,13 +385,19 @@ internal class AgentWorkflow :
         _pendingAgentApprovalDecision = null;
     }
 
+    protected override long? GetCommittedTurnRevision(AgentResponse? output) => _stateBagRevision;
+
     /// <inheritdoc/>
     protected override DurableSessionResponse BuildResponseEntry(
         string correlationId,
         string? requestId,
         AgentResponse output,
-        DateTimeOffset createdAt) =>
-        AgentSessionResponse.FromAgentResponse(correlationId, output, createdAt, requestId);
+        DateTimeOffset createdAt)
+    {
+        _stateBagRevision = checked(_stateBagRevision + 1);
+        TemporalAgentResponseMetadata.SetStateBag(output, _currentStateBag, _stateBagRevision);
+        return AgentSessionResponse.FromAgentResponse(correlationId, output, createdAt, requestId);
+    }
 
     /// <inheritdoc/>
     protected override Task<List<DurableSessionEntry>> ApplyKeyedHistoryReducerAsync(
@@ -444,6 +440,7 @@ internal class AgentWorkflow :
         var carriedInput = _input with
         {
             CarriedStateBag = _currentStateBag,
+            CarriedStateBagRevision = _stateBagRevision,
             InitialFireAndForgetRequest = null,
             // Base class CAN fields — sourced from the base DurableChatWorkflowInput arg.
             TimeToLive = input.TimeToLive,
@@ -594,9 +591,9 @@ internal class AgentWorkflow :
             // settings (per-tool activity options) and return them.
             var needsResolution = iteration == 0 && !_input!.WorkerSettingsResolved;
 
-            // F1 optimization: pass the full bag on the first step of each turn (force=true),
-            // and on subsequent steps only when the bag actually changed (hash gate).
-            var bagForStep = GetStateBagForDispatch(force: iteration == 0);
+            // The workflow is authoritative; every activity receives an explicit snapshot,
+            // including when no StateBag key changed since the preceding dispatch.
+            var bagForStep = GetStateBagForDispatch();
 
             var stepInput = new AgentStepInput
             {
@@ -667,7 +664,7 @@ internal class AgentWorkflow :
             // custom value) whenever a turn ends on a hash-gated LLM step that returns a
             // null/subset bag. The overlay is unfiltered here because context-provider output is
             // trusted-tier — see StateBagMerge.OverlayTrustedStateBag.
-            _currentStateBag = StateBagMerge.OverlayTrustedStateBag(_currentStateBag, stepResult.UpdatedStateBag);
+            _currentStateBag = StateBagMerge.ApplyTrustedDelta(_currentStateBag, stepResult.StateBagDelta);
 
             if (stepResult.Usage is not null)
             {
@@ -694,6 +691,17 @@ internal class AgentWorkflow :
             }
 
             var toolCalls = stepResult.ToolCalls;
+            foreach (var call in toolCalls)
+            {
+                if (call.CallId is { Length: > 256 })
+                {
+                    throw new ApplicationFailureException(
+                        "Tool call IDs cannot exceed 256 characters; no tool was dispatched.",
+                        errorType: "DurableToolCallIdTooLong",
+                        nonRetryable: true);
+                }
+            }
+
             var interruptedBatchIndex = BeginInterruptedToolBatch(toolCalls);
 
             var registeredToolNames = _input!.DurableAgentToolActivityOptions?.Keys.ToArray()
@@ -733,20 +741,7 @@ internal class AgentWorkflow :
             if (interceptorOpts is not null)
             {
                 var interceptorTasks = new List<Task<DurableToolInterceptorResult>>(toolCalls.Count);
-                // F1 optimization: all interceptors in a fan-out see the same bag snapshot.
-                // Compute once here so the (non-forced) hash gate fires exactly once for the entire
-                // fan-out (subsequent calls inside the loop would return null via the unchanged-hash
-                // path).
-                //
-                // The scope-aware approval interceptor reads session-scope records straight from
-                // the dispatched StateBag (RunToolInterceptorAsync is stateless — it has NO carried
-                // bag to fall back to, unlike the LLM step). If the hash gate returns null here, the
-                // interceptor sees an empty bag, cannot find an existing session-scope grant, and
-                // re-prompts a tool that should auto-approve. So when any scope-aware tool is
-                // registered, force the full bag for the interceptor fan-out; the F1 hash-gate
-                // optimization only holds for consumers that can fall back to carried state.
-                var forceInterceptorBag = _input!.ScopeAwareTools is { Count: > 0 };
-                var bagForInterceptors = GetStateBagForDispatch(force: forceInterceptorBag);
+                var bagForInterceptors = GetStateBagForDispatch();
                 for (var i = 0; i < toolCalls.Count; i++)
                 {
                     var tc = toolCalls[i];
@@ -796,8 +791,12 @@ internal class AgentWorkflow :
                 // bag, BEFORE tool dispatch, so a tool sees interceptor-driven state changes.
                 // Interceptors fan out concurrently; merge in tool-call index order (later index
                 // wins) for replay determinism — never by completion order.
+                var preInterceptorStateBag = _currentStateBag;
                 MergeStateBagWriteBacks(
-                    [.. interceptorResults.Select(r => r?.UpdatedStateBag)]);
+                    [.. interceptorResults.Select(result =>
+                        result?.UpdatedStateBag is { } updated
+                            ? StateBagMerge.CreateDelta(preInterceptorStateBag, updated)
+                            : null)]);
             }
 
             // ── Feature L — Phase 2 & Feature A: Process decisions, park for approvals ────
@@ -815,20 +814,9 @@ internal class AgentWorkflow :
 
             var requiresApprovalTools = _input!.RequiresApprovalTools;
 
-            // StateBag starvation guard (Fix 1): a user tool on the Proceed path may read ANY
-            // workflow-thread-written StateBag key — approval-scope records (scope-aware tools),
-            // context-provider output, or any custom key. InvokeAgentToolAsync is stateless:
-            // FromStateBag(id, null) builds
-            // an EMPTY session, so a null dispatch (F1 hash gate, unchanged bag) starves the tool
-            // on step 2+ of a hash-unchanged turn. Unlike the interceptor (only scope records
-            // matter → force gated on ScopeAwareTools), there is NO clean workflow-side signal for
-            // "context providers registered" — ContextProviderFactories live on the activity-side
-            // registration, never serialized into ProxyResolvedWorkerConfig. So we always force the
-            // Proceed-path tool bag: correctness over the marginal F1 saving. Tool calls are far
-            // rarer than LLM steps and already do real activity work, so the extra bag payload is
-            // negligible. This initial snapshot is refreshed before each serial dispatch so the
-            // next tool observes the preceding tool's committed StateBag write-back.
-            var bagForProceedTools = GetStateBagForDispatch(force: true);
+            // Every consumer receives a complete workflow-owned snapshot. This also ensures
+            // serial tool calls see state committed by the preceding call.
+            var bagForProceedTools = GetStateBagForDispatch();
 
             for (var i = 0; i < toolCalls.Count; i++)
             {
@@ -942,8 +930,7 @@ internal class AgentWorkflow :
                                 ApprovalAccepted = true,
                                 MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
                                 PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
-                                // Scope record may have been written above — always send the bag.
-                                SerializedStateBag = GetStateBagForDispatch(force: true),
+                                SerializedStateBag = GetStateBagForDispatch(),
                             }, ResolveDurableToolActivityOptions(tc.Name)));
                         }
                         else
@@ -982,7 +969,7 @@ internal class AgentWorkflow :
                     ApprovalAccepted = input.ApprovalAccepted,
                     MaximumTransportPayloadSizeBytes = input.MaximumTransportPayloadSizeBytes,
                     PayloadCodecExpansionAllowanceBytes = input.PayloadCodecExpansionAllowanceBytes,
-                    SerializedStateBag = GetStateBagForDispatch(force: true),
+                    SerializedStateBag = GetStateBagForDispatch(),
                 };
                 TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
                     Workflow.PayloadConverter,
@@ -1000,7 +987,7 @@ internal class AgentWorkflow :
                     idx,
                     toolResult.Result,
                     wasDispatched: true);
-                MergeStateBagWriteBacks([toolResult.UpdatedStateBag]);
+                MergeStateBagWriteBacks([toolResult.StateBagDelta]);
             }
 
             for (var i = 0; i < toolCalls.Count; i++)
@@ -1178,98 +1165,20 @@ internal class AgentWorkflow :
         return result;
     }
 
-    /// <summary>
-    /// Deterministically merges a sequence of untrusted tool/interceptor StateBag write-backs into
-    /// <c>_currentStateBag</c> in tool-call index order (later index wins). Delegates to
-    /// <see cref="StateBagMerge.Merge"/>, which applies the reserved approval-scope deny-list
-    /// (<see cref="StateBagMerge.ApprovalScopesReservedPrefix"/> + the agent's configured
-    /// always-scopes store key) so a write-back can never forge or clobber an approval grant.
-    /// See that type for the full merge policy (X-1 / X-2) and security rationale.
-    /// </summary>
-    private void MergeStateBagWriteBacks(IReadOnlyList<JsonElement?> updatedBags) =>
-        _currentStateBag = StateBagMerge.Merge(
-            _currentStateBag,
-            updatedBags,
-            _input!.AlwaysScopesStoreKey,
-            Workflow.Logger);
-
-    /// <summary>
-    /// Returns the current StateBag for dispatch into an activity input, applying the
-    /// content-hash gate (Item 9 / F1 + F3). When the bag hasn't changed since the last
-    /// dispatch, returns <see langword="null"/> so we avoid re-serializing the full JSON
-    /// into the Temporal event log.
-    /// <para>
-    /// <b>Two-tier consumer contract — read this before adding a new dispatch site.</b>
-    /// There is NO carried-state fallback. A null return means "the bag is unchanged since the
-    /// last dispatch"; an activity that receives null and reads the bag builds an EMPTY session
-    /// via <c>TemporalAgentSession.FromStateBag(id, null)</c>. Consumers therefore split into two
-    /// tiers:
-    /// </para>
-    /// <list type="bullet">
-    /// <item>
-    /// <b>Stateful / forced consumers</b> — read workflow-thread StateBag state, so they MUST pass
-    /// <c>force: true</c> or they will silently see an empty bag on a hash-unchanged step:
-    /// the LLM step at turn start (<c>force: iteration == 0</c>); the scope interceptor fan-out when
-    /// scope-aware tools are present; and the <c>InvokeAgentTool</c> dispatch (both the Proceed path,
-    /// which always forces because a user tool may read any workflow-written key, and the
-    /// approved/PauseForApproval path, which forces after writing a scope record).
-    /// </item>
-    /// </list>
-    /// </summary>
-    /// <param name="force">
-    /// Pass <see langword="true"/> whenever the consuming activity reads workflow-thread StateBag
-    /// state, to guarantee it receives the full bag even if the hash matches (see the two-tier
-    /// contract above).
-    /// </param>
-    private JsonElement? GetStateBagForDispatch(bool force = false)
+    private void MergeStateBagWriteBacks(IReadOnlyList<StateBagDelta?> deltas)
     {
-        if (_currentStateBag is null)
+        foreach (var delta in deltas)
         {
-            _lastSentStateBagHash = null;
-            return null;
+            _currentStateBag = StateBagMerge.ApplyDelta(
+                _currentStateBag,
+                delta,
+                _input!.AlwaysScopesStoreKey,
+                Workflow.Logger);
         }
-
-        var rawText = _currentStateBag.Value.GetRawText();
-        var hash = StableHash(rawText);
-
-        if (!force && _lastSentStateBagHash.HasValue && _lastSentStateBagHash.Value == hash)
-        {
-            // Bag unchanged since last dispatch — omit it (hash gate) to avoid re-serializing the
-            // full JSON into the event log. IMPORTANT: there is NO carried-state fallback. An
-            // activity that receives null and reads the bag builds an EMPTY session via
-            // FromStateBag(id, null). Only correct for consumers that DON'T read workflow-thread
-            // StateBag state. Any consumer that does read it MUST pass force: true (see the
-            // two-tier contract on the method summary).
-            return null;
-        }
-
-        _lastSentStateBagHash = hash;
-        return _currentStateBag;
     }
 
-    /// <summary>
-    /// FNV-1a 32-bit hash — fixed-seed, deterministic across process restarts.
-    /// Used for StateBag change detection. We cannot use <see cref="string.GetHashCode"/>
-    /// because .NET randomizes it per-process (hash-flooding protection); a collision
-    /// between two different bags under one seed but not another would cause the
-    /// null-vs-full-bag dispatch decision to diverge on replay and produce a
-    /// <c>WorkflowNondeterminismException</c>.
-    /// </summary>
-    private static int StableHash(string s)
-    {
-        unchecked
-        {
-            const int offsetBasis = -2128831035; // FNV-1a 32-bit offset basis
-            const int prime = 16777619;          // FNV-1a 32-bit prime
-            var hash = offsetBasis;
-            foreach (var c in s)
-            {
-                hash ^= c;
-                hash *= prime;
-            }
-            return hash;
-        }
-    }
+    private JsonElement? GetStateBagForDispatch() =>
+        _currentStateBag ?? StateBagMerge.EmptyStateBag;
 
     private List<ChatMessage> FlattenHistoryMessages()
     {
@@ -1357,7 +1266,11 @@ internal class AgentWorkflow :
     }
 
     JsonElement? TemporalCommunity.Extensions.AI.Internal.IDurableTurnRollbackParticipant
-        .CaptureTurnRollbackState() => _currentStateBag;
+        .CaptureTurnRollbackState()
+    {
+        _stateBagRevisionAtTurnStart = _stateBagRevision;
+        return _currentStateBag;
+    }
 
     void TemporalCommunity.Extensions.AI.Internal.IDurableTurnRollbackParticipant
         .RestoreTurnRollbackState(JsonElement? state)
@@ -1370,9 +1283,6 @@ internal class AgentWorkflow :
             state,
             _currentStateBag,
             _input?.AlwaysScopesStoreKey);
-
-        // The dispatch hash may describe the now-discarded bag. Invalidate it so the next
-        // activity receives the restored state rather than a hash-gated null payload.
-        _lastSentStateBagHash = null;
+        _stateBagRevision = _stateBagRevisionAtTurnStart;
     }
 }

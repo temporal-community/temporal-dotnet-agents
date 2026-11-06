@@ -326,20 +326,20 @@ public class PolymorphicSerializationAuditTests
     }
 
     [Fact]
-    public void Audit_AgentStepResult_UpdatedStateBag_RoundTrip()
+    public void Audit_AgentStepResult_StateBagDelta_RoundTrip()
     {
         var bag = JsonDocument.Parse("""{"k":"v"}""").RootElement;
         var result = new AgentStepResult
         {
             IsFinal = true,
             AssistantMessages = [new ChatMessage(ChatRole.Assistant, "ok")],
-            UpdatedStateBag = bag,
+            StateBagDelta = new StateBagDelta(bag, null),
         };
 
         var roundTripped = RoundTrip(result);
 
-        Assert.NotNull(roundTripped.UpdatedStateBag);
-        Assert.Equal("v", roundTripped.UpdatedStateBag!.Value.GetProperty("k").GetString());
+        Assert.NotNull(roundTripped.StateBagDelta);
+        Assert.Equal("v", roundTripped.StateBagDelta!.Upserts!.Value.GetProperty("k").GetString());
     }
 
     // ─── InvokeAgentToolInput / Result polymorphic members ──────────────────────────────

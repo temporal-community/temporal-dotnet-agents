@@ -48,6 +48,10 @@ internal sealed class TemporalAgentSessionSnapshot
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? StateBag { get; init; }
 
+    /// <summary>The monotonic revision of the cached workflow-owned StateBag.</summary>
+    [JsonPropertyName("stateBagRevision")]
+    public long StateBagRevision { get; init; }
+
     /// <summary>
     /// The session's conversation history in turn order, or <see langword="null"/> when the
     /// session has no history. A snapshot written before session-owned history existed omits this

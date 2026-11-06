@@ -47,6 +47,9 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? CarriedStateBag { get; init; }
 
+    /// <summary>Revision of the workflow-owned StateBag carried into this run.</summary>
+    public long CarriedStateBagRevision { get; init; }
+
     // RetryPolicy is inherited from DurableChatWorkflowInput. It applies to the model step;
     // tool activities use one attempt unless the agent explicitly opts all tools into this policy.
 

@@ -40,12 +40,9 @@ internal sealed class InvokeAgentToolResult
     public string? CallId { get; init; }
 
     /// <summary>
-    /// Serialized <c>AgentSessionStateBag</c> reflecting any mutations the tool made to the
-    /// session state during invocation (X-1). <see langword="null"/> when the tool did not
-    /// change the bag (the common case). The workflow merges this back into its carried
-    /// StateBag after each tool call completes, in tool-call index order (later index wins
-    /// on key conflict) for replay determinism.
+    /// Key-level StateBag changes made by the tool. Removed keys are explicit so deletion is
+    /// preserved when the workflow applies the result.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public JsonElement? UpdatedStateBag { get; init; }
+    public StateBagDelta? StateBagDelta { get; init; }
 }

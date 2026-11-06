@@ -29,7 +29,9 @@ hosted by another process and does not register a worker or agent implementation
 `AddDurableAgent(string name, Action<DurableAgentBuilder> configure)` consolidates the worker's chat
 client, instructions, durable tools, compatible context providers, and per-agent timeouts. It does
 not make provider-owned external history durable. DI access is provided via per-slot factories on
-the builder, so you do not need to call `BuildServiceProvider()` to wire dependencies.
+the builder, so you do not need to call `BuildServiceProvider()` to wire dependencies. Tool
+factories run inside a fresh activity scope on every invocation; resolve scoped dependencies there,
+and do not capture scoped services in a tool instance created at registration time.
 
 ### Worker-hosted example
 
@@ -147,6 +149,23 @@ Console.WriteLine(r1.Messages[0].Text);  // Paris
 var r2 = await agentProxy.RunAsync("What is its population?", session);
 Console.WriteLine(r2.Messages[0].Text);  // ~2.1 million (context preserved)
 ```
+
+The workflow owns the authoritative `AgentSession.StateBag`. The proxy returns the committed bag
+and a monotonically increasing state revision as response metadata, then updates the session's
+local cache only when that revision is newer. A cached bag is never sent back as workflow input:
+serializing or resuming an old client session cannot overwrite workflow state. Callers cannot write
+StateBag in this release; use it for workflow/provider/tool-owned session data, not caller-supplied
+authorization or tenant identity. Supply trusted identity through worker-side services or explicit
+request context instead.
+
+Request-ID recovery is bounded by the workflow's retained terminal-outcome ledger (128 records and
+1 MiB by default). Keep a caller-generated `TemporalAgentRunOptions.RequestId` if you need to retry
+after an ambiguous response; a retry with the same ID and identical input replays the retained
+outcome without re-running the turn. Oversized retained outcomes return a typed outcome-too-large
+error with the committed revision and bounded tool-call summary (or counts-only summary when the
+compact record also exceeds the limit). Once an outcome is evicted, a retry may be treated as a new
+turn. Different requests are rejected while a turn is active with a retryable session-busy error;
+retry with backoff rather than expecting the workflow to queue it.
 
 ### Request ID Recovery
 

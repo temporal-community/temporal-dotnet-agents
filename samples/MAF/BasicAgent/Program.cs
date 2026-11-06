@@ -2,7 +2,7 @@
 //
 // Demonstrates the canonical AddDurableAgent registration: an IChatClient registered
 // in DI, an agent registered via opts.AddDurableAgent("name", agent => { ... }), and
-// a tool added via agent.AddTool(...). The library composes the chat pipeline
+// a DI-backed tool resolved in a fresh activity scope for each tool invocation. The library composes the chat pipeline
 // internally — do NOT call .UseFunctionInvocation() on the IChatClient.
 //
 // Run:  dotnet run --project samples/MAF/BasicAgent/BasicAgent.csproj
@@ -40,23 +40,17 @@ var openAiClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) });
 
-// ── Step 3: Define the agent's tool ──────────────────────────────────────────
-static string GetCurrentWeather() => Random.Shared.NextDouble() > 0.5 ? "It's sunny" : "It's raining";
-var weatherTool = AIFunctionFactory.Create(
-    GetCurrentWeather,
-    name: "get_weather",
-    description: "Returns the current weather conditions.");
-
-// ── Step 4: Register the IChatClient in DI ───────────────────────────────────
+// ── Step 3: Register the IChatClient and tool dependency in DI ────────────────
 // Register a bare IChatClient — the durable-agent path composes its own pipeline
 // internally. Calling .UseFunctionInvocation() here would short-circuit Temporal's
 // per-tool activity dispatch.
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient());
+builder.Services.AddScoped<WeatherService>();
 
-// ── Step 5: Register the durable agent ───────────────────────────────────────
+// ── Step 4: Register the durable agent ───────────────────────────────────────
 // AddDurableAgent is the single registration entry point:
 //   • agent.ChatClient   — DI factory for the agent's IChatClient (required)
-//   • agent.AddTool(...) — registers a tool against this agent's local registry
+//   • agent.AddTool(...) — resolves the tool from a fresh activity scope per invocation
 //   • agent.TimeToLive   — per-agent override of opts.DefaultTimeToLive (14 days)
 builder.Services.AddTemporalClient(temporalAddress, "default");
 builder.Services
@@ -69,18 +63,21 @@ builder.Services
                 "You are a helpful geography and weather assistant. " +
                 "When asked about weather, always use the get_weather tool.";
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-            agent.AddTool(weatherTool);
+            agent.AddTool("get_weather", sp => AIFunctionFactory.Create(
+                sp.GetRequiredService<WeatherService>().GetCurrentWeather,
+                name: "get_weather",
+                description: "Returns the current weather conditions."));
             agent.TimeToLive   = TimeSpan.FromHours(1); // shortened for demo; production default is 14 days
         });
     });
 
-// ── Step 6: Start the host (worker runs as IHostedService) ───────────────────
+// ── Step 5: Start the host (worker runs as IHostedService) ───────────────────
 var host = builder.Build();
 await host.StartAsync();
 
 Console.WriteLine("Worker started. Sending messages...\n");
 
-// ── Step 7: Resolve the proxy and open a session ─────────────────────────────
+// ── Step 6: Resolve the proxy and open a session ─────────────────────────────
 // GetTemporalAgentProxy returns the keyed TemporalAIAgentProxy registered for "Assistant".
 // Under the hood it will start (or resume) an AgentWorkflow in Temporal.
 var proxy = host.Services.GetTemporalAgentProxy("Assistant");
@@ -88,7 +85,7 @@ var session = await proxy.CreateSessionAsync();
 
 Console.WriteLine($"Session workflow ID: {session}\n");
 
-// ── Step 8: Multi-turn conversation ──────────────────────────────────────────
+// ── Step 7: Multi-turn conversation ──────────────────────────────────────────
 // Each RunAsync call is a Temporal WorkflowUpdate — a durable, acknowledged
 // request/response round-trip. Conversation history is preserved in the workflow.
 Console.WriteLine("User : What is the capital of France?");
@@ -106,7 +103,7 @@ Console.WriteLine("User : What is the weather like there right now?");
 var r3 = await proxy.RunAsync("What is the weather like there right now?", session);
 Console.WriteLine($"Agent: {r3.Text ?? "(no response)"}\n");
 
-// ── Step 9: Request shutdown from the agent workflow ─────────────────────────
+// ── Step 8: Request shutdown from the agent workflow ─────────────────────────
 // Request shutdown so the workflow exits its session loop rather than sitting parked for TimeToLive.
 if (session is TemporalAgentSession temporalSession)
 {
@@ -115,7 +112,7 @@ if (session is TemporalAgentSession temporalSession)
     Console.WriteLine("Shutdown update accepted by agent workflow.\n");
 }
 
-// ── Step 10: Graceful shutdown ───────────────────────────────────────────────
+// ── Step 9: Graceful shutdown ────────────────────────────────────────────────
 // The Temporal hosted worker cancels its poll loop on shutdown, which may surface as
 // OperationCanceledException through BackgroundService. Swallow it: it is expected.
 try
@@ -127,3 +124,9 @@ catch (OperationCanceledException)
 }
 
 Console.WriteLine("Done.");
+
+sealed class WeatherService
+{
+    public string GetCurrentWeather() =>
+        Random.Shared.NextDouble() > 0.5 ? "It's sunny" : "It's raining";
+}

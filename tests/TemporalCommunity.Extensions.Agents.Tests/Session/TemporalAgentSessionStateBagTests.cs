@@ -185,6 +185,32 @@ public class TemporalAgentSessionStateBagTests
         Assert.Equal("written", Read(restored, "tool.note"));
     }
 
+    [Fact]
+    public void ApplyObservedStateBag_AcceptsOnlyMonotonicallyNewerRevisions()
+    {
+        var session = NewSession();
+        session.ApplyObservedStateBag(Bag(("revision", "2")), revision: 2);
+        session.ApplyObservedStateBag(Bag(("revision", "1")), revision: 1);
+        session.ApplyObservedStateBag(Bag(("revision", "2b")), revision: 2);
+        session.ApplyObservedStateBag(Bag(("revision", "3")), revision: 3);
+
+        Assert.Equal("3", Read(session, "revision"));
+        Assert.Equal(3, session.StateBagRevision);
+    }
+
+    [Fact]
+    public void ApplyObservedStateBag_RevisionSurvivesClientSessionSerialization()
+    {
+        var session = NewSession();
+        session.ApplyObservedStateBag(Bag(("revision", "new")), revision: 4);
+
+        var restored = TemporalAgentSession.Deserialize(session.Serialize());
+        restored.ApplyObservedStateBag(Bag(("revision", "stale")), revision: 3);
+
+        Assert.Equal("new", Read(restored, "revision"));
+        Assert.Equal(4, restored.StateBagRevision);
+    }
+
     // The reserved-key deny-list compares Ordinal, so a case variant is NOT dropped — it is merged
     // as a distinct key. That is safe only because the read side is Ordinal too: readers look up
     // the literal reserved key, and AgentSessionStateBag is backed by an ordinal-comparer

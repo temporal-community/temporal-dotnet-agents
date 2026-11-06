@@ -308,7 +308,8 @@ public sealed class DurableExecutionOptions
 
     /// <summary>
     /// Gets or sets the maximum serialized size, in bytes, of the terminal outcome ledger.
-    /// Defaults to 1 MiB. An individual outcome larger than this budget is not retained.
+    /// Defaults to 1 MiB. The minimum accepted value is 4 KiB so a minimal request-ID
+    /// deduplication record can always be retained.
     /// </summary>
     public int MaxTerminalOutcomeBytes { get; set; } = 1024 * 1024;
 
@@ -459,10 +460,12 @@ public sealed class DurableExecutionOptions
                 $"{nameof(MaxTerminalOutcomeCount)} must be positive in {nameof(DurableExecutionOptions)}.");
         }
 
-        if (MaxTerminalOutcomeBytes <= 0)
+        if (MaxTerminalOutcomeBytes < Internal.DurableTerminalTurnOutcomeLimits.MinimumBytes)
         {
             throw new InvalidOperationException(
-                $"{nameof(MaxTerminalOutcomeBytes)} must be positive in {nameof(DurableExecutionOptions)}.");
+                $"{nameof(MaxTerminalOutcomeBytes)} must be at least " +
+                $"{Internal.DurableTerminalTurnOutcomeLimits.MinimumBytes} bytes in " +
+                $"{nameof(DurableExecutionOptions)}.");
         }
 
         if (MaximumTransportPayloadSizeBytes <= 0)

@@ -38,6 +38,7 @@ public sealed class TemporalAgentSession : AgentSession
     private readonly List<DurableSessionEntry> _history = [];
     private readonly ReadOnlyCollection<DurableSessionEntry> _historyView;
     private bool _runInProgress;
+    private long _stateBagRevision;
 
     /// <summary>
     /// Initializes a new <see cref="TemporalAgentSession"/> with the given session ID.
@@ -60,6 +61,8 @@ public sealed class TemporalAgentSession : AgentSession
     [JsonInclude]
     [JsonPropertyName("sessionId")]
     public TemporalAgentSessionId SessionId { get; }
+
+    internal long StateBagRevision => _stateBagRevision;
 
     /// <summary>
     /// The conversation history accumulated on this session, in turn order.
@@ -143,6 +146,7 @@ public sealed class TemporalAgentSession : AgentSession
         {
             SessionId = this.SessionId.WorkflowId,
             StateBag = this.SerializeStateBag(),
+            StateBagRevision = _stateBagRevision,
             History = _history.Count > 0 ? _history.ToArray() : null,
         };
 
@@ -176,6 +180,7 @@ public sealed class TemporalAgentSession : AgentSession
             : new AgentSessionStateBag();
 
         var session = new TemporalAgentSession(sessionId, stateBag);
+        session._stateBagRevision = snapshot.StateBagRevision;
 
         if (snapshot.History is { Count: > 0 } history)
         {
@@ -183,6 +188,17 @@ public sealed class TemporalAgentSession : AgentSession
         }
 
         return session;
+    }
+
+    internal void ApplyObservedStateBag(JsonElement? stateBag, long revision)
+    {
+        if (revision <= _stateBagRevision)
+        {
+            return;
+        }
+
+        ReplaceStateBag(stateBag);
+        _stateBagRevision = revision;
     }
 
     /// <summary>
@@ -373,6 +389,9 @@ public sealed class TemporalAgentSession : AgentSession
         ReplaceStateBag(StateBagMerge.OverlayTrustedStateBag(this.SerializeStateBag(), updated));
     }
 
+    internal void ApplyTrustedStateBagDelta(StateBagDelta? delta) =>
+        ReplaceStateBag(StateBagMerge.ApplyTrustedDelta(this.SerializeStateBag(), delta));
+
     /// <summary>
     /// Merges <em>untrusted</em> tool and interceptor StateBag write-backs into this session's bag.
     /// </summary>
@@ -412,6 +431,21 @@ public sealed class TemporalAgentSession : AgentSession
 
         ReplaceStateBag(StateBagMerge.Merge(
             this.SerializeStateBag(), writeBacks, alwaysScopesStoreKey, logger));
+    }
+
+    internal void ApplyToolStateBagDeltas(
+        IReadOnlyList<StateBagDelta?> deltas,
+        string? alwaysScopesStoreKey = null,
+        ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(deltas);
+        var merged = this.SerializeStateBag();
+        foreach (var delta in deltas)
+        {
+            merged = StateBagMerge.ApplyDelta(merged, delta, alwaysScopesStoreKey, logger);
+        }
+
+        ReplaceStateBag(merged);
     }
 
     /// <summary>

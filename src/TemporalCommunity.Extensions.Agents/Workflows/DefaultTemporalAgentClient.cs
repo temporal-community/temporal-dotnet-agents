@@ -60,12 +60,26 @@ internal sealed class DefaultTemporalAgentClient(
         // by workflow-id, so it follows the continue-as-new chain like the previous run-less handle.
         // SDK caveat: this call may fail while the workflow still gets started (same partial-failure
         // window that the prior two-RPC sequence had).
-        var response = await client.ExecuteUpdateWithStartWorkflowAsync<AgentWorkflow, AgentResponse>(
-            wf => wf.RunAgentAsync(request),
-            new WorkflowUpdateWithStartOptions(startOp)
+        AgentResponse response;
+        try
+        {
+            response = await client.ExecuteUpdateWithStartWorkflowAsync<AgentWorkflow, AgentResponse>(
+                wf => wf.RunAgentAsync(request),
+                new WorkflowUpdateWithStartOptions(startOp)
+                {
+                    Rpc = new RpcOptions { CancellationToken = cancellationToken },
+                }).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            if (TemporalCommunity.Extensions.AI.Internal.DurableTurnFailureMapper.Map(
+                exception, request.RequestId) is { } mappedFailure)
             {
-                Rpc = new RpcOptions { CancellationToken = cancellationToken },
-            }).ConfigureAwait(false);
+                throw mappedFailure;
+            }
+
+            throw;
+        }
 
         _logger.LogClientUpdateCompleted(sessionId.AgentName, sessionId.WorkflowId);
         return response;

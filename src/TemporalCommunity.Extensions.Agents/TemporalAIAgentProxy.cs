@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.Agents.Workflows;
 
 namespace TemporalCommunity.Extensions.Agents;
@@ -130,7 +131,13 @@ internal class TemporalAIAgentProxy(
             return new AgentResponse();
         }
 
-        return await _agentClient.SendAsync(sessionId, request, cancellationToken).ConfigureAwait(false);
+        var response = await _agentClient.SendAsync(sessionId, request, cancellationToken).ConfigureAwait(false);
+        if (TemporalAgentResponseMetadata.TryGetStateBag(response, out var stateBag, out var revision))
+        {
+            temporalSession.ApplyObservedStateBag(stateBag, revision);
+        }
+
+        return response;
     }
 
     protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(

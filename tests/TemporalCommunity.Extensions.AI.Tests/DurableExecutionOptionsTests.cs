@@ -332,6 +332,7 @@ public class DurableExecutionOptionsTests
     [InlineData(-1, 1024)]
     [InlineData(1, 0)]
     [InlineData(1, -1)]
+    [InlineData(1, 4095)]
     public void Validate_RejectsInvalidTerminalOutcomeLedgerBounds(int count, int bytes)
     {
         var options = new DurableExecutionOptions
@@ -346,6 +347,18 @@ public class DurableExecutionOptionsTests
         Assert.Contains(
             count <= 0 ? nameof(options.MaxTerminalOutcomeCount) : nameof(options.MaxTerminalOutcomeBytes),
             exception.Message);
+    }
+
+    [Fact]
+    public void Validate_AcceptsMinimumTerminalOutcomeLedgerByteBudget()
+    {
+        var options = new DurableExecutionOptions
+        {
+            TaskQueue = "q",
+            MaxTerminalOutcomeBytes = 4096,
+        };
+
+        options.Validate();
     }
 
     // ── MaxToolCallsPerTurn (S-T1-1) ───────────────────────────────────

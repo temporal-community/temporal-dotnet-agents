@@ -27,8 +27,8 @@ public sealed class AgentToolContext : DurableToolContext
     /// <remarks>
     /// Mutations the interceptor makes to this bag during <c>BeforeToolCallAsync</c> ARE
     /// persisted back (X-2): the activity serializes the changed bag into
-    /// <c>DurableToolInterceptorResult.UpdatedStateBag</c>, and the workflow merges it into the
-    /// carried StateBag before tool dispatch. When the bag is <see langword="null"/> (no state
+    /// <c>DurableToolInterceptorResult.UpdatedStateBag</c>, which the workflow converts to a
+    /// key-level delta and applies before tool dispatch. When the bag is <see langword="null"/> (no state
     /// yet) there is nothing to mutate; an interceptor that needs to seed fresh state should do
     /// so via the LLM-step path. Concurrent interceptors in one turn are merged deterministically
     /// in tool-call index order (later index wins on key conflict).

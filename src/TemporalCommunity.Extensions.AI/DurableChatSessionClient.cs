@@ -209,6 +209,11 @@ public sealed class DurableChatSessionClient : IDurableChatSessionClient
         }
         catch (Exception exception)
         {
+            if (Internal.DurableTurnFailureMapper.Map(exception, effectiveRequestId) is { } mappedFailure)
+            {
+                throw mappedFailure;
+            }
+
             if (expectedSessionEpoch is not null && IsSessionEpochMismatch(exception))
             {
                 throw new DurableChatSessionEpochMismatchException(expectedSessionEpoch, exception);

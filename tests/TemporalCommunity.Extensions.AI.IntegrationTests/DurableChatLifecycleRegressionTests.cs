@@ -1098,16 +1098,22 @@ public class DurableChatLifecycleRegressionTests
                 e => e.WorkflowExecutionUpdateAcceptedEventAttributes is not null);
             var acceptedBeforeRejections = await CountAcceptedUpdatesAsync(workflow);
 
-            var busy = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
-                workflow.ExecuteUpdateAsync(wf => wf.ChatAsync(new DurableChatInput
-                {
-                    ConversationId = conversationId,
-                    RequestId = "request-2",
-                    Messages = new List<ChatMessage> { new(ChatRole.User, "different request") },
-                })));
+            var invalidRequest = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
+                session.SendAsync(
+                    conversationId,
+                    [new ChatMessage(ChatRole.User, "overlong request")],
+                    requestId: new string('r', 257)));
             Assert.Equal(
-                "DurableTurnBusy",
-                Assert.IsType<ApplicationFailureException>(busy.InnerException).ErrorType);
+                "DurableTurnInvalidRequest",
+                Assert.IsType<ApplicationFailureException>(invalidRequest.InnerException).ErrorType);
+
+            var busy = await Assert.ThrowsAsync<DurableSessionBusyException>(() =>
+                session.SendAsync(
+                    conversationId,
+                    [new ChatMessage(ChatRole.User, "different request")],
+                    requestId: "request-2"));
+            Assert.Equal("request-2", busy.RequestId);
+            Assert.True(busy.IsRetryable);
 
             var conflict = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(() =>
                 workflow.ExecuteUpdateAsync(wf => wf.ChatAsync(new DurableChatInput
@@ -1318,6 +1324,7 @@ public class DurableChatLifecycleRegressionTests
 
             Assert.Equal(callsBeforeRetry, model.Calls);
         }
+
         finally
         {
             if (oldRunId is not null)
@@ -1327,6 +1334,65 @@ public class DurableChatLifecycleRegressionTests
                 await run.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
                 await run.GetResultAsync().WaitAsync(Deadline);
             }
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task OversizedTerminalOutcome_IsRetainedAsCompactRecordAndNotRedispatched()
+    {
+        await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
+        env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
+        var model = new LargeOutputChatClient(16 * 1024);
+        var taskQueue = $"compact-terminal-outcome-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            env.Client,
+            taskQueue,
+            model,
+            maxEntryCount: 4,
+            historyCompactionStrategy: DurableHistoryCompactionStrategy.TrimRecentTurns,
+            maxTerminalOutcomeBytes: 4096);
+        await host.StartAsync();
+        var session = host.Services.GetRequiredService<DurableChatSessionClient>();
+        var conversationId = $"compact-terminal-outcome-{Guid.NewGuid():N}";
+        var workflow = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+            session.GetWorkflowId(conversationId));
+        const string requestId = "compact-outcome-request";
+        var messages = new[] { new ChatMessage(ChatRole.User, "large response") };
+        string? oldRunId = null;
+
+        try
+        {
+            var response = await session.SendAsync(conversationId, messages, requestId: requestId);
+            Assert.Equal(16 * 1024, response.Text!.Length);
+            oldRunId = (await workflow.DescribeAsync()).RunId;
+            await session.SendAsync(
+                conversationId,
+                [new ChatMessage(ChatRole.User, "second large response")],
+                requestId: "compact-outcome-second");
+            Assert.NotEqual(oldRunId, await WaitForNewRunAsync(workflow, oldRunId));
+
+            var exception = await Assert.ThrowsAsync<DurableTurnOutcomeTooLargeException>(() =>
+                session.SendAsync(conversationId, messages, requestId: requestId));
+
+            Assert.Equal(requestId, exception.RequestId);
+            Assert.Equal("completed", exception.Status);
+            Assert.False(exception.IsMinimal);
+            Assert.Equal(0, exception.ToolCallCounts.Completed);
+            Assert.Empty(exception.ToolCallSummaries);
+            Assert.Equal(2, model.Calls);
+        }
+        finally
+        {
+            try
+            {
+                var activeRunId = (await workflow.DescribeAsync()).RunId;
+                var activeRun = env.Client.GetWorkflowHandle<DurableChatWorkflow>(
+                    session.GetWorkflowId(conversationId), activeRunId);
+                await activeRun.ExecuteUpdateAsync(wf => wf.RequestShutdownAsync()).WaitAsync(Deadline);
+                await activeRun.GetResultAsync().WaitAsync(Deadline);
+            }
+            catch (Exception) { /* Preserve the original assertion failure. */ }
             await host.StopAsync();
         }
     }
@@ -2264,6 +2330,38 @@ public class DurableChatLifecycleRegressionTests
                     "Expected model failure.",
                     errorType: "ExpectedModelFailure",
                     nonRetryable: true));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var response = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in response.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+        public void Dispose() { }
+    }
+
+    private sealed class LargeOutputChatClient(int length) : IChatClient
+    {
+        private int _calls;
+
+        public int Calls => _calls;
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _calls);
+            return Task.FromResult(new ChatResponse(
+                new ChatMessage(ChatRole.Assistant, new string('x', length))));
         }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(

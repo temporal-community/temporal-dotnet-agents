@@ -425,8 +425,9 @@ public class AgentActivitiesContextProviderTests
         var first = await env.RunAsync(() =>
             activities.RunDurableAgentStepAsync(MakeInput("StateBagProviderAgent", "first")));
 
-        Assert.NotNull(first.UpdatedStateBag);
+        Assert.NotNull(first.StateBagDelta);
         Assert.Equal([0], provider.ObservedCounts);
+        var firstStateBag = StateBagMerge.ApplyTrustedDelta(null, first.StateBagDelta);
 
         var secondInput = new AgentStepInput
         {
@@ -434,11 +435,11 @@ public class AgentActivitiesContextProviderTests
             Request = new RunRequest("second"),
             AccumulatedMessages = [new ChatMessage(ChatRole.User, "second")],
             SessionId = TemporalAgentSessionId.WithRandomKey("StateBagProviderAgent"),
-            SerializedStateBag = first.UpdatedStateBag,
+            SerializedStateBag = firstStateBag,
         };
         var second = await env.RunAsync(() => activities.RunDurableAgentStepAsync(secondInput));
 
-        Assert.NotNull(second.UpdatedStateBag);
+        Assert.NotNull(second.StateBagDelta);
         Assert.Equal([0, 1], provider.ObservedCounts);
     }
 
@@ -471,11 +472,11 @@ public class AgentActivitiesContextProviderTests
             Request = new RunRequest("second"),
             AccumulatedMessages = [new ChatMessage(ChatRole.User, "second")],
             SessionId = sessionId,
-            SerializedStateBag = first.UpdatedStateBag,
+            SerializedStateBag = StateBagMerge.ApplyTrustedDelta(null, first.StateBagDelta),
         }));
 
-        Assert.NotNull(first.UpdatedStateBag);
-        Assert.NotNull(second.UpdatedStateBag);
+        Assert.NotNull(first.StateBagDelta);
+        Assert.NotNull(second.StateBagDelta);
         Assert.Equal([0, 1], observation.ObservedCounts);
         Assert.All(observation.Sessions, session =>
         {
@@ -969,7 +970,7 @@ public class AgentActivitiesContextProviderTests
 
             var result = await env.RunAsync(() => activities.RunDurableAgentStepAsync(input));
 
-            carried = result.UpdatedStateBag;
+            carried = StateBagMerge.ApplyTrustedDelta(carried, result.StateBagDelta);
             Assert.NotNull(carried);
             counts.Add(carried!.Value.GetProperty(SessionCountingProvider.StateBagKey).GetString()!);
         }

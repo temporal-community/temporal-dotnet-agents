@@ -258,10 +258,9 @@ public class InvokeAgentToolActivityTests
         var first = await env.RunAsync(() => activities.InvokeAgentToolAsync(input));
         var second = await env.RunAsync(() => activities.InvokeAgentToolAsync(input));
 
-        // First dispatch composes the agent (and runs the factory once); second dispatch reuses
-        // the cached state. Pin the cache contract so a future change doesn't accidentally
-        // reset state on every call.
-        Assert.Equal(1, resolveCount);
+        // The implementation factory runs inside each tool activity scope. The immutable
+        // registration is cached, but scoped dependencies are not.
+        Assert.Equal(2, resolveCount);
         Assert.Equal("echoed:x", first.Result);
         Assert.Equal("echoed:x", second.Result);
     }
@@ -331,6 +330,66 @@ public class InvokeAgentToolActivityTests
         Assert.Equal("echoed:<missing>", result.Result);
     }
 
+    [Fact]
+    public async Task InvokeAgentTool_ResolvesToolFromFreshScopeAndSetsArgumentsServices()
+    {
+        var observedScopes = new List<IServiceProvider>();
+        var services = new ServiceCollection();
+        services.AddScoped<ScopedToolDependency>();
+        var options = new TemporalAgentsOptionsAccessor().Create();
+        options.AddDurableAgent("ScopedAgent", agent =>
+        {
+            agent.ChatClient = _ => new StubChatClient();
+            agent.AddTool("scoped", provider =>
+            {
+                observedScopes.Add(provider);
+                return new ScopedServicesFunction("scoped", provider);
+            });
+        });
+        services.AddSingleton(options);
+        var root = services.BuildServiceProvider();
+        var activities = new AgentActivities(root, root.GetRequiredService<IServiceScopeFactory>());
+        var environment = new ActivityEnvironment();
+        var input = new InvokeAgentToolInput
+        {
+            AgentName = "ScopedAgent",
+            ToolName = "scoped",
+        };
+
+        var first = await environment.RunAsync(() => activities.InvokeAgentToolAsync(input));
+        var second = await environment.RunAsync(() => activities.InvokeAgentToolAsync(input));
+
+        Assert.Equal("scope-1", first.Result);
+        Assert.Equal("scope-2", second.Result);
+        Assert.Equal(2, observedScopes.Count);
+        Assert.NotSame(observedScopes[0], observedScopes[1]);
+    }
+
+    [Fact]
+    public async Task InvokeAgentTool_RejectsOversizedCallIdBeforeInvokingTool()
+    {
+        var tool = new RecordingFunction("echo");
+        var (activities, _, _) = BuildHarness(options =>
+            options.AddDurableAgent("BoundedIdAgent", agent =>
+            {
+                agent.ChatClient = _ => new StubChatClient();
+                agent.AddTool(tool);
+            }));
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(() =>
+            new ActivityEnvironment().RunAsync(() => activities.InvokeAgentToolAsync(
+                new InvokeAgentToolInput
+                {
+                    AgentName = "BoundedIdAgent",
+                    ToolName = "echo",
+                    CallId = new string('c', 257),
+                })));
+
+        Assert.True(exception.NonRetryable);
+        Assert.Equal("DurableToolCallIdTooLong", exception.ErrorType);
+        Assert.Equal(0, tool.InvocationCount);
+    }
+
     // ── Test helpers ────────────────────────────────────────────────────
 
     /// <summary>
@@ -386,6 +445,36 @@ public class InvokeAgentToolActivityTests
             InvocationCount++;
             var value = arguments.TryGetValue("value", out var v) ? v?.ToString() : "<missing>";
             return new ValueTask<object?>($"echoed:{value}");
+        }
+    }
+
+    private sealed class ScopedToolDependency
+    {
+        private static int _nextId;
+
+        public ScopedToolDependency() =>
+            this.Id = Interlocked.Increment(ref _nextId);
+
+        public int Id { get; }
+    }
+
+    private sealed class ScopedServicesFunction(
+        string name,
+        IServiceProvider factoryServices) : AIFunction
+    {
+        public override string Name { get; } = name;
+
+        protected override ValueTask<object?> InvokeCoreAsync(
+            AIFunctionArguments arguments,
+            CancellationToken cancellationToken)
+        {
+            if (!ReferenceEquals(arguments.Services, factoryServices))
+            {
+                throw new InvalidOperationException("The arguments did not receive the tool scope.");
+            }
+
+            var dependency = arguments.Services.GetRequiredService<ScopedToolDependency>();
+            return ValueTask.FromResult<object?>($"scope-{dependency.Id}");
         }
     }
 

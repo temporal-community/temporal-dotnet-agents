@@ -27,6 +27,20 @@ public sealed class WorkflowInitializationTests
     }
 
     [Fact]
+    public void InitializeInput_RejectsTerminalOutcomeBudgetBelowMinimalRecordSize()
+    {
+        var workflow = new TestWorkflow();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            workflow.Initialize(new DurableChatWorkflowInput
+            {
+                MaxTerminalOutcomeBytes = 4095,
+            }));
+
+        Assert.Contains("4096", exception.Message);
+    }
+
+    [Fact]
     public void RequiredInput_WithoutInitialization_FailsLoudly()
     {
         var workflow = new TestWorkflow();

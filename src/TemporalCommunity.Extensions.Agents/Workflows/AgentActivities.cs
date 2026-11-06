@@ -34,14 +34,13 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// store) are resolved fresh per activity call via an <see cref="IServiceScope"/> so that scoped
 /// services (e.g. <c>DbContext</c>) are never captured as implicit captive singletons.
 /// </summary>
-/// <param name="Tools">Resolved per-agent tool registry keyed by case-insensitive name.</param>
+/// <param name="ToolRegistrations">Immutable registrations; implementations are resolved per activity attempt.</param>
 /// <param name="Registration">Source-of-truth registration snapshot from the builder.</param>
 /// <param name="AgentsOptions">Reference to the shared agents-options snapshot.</param>
 internal sealed record AgentBlueprint(
-    IReadOnlyDictionary<string, AIFunction> Tools,
+    IReadOnlyDictionary<string, DurableToolRegistration> ToolRegistrations,
     DurableAgentRegistration Registration,
-    TemporalAgentsOptions AgentsOptions,
-    IReadOnlyList<AITool> ToolsAsAITools);
+    TemporalAgentsOptions AgentsOptions);
 
 /// <summary>
 /// Temporal activities that perform the actual AI inference for agent sessions.
@@ -130,6 +129,7 @@ internal sealed class AgentActivities(
         // (e.g. DbContext) are not captured as captive singletons.
         using var scope = serviceScopeFactory.CreateScope();
         var scopedServices = scope.ServiceProvider;
+        var toolFunctions = ResolveToolFunctions(blueprint, scopedServices);
         var captureTelemetryContent =
             TemporalCommunity.Extensions.AI.Internal.DurableTelemetryContentCapturePolicy.Resolve(
                 scope.ServiceProvider.GetService<TemporalCommunity.Extensions.AI.DurableExecutionOptions>());
@@ -146,6 +146,7 @@ internal sealed class AgentActivities(
         // Restore the StateBag before building the live pipeline so the innermost session boundary
         // can carry this exact durable instance through outer user middleware.
         var session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
+        var stateBagBefore = session.SerializeStateBag();
         var turnTelemetry = new TemporalAgentTurnTelemetryContext(input.Request.CorrelationId);
 
         // Build and own a fresh AIAgent pipeline from the scoped IChatClient. The pipeline lease
@@ -207,7 +208,7 @@ internal sealed class AgentActivities(
         // Spread [..] makes a per-call copy so downstream mutation (EnableToolNames filter below)
         // cannot corrupt the cached IReadOnlyList.
         var selectedTools = AgentRunToolSelectionPolicy.FilterProviderTools(
-            blueprint.ToolsAsAITools,
+            toolFunctions.Values.Cast<AITool>().ToArray(),
             input.Request.EnableToolCalls,
             input.Request.EnableToolNames is { } enabledToolNames ? [.. enabledToolNames] : null);
         chatOptions.Tools = selectedTools.Count > 0 ? [.. selectedTools] : null;
@@ -408,7 +409,7 @@ internal sealed class AgentActivities(
             }
 
             var toolCalls = callResolution.ActionableCalls;
-            var approvalRequiredToolNames = blueprint.Tools
+            var approvalRequiredToolNames = toolFunctions
                 .Where(pair => pair.Value.GetService<ApprovalRequiredAIFunction>() is not null)
                 .Select(pair => pair.Key)
                 .ToArray();
@@ -456,7 +457,7 @@ internal sealed class AgentActivities(
                 }
             }
 
-            var serializedStateBag = session.SerializeStateBag();
+            var stateBagDelta = StateBagMerge.CreateDelta(stateBagBefore, session.SerializeStateBag());
             var isFinal = toolCalls.Count == 0;
 
 
@@ -614,7 +615,7 @@ internal sealed class AgentActivities(
                 IsFinal = isFinal,
                 AssistantMessages = assistantMessages,
                 ToolCalls = isFinal ? null : toolCalls,
-                UpdatedStateBag = serializedStateBag,
+                StateBagDelta = stateBagDelta,
                 Usage = response.Usage,
                 ResponseId = response.ResponseId,
                 ResolvedWorkerConfig = resolvedConfig,
@@ -779,71 +780,28 @@ internal sealed class AgentActivities(
             throw new AgentNotRegisteredException(name);
         }
 
-        // ── Tool registry (Bucket 1 — frozen, stateless) ──────────────────────────────
-        // AIFunction is a delegate wrapper; it holds no scoped state. Resolve tools from
-        // the root provider so the registry is available for all per-call invocations.
-        var resolvedTools = new Dictionary<string, AIFunction>(StringComparer.OrdinalIgnoreCase);
-        var toolList = new List<AIFunction>(registration.Tools.Count);
-        foreach (var tool in registration.Tools)
-        {
-            var resolved = tool.Factory(providerServices);
-            if (resolved is null)
-            {
-                // Same class of defect as the name-mismatch guard immediately below, and it must
-                // get the same treatment: a factory that returns null returns null on every
-                // attempt, so a retryable failure here only burns the bounded default budget
-                // before surfacing the identical error. Non-retryable, with the shared
-                // DurableConfigurationException error type TemporalFailureInspector matches on.
-                var nullTool = new DurableConfigurationException(
-                    $"Tool factory for '{tool.Name}' on agent '{name}' returned null.");
-
-                throw new ApplicationFailureException(
-                    nullTool.Message,
-                    nullTool,
-                    errorType: nameof(DurableConfigurationException),
-                    nonRetryable: true);
-            }
-
-            if (!string.Equals(resolved.Name, tool.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                // A factory that resolves the wrong name is a misconfiguration: no number of
-                // retries turns it into a matching name, so retrying only burns the bounded
-                // default budget (measured: the failure surfaced on attempt 5 of 5) or, when the
-                // user set MaximumAttempts = 0, retries forever. Same treatment and same error
-                // type as the other configuration guards on this path — TemporalFailureInspector
-                // matches on the DurableConfigurationException name.
-                var mismatch = new DurableConfigurationException(
-                    $"Tool factory for '{tool.Name}' on agent '{name}' returned an AIFunction with " +
-                    $"name '{resolved.Name}'. The factory's resolved name must match the name declared " +
-                    "on AddTool.");
-
-                throw new ApplicationFailureException(
-                    mismatch.Message,
-                    mismatch,
-                    errorType: nameof(DurableConfigurationException),
-                    nonRetryable: true);
-            }
-
-            resolvedTools[tool.Name] = resolved;
-            toolList.Add(resolved);
-        }
-
-        IReadOnlyList<AITool> toolsAsAITools = [.. resolvedTools.Values.Cast<AITool>()];
-
-        // Audit-log provider-contributed tools so operators can confirm durable registration.
-        if (registration.ProviderContributedTools is { Count: > 0 } providerTools)
-        {
-            foreach (var (toolName, providerType) in providerTools)
-                _logger.LogInformation(
-                    "Agent '{AgentName}': tool '{ToolName}' contributed by context provider {ProviderType} registered as durable activity.",
-                    name, toolName, providerType);
-        }
-
+        var toolRegistrations = registration.Tools.ToDictionary(
+            tool => tool.Name,
+            StringComparer.OrdinalIgnoreCase);
         return new AgentBlueprint(
-            resolvedTools,
+            toolRegistrations,
             registration,
-            agentsOptions,
-            toolsAsAITools);
+            agentsOptions);
+    }
+
+    private IReadOnlyDictionary<string, AIFunction> ResolveToolFunctions(
+        AgentBlueprint blueprint,
+        IServiceProvider scopedServices)
+    {
+        var resolvedTools = new Dictionary<string, AIFunction>(
+            blueprint.ToolRegistrations.Count,
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, registration) in blueprint.ToolRegistrations)
+        {
+            resolvedTools.Add(name, ResolveToolFunction(registration, scopedServices, blueprint.Registration.Name));
+        }
+
+        return resolvedTools;
     }
 
     // ── Per-call helper: build and own a live AIAgent pipeline ───────────────────────────────
@@ -1172,10 +1130,9 @@ internal sealed class AgentActivities(
 
         var result = DurableToolInterceptorResult.FromDecision(decision);
 
-        // X-2: propagate StateBag mutations the interceptor made in place. Only emit
-        // UpdatedStateBag when the serialized bag actually changed. The workflow merges it
-        // back into _currentStateBag before tool dispatch (AgentWorkflow).
-        if (toolContext.StateBag is { Count: > 0 } mutatedBag)
+        // X-2: propagate StateBag mutations the interceptor made in place, including removal of
+        // its final key. The workflow converts this snapshot to a key-level delta before dispatch.
+        if (toolContext.StateBag is { } mutatedBag)
         {
             var stateBagAfter = mutatedBag.Serialize();
             if (!string.Equals(stateBagBefore, stateBagAfter.GetRawText(), StringComparison.Ordinal))
@@ -1191,28 +1148,23 @@ internal sealed class AgentActivities(
     public async Task<InvokeAgentToolResult> InvokeAgentToolAsync(InvokeAgentToolInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        if (input.CallId is { Length: > 256 })
+        {
+            throw new ApplicationFailureException(
+                "Tool call IDs cannot exceed 256 characters.",
+                errorType: "DurableToolCallIdTooLong",
+                nonRetryable: true);
+        }
 
         var ctx = ActivityExecutionContext.Current;
         var ct = ctx.CancellationToken;
 
-        // Tools live on the blueprint (Bucket 1 — stateless AIFunction delegates).
-        // No scope is needed for the tool lookup itself; however a scope is opened below for
-        // the TemporalAgentContext so any scoped services the tool resolves via the context are
-        // properly lifetime-managed.
         var blueprint = ResolveBlueprint(input.AgentName);
 
-        if (!blueprint.Tools.TryGetValue(input.ToolName, out var fn))
+        if (!blueprint.ToolRegistrations.TryGetValue(input.ToolName, out var toolRegistration))
         {
             throw new InvalidOperationException(
                 $"Tool '{input.ToolName}' is not registered on agent '{input.AgentName}'.");
-        }
-
-        if (fn.GetService<ApprovalRequiredAIFunction>() is not null && !input.ApprovalAccepted)
-        {
-            throw new ApplicationFailureException(
-                $"Tool '{input.ToolName}' requires a durable accepted approval before invocation.",
-                errorType: "DurableToolApprovalRequired",
-                nonRetryable: true);
         }
 
         ctx.Heartbeat();
@@ -1230,6 +1182,14 @@ internal sealed class AgentActivities(
         // Open a per-call scope so any scoped services the tool resolves via TemporalAgentContext
         // are properly lifetime-managed and not captured as captive singletons.
         using var scope = serviceScopeFactory.CreateScope();
+        var fn = ResolveToolFunction(toolRegistration, scope.ServiceProvider, input.AgentName);
+        if (fn.GetService<ApprovalRequiredAIFunction>() is not null && !input.ApprovalAccepted)
+        {
+            throw new ApplicationFailureException(
+                $"Tool '{input.ToolName}' requires a durable accepted approval before invocation.",
+                errorType: "DurableToolApprovalRequired",
+                nonRetryable: true);
+        }
 
         // Set up TemporalAgentContext for the tool invocation so tools that call
         // TemporalAgentContext.Current (e.g. for RequestApprovalAsync) work in the
@@ -1289,7 +1249,7 @@ internal sealed class AgentActivities(
 
         // Snapshot the bag's serialized form before invocation so we can detect (and write back)
         // tool-driven mutations afterwards (X-1). Only computed on the real agent-session path.
-        var stateBagBefore = session?.SerializeStateBag()?.GetRawText();
+        var stateBagBefore = session?.SerializeStateBag();
 
         try
         {
@@ -1298,6 +1258,7 @@ internal sealed class AgentActivities(
             var arguments = input.Arguments is null
                 ? new AIFunctionArguments()
                 : new AIFunctionArguments(input.Arguments);
+            arguments.Services = scope.ServiceProvider;
 
             object? result;
             try
@@ -1324,24 +1285,15 @@ internal sealed class AgentActivities(
                 result = $"[Tool failed safely] {exception.ModelVisibleMessage}";
             }
 
-            // X-1: capture StateBag write-back. Only emit UpdatedStateBag when the serialized
-            // bag actually changed, so the no-mutation case stays null (wire-compatible). The
-            // workflow merges this back into _currentStateBag in tool-call index order.
-            System.Text.Json.JsonElement? updatedStateBag = null;
-            if (session is not null)
-            {
-                var after = session.SerializeStateBag();
-                if (!string.Equals(stateBagBefore, after?.GetRawText(), StringComparison.Ordinal))
-                {
-                    updatedStateBag = after;
-                }
-            }
+            var stateBagDelta = session is null
+                ? null
+                : StateBagMerge.CreateDelta(stateBagBefore, session.SerializeStateBag());
 
             var toolResult = new InvokeAgentToolResult
             {
                 Result = result,
                 CallId = input.CallId,
-                UpdatedStateBag = updatedStateBag,
+                StateBagDelta = stateBagDelta,
             };
             try
             {
@@ -1358,7 +1310,7 @@ internal sealed class AgentActivities(
                 {
                     Result = InvokeAgentToolResult.ResultTooLargeMessage,
                     CallId = input.CallId,
-                    UpdatedStateBag = updatedStateBag,
+                    StateBagDelta = stateBagDelta,
                 };
                 try
                 {
@@ -1376,6 +1328,7 @@ internal sealed class AgentActivities(
                         "DurableToolResultTooLarge",
                         nonRetryable: true);
                 }
+
             }
             catch (ApplicationFailureException)
             {
@@ -1419,5 +1372,34 @@ internal sealed class AgentActivities(
                 TemporalAgentContext.SetUnavailable(null);
             }
         }
+    }
+
+    private static AIFunction ResolveToolFunction(
+        DurableToolRegistration registration,
+        IServiceProvider scopedServices,
+        string agentName)
+    {
+        var function = registration.Factory(scopedServices)
+            ?? throw CreateToolFactoryFailure(
+                $"Tool factory for '{registration.Name}' on agent '{agentName}' returned null.");
+
+        if (!string.Equals(function.Name, registration.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw CreateToolFactoryFailure(
+                $"Tool factory for '{registration.Name}' on agent '{agentName}' returned an AIFunction " +
+                $"named '{function.Name}'. The resolved name must match the registration name.");
+        }
+
+        return function;
+    }
+
+    private static ApplicationFailureException CreateToolFactoryFailure(string message)
+    {
+        var exception = new DurableConfigurationException(message);
+        return new ApplicationFailureException(
+            exception.Message,
+            exception,
+            errorType: nameof(DurableConfigurationException),
+            nonRetryable: true);
     }
 }

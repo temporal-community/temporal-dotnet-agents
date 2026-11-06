@@ -30,6 +30,7 @@ namespace TemporalCommunity.Extensions.Agents.State;
 [JsonSerializable(typeof(AgentStepInput))]
 [JsonSerializable(typeof(DurableChatTurnRange))]
 [JsonSerializable(typeof(AgentStepResult))]
+[JsonSerializable(typeof(StateBagDelta))]
 [JsonSerializable(typeof(InvokeAgentToolInput))]
 [JsonSerializable(typeof(InvokeAgentToolResult))]
 [JsonSerializable(typeof(IReadOnlyList<DurableSessionEntry>))]

@@ -233,6 +233,48 @@ public class StateBagMergeTests
     }
 
     [Fact]
+    public void ApplyDelta_PropagatesKeyUpdatesAndDeletions()
+    {
+        var before = Bag(("keep", "value"), ("replace", "old"), ("remove", "gone"));
+        var after = Bag(("keep", "value"), ("replace", "new"), ("add", "new"));
+
+        var delta = StateBagMerge.CreateDelta(before, after);
+        var result = StateBagMerge.ApplyDelta(before, delta);
+
+        Assert.Equal("value", GetString(result, "keep"));
+        Assert.Equal("new", GetString(result, "replace"));
+        Assert.Equal("new", GetString(result, "add"));
+        Assert.False(HasKey(result, "remove"));
+    }
+
+    [Fact]
+    public void ApplyDelta_DoesNotFilterTrustedReservedKeyChanges()
+    {
+        var before = Bag(("temporal.approval_scopes.session", "old"));
+        var after = Bag(("temporal.approval_scopes.session", "new"));
+
+        var result = StateBagMerge.ApplyTrustedDelta(
+            before,
+            StateBagMerge.CreateDelta(before, after));
+
+        Assert.Equal("new", GetString(result, "temporal.approval_scopes.session"));
+    }
+
+    [Fact]
+    public void ApplyDelta_UntrustedDeletionCannotRemoveReservedKey()
+    {
+        var current = Bag(("temporal.approval_scopes.session", "trusted"), ("remove", "gone"));
+        var delta = new StateBagDelta(
+            Upserts: null,
+            RemovedKeys: ["temporal.approval_scopes.session", "remove"]);
+
+        var result = StateBagMerge.ApplyDelta(current, delta);
+
+        Assert.Equal("trusted", GetString(result, "temporal.approval_scopes.session"));
+        Assert.False(HasKey(result, "remove"));
+    }
+
+    [Fact]
     public void Merge_OutputKeysAreOrdinalSorted_ForReplayStability()
     {
         // The merge emits keys in ordinal order so the carried JsonElement is byte-stable.

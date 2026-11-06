@@ -3,6 +3,10 @@ using Microsoft.Extensions.Logging;
 
 namespace TemporalCommunity.Extensions.Agents.Workflows;
 
+internal sealed record StateBagDelta(
+    JsonElement? Upserts,
+    IReadOnlyList<string>? RemovedKeys);
+
 /// <summary>
 /// Deterministic, replay-safe merge of StateBag write-backs returned by tool and interceptor
 /// activities (X-1 / X-2 merge policy).
@@ -46,6 +50,90 @@ internal static class StateBagMerge
     /// </summary>
     internal const string ApprovalScopesReservedPrefix = "temporal.approval_scopes.";
 
+    internal static JsonElement EmptyStateBag { get; } =
+        JsonSerializer.SerializeToElement(new Dictionary<string, object?>());
+
+    internal static StateBagDelta? CreateDelta(JsonElement? before, JsonElement? after)
+    {
+        var oldValues = GetProperties(before);
+        var newValues = GetProperties(after);
+        var upserts = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var removed = new List<string>();
+
+        foreach (var (key, value) in newValues)
+        {
+            if (!oldValues.TryGetValue(key, out var previous)
+                || !string.Equals(previous.GetRawText(), value.GetRawText(), StringComparison.Ordinal))
+            {
+                upserts[key] = value;
+            }
+        }
+
+        foreach (var key in oldValues.Keys)
+        {
+            if (!newValues.ContainsKey(key))
+            {
+                removed.Add(key);
+            }
+        }
+
+        if (upserts.Count == 0 && removed.Count == 0)
+        {
+            return null;
+        }
+
+        return new StateBagDelta(
+            upserts.Count == 0 ? null : SerializeSorted(upserts),
+            removed.Count == 0 ? null : removed.OrderBy(key => key, StringComparer.Ordinal).ToArray());
+    }
+
+    internal static JsonElement? ApplyDelta(
+        JsonElement? current,
+        StateBagDelta? delta,
+        string? alwaysScopesStoreKey = null,
+        ILogger? logger = null,
+        bool filterReservedKeys = true)
+    {
+        if (delta is null)
+        {
+            return current;
+        }
+
+        var merged = GetProperties(current);
+        var changed = false;
+
+        if (delta.RemovedKeys is { Count: > 0 } removedKeys)
+        {
+            foreach (var key in removedKeys)
+            {
+                if (filterReservedKeys && IsReservedApprovalScopeKey(key, alwaysScopesStoreKey))
+                {
+                    LogReservedStateBagWrite(key, logger);
+                    continue;
+                }
+
+                changed |= merged.Remove(key);
+            }
+        }
+
+        if (delta.Upserts is { ValueKind: JsonValueKind.Object } upserts)
+        {
+            foreach (var property in upserts.EnumerateObject())
+            {
+                if (filterReservedKeys && IsReservedApprovalScopeKey(property.Name, alwaysScopesStoreKey))
+                {
+                    LogReservedStateBagWrite(property.Name, logger);
+                    continue;
+                }
+
+                merged[property.Name] = property.Value.Clone();
+                changed = true;
+            }
+        }
+
+        return changed ? SerializeSorted(merged) : current;
+    }
+
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="key"/> is a reserved approval-scope key
     /// that untrusted tool/interceptor write-backs may never create, overwrite, or delete:
@@ -56,6 +144,9 @@ internal static class StateBagMerge
         key.StartsWith(ApprovalScopesReservedPrefix, StringComparison.Ordinal)
         || (!string.IsNullOrEmpty(alwaysScopesStoreKey)
             && string.Equals(key, alwaysScopesStoreKey, StringComparison.Ordinal));
+
+    internal static JsonElement? ApplyTrustedDelta(JsonElement? current, StateBagDelta? delta) =>
+        ApplyDelta(current, delta, filterReservedKeys: false);
 
     /// <summary>
     /// Merges <paramref name="updatedBags"/> (in index order, later wins) into
@@ -105,11 +196,7 @@ internal static class StateBagMerge
                     // BEFORE merge. A tool/interceptor may never forge or clobber an approval grant.
                     if (IsReservedApprovalScopeKey(prop.Name, alwaysScopesStoreKey))
                     {
-                        logger?.LogWarning(
-                            "StateBag write-back attempted to write reserved approval-scope key '{Key}'. " +
-                            "Dropping the contribution (possible tampering / privilege-escalation signal). " +
-                            "Only the workflow thread may write approval-scope records.",
-                            prop.Name);
+                        LogReservedStateBagWrite(prop.Name, logger);
                         continue;
                     }
 
@@ -248,4 +335,25 @@ internal static class StateBagMerge
 
         return JsonSerializer.Deserialize<JsonElement>(stream.ToArray());
     }
+
+    private static Dictionary<string, JsonElement> GetProperties(JsonElement? bag)
+    {
+        var properties = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        if (bag is { ValueKind: JsonValueKind.Object } objectBag)
+        {
+            foreach (var property in objectBag.EnumerateObject())
+            {
+                properties[property.Name] = property.Value.Clone();
+            }
+        }
+
+        return properties;
+    }
+
+    private static void LogReservedStateBagWrite(string key, ILogger? logger) =>
+        logger?.LogWarning(
+            "StateBag write-back attempted to write reserved approval-scope key '{Key}'. " +
+            "Dropping the contribution (possible tampering / privilege-escalation signal). " +
+            "Only the workflow thread may write approval-scope records.",
+            key);
 }

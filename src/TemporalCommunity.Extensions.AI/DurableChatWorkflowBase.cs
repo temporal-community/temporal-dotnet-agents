@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.AI.Approvals;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
 using Temporalio.Common;
@@ -51,6 +52,10 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
     private const int MaximumHistoryRecoveryRetriesPerRun = 3;
     private const int MaximumHistoryRecoveryRetriesPerIncident = 9;
+    protected const int MaximumRequestIdLength = 256;
+    internal const int MinimumTerminalOutcomeBytes = Internal.DurableTerminalTurnOutcomeLimits.MinimumBytes;
+    private const int MaximumRetainedToolCallSummaries = 32;
+    private const int MaximumTerminalErrorTypeLength = 128;
 
     private sealed class TurnExecutionRecord
     {
@@ -92,6 +97,22 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         public JsonElement? SerializedResponseEntry { get; set; }
 
         public int SerializedSizeBytes { get; set; }
+
+        public bool OutcomeOmitted { get; set; }
+
+        public bool IsMinimalOutcome { get; set; }
+
+        public string? OutcomeStatus { get; set; }
+
+        public long? CommittedRevision { get; set; }
+
+        public string? OutcomeErrorType { get; set; }
+
+        public IReadOnlyList<DurableToolCallOutcomeSummary>? ToolCallSummaries { get; set; }
+
+        public bool ToolCallSummariesTruncated { get; set; }
+
+        public DurableToolCallOutcomeCounts? ToolCallCounts { get; set; }
 
         public TurnFailure? Failure { get; set; }
     }
@@ -190,6 +211,119 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             throw new OperationCanceledException("The active turn was cancelled.");
         }
+    }
+
+    private Internal.DurableTerminalTurnOutcome CreateTerminalTurnOutcome(TurnExecutionRecord record) =>
+        new()
+        {
+            RequestId = record.RequestId,
+            AdmissionFingerprint = record.AdmissionFingerprint,
+            TurnInputFingerprint = record.TurnInputFingerprint,
+            Output = record.SerializedOutput,
+            ResponseEntry = record.SerializedResponseEntry,
+            Failure = record.Failure is { } failure
+                ? new Internal.DurableTerminalTurnFailure
+                {
+                    ErrorType = failure.ErrorType,
+                    Message = failure.Message,
+                    NonRetryable = failure.NonRetryable,
+                }
+                : record.OutcomeErrorType is { } errorType
+                    ? new Internal.DurableTerminalTurnFailure
+                    {
+                        ErrorType = errorType,
+                        Message = string.Empty,
+                        NonRetryable = true,
+                    }
+                    : null,
+            OutcomeOmitted = record.OutcomeOmitted,
+            IsMinimal = record.IsMinimalOutcome,
+            Status = record.OutcomeStatus,
+            CommittedRevision = record.CommittedRevision,
+            ToolCallSummaries = record.ToolCallSummaries,
+            ToolCallSummariesTruncated = record.ToolCallSummariesTruncated,
+            ToolCallCounts = record.ToolCallCounts,
+        };
+
+    private Internal.DurableTerminalTurnOutcome CreateCompactTerminalTurnOutcome(
+        TurnExecutionRecord record)
+    {
+        var (summaries, truncated, counts) = CreateToolCallOutcomeSummary();
+        return new Internal.DurableTerminalTurnOutcome
+        {
+            RequestId = record.RequestId,
+            AdmissionFingerprint = record.AdmissionFingerprint,
+            TurnInputFingerprint = record.TurnInputFingerprint,
+            Failure = record.Failure is { } failure
+                ? new Internal.DurableTerminalTurnFailure
+                {
+                    ErrorType = failure.ErrorType[..Math.Min(
+                        failure.ErrorType.Length,
+                        MaximumTerminalErrorTypeLength)],
+                    Message = string.Empty,
+                    NonRetryable = true,
+                }
+                : null,
+            OutcomeOmitted = true,
+            Status = record.OutcomeStatus ?? (record.Failure is null ? "completed" : "failed"),
+            CommittedRevision = GetCommittedTurnRevision(record.Output),
+            ToolCallSummaries = summaries,
+            ToolCallSummariesTruncated = truncated,
+            ToolCallCounts = counts,
+        };
+    }
+
+    private (
+        IReadOnlyList<DurableToolCallOutcomeSummary> Summaries,
+        bool Truncated,
+        DurableToolCallOutcomeCounts Counts)
+        CreateToolCallOutcomeSummary()
+    {
+        var summaries = new List<DurableToolCallOutcomeSummary>(MaximumRetainedToolCallSummaries);
+        var completed = 0;
+        var failed = 0;
+        var uncertain = 0;
+
+        foreach (var call in _interruptedToolBatches.SelectMany(batch => batch.Calls))
+        {
+            var status = call.Dispatched
+                ? call.HasResult
+                    ? DurableToolCallOutcomeStatus.Completed
+                    : DurableToolCallOutcomeStatus.OutcomeUncertain
+                : DurableToolCallOutcomeStatus.Failed;
+            switch (status)
+            {
+                case DurableToolCallOutcomeStatus.Completed:
+                    completed++;
+                    break;
+                case DurableToolCallOutcomeStatus.Failed:
+                    failed++;
+                    break;
+                case DurableToolCallOutcomeStatus.OutcomeUncertain:
+                    uncertain++;
+                    break;
+            }
+
+            if (summaries.Count < MaximumRetainedToolCallSummaries)
+            {
+                var callId = call.Call.CallId;
+                var functionName = call.Call.Name;
+                summaries.Add(new DurableToolCallOutcomeSummary(
+                    callId is { Length: > MaximumRequestIdLength }
+                        ? callId[..MaximumRequestIdLength]
+                        : callId,
+                    functionName.Length > MaximumRequestIdLength
+                        ? functionName[..MaximumRequestIdLength]
+                        : functionName,
+                    status));
+            }
+        }
+
+        var callCount = _interruptedToolBatches.Sum(batch => batch.Calls.Count);
+        return (
+            summaries,
+            callCount > MaximumRetainedToolCallSummaries,
+            new DurableToolCallOutcomeCounts(completed, failed, uncertain));
     }
 
     /// <summary>
@@ -564,6 +698,9 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     /// <summary>JSON options used to measure the serialized terminal outcome ledger.</summary>
     protected virtual JsonSerializerOptions TerminalOutcomeJsonSerializerOptions =>
         DurableAIJsonUtilities.DefaultOptions;
+
+    /// <summary>Returns the committed state revision associated with a completed turn, if any.</summary>
+    protected virtual long? GetCommittedTurnRevision(TOutput? output) => null;
 
     /// <summary>
     /// Hook invoked after the base upserts the standard <c>TurnCount</c> and
@@ -1540,6 +1677,12 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     protected void ValidateTurnAdmission(string? requestId, string admissionFingerprint)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(admissionFingerprint);
+        if (requestId is { Length: > MaximumRequestIdLength })
+        {
+            throw TurnAdmissionFailure(
+                $"Request IDs cannot exceed {MaximumRequestIdLength} characters.",
+                "DurableTurnInvalidRequest");
+        }
 
         var matchesActiveTurn = _activeTurn is not null
                                 && string.Equals(requestId, _activeTurn.RequestId, StringComparison.Ordinal);
@@ -1780,6 +1923,29 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             await Workflow.WaitConditionAsync(() => GetTurnRecord(admission).IsTerminal).ConfigureAwait(true);
 
             var record = GetTurnRecord(admission);
+            if (record.OutcomeOmitted)
+            {
+                var details = new Internal.DurableTurnOutcomeTooLargeDetails
+                {
+                    RequestId = record.RequestId,
+                    Status = record.OutcomeStatus ?? "unknown",
+                    IsMinimal = record.IsMinimalOutcome,
+                    CommittedRevision = record.CommittedRevision,
+                    ErrorType = record.OutcomeErrorType,
+                    ToolCallSummaries = record.ToolCallSummaries,
+                    ToolCallSummariesTruncated = record.ToolCallSummariesTruncated,
+                    ToolCallCounts = record.ToolCallCounts,
+                };
+                var message = JsonSerializer.Serialize(
+                    details,
+                    DurableAIJsonUtilities.DefaultOptions.GetTypeInfo(typeof(
+                        Internal.DurableTurnOutcomeTooLargeDetails)));
+                throw new ApplicationFailureException(
+                    message,
+                    errorType: Internal.DurableTurnFailureMapper.OutcomeTooLargeErrorType,
+                    nonRetryable: true);
+            }
+
             if (record.Failure is { } failure)
             {
                 throw new ApplicationFailureException(
@@ -1936,10 +2102,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 $"{nameof(input.MaxTerminalOutcomeCount)} must be positive.");
         }
 
-        if (input.MaxTerminalOutcomeBytes <= 0)
+        if (input.MaxTerminalOutcomeBytes < MinimumTerminalOutcomeBytes)
         {
             throw new InvalidOperationException(
-                $"{nameof(input.MaxTerminalOutcomeBytes)} must be positive.");
+                $"{nameof(input.MaxTerminalOutcomeBytes)} must be at least " +
+                $"{MinimumTerminalOutcomeBytes} bytes.");
         }
     }
 
@@ -2012,10 +2179,23 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
         foreach (var outcome in outcomes)
         {
+            if (outcome.RequestId is { Length: > MaximumRequestIdLength })
+            {
+                throw new InvalidOperationException("A carried terminal outcome has an oversized request ID.");
+            }
+
             var record = new TurnExecutionRecord(outcome.RequestId, outcome.AdmissionFingerprint)
             {
                 TurnInputFingerprint = outcome.TurnInputFingerprint,
                 IsTerminal = true,
+                OutcomeOmitted = outcome.OutcomeOmitted,
+                IsMinimalOutcome = outcome.IsMinimal,
+                OutcomeStatus = outcome.Status,
+                CommittedRevision = outcome.CommittedRevision,
+                OutcomeErrorType = outcome.Failure?.ErrorType,
+                ToolCallSummaries = outcome.ToolCallSummaries,
+                ToolCallSummariesTruncated = outcome.ToolCallSummariesTruncated,
+                ToolCallCounts = outcome.ToolCallCounts,
                 Failure = outcome.Failure is { } failure
                     ? new TurnFailure(failure.ErrorType, failure.Message, failure.NonRetryable)
                     : null,
@@ -2032,7 +2212,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 record.ResponseEntry = DeserializeTurnResponseEntry(serializedResponse);
             }
 
-            if (record.Failure is null
+            if (!record.OutcomeOmitted
+                && record.Failure is null
                 && (record.SerializedOutput is null || record.SerializedResponseEntry is null))
             {
                 throw new InvalidOperationException(
@@ -2077,6 +2258,13 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                         NonRetryable = failure.NonRetryable,
                     }
                     : null,
+                OutcomeOmitted = record.OutcomeOmitted,
+                IsMinimal = record.IsMinimalOutcome,
+                Status = record.OutcomeStatus,
+                CommittedRevision = record.CommittedRevision,
+                ToolCallSummaries = record.ToolCallSummaries,
+                ToolCallSummariesTruncated = record.ToolCallSummariesTruncated,
+                ToolCallCounts = record.ToolCallCounts,
             });
         }
 
@@ -2087,28 +2275,44 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         TurnExecutionRecord record,
         bool enforceBounds = true)
     {
-        var outcome = new Internal.DurableTerminalTurnOutcome
+        var fullOutcome = CreateTerminalTurnOutcome(record);
+        var compactOutcome = record.OutcomeOmitted
+            ? fullOutcome
+            : CreateCompactTerminalTurnOutcome(record);
+        var minimalOutcome = record.IsMinimalOutcome
+            ? fullOutcome
+            : compactOutcome with
+            {
+                TurnInputFingerprint = null,
+                Failure = null,
+                IsMinimal = true,
+                ToolCallSummaries = null,
+                ToolCallSummariesTruncated = false,
+            };
+        var fit = Internal.DurableTerminalTurnOutcomeBudget.Fit(
+            fullOutcome,
+            compactOutcome,
+            minimalOutcome,
+            _maxTerminalOutcomeBytes,
+            TerminalOutcomeJsonSerializerOptions);
+        var outcome = fit.Outcome;
+        record.SerializedSizeBytes = fit.SerializedSizeBytes;
+        record.OutcomeOmitted = outcome.OutcomeOmitted;
+        record.IsMinimalOutcome = outcome.IsMinimal;
+        record.OutcomeStatus = outcome.Status;
+        record.CommittedRevision = outcome.CommittedRevision;
+        record.OutcomeErrorType = outcome.Failure?.ErrorType;
+        record.ToolCallSummaries = outcome.ToolCallSummaries;
+        record.ToolCallSummariesTruncated = outcome.ToolCallSummariesTruncated;
+        record.ToolCallCounts = outcome.ToolCallCounts;
+        record.TurnInputFingerprint = outcome.TurnInputFingerprint;
+        if (outcome.OutcomeOmitted)
         {
-            RequestId = record.RequestId,
-            AdmissionFingerprint = record.AdmissionFingerprint,
-            TurnInputFingerprint = record.TurnInputFingerprint,
-            Output = record.SerializedOutput,
-            ResponseEntry = record.SerializedResponseEntry,
-            Failure = record.Failure is { } failure
-                ? new Internal.DurableTerminalTurnFailure
-                {
-                    ErrorType = failure.ErrorType,
-                    Message = failure.Message,
-                    NonRetryable = failure.NonRetryable,
-                }
-                : null,
-        };
-        record.SerializedSizeBytes =
-            JsonSerializer.SerializeToUtf8Bytes(outcome, TerminalOutcomeJsonSerializerOptions).Length;
-
-        if (record.SerializedSizeBytes > _maxTerminalOutcomeBytes)
-        {
-            return;
+            record.Output = default;
+            record.ResponseEntry = null;
+            record.SerializedOutput = null;
+            record.SerializedResponseEntry = null;
+            record.Failure = null;
         }
 
         _terminalTurns[record.RequestId] = record;
@@ -2148,6 +2352,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         record.SerializedResponseEntry = SerializeTurnResponseEntry(responseEntry);
         record.Output = output;
         record.ResponseEntry = responseEntry;
+        record.OutcomeStatus = "completed";
+        record.CommittedRevision = GetCommittedTurnRevision(output);
         record.IsTerminal = true;
         AddTerminalTurnRecord(record);
         if (ReferenceEquals(_activeTurn, record))
@@ -2170,6 +2376,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
             ? (failure.ErrorType ?? "DurableTurnFailure", failure.Message, failure.NonRetryable)
             : (exception.GetType().FullName ?? exception.GetType().Name, exception.Message, false);
         record.Failure = new TurnFailure(errorType, message, nonRetryable);
+        record.OutcomeStatus = "failed";
+        record.CommittedRevision = GetCommittedTurnRevision(record.Output);
         record.IsTerminal = true;
         AddTerminalTurnRecord(record);
         if (ReferenceEquals(_activeTurn, record))
@@ -2380,6 +2588,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     protected int BeginInterruptedToolBatch(IReadOnlyList<FunctionCallContent> calls)
     {
         ArgumentNullException.ThrowIfNull(calls);
+        if (calls.Any(call => call.CallId is { Length: > MaximumRequestIdLength }))
+        {
+            throw new ApplicationFailureException(
+                $"Tool call IDs cannot exceed {MaximumRequestIdLength} characters; no tool was dispatched.",
+                errorType: "DurableToolCallIdTooLong",
+                nonRetryable: true);
+        }
+
         _interruptedToolBatches.Add(new InterruptedToolBatch(calls));
         try
         {

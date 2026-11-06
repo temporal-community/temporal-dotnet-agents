@@ -317,7 +317,7 @@ public sealed class TemporalAIAgent : AIAgent
             // which are deny-list filtered. Overlay rather than replace: a hash-gated step returns
             // a null or partial bag, and replacing would wipe keys the workflow thread wrote
             // between activities.
-            temporalSession.OverlayTrustedStateBag(stepResult.UpdatedStateBag);
+            temporalSession.ApplyTrustedStateBagDelta(stepResult.StateBagDelta);
 
             if (stepResult.ResolvedWorkerConfig is not null)
             {
@@ -553,8 +553,8 @@ public sealed class TemporalAIAgent : AIAgent
                         toolResults[i] = await Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.InvokeAgentToolAsync(toolInput),
                             toolDispatchOpts).ConfigureAwait(true);
-                        temporalSession.MergeToolStateBagWriteBacks(
-                            [toolResults[i]!.UpdatedStateBag],
+                        temporalSession.ApplyToolStateBagDeltas(
+                            [toolResults[i]!.StateBagDelta],
                             alwaysScopesStoreKey: null,
                             Workflow.Logger);
                         break;

@@ -146,7 +146,8 @@ public record class DurableChatWorkflowInput
 
     /// <summary>
     /// Maximum serialized size in bytes of the terminal outcome ledger.
-    /// Defaults to 1 MiB. An outcome larger than the budget is not retained.
+    /// Defaults to 1 MiB. The minimum accepted value is 4 KiB so a minimal request-ID
+    /// deduplication record can always be retained.
     /// </summary>
     [JsonIgnore]
     public int MaxTerminalOutcomeBytes { get; init; } = 1024 * 1024;
