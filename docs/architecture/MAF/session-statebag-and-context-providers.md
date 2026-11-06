@@ -503,7 +503,7 @@ Each provider reads only its own key — they are fully independent.
 
 4. **The bag survives continue-as-new.** `AgentWorkflowInput.CarriedStateBag` carries it across workflow history resets — providers never need to reinitialize after a long-running session triggers continue-as-new.
 
-5. **Providers run in the activity, not in the workflow.** `IChatClient.GetStreamingResponseAsync` is called inside `AgentActivities.RunDurableAgentStepAsync`, and `AIContextProvider.InvokingAsync` runs immediately before it. LLM calls and retry-safe provider work belong there; provider-owned external history or writes remain unsupported without a dedicated adapter. Never call `RunAsync` directly inside a `[Workflow]` class.
+5. **Providers run in the activity, not in the workflow.** `IChatClient.GetResponseAsync` is called inside `AgentActivities.RunDurableAgentStepAsync`, and `AIContextProvider.InvokingAsync` runs immediately before it. LLM calls and retry-safe provider work belong there; provider-owned external history or writes remain unsupported without a dedicated adapter. Never call `RunAsync` directly inside a `[Workflow]` class.
 
 ---
 

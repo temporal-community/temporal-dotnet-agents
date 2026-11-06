@@ -543,10 +543,11 @@ public class AgentActivitiesContextProviderTests
     }
 
     /// <summary>
-    /// A minimal <see cref="IChatClient"/> that returns a single empty assistant streaming response.
-    /// Supports <see cref="GetStreamingResponseAsync"/> so the durable-agent LLM-step activity
-    /// can complete without hitting a real model.
+    /// A minimal <see cref="IChatClient"/> that returns a single empty assistant response.
     /// </summary>
+    /// <remarks>
+    /// Supports the non-streaming response path used by the durable-agent activity.
+    /// </remarks>
     private sealed class SimpleStreamingChatClient : IChatClient
     {
         public ChatOptions? LastOptions { get; private set; }
@@ -557,8 +558,12 @@ public class AgentActivitiesContextProviderTests
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+            CancellationToken cancellationToken = default)
+        {
+            LastOptions = options;
+            LastMessages = messages.ToArray();
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+        }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
@@ -592,21 +597,15 @@ public class AgentActivitiesContextProviderTests
         AIAgent inner,
         Action<ChatOptions?> record) : DelegatingAIAgent(inner)
     {
-        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        protected override async Task<AgentResponse> RunCoreAsync(
             IEnumerable<ChatMessage> messages,
             AgentSession? session = null,
             AgentRunOptions? options = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default)
         {
             record((options as ChatClientAgentRunOptions)?.ChatOptions);
-            await foreach (var update in base.RunCoreStreamingAsync(
-                messages,
-                session,
-                options,
-                cancellationToken))
-            {
-                yield return update;
-            }
+            return await base.RunCoreAsync(messages, session, options, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
@@ -625,11 +624,11 @@ public class AgentActivitiesContextProviderTests
     {
         private const string CountKey = "test.middleware_session_count";
 
-        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        protected override async Task<AgentResponse> RunCoreAsync(
             IEnumerable<ChatMessage> messages,
             AgentSession? session = null,
             AgentRunOptions? options = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default)
         {
             observation.Sessions.Add(session);
             observation.ContextMatchesSession.Add(
@@ -649,21 +648,12 @@ public class AgentActivitiesContextProviderTests
                 new MiddlewareCountState(count + 1),
                 System.Text.Json.JsonSerializerOptions.Default);
 
-            await foreach (var update in base.RunCoreStreamingAsync(
-                messages,
-                session,
-                options,
-                cancellationToken))
-            {
-                observation.ContextMatchesSession.Add(
-                    ReferenceEquals(session, CurrentRunContext?.Session));
-                yield return update;
-                observation.ContextMatchesSession.Add(
-                    ReferenceEquals(session, CurrentRunContext?.Session));
-            }
+            var response = await base.RunCoreAsync(messages, session, options, cancellationToken)
+                .ConfigureAwait(false);
 
             observation.ContextMatchesSession.Add(
                 ReferenceEquals(session, CurrentRunContext?.Session));
+            return response;
         }
 
         private sealed record MiddlewareCountState(int Count);
@@ -673,12 +663,12 @@ public class AgentActivitiesContextProviderTests
         AIAgent inner,
         AgentSession replacement) : DelegatingAIAgent(inner)
     {
-        protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        protected override Task<AgentResponse> RunCoreAsync(
             IEnumerable<ChatMessage> messages,
             AgentSession? session = null,
             AgentRunOptions? options = null,
             CancellationToken cancellationToken = default) =>
-            InnerAgent.RunStreamingAsync(messages, replacement, options, cancellationToken);
+            InnerAgent.RunAsync(messages, replacement, options, cancellationToken);
     }
 
     private sealed class SessionCapturingChatClient(
@@ -688,8 +678,12 @@ public class AgentActivitiesContextProviderTests
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+            CancellationToken cancellationToken = default)
+        {
+            onCall?.Invoke();
+            observation.LeafSessionTypes.Add(AIAgent.CurrentRunContext?.Session?.GetType().Name);
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty)));
+        }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
@@ -714,22 +708,17 @@ public class AgentActivitiesContextProviderTests
         Action? before,
         Action? after) : DelegatingAIAgent(inner)
     {
-        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        protected override async Task<AgentResponse> RunCoreAsync(
             IEnumerable<ChatMessage> messages,
             AgentSession? session = null,
             AgentRunOptions? options = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default)
         {
             before?.Invoke();
-            await foreach (var update in base.RunCoreStreamingAsync(
-                messages,
-                session,
-                options,
-                cancellationToken))
-            {
-                yield return update;
-            }
+            var response = await base.RunCoreAsync(messages, session, options, cancellationToken)
+                .ConfigureAwait(false);
             after?.Invoke();
+            return response;
         }
     }
 

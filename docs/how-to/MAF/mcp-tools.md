@@ -32,7 +32,7 @@ options.AddDurableAgent("InventoryAgent", agent =>
     agent.AddTool(byName["lookup_inventory"]);
     agent.AddTool(
         byName["delete_inventory"],
-        policy => policy.NoRetry().RequireApproval());
+        policy => policy.RequireApproval());
 });
 ```
 
@@ -83,26 +83,23 @@ catalogs fails loudly rather than silently shadowing a tool.
 
 ---
 
-## The default policy retries
+## Tool retries are opt-in
 
 This is the part worth reading before `AddTools(discovered)`.
 
-A tool registered with no policy of its own falls through `agent.RetryPolicy` and
-`opts.DefaultRetryPolicy` to the library's bounded backstop: **five attempts**, with a 30-second
-maximum backoff. The backstop is not the worker default — it is what applies when no worker,
-agent, or per-tool policy was set at all, and the library substitutes
-`new RetryPolicy { MaximumAttempts = 5 }` rather than letting Temporal's server default
-(`MaximumAttempts = 0`, unlimited) apply. Setting `opts.DefaultRetryPolicy` replaces it; see
-[Durable Agents](./durable-agents.md#retry-policy-hierarchy).
+Every tool activity gets **one attempt by default**, including tools added through `AddTools`.
+Retries are opted into through `agent.RetryPolicy` and apply to every tool on that agent; there is
+no per-tool retry override. This protects effectful tools from automatic re-execution after an
+ambiguous activity failure.
 
-Five attempts is right for a read. It is wrong for anything that has an effect: a `delete_inventory`
-that times out after doing the delete will be called again. Write-style MCP tools need `NoRetry()`,
-and `AddTools(discovered)` gives them the opposite:
+An explicit agent retry policy also retries write-style tools. Only use it when all of the agent's
+tools are safe to retry, usually because the authoritative service enforces an idempotency key.
+When an MCP catalog mixes reads and writes, keep the default one-attempt policy or split the tools
+across agents with appropriate policies:
 
 ```csharp
-agent.AddTools(reads);                                  // lookups — retry is a feature
-agent.AddTool(byName["delete_inventory"],
-    policy => policy.NoRetry().RequireApproval());      // effects — register individually
+agent.AddTools(reads);
+agent.AddTool(byName["delete_inventory"], tool => tool.RequireApproval());
 ```
 
 There is no way to tell from an MCP catalog which tools have effects. The server does not say, and

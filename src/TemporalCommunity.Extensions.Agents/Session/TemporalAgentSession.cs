@@ -378,10 +378,10 @@ public sealed class TemporalAgentSession : AgentSession
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <paramref name="writeBacks"/> must be ordered by original tool-call index, not by activity
-    /// completion order: tool activities fan out concurrently, so completion order is
-    /// non-deterministic and using it would break workflow replay. The merge applies contributions
-    /// in the supplied index order, so a later index wins a top-level key conflict.
+    /// <paramref name="writeBacks"/> must be ordered by original tool-call index. Interceptor
+    /// activities may fan out concurrently, so their completion order is non-deterministic and
+    /// must not drive merge order. Tool activities run serially; their write-backs are applied as
+    /// each call completes. In both cases a later index wins a top-level key conflict.
     /// </para>
     /// <para>
     /// Reserved approval-scope keys are dropped from every contribution — see

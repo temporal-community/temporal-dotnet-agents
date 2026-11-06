@@ -4,16 +4,16 @@ using Microsoft.Extensions.Logging;
 namespace TemporalCommunity.Extensions.Agents.Workflows;
 
 /// <summary>
-/// Deterministic, replay-safe merge of StateBag write-backs returned by concurrently
-/// fanned-out tool and interceptor activities (X-1 / X-2 merge policy).
+/// Deterministic, replay-safe merge of StateBag write-backs returned by tool and interceptor
+/// activities (X-1 / X-2 merge policy).
 /// </summary>
 /// <remarks>
 /// <para>
-/// Tool and interceptor activities fan out concurrently, so their <em>completion</em> order is
-/// non-deterministic and must never drive merge order (it would break workflow replay). Callers
-/// therefore supply write-backs ordered by the original tool-call index (the
-/// <c>FunctionCallContent</c> order within the turn). The merge applies them in that fixed index
-/// order, so <strong>the later index wins</strong> on a top-level key conflict.
+/// Interceptor activities fan out concurrently, so their <em>completion</em> order is
+/// non-deterministic and must never drive merge order (it would break workflow replay). Tool
+/// activities run serially in model order. Callers supply write-backs ordered by the original
+/// tool-call index (the <c>FunctionCallContent</c> order within the turn). The merge applies them
+/// in that fixed index order, so <strong>the later index wins</strong> on a top-level key conflict.
 /// </para>
 /// <para>
 /// The merge is key-level over the flat JSON object produced by

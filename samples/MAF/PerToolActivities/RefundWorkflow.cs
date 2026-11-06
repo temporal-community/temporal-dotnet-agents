@@ -19,7 +19,7 @@ namespace PerToolActivities;
 /// Because <c>RefundAgent</c> is registered via <c>AddDurableAgent</c>, every LLM
 /// call it makes is a separate <c>RunDurableAgentStep</c> activity and every tool
 /// call the model issues is a separate <c>InvokeAgentTool</c> activity dispatched
-/// in parallel from the durable loop inside <c>AgentWorkflow</c>. This workflow is
+/// serially in model order by <c>AgentWorkflow</c>. This workflow is
 /// blissfully ignorant of that machinery — one <c>RunAsync</c> call covers the
 /// whole multi-step turn.
 /// </para>

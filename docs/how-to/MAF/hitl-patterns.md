@@ -41,15 +41,15 @@ batch before dispatching *any* tool activity — so if the model asks for `apply
 `send_refund_confirmation` together, the confirmation cannot go out while the refund is under
 review.
 
-In-tool does not get that protection. From the workflow's point of view an in-tool tool is an
-ordinary tool: it is dispatched with its siblings, and they execute while your reviewer reads the
-request. This, not deploy safety, is the strongest argument for the default.
+MAF dispatches tool activities serially in model order. With in-tool approval, the current tool
+activity remains open while the reviewer reads the request, and later calls in the same response
+wait; they are not dispatched concurrently.
 
-**2. Only one approval can be outstanding at a time.**
+**2. In-tool approval keeps its activity open.**
 
-Two in-tool approvals in one model response collide. Both activities are dispatched together, both
-raise a request, and the second fails with `DurableApprovalAlreadyPending`. Workflow-parked raises
-approvals strictly one at a time in tool-call order, so several in one turn queue cleanly.
+In-tool approval ties up one activity for the duration of human review. Calls in the same model
+response are dispatched serially, so the next tool does not start until the current approval
+finishes. Workflow-parked approvals still stop before any tool activity starts.
 
 **3. The shipped defaults are wrong for in-tool, and nothing warns you.**
 
@@ -72,8 +72,8 @@ already keeps the heartbeat pump active; change it only when you need a differen
 | What the human approves | Whether the tool runs | A step inside a running tool |
 | Running during the review | Nothing | The tool's activity, on one worker, doing no work |
 | Survives worker restart / deploy | **Yes** | **No** |
-| Sibling tools in the same turn | Held until all approvals settle | **Run concurrently** |
-| More than one approval per turn | Queued in call order | **Fails** — one pending at a time |
+| Sibling tools in the same turn | Held until all approvals settle | Run serially; later calls wait |
+| More than one approval per turn | Queued in call order | Processed one at a time |
 | Realistic review window | Hours to days | Minutes |
 | Extra configuration | None — defaults suit it | Activity and approval budgets must align; heartbeat cadence is optional |
 | Reusable session grants (`ScopeAware()`) | Available | Not available |
@@ -130,13 +130,13 @@ until the reviewer decides or the approval timeout expires.
 options.AddDurableAgent("Operations", agent =>
 {
     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-    agent.AddTool(sendEmail, tool => tool.NoRetry().RequireApproval());
+    agent.AddTool(sendEmail, tool => tool.RequireApproval());
 });
 ```
 
-`NoRetry()` matters here: an approved send that performs its effect but fails to report success
-would otherwise be retried and could send twice. The approval gate has already resolved before the
-tool activity is scheduled, so an activity retry does not ask for approval again.
+Tool activities have one attempt by default. A failed activity can still leave the external effect's
+outcome uncertain; use downstream idempotency and reconcile before retrying the write. The approval
+gate has already resolved before the tool activity is scheduled.
 
 To decide per call rather than per tool, register an interceptor returning
 `DurableToolDecision.PauseForApproval(...)` — see [tool-interceptor.md](./tool-interceptor.md). The
@@ -155,15 +155,14 @@ opts.DefaultApprovalTimeout  = TimeSpan.FromMinutes(15);  // must stay under Act
 // Optional: change the inherited 2-minute heartbeat cadence.
 opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);   // pump runs at a third of this
 
-agent.AddTool(publishDraft, tool => tool.NoRetry());
+agent.AddTool(publishDraft);
 ```
 
 **`ApprovalTimeout` must be smaller than `ActivityTimeout`.** Otherwise the activity dies first and
 leaves the workflow holding an approval nobody is waiting on.
 
-**`NoRetry()` is a correctness requirement here, not only an idempotency one.** On retry the tool
-issues a *fresh* approval request while the first is still pending, so every attempt after the first
-fails with `DurableApprovalAlreadyPending`.
+Tool activities use one attempt by default. An explicit agent retry policy also applies to this
+tool, so only opt into retries when the activity and approval protocol are safe to repeat.
 
 **The heartbeat pump is on by default.** Every package-managed tool activity receives an effective
 heartbeat timeout (2 minutes unless overridden), and the package heartbeats at most once per second
@@ -172,8 +171,8 @@ assistant text and tool output are not included. The public options do not provi
 to disable this pump. The hazard to watch is `ActivityTimeout`, not a missing heartbeat.
 
 **Heartbeating is not durability.** The wait is resident on one worker for its entire duration. A
-deploy, crash, or scale-down ends it — heartbeats or not — and with `NoRetry()` on a write tool that
-ends the turn.
+deploy, crash, or scale-down ends it — heartbeats or not. A failed activity can still leave the
+effect's outcome uncertain; reconcile before retrying an external write.
 
 ### The tool body
 
@@ -363,7 +362,7 @@ By default one decision covers one call. With grants a reviewer approves a *shap
 another prompt until the grant expires.
 
 ```csharp
-agent.AddTool(writeFile, tool => tool.NoRetry().RequireApproval().ScopeAware());
+agent.AddTool(writeFile, tool => tool.RequireApproval().ScopeAware());
 agent.UseApprovalScopes();   // installs the built-in scope-aware interceptor
 ```
 

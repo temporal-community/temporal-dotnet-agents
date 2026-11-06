@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
+using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode; // shared scaffolding (linked via .csproj)
@@ -14,8 +15,8 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 /// <summary>
 /// Crash-safety coverage for durable agents (registered via <c>AddDurableAgent</c>).
 /// Pins the load-bearing behavioral guarantee: a write tool registered with
-/// <c>opts.NoRetry()</c> never double-fires even across worker restarts, and a transient
-/// read-tool failure is retried independently of write-tool retries.
+/// default options gets one activity attempt even across worker restarts. Retries are
+/// opt-in at the agent level and apply uniformly to its tool activities.
 /// </summary>
 [Trait("Category", "Integration")]
 public class DurableAgentCrashSafetyTests
@@ -23,7 +24,7 @@ public class DurableAgentCrashSafetyTests
     private const string InvokeAgentToolActivity = "TemporalCommunity.Extensions.Agents.InvokeAgentTool";
 
     /// <summary>
-    /// Write tool with <c>NoRetry()</c> never double-fires across a worker restart.
+    /// A write tool with the default policy gets one attempt and never double-fires on replay.
     /// </summary>
     [Fact]
     public async Task DurableAgent_WriteToolNoRetry_DoesNotDoubleFire()
@@ -108,18 +109,17 @@ public class DurableAgentCrashSafetyTests
     }
 
     /// <summary>
-    /// Read tool with default retry policy retries independently of a write tool registered
-    /// with <c>NoRetry()</c>. Uses <c>FailOnceThenSucceed</c> so the first attempt of the read
-    /// tool fails and Temporal retries it.
+    /// An explicit per-agent retry policy opts all tool activities into retries. Uses
+    /// <c>FailOnceThenSucceed</c> so the first attempt of the read tool fails and Temporal retries it.
     /// </summary>
     [Fact]
-    public async Task DurableAgent_TransientReadToolFailure_RetriesIndependently()
+    public async Task DurableAgent_ExplicitAgentRetryPolicy_RetriesToolActivities()
     {
         await using var env = await TestEnvironmentHelper.StartLocalAsync();
         env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
         var taskQueue = $"durable-crash-retry-{Guid.NewGuid():N}";
 
-        // Read tool fails once, then succeeds — exercises the default retry policy.
+        // Read tool fails once, then succeeds — exercises the agent-level retry policy.
         var readTool = new RecordingTool
         {
             Name = "lookup_data",
@@ -127,7 +127,7 @@ public class DurableAgentCrashSafetyTests
         };
         var readAiFunction = readTool.Build();
 
-        // Write tool always succeeds, but is registered with NoRetry — it must run exactly once.
+        // Write tool succeeds and inherits the same agent-level policy.
         var writeTool = new RecordingTool
         {
             Name = "send_email",
@@ -135,7 +135,7 @@ public class DurableAgentCrashSafetyTests
         };
         var writeAiFunction = writeTool.Build();
 
-        // Single turn: LLM calls both tools in parallel, then returns final answer.
+        // Single turn: LLM returns both calls in order, then returns a final answer.
         var responses = new List<ChatResponse>
         {
             new(new ChatMessage(ChatRole.Assistant, [
@@ -152,7 +152,8 @@ public class DurableAgentCrashSafetyTests
             agent =>
             {
                 agent.AddTool(readAiFunction);
-                agent.AddTool(writeAiFunction, opts => opts.NoRetry());
+                agent.AddTool(writeAiFunction);
+                agent.RetryPolicy = new RetryPolicy { MaximumAttempts = 2 };
             });
         await host.StartAsync();
         try
@@ -282,10 +283,7 @@ public class DurableAgentCrashSafetyTests
         string taskQueue,
         ScriptedChatClient scripted,
         AIFunction tool) =>
-        BuildHostOnTaskQueueWithTools(client, taskQueue, scripted, agent =>
-        {
-            agent.AddTool(tool, opts => opts.NoRetry());
-        });
+        BuildHostOnTaskQueueWithTools(client, taskQueue, scripted, agent => agent.AddTool(tool));
 
     private static IHost BuildHostOnTaskQueueWithTools(
         ITemporalClient client,

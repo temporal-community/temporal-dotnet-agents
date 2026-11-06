@@ -215,22 +215,17 @@ public class AgentPipelineIntegrationTests
         public int ConstructionOrdinal { get; } =
             Interlocked.Increment(ref observation.ConstructionCount);
 
-        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        protected override async Task<AgentResponse> RunCoreAsync(
             IEnumerable<ChatMessage> messages,
             AgentSession? session = null,
             AgentRunOptions? options = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref observation.BeforeCount);
-            await foreach (var update in base.RunCoreStreamingAsync(
-                messages,
-                session,
-                options,
-                cancellationToken))
-            {
-                yield return update;
-            }
+            var response = await base.RunCoreAsync(messages, session, options, cancellationToken)
+                .ConfigureAwait(false);
             Interlocked.Increment(ref observation.AfterCount);
+            return response;
         }
     }
 
@@ -238,21 +233,15 @@ public class AgentPipelineIntegrationTests
         AIAgent inner,
         ActivitySource source) : DelegatingAIAgent(inner)
     {
-        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        protected override async Task<AgentResponse> RunCoreAsync(
             IEnumerable<ChatMessage> messages,
             AgentSession? session = null,
             AgentRunOptions? options = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default)
         {
             using var activity = source.StartActivity("custom.middleware");
-            await foreach (var update in base.RunCoreStreamingAsync(
-                messages,
-                session,
-                options,
-                cancellationToken))
-            {
-                yield return update;
-            }
+            return await base.RunCoreAsync(messages, session, options, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 }

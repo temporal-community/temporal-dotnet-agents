@@ -85,23 +85,8 @@ internal sealed class CapturingChatClient : IChatClient
     public List<ChatOptions?> CapturedOptions { get; } = [];
     public ChatOptions? LastOptions => CapturedOptions.LastOrDefault();
 
-    // The durable-agent path invokes the model through agent.RunStreamingAsync, so this is the
-    // method that actually runs. A double that captures only in GetResponseAsync records nothing.
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-        IEnumerable<ChatMessage> messages,
-        ChatOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        CapturedOptions.Add(options);
-        var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, "stub"));
-        foreach (var update in response.ToChatResponseUpdates())
-        {
-            yield return update;
-        }
-
-        await Task.CompletedTask;
-    }
-
+    // The durable-agent path invokes the model through agent.RunAsync, which calls GetResponseAsync.
+    // A double that captures only in GetStreamingResponseAsync does not exercise this path.
     public Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
@@ -117,9 +102,8 @@ internal sealed class CapturingChatClient : IChatClient
 }
 ```
 
-> Implement **both** methods. `GetStreamingResponseAsync` is the one the durable agent calls; keeping
-> `GetResponseAsync` lets the same double serve direct MEAI callers. See
-> [Intercepting LLM Calls](./llm-call-interception.md) for why.
+> Implement `GetResponseAsync` for the durable-agent path. `RunStreamingAsync` is not supported.
+> See [Intercepting LLM Calls](./llm-call-interception.md) for the interception boundary.
 
 ### Test custom middleware leaf preservation
 

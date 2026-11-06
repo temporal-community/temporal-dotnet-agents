@@ -616,8 +616,8 @@ Here is the complete path a message takes from an external caller to the LLM and
 │        // Policy-check each call against the frozen           │
 │        // registered names; blocked calls get a synthetic     │
 │        // result and schedule nothing.                        │
-│        // Then (when an interceptor is configured) fan out     │
-│        // RunToolInterceptor, then fan out InvokeAgentTool.    │
+│        // Then (when configured) run interceptors in parallel;  │
+│        // dispatch InvokeAgentTool calls serially in model order│
 │        toolResults = await Workflow.WhenAllAsync(            │
 │          dispatched.Select(d =>                              │
 │            Workflow.ExecuteActivityAsync(                    │
@@ -663,7 +663,7 @@ Here is the complete path a message takes from an external caller to the LLM and
 │       each provider's aggregate into the next                │
 │   16. Set TemporalAgentContext.Current (for tools)           │
 │                                                              │
-│   17. agent.RunStreamingAsync(augmentedMessages, session,    │
+│   17. agent.RunAsync(augmentedMessages, session,              │
 │         new ChatClientAgentRunOptions { ChatOptions })       │
 │       ← goes through the AGENT, not the chat client, so any  │
 │         DelegatingAIAgent the user installed via             │
@@ -870,7 +870,7 @@ There is no `AgentWorkflowWrapper` interposed between the `ChatClientAgent` and 
 
 ## Durable Agent Workflow Loop
 
-Every agent registered via `TemporalAgentsOptions.AddDurableAgent(...)` runs in **durable mode**: the agentic loop lives inside `[Workflow]` code, each LLM call is its own `RunDurableAgentStep` activity, and each tool call is its own `InvokeAgentTool` activity dispatched in parallel via `Workflow.WhenAllAsync`. There is no opt-in flag — this is the only worker-hosted agent-definition path; client-only processes declare proxies separately.
+Every agent registered via `TemporalAgentsOptions.AddDurableAgent(...)` runs in **durable mode**: the agentic loop lives inside `[Workflow]` code, each LLM call is its own `RunDurableAgentStep` activity, and each tool call is its own `InvokeAgentTool` activity. A response's tool calls are dispatched serially in model order, with each result and StateBag write-back applied before the next call. There is no opt-in flag — this is the only worker-hosted agent-definition path; client-only processes declare proxies separately.
 
 ### Why the loop must live in the workflow
 
@@ -906,7 +906,7 @@ The only implementable design within Temporal's public API is to put the dispatc
 │           ├─ Clone registration.ChatOptions; stamp Instructions /          │
 │           │    filtered Tools / ResponseFormat                             │
 │           ├─ Run AIContextProvider.InvokingAsync chain                     │
-│           ├─ agent.RunStreamingAsync(messages, session, runOptions)        │
+│           ├─ agent.RunAsync(messages, session, runOptions)                 │
 │           │    ← through the AGENT, not the chat client                    │
 │           ├─ Heartbeat per update                                          │
 │           ├─ Run AIContextProvider.InvokedAsync chain                      │
@@ -954,7 +954,7 @@ writing the same StateBag key must produce the same winner on replay, and comple
 replay-stable.
 
 The mental model: **the workflow owns the tool-dispatch loop.** The activity runs the model call
-through `agent.RunStreamingAsync` with `UseProvidedChatClientAsIs = true` and
+through `agent.RunAsync` with `UseProvidedChatClientAsIs = true` and
 `ChatOptions.Tools` populated from the agent's per-agent registry. The model returns
 `FunctionCallContent` items; nothing executes them inside the activity. The workflow reads those
 items back, policy-checks them, fans out one `InvokeAgentTool` activity per surviving call, awaits
@@ -968,40 +968,37 @@ fires only at continue-as-new.
 
 | Activity name | Role |
 |---|---|
-| `TemporalCommunity.Extensions.Agents.RunDurableAgentStep` | One LLM call, through `agent.RunStreamingAsync`. Returns either a final assistant message or `FunctionCallContent[]`, plus the updated StateBag and usage. Runs the `AIContextProvider` chain explicitly around the call. On a proxy-started session's first step it also returns the resolved worker settings. |
+| `TemporalCommunity.Extensions.Agents.RunDurableAgentStep` | One non-streaming MAF `agent.RunAsync` call. Preserves every response message and returns actionable `FunctionCallContent[]`, plus the updated StateBag and usage. Runs the `AIContextProvider` chain explicitly around the call. On a proxy-started session's first step it also returns the resolved worker settings. |
 | `TemporalCommunity.Extensions.Agents.RunToolInterceptor` | One pre-tool decision (`Proceed` / `PauseForApproval` / `Skip` / `Block`). Dispatched only when an interceptor is configured and the tool did not opt out. Fails **closed** for `ScopeAware + RequiresApproval` tools when no interceptor resolves — a deliberate asymmetry with MEAI's fail-open equivalent. |
 | `TemporalCommunity.Extensions.Agents.InvokeAgentTool` | One tool dispatch. Resolves the tool from the blueprint's per-agent registry — names do not collide across agents. Throws when the name is unregistered. |
 | `TemporalCommunity.Extensions.Agents.ReduceHistoryByKey` | Applies the DI-resolved keyed history reducer at continue-as-new. Not part of a turn. |
 
 The split is intentional: `InvokeAgentTool` carries the `AgentName` so the blueprint can resolve the tool against its per-agent registry. Two agents on the same worker can register tools with the same `AIFunction.Name` without collision, and the Temporal Web UI shows each activity as a distinct row so operators can read the dispatch shape at a glance.
 
-### Why `Workflow.WhenAllAsync` and not `Task.WhenAll`
-
-The fan-out step uses `Workflow.WhenAllAsync` — the Temporal SDK's workflow-safe combinator — not `Task.WhenAll`:
+### Serial tool dispatch order
 
 ```csharp
-var toolOutputs = await Workflow.WhenAllAsync(toolTasks).ConfigureAwait(true);
+foreach (var toolCall in toolCalls)
+{
+    var result = await Workflow.ExecuteActivityAsync(
+        (AgentActivities a) => a.InvokeAgentToolAsync(BuildInput(toolCall)),
+        ResolveToolActivityOptions(toolCall.Name)).ConfigureAwait(true);
+    ApplyResultAndStateBagWriteBack(toolCall, result);
+}
 ```
 
-Inside a Temporal `[Workflow]`, `await`s must run on the workflow scheduler so that task continuations are deterministic on replay. `Task.WhenAll` is technically safe in many cases (when all the awaited tasks come from `Workflow.ExecuteActivityAsync`, which schedules continuations on `TaskScheduler.Current`), but `Workflow.WhenAllAsync` is the project convention and is documented as "the workflow-safe equivalent of `Task.WhenAll`" by the SDK itself. `WorkflowAgents.ExecuteAgentsInParallelAsync` (`src/TemporalCommunity.Extensions.Agents/WorkflowAgents.cs:112`) already uses it for the parallel-agent pattern; the durable loop follows the same convention.
-
-`Workflow.WhenAllAsync` preserves input order. The result array is index-aligned with the input
-task list, which is what makes the ordered StateBag merge possible.
-
-One subtlety: the result array is **not** index-aligned with `toolCalls`, because a blocked or
-skipped call schedules no activity at all. The workflow builds the awaited list from the
-non-null slots of a `Task<InvokeAgentToolResult>?[]` sized to `toolCalls.Count`, then walks
-`toolCalls` with a separate `pendingIdx` cursor into the results, substituting the synthetic
-result for any index that was never dispatched. `FunctionResultContent` is always constructed with
-`callId: toolCalls[i].CallId`, so correlation back to the model's request is by call ID, not by
-position in the result array.
+Each activity is awaited before the next one is scheduled. This makes model order the effect order
+and lets a completed tool's StateBag write-back affect later calls. If a call fails, later calls in
+that response are not dispatched; the workflow retains the completed/uncertain/not-executed
+projection for a later turn. `FunctionResultContent` is correlated to the model's request by
+`CallId`, not by activity completion order.
 
 ### The iteration cap as a workflow-history bound
 
 Temporal's per-workflow event-history limit (~50K events) is a hard constraint on any in-workflow loop. Each iteration in the durable loop contributes:
 
 - One `ActivityScheduled` + one `ActivityCompleted` (or `ActivityFailed` + retries) for the `RunDurableAgentStep` call
-- One pair per tool call in the fan-out batch
+- One pair per tool call, dispatched serially
 - **Plus** one pair per tool call for `RunToolInterceptor`, when an interceptor is configured
 
 Counting a turn with `K` tool calls per round that converges after `N` tool rounds: `N + 1`
@@ -1031,7 +1028,7 @@ The same workflow-determinism rules apply inside `ExecuteDurableAgentTurnAsync` 
 
 | Concern | Rule | Why |
 |---|---|---|
-| Parallel fan-out | `Workflow.WhenAllAsync(tasks)` | Project convention; the SDK-provided workflow-safe combinator |
+| Tool ordering | Await each tool activity before scheduling the next | Model order is the effect order and StateBag merge order |
 | Wall-clock time | `Workflow.UtcNow` | `DateTime.UtcNow` differs across replay |
 | Random GUIDs | `Workflow.NewGuid()` | `Guid.NewGuid()` differs across replay |
 | Logging | `Workflow.Logger` | Direct `ILogger` captured via closure misbehaves on replay |
@@ -1059,7 +1056,7 @@ on how the session started:
 
 - **Worker-started session** (this process holds the `AddDurableAgent` registration):
   `DefaultTemporalAgentClient` builds `ResolvedWorkerConfig` at workflow start, from the agent's
-  per-tool `DurableToolOptions`.
+  retry policy and per-tool timeout settings.
 - **Proxy-started session** (this process only declared `AddAgentProxy`, so it has no registration):
   `ResolvedWorkerConfig` starts `null`. `WorkerSettingsResolved` is therefore `false`, and the
   workflow sets `NeedsWorkerSettingsResolution` on the **first step of the first turn**. The worker
@@ -1067,14 +1064,9 @@ on how the session started:
   the workflow patches `_input` mid-loop. This is why `MaxToolCallsPerTurn` is re-read on every
   iteration rather than snapshotted before the loop.
 
-Once resolved, the bundle is carried through `CreateContinueAsNewException` unchanged. A write tool
-registered with `opts.NoRetry()` keeps `MaximumAttempts = 1` across every continue-as-new
-boundary — the options dictionary is never re-read from the registration after resolution, so
-registration-time changes do not bleed into running workflows. Continue-as-new is settings-frozen.
-
-A tool with no entry in that dictionary falls back to activity options built from the workflow
-input's `ActivityTimeout`, `HeartbeatTimeout`, and `RetryPolicy` — which for a write tool is the
-wrong answer. Register write tools with an explicit `opts.NoRetry()`.
+Once resolved, the bundle is carried through `CreateContinueAsNewException` unchanged. Tool
+activities use one attempt by default; an explicit agent retry policy is carried forward and
+applies uniformly to all tools. Continue-as-new is settings-frozen.
 
 For the user-facing how-to, see [the durable-agents how-to](../../how-to/MAF/durable-agents.md).
 
@@ -1118,23 +1110,22 @@ new ActivityOptions
 
 **What it controls**: Maximum wall-clock time for a single `RunDurableAgentStepAsync` (or `InvokeAgentToolAsync`) activity execution, measured from when the worker starts executing the activity to when it must return a result. It is a **per-attempt** limit, not a total budget for the call.
 
-**What happens on timeout**: Temporal marks the attempt as failed and **retries it under the
-effective retry policy**. The library never leaves `ActivityOptions.RetryPolicy` null: a null
-policy is transmitted as "server default", which means `MaximumAttempts = 0` — *unlimited* retries —
-so a permanently-failing LLM call would retry forever and hang the caller. Instead
-`DefaultRetryPolicy` substitutes a bounded default when the user configured none:
+**What happens on timeout**: Temporal marks the attempt as failed and retries it only if the
+effective policy allows another attempt. The library never leaves `ActivityOptions.RetryPolicy`
+null: a null policy is transmitted as the server default, `MaximumAttempts = 0` — *unlimited*
+retries. Instead `DefaultRetryPolicy` supplies:
 
 | Workload | Default when unconfigured |
 |---|---|
 | Model step (`RunDurableAgentStep`) | `MaximumAttempts = 5`, `MaximumInterval = 2s` |
-| Tool / policy activities | `MaximumAttempts = 5`, `MaximumInterval = 30s` |
+| Tool and interceptor activities | `MaximumAttempts = 1` |
 
 Only when the attempt budget is exhausted does `ExecuteActivityAsync` throw. At that point the
 base's `RunTurnAsync` rolls the whole turn back (request entry, turn count, StateBag) and the
 Update surfaces the failure to the caller; the workflow itself stays alive for the next turn.
 
-Set `opts.DefaultRetryPolicy` (or the per-agent `RetryPolicy`) to override. Non-idempotent tools
-should use the per-tool `opts.NoRetry()` rather than widening the worker-level policy.
+Set the per-agent retry policy to opt all of that agent's activities into retries. Do so only when
+every tool can tolerate re-execution; use downstream idempotency and reconcile uncertain writes.
 
 **When to increase**: If your LLM calls are slow (large context or complex tool chains).
 
@@ -1164,18 +1155,13 @@ new ActivityOptions
 
 **How heartbeats are sent**:
 
-The model-step activity consumes provider updates and sends a heartbeat for every update while it
-builds the completed response:
+The model-step activity calls non-streaming `agent.RunAsync`. A background heartbeat pump keeps
+the activity alive during the model request; Temporal throttles the heartbeat calls internally:
 
 ```csharp
-var collected = new List<AgentResponseUpdate>();
-await foreach (var update in agent.RunStreamingAsync(
-        augmentedMessages, session, runOptions, ct).WithCancellation(ct).ConfigureAwait(false))
-{
-    collected.Add(update);
-    ctx.Heartbeat(update.Text);    // ← Heartbeat fired on every update
-}
-var response = collected.ToAgentResponse();
+var response = await RunWithHeartbeatsAsync(
+    ctx,
+    () => agent.RunAsync(augmentedMessages, session, runOptions, ct));
 ```
 
 `InvokeAgentToolAsync` heartbeats once, on entry (`ctx.Heartbeat($"invoking tool '{name}'")`). A
@@ -1185,7 +1171,7 @@ per-tool `HeartbeatTimeout` via `DurableToolOptions`, or heartbeat from inside t
 
 **What happens on heartbeat timeout**: Temporal cancels the activity's `CancellationToken` and marks it as timed out. This is the primary mechanism for detecting a dead worker during long LLM calls. Caller-visible `RunStreamingAsync` is intentionally unsupported.
 
-**Key insight**: `HeartbeatTimeout` is active while the model-step activity consumes provider updates. It is not a caller-visible streaming transport.
+**Key insight**: `HeartbeatTimeout` is active during the non-streaming model request. It is not a caller-visible streaming transport; `RunStreamingAsync` is intentionally unsupported.
 
 #### 3. Workflow `TimeToLive` (default: 14 days)
 

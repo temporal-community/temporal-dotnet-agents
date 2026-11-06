@@ -1,11 +1,11 @@
-# PerToolActivities — Per-Tool Temporal Activity Granularity
+# PerToolActivities — Serial Tool Activities
 
 This sample demonstrates **per-tool Temporal activities** in
 `TemporalCommunity.Extensions.Agents`. Every LLM call is its own
-`TemporalCommunity.Extensions.Agents.RunDurableAgentStep` activity, and every tool call
-is its own `TemporalCommunity.Extensions.Agents.InvokeAgentTool` activity. Per-tool
-retry policies make write-style tools safe to use without risking double-fire on
-transient failure.
+`RunDurableAgentStep` activity, and every model-requested tool call is its own
+`InvokeAgentTool` activity. Calls in one model response execute serially in model
+order. Tool activities get one attempt by default; retries are an explicit
+per-agent opt-in that applies to all tools.
 
 For the conceptual background, see
 [`docs/how-to/MAF/durable-agents.md`](../../../docs/how-to/MAF/durable-agents.md).
@@ -17,11 +17,11 @@ For the conceptual background, see
 A refund-handling agent receives a customer complaint and must perform three tool
 calls to resolve it:
 
-| Tool          | Type  | `MaximumAttempts` | Why                                           |
-| ------------- | ----- | ----------------- | --------------------------------------------- |
-| `lookup_order`| Read  | default (unbounded) | Idempotent — safe to retry on transient failure |
-| `apply_refund`| Write | **1**             | Non-idempotent — retry would issue a double refund |
-| `send_email`  | Write | **1**             | Non-idempotent — retry would deliver a duplicate   |
+| Tool | Type | Default activity attempts | Why |
+|---|---|---:|---|
+| `lookup_order` | Read | **1** | Retries require an explicit agent-level policy |
+| `apply_refund` | Write | **1** | Avoids automatic duplicate refunds after uncertain completion |
+| `send_email` | Write | **1** | Avoids automatic duplicate delivery after uncertain completion |
 
 The same workflow also demonstrates all four per-turn selection states:
 
@@ -38,13 +38,13 @@ Five scenarios run:
 2. **Subset** — only `lookup_order` is exposed and dispatchable.
 3. **Empty list** — no tools are exposed or dispatchable.
 4. **Disabled** — all model-returned tool calls are blocked before durable dispatch.
-5. **Transient lookup failure** — the in-memory `lookup_order` tool is configured
-   to throw on its first invocation. Temporal retries the activity (default
-   policy, unbounded attempts) and the second attempt succeeds. The write tools
-   are **not** re-run.
+5. **Lookup failure** — the in-memory `lookup_order` tool throws on its first
+   invocation. The default one-attempt policy surfaces the activity failure
+   instead of retrying it or dispatching later calls from the response.
 
-The console output of scenario 2 prints `LookupCalls = 2, RefundCalls = 1, SendCalls = 1`,
-proving that retries are scoped to the failing tool.
+This scenario shows the retry boundary, not exactly-once behavior. If a failed
+write activity may have completed an external effect, reconcile with the system
+of record before manually retrying.
 
 ---
 
@@ -71,8 +71,8 @@ After the scenarios complete, open the Temporal Web UI at
 <http://localhost:8233> and inspect either workflow's history. Each
 `RunDurableAgentStep` and each `InvokeAgentTool` shows up as a distinct activity
 row with the tool name in its summary — clicking into the failed `lookup_order`
-row in the second workflow shows two attempts, while the `apply_refund` and
-`send_email` rows show exactly one attempt each.
+row in the failure scenario shows one attempt. Tool activities are serial: a
+later call is not scheduled until the previous call completes.
 
 ---
 
@@ -99,13 +99,13 @@ Worker started. Running per-tool activity scenarios...
   Selection: EnableToolCalls=False, EnableToolNames=<all registered>
   ...
 
-─── Scenario 5: Transient lookup failure (per-tool retry) ───
+─── Scenario 5: Lookup failure (one attempt by default) ──────
   Workflow:  refund-retry-...
   Complaint: Refund my order ORD-001 for $19.99. Email confirmation to acme@example.com.
-  Agent:     Your refund of $19.99 has been applied to ORD-001 and the confirmation email is on its way.
-  This run    → LookupCalls = 2, RefundCalls = 1, SendCalls = 1
+  Workflow failed: ...
+  This run    → LookupCalls = 1, RefundCalls = 0, SendCalls = 0
   Cumulative  → LookupCalls = 3, RefundCalls = 2, SendCalls = 2
-  ✓ Per-tool retry granularity confirmed: lookup retried; write tools were configured with no retry.
+  ✓ Default policy confirmed: lookup ran once; later tools were not dispatched after its failure.
 
 ─── View the activity timeline ──────────────────────────────
   Open http://localhost:8233 in the Temporal Web UI.
@@ -114,17 +114,15 @@ Worker started. Running per-tool activity scenarios...
 Done.
 ```
 
-The exact wording of the agent's final reply varies between runs — the model is
-non-deterministic. The retry scenario's deltas show that lookup was retried and write tools were
-configured for one activity attempt. This does not guarantee exactly-once external effects: a
-timeout or lost activity result can leave an effect's outcome uncertain. Use downstream idempotency
-and reconcile with the system of record before retrying an ambiguous write.
+The exact wording of the agent's reply varies between runs — the model is
+non-deterministic. A timeout or lost activity result can leave an external
+effect's outcome uncertain. Use downstream idempotency and reconcile with the
+system of record before retrying an ambiguous write.
 
 On a turn failure after dispatch, the shared workflow keeps a bounded interrupted-turn projection
 for later model context: completed tool results remain paired with their calls, uncertain outcomes
 are marked unknown, and undispatched calls are marked not executed. This is not an external-effect
-receipt; reconcile with the system of record before retrying a write. The scenarios above focus on
-retry granularity and do not inject cancellation or a lost tool result.
+receipt; reconcile with the system of record before retrying a write.
 
 Selection is enforced twice: the model receives only the selected tool declarations, and the
 workflow checks every returned function call again before interceptor, approval, or tool activity
@@ -155,27 +153,26 @@ builder.Services
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
             agent.MaxToolCallsPerTurn = 10;
 
-            // Read tool — inherits worker default retry policy.
+            // Read tool — one activity attempt by default.
             agent.AddTool("lookup_order", sp => AIFunctionFactory.Create(
                 sp.GetRequiredService<OrderService>().LookupOrder,
                 "lookup_order"));
 
-            // Write tools — opts.NoRetry() binds MaximumAttempts = 1 to the AIFunction
-            // reference. No string-keyed PerToolActivityOptions dictionary, no
-            // name-typo footgun.
+            // Write tools — one activity attempt by default; retry is configured
+            // at agent level only.
             agent.AddTool(
                 "apply_refund",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<RefundService>().ApplyRefund,
                     "apply_refund"),
-                opts => opts.NoRetry().WithTimeout(TimeSpan.FromSeconds(30)));
+                opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
 
             agent.AddTool(
                 "send_email",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<EmailService>().SendEmail,
                     "send_email"),
-                opts => opts.NoRetry().WithTimeout(TimeSpan.FromSeconds(30)));
+                opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
         });
     })
     .AddWorkflow<RefundWorkflow>();
@@ -190,8 +187,7 @@ What this design simplifies away:
   agent path subsumes both. (MEAI's `DurableChatWorkflow` users still need them.)
 - **No `EnablePerToolActivities = true`** — every `AddDurableAgent` is durable
   by definition.
-- **No `PerToolActivityOptions["..."]` dictionary** — per-tool retry policy is
-  bound to the `AIFunction` reference at registration via `opts => opts.NoRetry()`.
+- **No per-tool retry override** — agent-level retry policy is the only retry opt-in.
 - **No inline function-invocation middleware** — register a bare `IChatClient`.
   `UseProvidedChatClientAsIs = true` prevents MAF from adding its own middleware, but a
   caller-installed `UseFunctionInvocation()` loop is incompatible with the workflow-owned
@@ -201,11 +197,9 @@ What this design simplifies away:
 
 | Method                       | What it does                                           |
 | ---------------------------- | ------------------------------------------------------ |
-| `opts.NoRetry()`             | Sets `RetryPolicy = new() { MaximumAttempts = 1 }`     |
-| `opts.WithMaxAttempts(n)`    | Sets a fixed-attempt retry policy                       |
 | `opts.WithTimeout(t)`        | Sets `StartToCloseTimeout`                              |
 
-These compose: `opts => opts.NoRetry().WithTimeout(TimeSpan.FromSeconds(30))` is valid.
+Tool retries are controlled by the agent's `RetryPolicy` and apply to all its tools.
 
 ---
 
@@ -223,15 +217,14 @@ InvokeAgentTool:RefundAgent:send_email               ← 1 attempt, succeeds (Ma
 RunDurableAgentStep                                  ← LLM call #4 → final assistant message
 ```
 
-Scenario 2 (transient lookup failure) — the difference shows up on the first
-`InvokeAgentTool` row:
+Scenario 5 (lookup failure) — the failure surfaces after one activity attempt:
 
 ```
-InvokeAgentTool:RefundAgent:lookup_order             ← 2 attempts: 1 failure, 1 success
+InvokeAgentTool:RefundAgent:lookup_order             ← 1 attempt, fails
 ```
 
-The write-tool rows are unchanged: still one attempt each. That is the per-tool
-retry granularity benefit.
+Because dispatch is serial, later tool calls from the same model response are
+not scheduled after this failure.
 
 ---
 

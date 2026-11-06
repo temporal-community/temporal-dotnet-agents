@@ -155,8 +155,8 @@ Console.WriteLine(result);
 
 ## Rules worth knowing on day one
 
-- **Write tools must opt out of retry.** `agent.AddTool(tool, opts => opts.NoRetry())` — otherwise a
-  transient failure re-executes a non-idempotent action.
+- **Tool activities use one attempt by default.** An `agent.RetryPolicy` opts every tool on the
+  agent into the same retry policy, so only configure retries when all its tools are safe to retry.
 - **One run at a time per session.** Overlapping `RunAsync` calls on the same session throw.
   Parallel conversations get a session each.
 - **A session belongs to its agent.** Passing one agent's session to another is rejected.

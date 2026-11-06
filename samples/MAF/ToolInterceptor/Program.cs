@@ -93,7 +93,7 @@ builder.Services
                     description: "Look up an order by its order ID and return a summary of its details."),
                 opts => opts.SkipInterceptor());
 
-            // apply_refund: write tool — NoRetry() prevents double-execution on retry.
+            // apply_refund: tool activities use one attempt by default.
             // RequireApproval() is the Rule 2 absolute floor: even if the interceptor
             // somehow returns Proceed, the turn loop still parks for human approval.
             agent.AddTool(
@@ -102,7 +102,7 @@ builder.Services
                     sp.GetRequiredService<FakeOrderService>().ApplyRefund,
                     name: "apply_refund",
                     description: "Apply a refund of the specified amount to the given order. WRITE — non-idempotent."),
-                opts => opts.NoRetry().RequireApproval());
+                opts => opts.RequireApproval());
         });
     });
 

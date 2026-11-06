@@ -8,12 +8,8 @@ namespace TemporalCommunity.Extensions.Agents;
 /// <see cref="DurableAgentBuilder.AddContextProvider(AIContextProvider, IEnumerable{DurableToolRegistrationSpec}?)"/>.
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>Non-idempotent tools (code execution, file writes, external API calls) MUST set
-/// <c>Configure = opts => opts.NoRetry()</c></b> to prevent double-execution on activity retry.
-/// The default inherits an explicit worker-level <c>DefaultRetryPolicy</c>, or the library's
-/// bounded five-attempt tool policy when the worker policy is unset.
-/// </para>
+/// Tool activities use one attempt by default. The agent-level retry policy is the only way to
+/// opt tools into retries and applies to every tool on that agent.
 /// </remarks>
 public sealed record DurableToolRegistrationSpec(
     AIFunction Tool,

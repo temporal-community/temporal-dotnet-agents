@@ -1,5 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Agents.AI;
+using TemporalCommunity.Extensions.Agents.Exceptions;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Temporalio.Exceptions;
@@ -123,6 +125,109 @@ public class InvokeAgentToolActivityTests
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             env.RunAsync(() => activities.InvokeAgentToolAsync(input)));
         Assert.Equal("boom!", ex.Message);
+    }
+
+    [Fact]
+    public async Task InvokeAgentTool_ReturnsExplicitlyClassifiedSafeFailureToModel()
+    {
+        var tool = new SafeFailureFunction("lookup");
+        var (activities, _, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("SafeFailureAgent", agent =>
+            {
+                agent.ChatClient = _ => new StubChatClient();
+                agent.AddTool(tool);
+            });
+        });
+
+        var result = await new ActivityEnvironment().RunAsync(() =>
+            activities.InvokeAgentToolAsync(new InvokeAgentToolInput
+            {
+                AgentName = "SafeFailureAgent",
+                ToolName = "lookup",
+                CallId = "call-safe-failure",
+            }));
+
+        Assert.Equal("call-safe-failure", result.CallId);
+        Assert.Equal("[Tool failed safely] Lookup failed before any change was made.", result.Result);
+        Assert.Equal(1, tool.InvocationCount);
+    }
+
+    [Fact]
+    public async Task InvokeAgentTool_ApprovalRequiredFunctionRejectsUnapprovedDirectInvocation()
+    {
+        var inner = new RecordingFunction("gated");
+        var (activities, _, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("ApprovalAgent", agent =>
+            {
+                agent.ChatClient = _ => new StubChatClient();
+                agent.AddTool(new ApprovalRequiredAIFunction(inner));
+            });
+        });
+
+        var ex = await Assert.ThrowsAsync<ApplicationFailureException>(() =>
+            new ActivityEnvironment().RunAsync(() =>
+                activities.InvokeAgentToolAsync(new InvokeAgentToolInput
+                {
+                    AgentName = "ApprovalAgent",
+                    ToolName = "gated",
+                })));
+
+        Assert.True(ex.NonRetryable);
+        Assert.Equal("DurableToolApprovalRequired", ex.ErrorType);
+        Assert.Equal(0, inner.InvocationCount);
+    }
+
+    [Fact]
+    public async Task InvokeAgentTool_ApprovalRequiredFunctionRunsAfterApproval()
+    {
+        var inner = new RecordingFunction("gated");
+        var (activities, _, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("ApprovalAgent", agent =>
+            {
+                agent.ChatClient = _ => new StubChatClient();
+                agent.AddTool(new ApprovalRequiredAIFunction(inner));
+            });
+        });
+
+        var result = await new ActivityEnvironment().RunAsync(() =>
+            activities.InvokeAgentToolAsync(new InvokeAgentToolInput
+            {
+                AgentName = "ApprovalAgent",
+                ToolName = "gated",
+                Arguments = new Dictionary<string, object?> { ["value"] = "approved" },
+                ApprovalAccepted = true,
+            }));
+
+        Assert.Equal("echoed:approved", result.Result);
+        Assert.Equal(1, inner.InvocationCount);
+    }
+
+    [Fact]
+    public async Task InvokeAgentTool_ReplacesOversizedResultWithBoundedModelMessage()
+    {
+        var tool = new LargeResultFunction("large");
+        var (activities, _, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("LargeResultAgent", agent =>
+            {
+                agent.ChatClient = _ => new StubChatClient();
+                agent.AddTool(tool);
+            });
+        });
+
+        var result = await new ActivityEnvironment().RunAsync(() =>
+            activities.InvokeAgentToolAsync(new InvokeAgentToolInput
+            {
+                AgentName = "LargeResultAgent",
+                ToolName = "large",
+                MaximumTransportPayloadSizeBytes = 512,
+            }));
+
+        Assert.Equal(InvokeAgentToolResult.ResultTooLargeMessage, result.Result);
+        Assert.Equal(1, tool.InvocationCount);
     }
 
     [Fact]
@@ -297,6 +402,38 @@ public class InvokeAgentToolActivityTests
             AIFunctionArguments arguments,
             CancellationToken cancellationToken) =>
             throw new InvalidOperationException($"{Name}!");
+    }
+
+    private sealed class SafeFailureFunction : AIFunction
+    {
+        public SafeFailureFunction(string name) => Name = name;
+
+        public override string Name { get; }
+        public int InvocationCount { get; private set; }
+
+        protected override ValueTask<object?> InvokeCoreAsync(
+            AIFunctionArguments arguments,
+            CancellationToken cancellationToken)
+        {
+            InvocationCount++;
+            throw new DurableToolFailureException("Lookup failed before any change was made.");
+        }
+    }
+
+    private sealed class LargeResultFunction : AIFunction
+    {
+        public LargeResultFunction(string name) => Name = name;
+
+        public override string Name { get; }
+        public int InvocationCount { get; private set; }
+
+        protected override ValueTask<object?> InvokeCoreAsync(
+            AIFunctionArguments arguments,
+            CancellationToken cancellationToken)
+        {
+            InvocationCount++;
+            return ValueTask.FromResult<object?>(new string('x', 2048));
+        }
     }
 
     // ── Unsupported-path diagnostics ─────────────────────────────────────────

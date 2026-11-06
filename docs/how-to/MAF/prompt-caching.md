@@ -23,7 +23,7 @@ Every agent session in TemporalAgents maintains a conversation history — the f
 
 1. **Stored in workflow state** (`AgentWorkflow._history`) as a `List<DurableSessionEntry>` populated with `AgentSessionRequest` / `AgentSessionResponse` instances (MAF subclasses of the shared `DurableSessionRequest` / `DurableSessionResponse` types in `TemporalCommunity.Extensions.AI`). Each entry's `Messages` is `IReadOnlyList<ChatMessage>` (MEAI type, stored directly).
 2. **Flattened into `AgentStepInput.AccumulatedMessages`** at the start of every turn by `AgentWorkflow.ExecuteDurableAgentTurnAsync`, then re-sent on each step of the per-LLM-call durable loop
-3. **Sent to the LLM** by `AgentActivities.RunDurableAgentStepAsync` via `IChatClient.GetStreamingResponseAsync`
+3. **Sent to the LLM** by `AgentActivities.RunDurableAgentStepAsync` via `IChatClient.GetResponseAsync`
 4. **Carried across continue-as-new boundaries** via `AgentWorkflowInput.CarriedHistory`
 
 This means that by default, the LLM sees the **complete conversation** on every turn. For long-running sessions, this can lead to significant token costs and eventually hit context window limits.

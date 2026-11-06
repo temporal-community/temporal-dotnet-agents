@@ -22,9 +22,10 @@ Temporal workflows are designed to be **deterministic** — they must produce th
 1. **Event Sourcing**: Every workflow action (activity execution, decision, etc.) is recorded in an immutable event history
 2. **Deterministic Replay**: When a workflow resumes after a crash, it replays from the beginning, but returns cached results from history instead of re-executing side effects
 3. **Activity Idempotence**: from the workflow's perspective a given `ExecuteActivityAsync` call
-   yields exactly one result, but the activity body may execute **several times** across retry
-   attempts. Anything with a side effect — a write tool, a notification — must therefore be
-   idempotent, or be registered with `opts.NoRetry()` so it gets `MaximumAttempts = 1`.
+   yields exactly one result, but an activity body can execute again if the activity completion
+   is lost or retries are explicitly enabled. Tool activities get one attempt by default; the
+   per-agent retry policy opts every tool on that agent into retries. Effectful tools still need
+   downstream idempotency keys because one attempt is not exactly-once delivery.
 
 ---
 
@@ -168,9 +169,8 @@ External Caller (e.g. TemporalAIAgentProxy)
     ↓
     Loop: Workflow.ExecuteActivityAsync(AgentActivities.RunDurableAgentStepAsync)
         ← One LLM call per dispatch
-        ← For each surviving tool call, fan out via Workflow.WhenAllAsync over
-          AgentActivities.InvokeAgentToolAsync (one activity per tool), preceded
-          by RunToolInterceptor activities when an interceptor is configured
+        ← RunToolInterceptor activities precede dispatch when configured;
+          InvokeAgentTool activities then run serially in model order
     ↓
     AgentActivities.RunDurableAgentStepAsync [Activity]
         ← ResolveBlueprint(agentName) → AgentBlueprint, built lazily on first
@@ -178,7 +178,7 @@ External Caller (e.g. TemporalAIAgentProxy)
         ← Everything live — chat client, context providers, interceptor,
           ChatClientAgent, middleware — is resolved fresh from a new DI scope
           on every attempt.
-        ← The model call goes through agent.RunStreamingAsync, not through
+        ← The model call goes through agent.RunAsync, not through
           IChatClient directly, so user middleware fires around it.
     ↓
     Final AgentResponse returned to AgentWorkflow → recorded in history
@@ -259,9 +259,9 @@ library does not do this for you — see
 The library never leaves `RetryPolicy` null on an activity it builds. A null policy is transmitted
 as "server default", which means `MaximumAttempts = 0` — *unlimited* retries — so a deterministically
 failing LLM call would retry forever and hang the caller. `DefaultRetryPolicy` substitutes a bounded
-default instead, on every dispatch path: the session loop's model step, `TemporalAIAgent`'s
-sub-agent step, and tool/policy activities. The defaults are five attempts, with a `2s` maximum
-backoff interval for model steps and `30s` for tool work.
+default instead: model calls use five attempts with a `2s` maximum backoff interval, while tool
+and interceptor activities use one attempt. An explicit per-agent retry policy opts all tools on
+that agent into the configured retry behavior.
 
 A caller-supplied `ActivityOptions` is used **verbatim**, including a null `RetryPolicy` — at that
 point it is the caller's own choice.
@@ -362,8 +362,9 @@ generic `Activity1`/`Activity2`/`Activity3` example.
 ### ✅ DO
 
 - **Trust Temporal's replay mechanism** — *completed* activities in history are not re-executed
-- **Design tools to be idempotent** — the activity body runs once per retry attempt, so a tool that
-  is not idempotent must be registered with `opts.NoRetry()` to get `MaximumAttempts = 1`
+- **Design tools to be idempotent** — a tool's default is one attempt, but activity completion can
+  be uncertain and the per-agent retry policy opts every tool into retries. Use downstream
+  idempotency keys for effectful tools.
 - **Set timeouts per workload** — `StartToCloseTimeout` bounds one attempt, not the whole call;
   size `HeartbeatTimeout` against how often the activity actually heartbeats
 - **Externalize a transcript you must keep** — continue-as-new trims carried history by default
@@ -444,8 +445,8 @@ For unit-testing agent behaviour (as opposed to replay safety), see
 | Will conversation history be lost at continue-as-new? | Only under an explicitly configured reducer or recovery trim; without a strategy the workflow blocks and preserves the last valid history |
 | Is the StateBag preserved across continue-as-new? | ✅ Yes — carried in full as `CarriedStateBag`, with a 64 KB warning threshold |
 | Is the StateBag preserved when a turn fails? | ✅ Yes — rolled back to its pre-turn snapshot, retaining reserved approval-scope records |
-| Should activities be idempotent? | ✅ Yes — the body can run once per retry attempt. Use `opts.NoRetry()` for write tools |
-| What if an activity fails and is retried? | The workflow's `await` does not throw until the retry budget is exhausted (bounded to 5 attempts by default) |
+| Should activities be idempotent? | ✅ Yes — tool activities use one attempt by default, but an uncertain completion or per-agent retry can repeat an effect; use downstream idempotency keys |
+| What if an activity fails and is retried? | The workflow's `await` does not throw until the retry budget is exhausted; model calls default to five attempts and tools default to one |
 | Does a `RequestShutdown` update cause a continue-as-new? | ❌ No — the rollover branch is gated on `!_shutdownRequested`; shutdown ends the run |
 
 ---

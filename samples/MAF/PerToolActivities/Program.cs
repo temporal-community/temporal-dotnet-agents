@@ -1,8 +1,8 @@
-// PerToolActivities — demonstrates per-tool Temporal activity granularity.
+// PerToolActivities — demonstrates serial Temporal tool activity dispatch.
 //
 // Each LLM call is a RunDurableAgentStep activity; each tool call is an
-// InvokeAgentTool:<tool_name> activity. Write tools (apply_refund, send_email)
-// register opts.NoRetry() so a transient failure cannot double-fire them.
+// InvokeAgentTool:<tool_name> activity, serially in model order. Tool activities
+// use one attempt by default; retries are an explicit per-agent opt-in.
 //
 // Run:  dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj
 //
@@ -11,9 +11,7 @@
 //   2. Subset — only lookup_order is exposed and dispatchable.
 //   3. Empty list — no tools are exposed or dispatchable.
 //   4. Disabled — EnableToolCalls=false blocks every model-returned call.
-//   5. Transient lookup failure — the read tool fails on attempt 1 and retries; the
-//      write tools use a one-attempt activity policy. This does not guarantee exactly-once
-//      external effects if an activity result is lost or the effect's outcome is uncertain.
+//   5. Lookup failure — it gets one attempt by default, and later calls do not run.
 
 using System.ClientModel;
 using Microsoft.Extensions.AI;
@@ -68,10 +66,8 @@ builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient()
 
 // ── Step 5: Register Temporal client + worker pipeline ───────────────────────
 // AddDurableAgent is the single registration entry point:
-//   • agent.AddTool(...)                       — read tool, inherits worker default retry
-//   • agent.AddTool(..., opts => opts.NoRetry()) — write tool, MaximumAttempts = 1
-// Per-tool retry is bound to the AIFunction reference via the configure callback —
-// no string-keyed PerToolActivityOptions dictionary, no name-typo footgun.
+//   • agent.AddTool(...) — every tool gets one activity attempt by default.
+// Tool retries are an explicit per-agent opt-in and apply uniformly.
 builder.Services.AddTemporalClient(temporalAddress, "default");
 
 builder.Services
@@ -89,22 +85,21 @@ builder.Services
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
             agent.MaxToolCallsPerTurn = 10;
 
-            // Read tool — inherits worker default retry. A transient failure retries.
+            // Read tool — one activity attempt by default.
             agent.AddTool("lookup_order", sp => AIFunctionFactory.Create(
                 sp.GetRequiredService<OrderService>().LookupOrder,
                 name: "lookup_order",
                 description: "Look up the current status of a customer order by order ID."));
 
-            // Write tools — opts.NoRetry() sets MaximumAttempts = 1, bound to the
-            // AIFunction reference at registration. A transient activity failure
-            // surfaces to the workflow rather than re-firing the side effect.
+            // Write tools — one activity attempt by default. Per-tool timeouts
+            // remain configurable; retry policy is agent-level only.
             agent.AddTool(
                 "apply_refund",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<RefundService>().ApplyRefund,
                     name: "apply_refund",
                     description: "Apply a refund of the specified amount to the order. WRITE — non-idempotent."),
-                opts => opts.NoRetry().WithTimeout(TimeSpan.FromSeconds(30)));
+                opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
 
             agent.AddTool(
                 "send_email",
@@ -112,7 +107,7 @@ builder.Services
                     sp.GetRequiredService<EmailService>().SendEmail,
                     name: "send_email",
                     description: "Send an email to the customer. WRITE — non-idempotent."),
-                opts => opts.NoRetry().WithTimeout(TimeSpan.FromSeconds(30)));
+                opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
         });
     })
     .AddWorkflow<RefundWorkflow>();
@@ -121,7 +116,7 @@ builder.Services
 var host = builder.Build();
 await host.StartAsync();
 
-Console.WriteLine("Worker started. Running per-tool activity scenarios...\n");
+Console.WriteLine("Worker started. Running serial tool activity scenarios...\n");
 
 var client = host.Services.GetRequiredService<ITemporalClient>();
 var orderService = host.Services.GetRequiredService<OrderService>();
@@ -170,12 +165,12 @@ await RunScenarioAsync(
     enableToolCalls: false);
 Console.WriteLine();
 
-// ── Step 6c: Scenario 5 — transient lookup failure ───────────────────────────
+// ── Step 6c: Scenario 5 — lookup failure ─────────────────────────────────────
 var lookupBefore = orderService.LookupCalls;
 var refundBefore = refundService.RefundCalls;
 var emailBefore = emailService.SendCalls;
 
-Console.WriteLine("─── Scenario 5: Transient lookup failure (per-tool retry) ───");
+Console.WriteLine("─── Scenario 5: Lookup failure (one attempt by default) ─────");
 orderService.FailOnceEnabled = true;
 
 await RunScenarioAsync(
@@ -192,9 +187,9 @@ Console.WriteLine($"  This run    → LookupCalls = {lookupDelta}, RefundCalls =
 Console.WriteLine($"  Cumulative  → LookupCalls = {orderService.LookupCalls}, " +
                   $"RefundCalls = {refundService.RefundCalls}, SendCalls = {emailService.SendCalls}");
 
-if (lookupDelta >= 2 && refundDelta == 1 && emailDelta == 1)
+if (lookupDelta == 1 && refundDelta == 0 && emailDelta == 0)
 {
-    Console.WriteLine("  ✓ Per-tool retry granularity confirmed: lookup retried; write tools were configured with no retry.");
+    Console.WriteLine("  ✓ Default policy confirmed: lookup ran once; later tools were not dispatched after its failure.");
 }
 Console.WriteLine();
 
@@ -203,9 +198,9 @@ Console.WriteLine("─── View the activity timeline ────────
 Console.WriteLine("  Open http://localhost:8233 in the Temporal Web UI.");
 Console.WriteLine("  Each workflow above shows distinct activity rows:");
 Console.WriteLine("    • RunDurableAgentStep                        — one row per LLM call");
-Console.WriteLine("    • InvokeAgentTool:RefundAgent:lookup_order   — read, retries on transient failure");
-Console.WriteLine("    • InvokeAgentTool:RefundAgent:apply_refund   — write, MaximumAttempts = 1");
-Console.WriteLine("    • InvokeAgentTool:RefundAgent:send_email     — write, MaximumAttempts = 1");
+Console.WriteLine("    • InvokeAgentTool:RefundAgent:lookup_order   — one attempt by default");
+Console.WriteLine("    • InvokeAgentTool:RefundAgent:apply_refund   — one attempt by default");
+Console.WriteLine("    • InvokeAgentTool:RefundAgent:send_email     — one attempt by default");
 Console.WriteLine();
 
 try { await host.StopAsync(); } catch (OperationCanceledException) { }

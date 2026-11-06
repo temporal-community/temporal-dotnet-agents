@@ -69,7 +69,7 @@ builder.Services
                 "You are a helpful geography and weather assistant. " +
                 "When asked about weather, always use the get_weather tool.";
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-            agent.AddTool(weatherTool, opts => opts.NoRetry());
+            agent.AddTool(weatherTool);
             agent.TimeToLive   = TimeSpan.FromHours(1); // shortened for demo; production default is 14 days
         });
     });

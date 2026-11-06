@@ -43,9 +43,8 @@ internal sealed record AgentJobInput
     /// Pre-computed per-tool <see cref="ActivityOptions"/> indexed by tool name (case-insensitive).
     /// When a tool name is present, <see cref="AgentJobWorkflow"/> uses these options for the
     /// per-tool activity dispatch; otherwise it falls back to a default built from
-    /// <see cref="ActivityTimeout"/> and <see cref="RetryPolicy"/>.
-    /// Write tools registered with <c>opts.NoRetry()</c> require this to be populated so that
-    /// <c>MaximumAttempts = 1</c> is respected in scheduled / deferred jobs.
+    /// <see cref="ActivityTimeout"/> and <see cref="RetryPolicy"/>. This bundle carries the
+    /// default one-attempt tool policy and any per-agent retry opt-in into scheduled / deferred jobs.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Dictionary<string, ActivityOptions>? DurableAgentToolActivityOptions { get; init; }

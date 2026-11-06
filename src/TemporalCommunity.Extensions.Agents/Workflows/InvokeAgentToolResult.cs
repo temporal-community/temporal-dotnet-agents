@@ -11,6 +11,9 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// </summary>
 internal sealed class InvokeAgentToolResult
 {
+    internal const string ResultTooLargeMessage =
+        "The tool function returned, but its result was too large to send to the model; the result was omitted.";
+
     /// <summary>
     /// The value returned by the tool's <c>InvokeAsync</c>. Serialized as <c>object?</c> through the
     /// Temporal data converter; consumers typically project this into a
@@ -31,8 +34,8 @@ internal sealed class InvokeAgentToolResult
     public object? Result { get; init; }
 
     /// <summary>
-    /// Echo of <see cref="InvokeAgentToolInput.CallId"/> so the workflow can correlate parallel
-    /// tool dispatches.
+    /// Echo of <see cref="InvokeAgentToolInput.CallId"/> so the workflow can correlate this
+    /// activity result with its pending tool call.
     /// </summary>
     public string? CallId { get; init; }
 
@@ -40,7 +43,7 @@ internal sealed class InvokeAgentToolResult
     /// Serialized <c>AgentSessionStateBag</c> reflecting any mutations the tool made to the
     /// session state during invocation (X-1). <see langword="null"/> when the tool did not
     /// change the bag (the common case). The workflow merges this back into its carried
-    /// StateBag after the tool fan-out completes, in tool-call index order (later index wins
+    /// StateBag after each tool call completes, in tool-call index order (later index wins
     /// on key conflict) for replay determinism.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

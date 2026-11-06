@@ -170,7 +170,7 @@ public class DurableAgentSettingsInheritanceTests
     }
 
     [Fact]
-    public void WhenRetryPoliciesUnset_ModelAndToolUseSeparateBoundedDefaults()
+    public void WhenRetryPoliciesUnset_ModelUsesBoundedDefaultAndToolUsesOneAttempt()
     {
         var options = OptionsWithDurableAgent(
             configureAgent: agent => agent.AddTool(
@@ -184,12 +184,9 @@ public class DurableAgentSettingsInheritanceTests
             input.RetryPolicy!.MaximumInterval);
         var toolRetry = input.DurableAgentToolActivityOptions!["lookup"].RetryPolicy!;
         Assert.Equal(
-            global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultMaximumAttempts,
+            1,
             toolRetry.MaximumAttempts);
-        Assert.Equal(
-            TimeSpan.FromSeconds(
-                global::TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.DefaultToolMaximumIntervalSeconds),
-            toolRetry.MaximumInterval);
+        Assert.Null(toolRetry.MaximumInterval);
     }
 
     // ── MaxEntryCount ───────────────────────────────────────────────────────────
@@ -258,7 +255,7 @@ public class DurableAgentSettingsInheritanceTests
 
         Assert.NotNull(input.DurableAgentToolActivityOptions);
         Assert.True(input.DurableAgentToolActivityOptions!.TryGetValue("send_email", out var perTool));
-        Assert.Same(noRetryPolicy, perTool!.RetryPolicy);
+        Assert.Equal(1, perTool!.RetryPolicy!.MaximumAttempts);
     }
 
     [Fact]

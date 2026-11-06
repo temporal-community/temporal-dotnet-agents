@@ -18,8 +18,7 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 /// End-to-end integration coverage for durable agents registered via
 /// <c>TemporalAgentsOptions.AddDurableAgent</c>. Exercises the new workflow loop:
 /// <c>TemporalCommunity.Extensions.Agents.RunDurableAgentStep</c> for the LLM call and
-/// <c>TemporalCommunity.Extensions.Agents.InvokeAgentTool</c> per tool dispatch (parallel fan-out via
-/// <c>Workflow.WhenAllAsync</c>).
+/// <c>TemporalCommunity.Extensions.Agents.InvokeAgentTool</c> per tool dispatch, in model order.
 /// </summary>
 [Trait("Category", "Integration")]
 public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmentFixture>
@@ -60,6 +59,30 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
 
         Assert.Contains(RunDurableAgentStepActivity, activityNames);
         Assert.DoesNotContain(InvokeAgentToolActivity, activityNames);
+
+        await host.StopAsync();
+    }
+
+    [Fact]
+    public async Task DurableAgent_PreservesEveryModelResponseMessage()
+    {
+        var scripted = new ScriptedChatClient([
+            new ChatResponse([
+                new ChatMessage(ChatRole.Assistant, "First response message."),
+                new ChatMessage(ChatRole.Assistant, "Final answer."),
+            ]),
+        ]);
+
+        using var host = BuildHost(scripted, tools: [], configureAgent: null);
+        await host.StartAsync();
+
+        var proxy = host.Services.GetTemporalAgentProxy("DurableAgent");
+        var session = await proxy.CreateSessionAsync();
+        var response = await proxy.RunAsync("Hi", session);
+
+        Assert.Equal(
+            ["First response message.", "Final answer."],
+            response.Messages.Select(message => message.Text).ToArray());
 
         await host.StopAsync();
     }
@@ -174,12 +197,13 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
     {
         var allowed = new RecordingTool { Name = "allowed_tool" };
         var excluded = new RecordingTool { Name = "excluded_tool" };
-        var sharedCallId = "same-call-id";
+        var excludedCallId = "excluded-call-id";
+        var allowedCallId = "allowed-call-id";
         var scripted = ScriptedChatClient.WithToolCallsThenFinal(
         [
-            new FunctionCallContent(sharedCallId, excluded.Name,
+            new FunctionCallContent(excludedCallId, excluded.Name,
                 new Dictionary<string, object?> { ["input"] = "blocked" }),
-            new FunctionCallContent(sharedCallId, allowed.Name,
+            new FunctionCallContent(allowedCallId, allowed.Name,
                 new Dictionary<string, object?> { ["input"] = "allowed" }),
         ], "Mixed batch handled.");
 
@@ -200,9 +224,9 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
         var resultMessage = scripted.Calls[1].Messages.Single(message => message.Role == ChatRole.Tool);
         var results = resultMessage.Contents.OfType<FunctionResultContent>().ToArray();
         Assert.Equal(2, results.Length);
-        Assert.Equal(sharedCallId, results[0].CallId);
+        Assert.Equal(excludedCallId, results[0].CallId);
         Assert.Equal(AgentRunToolSelectionPolicy.BlockedResult, results[0].Result?.ToString());
-        Assert.Equal(sharedCallId, results[1].CallId);
+        Assert.Equal(allowedCallId, results[1].CallId);
 
         var sessionId = ((TemporalAgentSession)session).SessionId;
         var activityNames = await CollectActivityNamesAsync(
@@ -212,10 +236,39 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
         await host.StopAsync();
     }
 
-    // ── Three parallel tool calls dispatched concurrently ───────────────────────
+    [Fact]
+    public async Task DurableAgent_InvalidDuplicateCallIdsFailBeforeToolDispatch()
+    {
+        var recorder = new RecordingTool { Name = "echo_tool" };
+        var scripted = new ScriptedChatClient([
+            new ChatResponse([
+                new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("duplicate-call", recorder.Name)]),
+                new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("duplicate-call", recorder.Name)]),
+            ]),
+        ]);
+
+        using var host = BuildHost(scripted, [recorder.Build()], configureAgent: null);
+        await host.StartAsync();
+
+        var proxy = host.Services.GetTemporalAgentProxy("DurableAgent");
+        var session = await proxy.CreateSessionAsync();
+        await Assert.ThrowsAnyAsync<Exception>(() => proxy.RunAsync("Hi", session));
+
+        Assert.Equal(0, recorder.CallCount);
+        var sessionId = ((TemporalAgentSession)session).SessionId;
+        var activityNames = await CollectActivityNamesAsync(
+            _env.Client.GetWorkflowHandle(sessionId.WorkflowId));
+        Assert.DoesNotContain(InvokeAgentToolActivity, activityNames);
+
+        await host.StopAsync();
+    }
+
+    // ── Multiple tool calls dispatch serially in model order ────────────────────
 
     [Fact]
-    public async Task DurableAgent_ParallelToolCalls_DispatchesConcurrently()
+    public async Task DurableAgent_MultipleToolCalls_DispatchSeriallyInModelOrder()
     {
         var recorder = new RecordingTool { Name = "echo_tool" };
         var aiFunction = recorder.Build();
@@ -238,20 +291,40 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
 
         Assert.Equal(3, recorder.CallCount);
 
-        // Inspect history: assert all three InvokeAgentTool ActivityTaskScheduled events precede
-        // the first ActivityTaskCompleted of the same type — proving Workflow.WhenAllAsync
-        // dispatched them in parallel.
         var sessionId = ((TemporalAgentSession)session).SessionId;
         var handle = _env.Client.GetWorkflowHandle(sessionId.WorkflowId);
-        var (scheduleIndices, firstCompleteIndex) =
-            await CollectScheduleVsCompleteAsync(handle, InvokeAgentToolActivity);
+        var scheduleIndices = new List<long>();
+        var completionIndices = new List<long>();
+        var scheduledTypes = new Dictionary<long, string>();
+        await foreach (var ev in handle.FetchHistoryEventsAsync())
+        {
+            if (ev.ActivityTaskScheduledEventAttributes is { } scheduled)
+            {
+                scheduledTypes[ev.EventId] = scheduled.ActivityType.Name;
+                if (scheduled.ActivityType.Name == InvokeAgentToolActivity)
+                {
+                    scheduleIndices.Add(ev.EventId);
+                }
+            }
+            else if (ev.ActivityTaskCompletedEventAttributes is { } completed
+                && scheduledTypes.TryGetValue(completed.ScheduledEventId, out var typeName)
+                && typeName == InvokeAgentToolActivity)
+            {
+                completionIndices.Add(ev.EventId);
+            }
+        }
 
         Assert.Equal(3, scheduleIndices.Count);
-        Assert.True(firstCompleteIndex >= 0, "expected at least one ActivityTaskCompleted event");
-        foreach (var idx in scheduleIndices)
+        Assert.Equal(3, completionIndices.Count);
+        for (var index = 0; index < scheduleIndices.Count; index++)
         {
-            Assert.True(idx < firstCompleteIndex,
-                $"schedule event at {idx} did not precede first complete at {firstCompleteIndex} — fan-out is sequential");
+            Assert.True(scheduleIndices[index] < completionIndices[index],
+                $"tool {index} completed before it was scheduled");
+            if (index + 1 < scheduleIndices.Count)
+            {
+                Assert.True(completionIndices[index] < scheduleIndices[index + 1],
+                    $"tool {index + 1} was scheduled before tool {index} completed");
+            }
         }
 
         await host.StopAsync();
@@ -294,10 +367,10 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
         await host.StopAsync();
     }
 
-    // ── Write tool with NoRetry never re-fires on activity failure ──────────────
+    // ── Default tool policy allows one activity attempt ─────────────────────────
 
     [Fact]
-    public async Task DurableAgent_WriteToolWithNoRetry_DoesNotRetry()
+    public async Task DurableAgent_DefaultToolPolicy_DoesNotRetry()
     {
         var recorder = new RecordingTool
         {
@@ -311,15 +384,9 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
         // case where the workflow would recover.
         var scripted = ScriptedChatClient.WithToolCallsThenFinal([fc], "Done.");
 
-        using var host = BuildHost(scripted, tools: [aiFunction], configureAgent: agent =>
+        using var host = BuildHost(scripted, tools: [], configureAgent: null, registerToolsViaBuilder: builder =>
         {
-            // Re-register the tool with NoRetry. We must remove + re-add since BuildHost
-            // already added it without overrides. Easier path: provide a configure callback
-            // that adds the tool through the builder directly instead of using the BuildHost
-            // tools parameter. Re-routing through the configure callback below.
-        }, registerToolsViaBuilder: builder =>
-        {
-            builder.AddTool(aiFunction, opts => opts.NoRetry());
+            builder.AddTool(aiFunction);
         });
         await host.StartAsync();
 
@@ -361,36 +428,6 @@ public class DurableAgentIntegrationTests : IClassFixture<DurableAgentEnvironmen
             }
         }
         return activityNames;
-    }
-
-    private static async Task<(List<int> ScheduleIndices, int FirstCompleteIndex)>
-        CollectScheduleVsCompleteAsync(WorkflowHandle handle, string activityTypeName)
-    {
-        var schedules = new List<int>();
-        var firstComplete = -1;
-        var scheduledIdToType = new Dictionary<long, string>();
-        var index = 0;
-        await foreach (var ev in handle.FetchHistoryEventsAsync())
-        {
-            if (ev.ActivityTaskScheduledEventAttributes is { } a)
-            {
-                scheduledIdToType[ev.EventId] = a.ActivityType.Name;
-                if (a.ActivityType.Name == activityTypeName)
-                {
-                    schedules.Add(index);
-                }
-            }
-            else if (firstComplete < 0 && ev.ActivityTaskCompletedEventAttributes is { } c)
-            {
-                if (scheduledIdToType.TryGetValue(c.ScheduledEventId, out var typeName)
-                    && typeName == activityTypeName)
-                {
-                    firstComplete = index;
-                }
-            }
-            index++;
-        }
-        return (schedules, firstComplete);
     }
 
     private IHost BuildHost(

@@ -45,7 +45,7 @@ internal sealed class AgentJobWorkflow
             StartToCloseTimeout = input.ActivityTimeout,
             HeartbeatTimeout = input.HeartbeatTimeout,
             Summary = AgentActivities.BuildActivitySummary(input.AgentName),
-            RetryPolicy = input.RetryPolicy,
+            RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(input.RetryPolicy),
         };
 
         var accumulated = new List<ChatMessage>(input.Request.Messages);
@@ -62,11 +62,17 @@ internal sealed class AgentJobWorkflow
                 SessionId = null,
             };
 
+            TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                stepInput,
+                stepInput.MaximumTransportPayloadSizeBytes,
+                stepInput.PayloadCodecExpansionAllowanceBytes,
+                "model-step activity input");
             var stepResult = await Workflow.ExecuteActivityAsync(
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 stepActivityOptions).ConfigureAwait(true);
 
-            accumulated.Add(stepResult.AssistantMessage);
+            accumulated.AddRange(stepResult.AssistantMessages);
 
             if (stepResult.IsFinal || stepResult.ToolCalls is null || stepResult.ToolCalls.Count == 0)
             {
@@ -139,7 +145,7 @@ internal sealed class AgentJobWorkflow
                             RequiresApproval = input.RequiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true
                                 || input.ScopeAwareApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
                         };
-                        // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel typed dispatch
+                        // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel interceptor dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
                             DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(tc.Name, interceptorOpts, interceptorToolOpts)));
@@ -149,9 +155,13 @@ internal sealed class AgentJobWorkflow
                 interceptorResults = await Workflow.WhenAllAsync(interceptorTasks).ConfigureAwait(true);
             }
 
-            // Feature L: Phase 2 — process decisions.
-            var toolTasks = new List<Task<InvokeAgentToolResult>?>(toolCalls.Count);
+            // Feature L: Phase 2 — process decisions serially.
+            var toolResults = new InvokeAgentToolResult?[toolCalls.Count];
             var syntheticResults = new string?[toolCalls.Count];
+            var requiresApprovalTools = (input.RequiresApprovalTools ?? [])
+                .Concat(stepResult.ApprovalRequiredToolNames ?? [])
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
 
             for (var i = 0; i < toolCalls.Count; i++)
             {
@@ -159,14 +169,13 @@ internal sealed class AgentJobWorkflow
                 if (!enabledToolCalls[i])
                 {
                     syntheticResults[i] = AgentRunToolSelectionPolicy.CreateBlockedResult(tc.Name);
-                    toolTasks.Add(null);
                     continue;
                 }
 
                 var interceptorResult = interceptorResults?[i];
                 // Determine effective outcome (Rule 2: RequireApproval floor, Block never overridden).
                 var outcome = DurableToolDecisionPolicy.GetEffectiveOutcome(
-                    interceptorResult?.Outcome, tc.Name, input.RequiresApprovalTools);
+                    interceptorResult?.Outcome, tc.Name, requiresApprovalTools);
 
                 switch (outcome)
                 {
@@ -179,9 +188,15 @@ internal sealed class AgentJobWorkflow
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
                         };
-                        toolTasks.Add(Workflow.ExecuteActivityAsync(
+                        TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                            Workflow.PayloadConverter,
+                            toolInput,
+                            toolInput.MaximumTransportPayloadSizeBytes,
+                            toolInput.PayloadCodecExpansionAllowanceBytes,
+                            "tool-activity input");
+                        toolResults[i] = await Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.InvokeAgentToolAsync(toolInput),
-                            toolOptions));
+                            toolOptions).ConfigureAwait(true);
                         break;
 
                     case DurableToolOutcome.PauseForApproval:
@@ -191,30 +206,20 @@ internal sealed class AgentJobWorkflow
                             "but AgentJobWorkflow does not support workflow-parked approval. Degrading to Block.",
                             tc.Name, input.AgentName);
                         syntheticResults[i] = $"[Blocked] Tool '{tc.Name}' requires approval but approval is not supported in job workflows.";
-                        toolTasks.Add(null);
                         break;
 
                     case DurableToolOutcome.Skip:
                         syntheticResults[i] = DurableToolDecisionPolicy.SkipMessage(interceptorResult?.Message);
-                        toolTasks.Add(null);
                         break;
 
                     case DurableToolOutcome.Block:
                     default:
                         syntheticResults[i] = DurableToolDecisionPolicy.BlockMessage(interceptorResult?.Message);
-                        toolTasks.Add(null);
                         break;
                 }
             }
 
-            // Phase 3: await approved tasks.
-            var pendingTasks = toolTasks.Where(t => t is not null).Cast<Task<InvokeAgentToolResult>>().ToList();
-            InvokeAgentToolResult[]? toolResults = pendingTasks.Count > 0
-                ? await Workflow.WhenAllAsync(pendingTasks).ConfigureAwait(true)
-                : null;
-
             var functionResultContents = new List<AIContent>(toolCalls.Count);
-            var pendingIdx = 0;
             for (var i = 0; i < toolCalls.Count; i++)
             {
                 if (syntheticResults[i] is { } synthetic)
@@ -223,11 +228,11 @@ internal sealed class AgentJobWorkflow
                         callId: toolCalls[i].CallId,
                         result: synthetic));
                 }
-                else if (toolResults is not null && pendingIdx < toolResults.Length)
+                else if (toolResults[i] is { } toolResult)
                 {
                     functionResultContents.Add(new FunctionResultContent(
                         callId: toolCalls[i].CallId,
-                        result: toolResults[pendingIdx++].Result));
+                        result: toolResult.Result));
                 }
             }
 
@@ -238,7 +243,7 @@ internal sealed class AgentJobWorkflow
     /// <summary>
     /// Resolves the <see cref="ActivityOptions"/> for a per-tool dispatch. When
     /// <see cref="AgentJobInput.DurableAgentToolActivityOptions"/> contains an entry for
-    /// <paramref name="toolName"/>, those options (with their per-tool retry policy and timeouts)
+    /// <paramref name="toolName"/>, those options (with their per-tool timeout and agent retry policy)
     /// are used; otherwise a default is built from the flat job-level settings.
     /// </summary>
     private static ActivityOptions ResolveDurableToolActivityOptions(AgentJobInput input, string toolName)

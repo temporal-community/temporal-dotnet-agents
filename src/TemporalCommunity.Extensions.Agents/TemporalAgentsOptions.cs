@@ -74,12 +74,10 @@ public sealed class TemporalAgentsOptions
     /// Gets or sets the worker-level retry-policy override applied to model, tool, and policy
     /// activities. Agents inherit this value when
     /// <see cref="DurableAgentBuilder.RetryPolicy"/> is unset. When <see langword="null"/> (and no
-    /// per-agent policy is set), a bounded backstop of <c>new RetryPolicy { MaximumAttempts = 5 }</c>
-    /// is applied at session start rather than the Temporal server default (<c>MaximumAttempts = 0</c>,
-    /// i.e. unlimited retries). Model calls use a 2-second maximum backoff; tools and policy
-    /// activities use a 30-second maximum backoff. Both defaults allow five attempts. Set an
-    /// explicit policy to replace these defaults exactly. Per-tool retry policies are configured via
-    /// <see cref="DurableAgentBuilder.AddTool(Microsoft.Extensions.AI.AIFunction, Action{DurableToolOptions}?)"/>.
+    /// per-agent policy is set), model calls use five attempts with a 2-second maximum backoff and
+    /// tool activities use one attempt. Setting this value opts all tools on each inheriting agent
+    /// into retries, so do so only when every tool is safe to repeat or uses downstream idempotency
+    /// keys. Per-tool retry counts above one are not supported.
     /// </summary>
     public RetryPolicy? DefaultRetryPolicy { get; set; }
 

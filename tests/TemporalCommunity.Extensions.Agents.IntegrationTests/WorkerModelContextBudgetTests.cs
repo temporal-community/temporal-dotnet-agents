@@ -211,7 +211,15 @@ public class WorkerModelContextBudgetTests
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _callCount);
+            var message = returnToolCall
+                ? new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent("call-1", "large_result", new Dictionary<string, object?>())])
+                : new ChatMessage(ChatRole.Assistant, "done");
+            return Task.FromResult(new ChatResponse(message));
+        }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,

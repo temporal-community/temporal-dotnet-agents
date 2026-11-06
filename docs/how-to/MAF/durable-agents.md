@@ -1,6 +1,6 @@
 # Durable Agents
 
-Every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in its own `InvokeAgentTool` activity, all dispatched in parallel via `Workflow.WhenAllAsync`. Every tool shares that one activity type name; what differs per tool is the activity options — retry policy and timeouts are resolved by tool name at dispatch. There is no opt-in flag — it is the only worker-hosted agent-definition path. Client-only processes use `AddTemporalAgentProxies` and `AddAgentProxy` to call an agent hosted elsewhere. This makes per-tool retry granularity explicit and prevents the foot-gun where write-style tools could re-fire on a transient activity retry.
+Every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in its own `InvokeAgentTool` activity. A response's tool calls are dispatched serially in model order, so each call's result and StateBag write-back are applied before the next call starts. Tool activities use one attempt by default; retries are an explicit per-agent opt-in and apply uniformly to that agent's tools. A retry can repeat an external effect whose completion was uncertain, so use downstream idempotency and reconciliation for writes. There is no opt-in durability flag — this is the worker-hosted agent-definition path. Client-only processes use `AddTemporalAgentProxies` and `AddAgentProxy` to call an agent hosted elsewhere.
 
 ### Activities the workflow may dispatch per turn
 
@@ -9,12 +9,12 @@ The following activities run as needed by the durable agent loop.
 | Activity name | When | What it does |
 |---|---|---|
 | `TemporalCommunity.Extensions.Agents.RunDurableAgentStep` | Every step of every turn (loop iterations) | One LLM call. |
-| `TemporalCommunity.Extensions.Agents.InvokeAgentTool` | One per tool call the LLM emits | Dispatches a single tool. Honors per-tool `DurableToolOptions` |
+| `TemporalCommunity.Extensions.Agents.InvokeAgentTool` | One per tool call the LLM emits | Dispatches a single tool. Honors agent-level retry policy and per-tool timeout/approval settings |
 
 ## When to use what
 
-- **Read tools** (lookup, query, fetch): leave the per-tool retry policy unset; they fall through to the per-agent, then worker, then the library's bounded default of five attempts.
-- **Write tools** (send_email, apply_refund, write_record): always pass `opts => opts.NoRetry()` (or set a small `MaximumAttempts`) so a worker crash cannot re-issue the side effect.
+- **Tools default to one activity attempt**, regardless of whether they read or write. This avoids an automatic re-execution after an ambiguous activity failure.
+- **Retries are opt-in through `agent.RetryPolicy`** and apply to every tool on that agent. Only enable them when every affected tool is safe to retry, usually through an application-level idempotency key.
 
 ## Canonical example
 
@@ -36,25 +36,24 @@ builder.Services
             agent.Instructions = "You are a refund specialist...";
             agent.MaxToolCallsPerTurn = 10;  // caps the per-turn LLM↔tool loop; default 20 — see usage.md
 
-            // Read tool — retries on transient failure, bounded at five attempts by default.
+            // Read tool — one activity attempt by default.
             agent.AddTool("lookup_order", sp => AIFunctionFactory.Create(
                 sp.GetRequiredService<OrderService>().LookupOrder,
                 name: "lookup_order"));
 
-            // Write tools — never retry, never re-fire on activity-level retry.
+            // Write tools — one activity attempt by default; use downstream idempotency
+            // and reconcile if a failed activity leaves the effect's outcome uncertain.
             agent.AddTool(
                 "apply_refund",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<RefundService>().ApplyRefund,
-                    name: "apply_refund"),
-                opts => opts.NoRetry());
+                    name: "apply_refund"));
 
             agent.AddTool(
                 "send_email",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<EmailService>().SendEmail,
-                    name: "send_email"),
-                opts => opts.NoRetry());
+                    name: "send_email"));
         });
     });
 ```
@@ -66,8 +65,6 @@ To use the agent, call `WorkflowAgents.GetTemporalAgent("RefundAgent")` inside a
 ## Fluent sugar on `DurableToolOptions`
 
 ```csharp
-opts => opts.NoRetry()                              // RetryPolicy { MaximumAttempts = 1 }
-opts => opts.WithMaxAttempts(3)
 opts => opts.WithTimeout(TimeSpan.FromSeconds(30))
 
 // Tool interceptor overrides (Feature L)
@@ -86,40 +83,37 @@ opts => opts.ScopeAware()                           // opt in to expiring-grant 
 This is the canonical statement of retry inheritance for MAF agents; other pages link here rather
 than restating it.
 
-Three activity types resolve a retry policy, and they share all but one rung. First match wins:
+Model-step and tool activities use a bounded policy for model calls and one attempt for tools unless
+an explicit agent policy opts the tools into retries. Agent-level retry policy is shared; it is not
+a per-tool override.
 
-| Rung | Applies to | Source |
+| Activity | Default | Explicit retry configuration |
 |---|---|---|
-| 1 | tool calls only | `DurableToolOptions.RetryPolicy` — the `configure` callback on `AddTool` |
-| 2 | all three | `OneTimeAgentRun.RetryPolicy` — **scheduled and one-time runs only**; absent on the session path |
-| 3 | all three | `agent.RetryPolicy` |
-| 4 | all three | `opts.DefaultRetryPolicy` |
-| 5 | all three | bounded backstop — 5 attempts, max interval 2s for the LLM call and 30s for tool and interceptor calls |
-
-The three activity types are `InvokeAgentTool`, `RunDurableAgentStep` (the LLM call), and
-`RunToolInterceptor`.
+| `RunDurableAgentStep` (LLM call) | Bounded model retry policy | Agent/run/worker policy |
+| `InvokeAgentTool` | One attempt | Agent/run/worker policy, applied uniformly to tools |
+| `RunToolInterceptor` | One attempt | Agent/worker policy |
 
 Three consequences people get wrong:
 
-- **`agent.RetryPolicy` is not LLM-only.** Rung 3 is shared. An agent-level policy set to tune model
-  retries also becomes the default for every tool on that agent and for the interceptor activity.
-  Only `DurableToolOptions.RetryPolicy` is tool-specific.
-- **`OneTimeAgentRun.RetryPolicy` is not LLM-only either.** On a scheduled or one-time run it
-  becomes the default for that run's tool and interceptor activities as well — a per-tool policy is
-  the only thing that outranks it. Setting it to tune a flaky model call silently re-times every
-  tool in the run.
-- **The backstop is not a worker default you can read back.** Rung 5 exists precisely *because*
-  rungs 1–4 are all unset. Leaving `opts.DefaultRetryPolicy` null does not mean "no retry policy" —
-  it means the library substitutes `MaximumAttempts = 5` in place of Temporal's server default of
-  `MaximumAttempts = 0`, which is **unlimited**. An unbounded retry on a permanently failing tool or
-  model call would otherwise never surface as a failure.
+- **`agent.RetryPolicy` applies to tools too.** Setting it to tune a flaky model call also makes
+  every registered tool retry with that policy. Do not opt in unless all tools on that agent can
+  safely tolerate retries.
+- **The default tool policy is not Temporal's server default.** Temporal interprets an omitted
+  policy as unlimited retries; MAF supplies a one-attempt policy instead. Setting an explicit agent
+  retry policy replaces that default for tool activities.
 
-The model backstop caps backoff at 2 seconds rather than 30 because an interactive `RunAsync` should
-return its terminal failure promptly; tool work gets the longer window so a transient dependency has
-a meaningful chance to recover.
+The model backstop caps backoff at 2 seconds so an interactive `RunAsync` returns its terminal
+failure promptly. Tools do not retry unless the agent explicitly opts in.
 
-Setting `DefaultRetryPolicy` or a per-agent `RetryPolicy` **replaces** the backstop rather than
-layering on it, so an explicit policy with `MaximumAttempts = 0` does restore unlimited retries.
+Setting a per-agent `RetryPolicy` **replaces** the default policy for tool activities, so an
+explicit policy with `MaximumAttempts = 0` restores Temporal's unlimited retries.
+
+`ApprovalRequiredAIFunction` markers from MAF are carried through the workflow boundary: the
+workflow requires accepted per-call approval before dispatch, and a direct tool activity call
+without that approval fails non-retryably. Tools may throw
+`DurableToolFailureException` only when they can guarantee failure occurred before any external
+effect; its bounded, sanitized message is returned to the model. Other tool failures propagate as
+activity failures and are not exposed as raw model content.
 
 If a turn terminates after a tool activity is dispatched, later model context receives a
 protocol-valid interrupted-turn projection: completed results remain paired with their calls,
@@ -129,9 +123,9 @@ not an audit log; verify an unknown effect with the downstream system before ret
 
 ## Split-deployment behavior
 
-In a split-deployment setup — where a client process uses `GetTemporalAgentProxy` without a full `AddDurableAgent` registration and the worker process hosts the agent via `AddDurableAgent` — the workflow starts without access to the worker's per-tool configuration. On the first `RunDurableAgentStep` call of each turn, the activity detects this state and resolves per-tool retry and timeout options from the worker's `DurableAgentRegistration` in memory, returning them as part of the step result. The workflow then uses these resolved options for all subsequent tool dispatches in that turn.
+In a split-deployment setup — where a client process uses `GetTemporalAgentProxy` without a full `AddDurableAgent` registration and the worker process hosts the agent via `AddDurableAgent` — the workflow starts without access to the worker's retry and timeout configuration. On the first `RunDurableAgentStep` call of each turn, the activity resolves the agent's retry policy and per-tool timeout options from the worker's registration and returns them as part of the step result.
 
-This means per-tool options set via `agent.AddTool(tool, opts => opts.NoRetry())` are honored correctly in split deployments — they do not need to be (and cannot be) configured on the client side.
+The worker's agent-level retry policy and per-tool timeouts are honored without duplicating them on the client side.
 
 ## Sample
 

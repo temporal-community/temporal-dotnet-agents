@@ -12,7 +12,8 @@ dotnet run --project samples/MAF/McpTools -- --dynamic
 The default mode builds tools from checked-in `Protocol.Tool` definitions. That avoids live
 `tools/list` changing the model surface, but it neither authenticates the MCP server nor proves its
 implementation is compatible. Exact ordinal lookup fails startup when a required sensitive tool is
-missing. `delete_inventory` is registered explicitly with `NoRetry` and workflow-parked approval;
+missing. `delete_inventory` is registered explicitly with workflow-parked approval; tool activities
+use one attempt by default;
 the server's unexpected `server_admin` tool is excluded.
 
 ## Prerequisites

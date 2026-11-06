@@ -19,8 +19,8 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// <summary>
 /// Long-lived Temporal workflow that acts as the durable backing store for an agent session.
 /// Drives the durable-agent dispatch loop: each LLM call is a separate <c>RunDurableAgentStep</c>
-/// activity, and each tool call is a separate <c>InvokeAgentTool</c> activity dispatched in
-/// parallel via <see cref="Workflow.WhenAllAsync{TResult}(IEnumerable{Task{TResult}})"/>.
+/// activity, and each tool call is a separate <c>InvokeAgentTool</c> activity dispatched
+/// serially in the order returned by the model.
 /// </summary>
 [Workflow("TemporalCommunity.Extensions.Agents.AgentWorkflow")]
 internal class AgentWorkflow :
@@ -556,7 +556,7 @@ internal class AgentWorkflow :
             StartToCloseTimeout = _input!.ActivityTimeout,
             HeartbeatTimeout = _input!.HeartbeatTimeout,
             Summary = AgentActivities.BuildActivitySummary(_input!.AgentName),
-            RetryPolicy = _input!.RetryPolicy,
+            RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(_input!.RetryPolicy),
             CancellationToken = turnActivityOptions.CancellationToken,
             CancellationType = turnActivityOptions.CancellationType,
         });
@@ -567,8 +567,7 @@ internal class AgentWorkflow :
     /// <summary>
     /// Durable-agent dispatch loop. Drives the alternation between
     /// <c>RunDurableAgentStepAsync</c> (one LLM call) and <c>InvokeAgentToolAsync</c> per tool
-    /// call. Tool calls within a single LLM response fan out via
-    /// <see cref="Workflow.WhenAllAsync{TResult}(IEnumerable{Task{TResult}})"/>; the loop
+    /// call. Tool calls within a single LLM response run serially in model order; the loop
     /// terminates when the LLM returns a final assistant message or when
     /// <see cref="DurableAgentBuilder.MaxToolCallsPerTurn"/> iterations are exceeded.
     /// </summary>
@@ -611,8 +610,16 @@ internal class AgentWorkflow :
                 SerializedStateBag = bagForStep,
                 SessionId = null,
                 NeedsWorkerSettingsResolution = needsResolution,
+                MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
+                PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
             };
 
+            TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                stepInput,
+                _input.MaximumTransportPayloadSizeBytes,
+                _input.PayloadCodecExpansionAllowanceBytes,
+                "model-step activity input");
             var stepResult = await Workflow.ExecuteActivityAsync(
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 stepActivityOptions).ConfigureAwait(true);
@@ -626,6 +633,26 @@ internal class AgentWorkflow :
                 {
                     CarriedStateBag = _currentStateBag,
                     ResolvedWorkerConfig = stepResult.ResolvedWorkerConfig,
+                };
+            }
+
+            if (stepResult.ApprovalRequiredToolNames is { Count: > 0 } markedTools)
+            {
+                var resolvedConfig = _input!.ResolvedWorkerConfig
+                    ?? throw new ApplicationFailureException(
+                        "Worker tool approval metadata was returned without resolved worker settings.",
+                        errorType: "DurableConfigurationException",
+                        nonRetryable: true);
+                var combinedApprovalTools = (resolvedConfig.RequiresApprovalTools ?? [])
+                    .Concat(markedTools)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                _input = _input with
+                {
+                    ResolvedWorkerConfig = resolvedConfig with
+                    {
+                        RequiresApprovalTools = combinedApprovalTools,
+                    },
                 };
             }
 
@@ -650,8 +677,8 @@ internal class AgentWorkflow :
                 totalUsage.TotalTokenCount = (totalUsage.TotalTokenCount ?? 0) + (stepResult.Usage.TotalTokenCount ?? 0);
             }
 
-            accumulated.Add(stepResult.AssistantMessage);
-            allTurnMessages.Add(stepResult.AssistantMessage);
+            accumulated.AddRange(stepResult.AssistantMessages);
+            allTurnMessages.AddRange(stepResult.AssistantMessages);
 
             if (stepResult.IsFinal || stepResult.ToolCalls is null || stepResult.ToolCalls.Count == 0)
             {
@@ -754,7 +781,7 @@ internal class AgentWorkflow :
                             ApprovalEvaluationTime = Workflow.UtcNow,
                         };
 
-                        // See also: DurableChatWorkflow.ExecutePattern3TurnAsync (MEAI path) — parallel typed dispatch
+                        // See also: DurableChatWorkflow.ExecutePattern3TurnAsync (MEAI path) — parallel interceptor dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
                             ApplyCurrentTurnCancellation(
@@ -778,11 +805,9 @@ internal class AgentWorkflow :
             // Safety invariant (BLOCK-4): NO tool activity is dispatched until ALL approval
             // waits in this turn are fully resolved. Proceed-outcome tool inputs are buffered
             // in pendingToolDispatches and dispatched in Phase 2.5, after the approval loop
-            // completes. This prevents a write-style tool (e.g. send_email, apply_refund) from
-            // executing concurrently with a human review window opened by another tool in the
-            // same turn.
+            // completes. No tool effect runs while a workflow-parked approval is outstanding.
             //
-            var toolTasks = new Task<InvokeAgentToolResult>?[toolCalls.Count];
+            var toolResults = new InvokeAgentToolResult?[toolCalls.Count];
             var syntheticResults = new string?[toolCalls.Count]; // null = real tool result
 
             // Buffered dispatches: populated during Phase 2, dispatched in Phase 2.5.
@@ -801,8 +826,8 @@ internal class AgentWorkflow :
             // registration, never serialized into ProxyResolvedWorkerConfig. So we always force the
             // Proceed-path tool bag: correctness over the marginal F1 saving. Tool calls are far
             // rarer than LLM steps and already do real activity work, so the extra bag payload is
-            // negligible. Computed ONCE here and shared across the whole Proceed fan-out (do not
-            // re-serialize per tool). The approved/PauseForApproval path (~L756) already forces.
+            // negligible. This initial snapshot is refreshed before each serial dispatch so the
+            // next tool observes the preceding tool's committed StateBag write-back.
             var bagForProceedTools = GetStateBagForDispatch(force: true);
 
             for (var i = 0; i < toolCalls.Count; i++)
@@ -830,9 +855,9 @@ internal class AgentWorkflow :
                             ToolName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
-                            // Forced above (bagForProceedTools) — a Proceed tool may read any
-                            // workflow-thread StateBag key; null-gating would starve it. Shared
-                            // across the whole fan-out, computed once.
+                            MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
+                            PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
+                            // Refreshed at dispatch time after prior serial tool results are applied.
                             SerializedStateBag = bagForProceedTools,
                         }, ResolveDurableToolActivityOptions(tc.Name)));
                         break;
@@ -914,6 +939,9 @@ internal class AgentWorkflow :
                                 ToolName = tc.Name,
                                 Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                                 CallId = tc.CallId,
+                                ApprovalAccepted = true,
+                                MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
+                                PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
                                 // Scope record may have been written above — always send the bag.
                                 SerializedStateBag = GetStateBagForDispatch(force: true),
                             }, ResolveDurableToolActivityOptions(tc.Name)));
@@ -939,47 +967,42 @@ internal class AgentWorkflow :
                 }
             }
 
-            // ── Phase 2.5: Dispatch all buffered tool activities ──────────────────────────
-            // All approval waits are resolved before any InvokeAgentTool activity starts.
+            // ── Phase 2.5: Dispatch buffered tool activities serially ───────────────────
+            // All approval waits are resolved before the first tool starts. Serial dispatch makes
+            // effect order explicit and lets each later tool observe earlier StateBag updates.
             ThrowIfCurrentTurnCancellationRequested();
             foreach (var (idx, input, opts) in pendingToolDispatches)
             {
-                toolTasks[idx] = Workflow.ExecuteActivityAsync(
-                    (AgentActivities a) => a.InvokeAgentToolAsync(input),
-                    ApplyCurrentTurnCancellation(opts));
-                MarkInterruptedToolCallDispatched(interruptedBatchIndex, idx);
-            }
-
-            // ── Phase 3: Wait for all dispatched tool activities ──────────────────────────
-            var pendingTasks = toolTasks
-                .Where(t => t is not null)
-                .Cast<Task<InvokeAgentToolResult>>()
-                .ToList();
-            InvokeAgentToolResult[]? toolResults;
-            try
-            {
-                toolResults = pendingTasks.Count > 0
-                    ? await Workflow.WhenAllAsync(pendingTasks).ConfigureAwait(true)
-                    : null;
-            }
-            catch
-            {
-                for (var i = 0; i < toolTasks.Length; i++)
+                var dispatchInput = new InvokeAgentToolInput
                 {
-                    if (toolTasks[i] is { IsCompletedSuccessfully: true } completedTask)
-                    {
-                        RecordInterruptedToolCallResult(
-                            interruptedBatchIndex,
-                            i,
-                            completedTask.Result.Result,
-                            wasDispatched: true);
-                    }
-                }
-
-                throw;
+                    AgentName = input.AgentName,
+                    ToolName = input.ToolName,
+                    Arguments = input.Arguments,
+                    CallId = input.CallId,
+                    ApprovalAccepted = input.ApprovalAccepted,
+                    MaximumTransportPayloadSizeBytes = input.MaximumTransportPayloadSizeBytes,
+                    PayloadCodecExpansionAllowanceBytes = input.PayloadCodecExpansionAllowanceBytes,
+                    SerializedStateBag = GetStateBagForDispatch(force: true),
+                };
+                TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    dispatchInput,
+                    dispatchInput.MaximumTransportPayloadSizeBytes,
+                    dispatchInput.PayloadCodecExpansionAllowanceBytes,
+                    "tool-activity input");
+                MarkInterruptedToolCallDispatched(interruptedBatchIndex, idx);
+                var toolResult = await Workflow.ExecuteActivityAsync(
+                    (AgentActivities a) => a.InvokeAgentToolAsync(dispatchInput),
+                    ApplyCurrentTurnCancellation(opts)).ConfigureAwait(true);
+                toolResults[idx] = toolResult;
+                RecordInterruptedToolCallResult(
+                    interruptedBatchIndex,
+                    idx,
+                    toolResult.Result,
+                    wasDispatched: true);
+                MergeStateBagWriteBacks([toolResult.UpdatedStateBag]);
             }
 
-            var completedResultIndex = 0;
             for (var i = 0; i < toolCalls.Count; i++)
             {
                 if (syntheticResults[i] is { } synthetic)
@@ -990,27 +1013,14 @@ internal class AgentWorkflow :
                         synthetic,
                         wasDispatched: false);
                 }
-                else if (toolTasks[i] is { IsCompletedSuccessfully: true }
-                         && toolResults is not null)
-                {
-                    RecordInterruptedToolCallResult(
-                        interruptedBatchIndex,
-                        i,
-                        toolResults[completedResultIndex++].Result,
-                        wasDispatched: true);
-                }
             }
 
             ThrowIfCurrentTurnCancellationRequested();
 
             // Assemble final results in original order.
-            // X-1: also collect each tool's StateBag write-back, slotted by tool-call index so
-            // the post-fan-out merge is deterministic (later index wins) regardless of which
-            // activity completed first. toolResults is in ascending tool-call-index order
-            // (pendingTasks was built by iterating toolTasks[] in index order).
+            // Tool results are already applied in call order; preserve that order in the model
+            // transcript even when some calls were blocked or denied.
             var functionResultContents = new List<AIContent>(toolCalls.Count);
-            var toolStateBagWriteBacks = new JsonElement?[toolCalls.Count];
-            var pendingIdx = 0;
             for (var i = 0; i < toolCalls.Count; i++)
             {
                 if (syntheticResults[i] is { } synthetic)
@@ -1024,10 +1034,8 @@ internal class AgentWorkflow :
                         synthetic,
                         wasDispatched: false);
                 }
-                else if (toolResults is not null && pendingIdx < toolResults.Length)
+                else if (toolResults[i] is { } toolResult)
                 {
-                    var toolResult = toolResults[pendingIdx++];
-                    toolStateBagWriteBacks[i] = toolResult.UpdatedStateBag;
                     // S-X-6: toolResult.Result crosses the activity boundary as a JsonElement
                     // (declared object?), so FunctionResultContent.Result holds a JsonElement here,
                     // not the tool's domain type. Accepted limitation — see InvokeAgentToolResult.Result.
@@ -1041,11 +1049,6 @@ internal class AgentWorkflow :
                         wasDispatched: true);
                 }
             }
-
-            // X-1: merge tool StateBag mutations back in tool-call index order. The merge is
-            // post-result and does NOT re-run any tool, so .NoRetry() write tools are not
-            // double-executed by this step.
-            MergeStateBagWriteBacks(toolStateBagWriteBacks);
 
             var toolResultMessage = new ChatMessage(ChatRole.Tool, functionResultContents);
             accumulated.Add(toolResultMessage);

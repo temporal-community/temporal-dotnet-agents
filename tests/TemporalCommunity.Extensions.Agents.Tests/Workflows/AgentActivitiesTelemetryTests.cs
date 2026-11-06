@@ -124,7 +124,7 @@ public class AgentActivitiesTelemetryTests
 
         if (cancellation)
         {
-            await Assert.ThrowsAsync<OperationCanceledException>(() =>
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
                 RunActivityAsync(activities, "FailedAttemptAgent", "corr-cancelled"));
         }
         else
@@ -262,21 +262,15 @@ public class AgentActivitiesTelemetryTests
         AIAgent inner,
         ActivitySource source) : DelegatingAIAgent(inner)
     {
-        protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        protected override async Task<AgentResponse> RunCoreAsync(
             IEnumerable<ChatMessage> messages,
             AgentSession? session = null,
             AgentRunOptions? options = null,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default)
         {
             using var activity = source.StartActivity("custom.middleware");
-            await foreach (var update in base.RunCoreStreamingAsync(
-                messages,
-                session,
-                options,
-                cancellationToken))
-            {
-                yield return update;
-            }
+            return await base.RunCoreAsync(messages, session, options, cancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
@@ -285,8 +279,23 @@ public class AgentActivitiesTelemetryTests
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException("activities use streaming");
+            CancellationToken cancellationToken = default)
+        {
+            if (fail)
+            {
+                return Task.FromException<ChatResponse>(new InvalidOperationException("provider failure"));
+            }
+
+            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "hello"))
+            {
+                Usage = new UsageDetails
+                {
+                    InputTokenCount = 11,
+                    OutputTokenCount = 7,
+                    TotalTokenCount = 18,
+                },
+            });
+        }
 
         public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,

@@ -13,7 +13,7 @@ A consolidated reference of common mistakes and best practices when building wit
 5. [Observability](#observability)
 6. [Testing](#testing)
 7. [Security and Configuration](#security-and-configuration)
-8. [Per-Tool Activity Configuration](#per-tool-activity-configuration)
+8. [Tool Activity Ordering and Retries](#tool-activity-ordering-and-retries)
 9. [Scheduling](#scheduling)
 
 ---
@@ -417,7 +417,7 @@ opts.AddDurableAgent("Assistant", agent =>
 });
 ```
 
-**Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. Do not add `UseFunctionInvocation()`; the workflow owns durable tool dispatch, and a `FunctionInvokingChatClient` in that chain now fails the activity non-retryably before the model is called. See [Intercepting LLM Calls](./llm-call-interception.md) for the full guide — note that a durable agent only ever calls `GetStreamingResponseAsync` on your decorator.
+**Why:** Per-LLM-call observability is a different problem from per-tool durability. Adding a logging decorator changes nothing about Temporal's checkpoint shape; it just adds round-level detail to your existing telemetry. Do not add `UseFunctionInvocation()`; the workflow owns durable tool dispatch, and a `FunctionInvokingChatClient` in that chain now fails the activity non-retryably before the model is called. See [Intercepting LLM Calls](./llm-call-interception.md) for the full guide — durable calls use `GetResponseAsync`.
 
 ### Do pre-register search attributes, or explicitly opt out
 
@@ -539,37 +539,29 @@ All samples load secrets from `dotnet user-secrets`, which stores values in `~/.
 
 ---
 
-## Per-Tool Activity Configuration
+## Tool Activity Ordering and Retries
 
-### Do call `opts.NoRetry()` on write-style tools
+### Do rely on the one-attempt default for effectful tools
 
 ```csharp
 opts.AddDurableAgent("SupportAgent", agent =>
 {
     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
 
-    // Write tool — non-idempotent, must not double-fire on retry.
-    agent.AddTool(sendEmailTool, opts => opts.NoRetry().WithTimeout(TimeSpan.FromSeconds(30)));
-
-    // Read tool — idempotent, inherits worker default retry policy.
+    // Both tools use one activity attempt by default.
+    agent.AddTool(sendEmailTool);
     agent.AddTool(lookupOrderTool);
 });
 ```
 
-**Why:** Every tool in a durable agent is dispatched as a separate Temporal activity (`InvokeAgentTool`). A transient activity failure normally retries — for a non-idempotent write tool that already had a side effect, the retry would fire the side effect a second time. `opts.NoRetry()` is sugar for `RetryPolicy = new() { MaximumAttempts = 1 }`, which tells Temporal not to re-execute the activity. Per-tool options are keyed by the **registered** tool name, which is why the two `AddTool` overloads differ here: with `AddTool(AIFunction tool, ...)` the key *is* `tool.Name`, so there is no separate string to get wrong. With `AddTool(string name, Func<IServiceProvider, AIFunction> factory, ...)` the declared name and the factory's resolved `AIFunction.Name` are checked against each other at first dispatch, and a mismatch throws a non-retryable `DurableConfigurationException` — not at build time, but loudly and without burning the retry budget. What it is *not* is a silent fall-through to the default retry policy. See [Durable Agents](./durable-agents.md).
+**Why:** Tool calls are separate `InvokeAgentTool` activities and execute serially in model order. Each activity gets one attempt by default. A failed write can still have an uncertain external outcome, so do not blindly retry it; use an idempotency key and reconcile with the system of record. Setting `agent.RetryPolicy` opts every tool on that agent into the same retry policy, so only do that when all of them are retry-safe. See [Durable Agents](./durable-agents.md).
 
-### Do use `Workflow.WhenAllAsync` for parallel activity fan-out
+### Do not fan out calls from one model response
 
-```csharp
-var tasks = toolCalls.Select(tc =>
-    Workflow.ExecuteActivityAsync(
-        (AgentActivities a) => a.InvokeAgentToolAsync(BuildInput(tc)),
-        ResolveToolActivityOptions(tc.Name))).ToList();
-
-var results = await Workflow.WhenAllAsync(tasks);
-```
-
-**Why:** `Workflow.WhenAllAsync` is the workflow-safe combinator and preserves input order — `results[i]` corresponds to `tasks[i]`, which lets you correlate fan-out activity results to the requests that produced them without a side lookup. The durable-agent loop in `AgentWorkflow` uses exactly this pattern.
+The durable-agent loop invokes one tool activity at a time, applying its result and StateBag
+write-back before dispatching the next call. Keep calls in model order; do not replace this with
+`Workflow.WhenAllAsync`. Use `WorkflowAgents.ExecuteAgentsInParallelAsync` only for independent
+agent conversations, each with its own session.
 
 ---
 
@@ -608,7 +600,7 @@ Use `ScheduleHandle.UpdateAsync`, or delete the schedule and restart the worker.
 | Don't call `ActivitySource.StartActivity()` in workflows | Determinism | Fatal |
 | Use `Workflow.WhenAllAsync`, not `Task.WhenAll`, in workflows | Determinism | Convention |
 | Don't use `ConfigureAwait(false)` in `[Workflow]` code | Determinism | Workflow scheduler is lost |
-| Pass `opts => opts.NoRetry()` to `agent.AddTool` for write tools | Per-tool retry | Non-idempotent re-execution |
+| Leave tool retry unset for effectful tools | One attempt by default | Uncertain external-effect outcomes |
 | Register all 4 OTel sources | Observability | Silent data loss |
 | Set `ActivityTimeout` for HITL | Timeouts | Activity failure |
 | Don't reuse `TemporalAIAgent` instances | Sessions | Incorrect behavior |
@@ -626,7 +618,7 @@ Use `ScheduleHandle.UpdateAsync`, or delete the schedule and restart the worker.
 - [Intercepting LLM Calls](./llm-call-interception.md) — chat-client decorators via `agent.ChatClient`, and agent middleware via `ConfigureAgentPipeline`
 - [Testing Agents](./testing-agents.md) — test patterns and fixtures
 - [Scheduling](./scheduling.md) — schedule lifecycle and pitfalls
-- [Durable Agents](./durable-agents.md) — per-tool retry pattern, `opts.NoRetry()` sugar, iteration cap
+- [Durable Agents](./durable-agents.md) — serial tool dispatch, one-attempt default, agent-level retry opt-in, iteration cap
 
 ---
 

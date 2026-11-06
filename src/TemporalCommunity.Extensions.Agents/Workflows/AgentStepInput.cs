@@ -11,8 +11,7 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// Input for the <c>RunDurableAgentStepAsync</c> activity used by durable-agent workflows.
 /// Each call produces either a final assistant message or a list of pending
 /// <see cref="FunctionCallContent"/> items that the workflow then dispatches as separate
-/// <c>InvokeAgentToolAsync</c> activities (one per tool call, fanned out via
-/// <see cref="Temporalio.Workflows.Workflow.WhenAllAsync{TResult}(IEnumerable{Task{TResult}})"/>).
+/// <c>InvokeAgentToolAsync</c> activities (one per tool call, serially in model order).
 /// </summary>
 internal sealed class AgentStepInput
 {
@@ -64,4 +63,10 @@ internal sealed class AgentStepInput
     /// Defaults to <see langword="false"/> for all existing callers.
     /// </summary>
     public bool NeedsWorkerSettingsResolution { get; init; }
+
+    /// <summary>Maximum serialized activity payload size, including codec expansion allowance.</summary>
+    public int MaximumTransportPayloadSizeBytes { get; init; } = 1024 * 1024;
+
+    /// <summary>Allowance reserved for payload codec expansion.</summary>
+    public int PayloadCodecExpansionAllowanceBytes { get; init; }
 }

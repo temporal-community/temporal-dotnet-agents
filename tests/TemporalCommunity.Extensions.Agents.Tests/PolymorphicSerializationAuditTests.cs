@@ -243,7 +243,7 @@ public class PolymorphicSerializationAuditTests
         var result = new AgentStepResult
         {
             IsFinal = true,
-            AssistantMessage = new ChatMessage(ChatRole.Assistant, "test"),
+            AssistantMessages = [new ChatMessage(ChatRole.Assistant, "test")],
             Usage = new UsageDetails
             {
                 InputTokenCount = 100,
@@ -269,22 +269,27 @@ public class PolymorphicSerializationAuditTests
     }
 
     [Fact]
-    public void Audit_AgentStepResult_AssistantMessage_RoundTrip()
+    public void Audit_AgentStepResult_AssistantMessages_RoundTrip()
     {
         var result = new AgentStepResult
         {
             IsFinal = true,
-            AssistantMessage = new ChatMessage(ChatRole.Assistant,
-                [new TextContent("final answer"), new TextReasoningContent("because")]),
+            AssistantMessages =
+            [
+                new ChatMessage(ChatRole.Assistant,
+                    [new TextContent("intermediate"), new TextReasoningContent("because")]),
+                new ChatMessage(ChatRole.Assistant, "final answer"),
+            ],
             Usage = new UsageDetails { InputTokenCount = 5, OutputTokenCount = 7 },
         };
 
         var roundTripped = RoundTrip(result);
 
         Assert.True(roundTripped.IsFinal);
-        Assert.Equal(2, roundTripped.AssistantMessage.Contents.Count);
-        Assert.IsType<TextContent>(roundTripped.AssistantMessage.Contents[0]);
-        Assert.IsType<TextReasoningContent>(roundTripped.AssistantMessage.Contents[1]);
+        Assert.Equal(2, roundTripped.AssistantMessages.Count);
+        Assert.Equal("intermediate", roundTripped.AssistantMessages[0].Text);
+        Assert.IsType<TextReasoningContent>(roundTripped.AssistantMessages[0].Contents[1]);
+        Assert.Equal("final answer", roundTripped.AssistantMessages[1].Text);
         Assert.NotNull(roundTripped.Usage);
         Assert.Equal(5, roundTripped.Usage!.InputTokenCount);
     }
@@ -295,10 +300,13 @@ public class PolymorphicSerializationAuditTests
         var result = new AgentStepResult
         {
             IsFinal = false,
-            AssistantMessage = new ChatMessage(ChatRole.Assistant,
-                [new FunctionCallContent(callId: "cid-1", name: "f1"),
-                 new FunctionCallContent(callId: "cid-2", name: "f2",
-                    arguments: new Dictionary<string, object?> { ["x"] = "y" })]),
+            AssistantMessages =
+            [
+                new ChatMessage(ChatRole.Assistant, [new FunctionCallContent(callId: "cid-1", name: "f1")]),
+                new ChatMessage(ChatRole.Assistant,
+                    [new FunctionCallContent(callId: "cid-2", name: "f2",
+                        arguments: new Dictionary<string, object?> { ["x"] = "y" })]),
+            ],
             ToolCalls = new List<FunctionCallContent>
             {
                 new(callId: "cid-1", name: "f1"),
@@ -324,7 +332,7 @@ public class PolymorphicSerializationAuditTests
         var result = new AgentStepResult
         {
             IsFinal = true,
-            AssistantMessage = new ChatMessage(ChatRole.Assistant, "ok"),
+            AssistantMessages = [new ChatMessage(ChatRole.Assistant, "ok")],
             UpdatedStateBag = bag,
         };
 

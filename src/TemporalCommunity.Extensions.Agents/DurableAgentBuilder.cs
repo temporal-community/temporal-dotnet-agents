@@ -184,7 +184,7 @@ public sealed class DurableAgentBuilder
 
     /// <summary>
     /// Gets or sets the maximum number of LLM-step iterations within a single agent turn. Each
-    /// iteration may dispatch a parallel batch of tool activities. When the cap is exceeded the
+    /// iteration may dispatch a serial batch of tool activities. When the cap is exceeded the
     /// workflow returns a structured error response. Defaults to <c>20</c>.
     /// </summary>
     /// <remarks>
@@ -388,8 +388,9 @@ public sealed class DurableAgentBuilder
     /// call, preventing downstream providers from seeing stale tool lists.
     /// </para>
     /// <para>
-    /// <b>Non-idempotent tools MUST set <c>Configure = opts =&gt; opts.NoRetry()</c></b>
-    /// to prevent double-execution on activity retry.
+    /// Tool activities use one attempt by default. Setting this agent's
+    /// <see cref="RetryPolicy"/> opts every tool on the agent into retries; do so only when all
+    /// tools are safe to repeat or use downstream idempotency keys.
     /// </para>
     /// </remarks>
     public DurableAgentBuilder AddContextProvider(

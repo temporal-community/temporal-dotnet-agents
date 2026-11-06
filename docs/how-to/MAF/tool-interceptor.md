@@ -25,7 +25,7 @@ A pre-tool lifecycle hook that runs as a Temporal activity before each `InvokeAg
 
 ## What it is
 
-When an agent turn produces tool calls, the workflow dispatches a `RunToolInterceptor` activity for each one — in parallel, before dispatching any `InvokeAgentTool` activity. The interceptor runs as a proper Temporal activity, so it can do I/O: database lookups, external API calls, risk scoring services. Its result is recorded in workflow history. On replay, the activity is not re-executed.
+When an agent turn produces tool calls, the workflow dispatches a `RunToolInterceptor` activity for each one — in parallel, before dispatching any `InvokeAgentTool` activity. The tool activities themselves then run serially in model order. The interceptor runs as a proper Temporal activity, so it can do I/O: database lookups, external API calls, risk scoring services. Its result is recorded in workflow history. On replay, the activity is not re-executed.
 
 This is different from the in-tool HITL path (`TemporalAgentContext.Current.RequestApprovalAsync`), which fires after a tool has already started. The interceptor fires before the tool activity is dispatched at all.
 
@@ -313,7 +313,7 @@ builder.Services
                 "cancel_order",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<OrderService>().CancelOrder, name: "cancel_order"),
-                opts => opts.NoRetry());
+                opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
         });
     });
 ```
@@ -350,7 +350,6 @@ agent.AddTool(
     sp => AIFunctionFactory.Create(
         sp.GetRequiredService<DataService>().WriteRecord, name: "write_record"),
     opts => opts
-        .NoRetry()
         .WithInterceptorTimeout(TimeSpan.FromSeconds(10)));  // interceptor gets 10s
         // tool's own StartToCloseTimeout still falls through agent.ActivityTimeout
         // to opts.DefaultActivityTimeout
@@ -475,7 +474,7 @@ The tool receives the token instead of the raw SSN. `ModifiedArguments` affects 
 
 - [Durable Agents](./durable-agents.md) — per-tool activity configuration, `DurableToolOptions` reference
 - [HITL Patterns](./hitl-patterns.md) — reviewer-side approval flow, `ResolveApprovalAsync`, and approval-pattern comparison
-- [Usage Guide — Per-Tool Activity Configuration](./usage.md#per-tool-activity-configuration)
+- [Usage Guide — Tool Activity Ordering and Retry Policy](./usage.md#tool-activity-ordering-and-retry-policy)
 - [`samples/MAF/ToolInterceptor/`](../../../samples/MAF/ToolInterceptor/) — runnable sample: all four decision paths + `RequireApproval()` in a refund-agent scenario
 
 ---

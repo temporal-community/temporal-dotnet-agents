@@ -4,7 +4,7 @@ How to get in front of the model call a durable agent makes — to log prompts a
 requests, capture token usage, emit custom telemetry, or rewrite payloads in flight.
 
 **The short answer:** return a decorated `IChatClient` from `agent.ChatClient`, and put your logic in
-`GetStreamingResponseAsync`. Every LLM call flows through it.
+`GetResponseAsync`. Every durable LLM call flows through it.
 
 The rest of this page covers which of the two interception layers you want, the one trap that makes
 decorators look broken, and how to diagnose it when they do.
@@ -17,7 +17,7 @@ There are two places to intercept, plus a third mechanism people often arrive he
 
 | I want to see… | Use | Covered |
 |---|---|---|
-| Raw model transport — streaming updates as they arrive, tokens, finish reason, provider payload | Decorate the `IChatClient` returned from `agent.ChatClient` | [below](#the-chat-client-layer) |
+| Raw model transport — request, complete response, tokens, finish reason, provider payload | Decorate the `IChatClient` returned from `agent.ChatClient` | [below](#the-chat-client-layer) |
 | One event wrapping the whole agent run for the step, with the durable session in hand | `agent.ConfigureAgentPipeline` with a `DelegatingAIAgent` | [below](#the-agent-middleware-layer) |
 | Tool names, arguments, or a gate before a tool runs | `IAgentToolInterceptor` | [tool-interceptor.md](./tool-interceptor.md) |
 
@@ -30,11 +30,11 @@ RunDurableAgentStep activity
 ├─ resolves the chat client and context providers from a per-attempt DI scope
 ├─ invokes the context providers, chaining each one's output into the next
 ├─ builds the augmented messages and the effective ChatOptions / ChatClientAgentRunOptions
-└─ agent.RunStreamingAsync(augmentedMessages, session, runOptions, ct)
+└─ agent.RunAsync(augmentedMessages, session, runOptions, ct)
      └─ your ConfigureAgentPipeline middleware   ← outermost; receives the restored durable session
          └─ TemporalSessionBoundaryAgent         ← library-owned session boundary
              └─ ChatClientAgent                  ← constructed with AIContextProviders = null
-                 └─ your IChatClient decorator   ← provider-level transport and streaming updates
+                 └─ your IChatClient decorator   ← provider-level request and response
                      └─ provider client (OpenAI, Azure, …)
 ```
 
@@ -47,48 +47,41 @@ So the choice between layers is not "before or after providers." It is:
 
 - **Agent middleware** wraps the agent run for the step and has the restored `TemporalAgentSession`.
   Use it for run-level spans, and for retry-safe StateBag work.
-- **Chat-client decorator** sits at the transport boundary. Use it when you need the streaming
-  updates themselves, token usage, finish reason, or anything about how the provider call behaved.
+- **Chat-client decorator** sits at the transport boundary. Use it for request/response telemetry,
+  token usage, finish reason, or provider metadata.
 
 ---
 
 ## The chat-client layer
 
-### Only `GetStreamingResponseAsync` is ever called
+### Durable calls use `GetResponseAsync`
 
 This is the single thing most likely to cost you an afternoon.
 
-The durable path invokes the model through `agent.RunStreamingAsync(...)`
-(`AgentActivities.cs`, in `RunDurableAgentStepAsync`). Your `IChatClient` therefore only ever sees
-**`GetStreamingResponseAsync`**. A decorator that puts its logging in `GetResponseAsync` is
-constructed, is wired correctly, and logs nothing — which reads exactly like "my decorator isn't
-running."
+The durable path invokes the model through non-streaming `agent.RunAsync(...)`
+(`AgentActivities.cs`, in `RunDurableAgentStepAsync`). Your `IChatClient` therefore sees
+**`GetResponseAsync`**. Streaming through MAF `RunStreamingAsync` is not supported.
 
-Put your telemetry in the streaming override. Override `GetResponseAsync` too if you like, for
-direct callers, but do not rely on it here.
+Put your telemetry in `GetResponseAsync`. A decorator that only overrides
+`GetStreamingResponseAsync` does not observe durable model calls. The returned `ChatResponse`
+contains the complete response, including usage and provider metadata exposed by MEAI.
 
 ### A logging decorator
 
 ```csharp
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 
 internal sealed class AuditingChatClient(IChatClient inner, ILogger<AuditingChatClient> logger)
     : DelegatingChatClient(inner)
 {
-    public override async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         var stopwatch = Stopwatch.StartNew();
-        var updates = new List<ChatResponseUpdate>();
-
-        // Pessimistic default: if we never reach the end of the stream and nothing threw, the
-        // consumer stopped enumerating.
-        var outcome = "consumer-stopped";
 
         // `messages` carries user content and system instructions — redact before shipping this
         // anywhere you would not put PII.
@@ -97,81 +90,33 @@ internal sealed class AuditingChatClient(IChatClient inner, ILogger<AuditingChat
             messages.Count(),
             options?.Tools?.Count ?? 0);
 
-        var stream = base.GetStreamingResponseAsync(messages, options, cancellationToken)
-            .GetAsyncEnumerator(cancellationToken);
         try
         {
-            while (true)
-            {
-                // `yield return` cannot live inside a try/catch, so the catch wraps only the
-                // advance. This is what lets the outcome distinguish a fault from a cancellation
-                // from a consumer that simply stopped reading.
-                ChatResponseUpdate update;
-                try
-                {
-                    if (!await stream.MoveNextAsync())
-                    {
-                        outcome = "completed";
-                        break;
-                    }
-
-                    update = stream.Current;
-                }
-                catch (OperationCanceledException)
-                {
-                    outcome = "canceled";
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    outcome = "faulted";
-                    logger.LogError(ex,
-                        "LLM call failed after {DurationMs}ms", stopwatch.ElapsedMilliseconds);
-                    throw;
-                }
-
-                updates.Add(update);
-                yield return update;
-            }
+            var response = await base.GetResponseAsync(messages, options, cancellationToken)
+                .ConfigureAwait(false);
+            logger.LogInformation(
+                "LLM response completed: duration={DurationMs}ms, input_tokens={Input}, " +
+                "output_tokens={Output}, total_tokens={Total}, finish_reason={FinishReason}",
+                stopwatch.ElapsedMilliseconds,
+                response.Usage?.InputTokenCount,
+                response.Usage?.OutputTokenCount,
+                response.Usage?.TotalTokenCount,
+                response.FinishReason);
+            return response;
         }
-        finally
+        catch (OperationCanceledException)
         {
-            await stream.DisposeAsync();
-
-            // Only a completed stream yields a trustworthy aggregate. Usage and finish reason are
-            // absent or partial in every other terminal state, so do not report them as a result.
-            if (outcome == "completed")
-            {
-                var response = updates.ToChatResponse();
-                logger.LogInformation(
-                    "LLM response completed: duration={DurationMs}ms, input_tokens={Input}, " +
-                    "output_tokens={Output}, total_tokens={Total}, finish_reason={FinishReason}",
-                    stopwatch.ElapsedMilliseconds,
-                    response.Usage?.InputTokenCount,
-                    response.Usage?.OutputTokenCount,
-                    response.Usage?.TotalTokenCount,
-                    response.FinishReason);
-            }
-            else
-            {
-                logger.LogWarning(
-                    "LLM call ended without completing: outcome={Outcome}, " +
-                    "duration={DurationMs}ms, partial_updates={Count}",
-                    outcome, stopwatch.ElapsedMilliseconds, updates.Count);
-            }
+            logger.LogWarning("LLM call canceled after {DurationMs}ms", stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "LLM call failed after {DurationMs}ms", stopwatch.ElapsedMilliseconds);
+            throw;
         }
     }
 }
 ```
-
-The `finally` runs on **every** terminal path — success, provider fault, cancellation, and a consumer
-that stops enumerating early. Emitting one unconditional "LLM response" event from it would report a
-partial or empty aggregate as if it were a result, and would hide failures behind a success-shaped
-log line. Use `finally` for duration and cleanup; record the outcome explicitly.
-
-`ChatResponseUpdate` fragments aggregate into a single `ChatResponse` via
-`ToChatResponse()`, which is where `Usage` and `FinishReason` become available — they are not on the
-individual updates.
 
 > **`options?.ModelId` is usually null.** The library clones `registration.ChatOptions` and never
 > sets `ModelId`; the canonical registration pins the model on the provider client instead (see
@@ -276,7 +221,7 @@ That exact line is live in `samples/MAF/MultiAgentRouting/Program.cs`.
 ### Writing custom middleware
 
 The wrapper must derive from `DelegatingAIAgent`, preserve the exact supplied `inner` through
-`base(inner)`, and delegate both run shapes it customizes:
+`base(inner)`, and delegate the non-streaming run:
 
 ```csharp
 sealed class TimingAgent(AIAgent inner, ILogger<TimingAgent> logger)
@@ -300,27 +245,6 @@ sealed class TimingAgent(AIAgent inner, ILogger<TimingAgent> logger)
         }
     }
 
-    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
-        IEnumerable<ChatMessage> messages,
-        AgentSession? session = null,
-        AgentRunOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var started = Stopwatch.GetTimestamp();
-        try
-        {
-            await foreach (var update in base.RunCoreStreamingAsync(
-                messages, session, options, cancellationToken))
-            {
-                yield return update;
-            }
-        }
-        finally
-        {
-            logger.LogInformation("Agent stream completed in {Elapsed}",
-                Stopwatch.GetElapsedTime(started));
-        }
-    }
 }
 
 agent.ConfigureAgentPipeline = pipeline =>
@@ -328,8 +252,7 @@ agent.ConfigureAgentPipeline = pipeline =>
         new TimingAgent(inner, services.GetRequiredService<ILogger<TimingAgent>>()));
 ```
 
-Note the durable agent only ever streams (see [above](#only-getstreamingresponseasync-is-ever-called)),
-so `RunCoreStreamingAsync` is the override that fires — the same trap as the chat-client layer.
+The durable agent calls `RunAsync`, so `RunCoreAsync` is the override that fires.
 
 ### Rules the library enforces
 
@@ -352,20 +275,17 @@ persist retry-safe state in its `StateBag`, but must hand that same object to `n
 ```csharp
 sealed class AttemptCountingAgent(AIAgent inner) : DelegatingAIAgent(inner)
 {
-    protected override async IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+    protected override async Task<AgentResponse> RunCoreAsync(
         IEnumerable<ChatMessage> messages,
         AgentSession? session = null,
         AgentRunOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         var durable = (TemporalAgentSession)session!;
         // Read/write a JSON-serializable StateBag value here. The activity persists the bag.
 
-        await foreach (var update in base.RunCoreStreamingAsync(
-            messages, durable, options, cancellationToken))
-        {
-            yield return update;
-        }
+        return await base.RunCoreAsync(
+            messages, durable, options, cancellationToken).ConfigureAwait(false);
     }
 }
 ```
@@ -435,7 +355,7 @@ Each `RunDurableAgentStep` activity attempt then:
 3. Builds a `ChatClientAgent` with `UseProvidedChatClientAsIs = true`, so MAF does **not** auto-inject
    `FunctionInvokingChatClient` — the workflow owns tool dispatch.
 4. Applies your `ConfigureAgentPipeline` middleware and the library's session boundary around it.
-5. Calls `agent.RunStreamingAsync(...)` with one freshly built `ChatOptions` for the step.
+5. Calls `agent.RunAsync(...)` with one freshly built `ChatOptions` for the step.
 6. Disposes the pipeline at the end of the attempt.
 
 Three loops drive this, and your decorator fires under all of them: `AgentWorkflow` (sessions),
@@ -460,10 +380,9 @@ duplicated tools, instructions, or stop sequences. Per-request tool filtering
 
 | Symptom | Cause |
 |---|---|
-| Decorator is constructed, but logs nothing | Logging lives in `GetResponseAsync`. The durable path only calls `GetStreamingResponseAsync`. |
-| Streaming logs the request but never the completion | Completion logging sits after the `await foreach` instead of in a `finally`; an early break or a fault skips it. |
+| Decorator is constructed, but logs nothing | The durable path calls `GetResponseAsync`; a decorator that only overrides `GetStreamingResponseAsync` does not observe it. |
 | `model=` is always empty | `options.ModelId` is not set by the library — the model is pinned on the provider client. |
-| Usage and finish reason are always null | Read from `updates.ToChatResponse()`, not from individual `ChatResponseUpdate` values. |
+| Usage and finish reason are always null | Read them from the complete `ChatResponse` returned by `GetResponseAsync`. |
 | Duplicate log lines for one user message | Expected: one entry per LLM round, plus a fresh set per activity retry. |
 | Activity fails once and does not retry; `ApplicationFailureException` with `ErrorType` `DurableConfigurationException` | `.UseFunctionInvocation()` is in your chat-client chain. The nested cause is an `ApplicationFailureException` with `ErrorType` `DurableFunctionInvocationConflictException`. Remove it — see the warning above. |
 | Decorator never constructed at all | `agent.ChatClient` is returning a different client than the one you decorated. Check the factory, not the DI registration. |

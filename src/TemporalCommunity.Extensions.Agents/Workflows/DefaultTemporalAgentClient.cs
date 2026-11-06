@@ -9,6 +9,7 @@ using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
 using Temporalio.Workflows;
@@ -341,15 +342,13 @@ internal sealed class DefaultTemporalAgentClient(
         var perAgentActivityTimeout = registration.ActivityTimeout ?? options.DefaultActivityTimeout;
         var perAgentHeartbeatTimeout = registration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
         var perAgentApprovalTimeout = registration.ApprovalTimeout ?? options.DefaultApprovalTimeout;
-        // Bounded backstop: when neither the per-agent nor worker-level policy is set, use a
-        // bounded default (MaximumAttempts = 5) instead of null. A null RetryPolicy is transmitted
-        // as the server default (unlimited retries), which lets an unrecoverable LLM error loop
-        // forever and hang the agent workflow. See TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.
+        // Model steps keep the bounded retry backstop. Tool activities instead make one attempt
+        // unless the agent explicitly opts in through its per-agent RetryPolicy.
         var configuredRetryPolicy = registration.RetryPolicy ?? options.DefaultRetryPolicy;
         var perAgentModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
             configuredRetryPolicy);
-        var perAgentToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
-            configuredRetryPolicy);
+        var perAgentToolRetryPolicy =
+            TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(registration.RetryPolicy);
         var perAgentMaxEntryCount = registration.MaxEntryCount ?? options.DefaultMaxEntryCount;
         var modelContextBudget = AgentModelContextBudget.Resolve(registration, options);
         var perAgentHistoryReducerKey = registration.HistoryReducerKey ?? options.DefaultHistoryReducerKey;
@@ -557,8 +556,8 @@ internal sealed class DefaultTemporalAgentClient(
         var configuredRetryPolicy = retryPolicyOverride ?? options.DefaultRetryPolicy;
         var effectiveModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
             configuredRetryPolicy);
-        var effectiveToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
-            configuredRetryPolicy);
+        var effectiveToolRetryPolicy =
+            TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(null);
         Dictionary<string, ActivityOptions>? toolActivityOptions = null;
         ActivityOptions? interceptorActivityOpts = null;
         Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
@@ -575,8 +574,8 @@ internal sealed class DefaultTemporalAgentClient(
             configuredRetryPolicy = retryPolicyOverride ?? registration.RetryPolicy ?? options.DefaultRetryPolicy;
             effectiveModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
                 configuredRetryPolicy);
-            effectiveToolRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
-                configuredRetryPolicy);
+            effectiveToolRetryPolicy =
+                TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(registration.RetryPolicy);
             toolActivityOptions = BuildDurableAgentToolActivityOptions(
                 registration, effectiveActivityTimeout, effectiveHeartbeatTimeout, effectiveToolRetryPolicy);
 
@@ -729,12 +728,36 @@ internal sealed class DefaultTemporalAgentClient(
             {
                 StartToCloseTimeout = toolOpts.StartToCloseTimeout ?? defaultActivityTimeout,
                 HeartbeatTimeout = toolOpts.HeartbeatTimeout ?? defaultHeartbeatTimeout,
-                RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
-                    toolOpts.RetryPolicy ?? defaultRetryPolicy),
+                RetryPolicy = ResolveToolRetryPolicy(toolOpts, defaultRetryPolicy, tool.Name),
                 Summary = tool.Name,
             };
         }
 
         return result;
+    }
+
+    private static RetryPolicy ResolveToolRetryPolicy(
+        DurableToolOptions toolOptions,
+        RetryPolicy? perAgentRetryPolicy,
+        string toolName)
+    {
+        if (toolOptions.RetryPolicy is { } perToolRetryPolicy)
+        {
+            if (perToolRetryPolicy.MaximumAttempts != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Tool '{toolName}' configures per-tool retries. Configure DurableAgentBuilder.RetryPolicy instead; " +
+                    "that policy applies to every tool on the agent.");
+            }
+
+            if (perAgentRetryPolicy is { MaximumAttempts: > 1 })
+            {
+                throw new InvalidOperationException(
+                    $"Tool '{toolName}' disables retries while the agent has an explicit retry policy. " +
+                    "Tool retry behavior must be consistent across the agent; remove the per-tool retry setting.");
+            }
+        }
+
+        return TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(perAgentRetryPolicy);
     }
 }

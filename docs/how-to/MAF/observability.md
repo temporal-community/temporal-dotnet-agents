@@ -242,7 +242,7 @@ agent.client.send                           ← TemporalAgentTelemetry (Client k
 
   RunActivity:InvokeAgentTool                 ← TracingInterceptor.ActivitiesSource
         │
-        └── agent.tool.invoke                ← one per tool call, fanned out via Workflow.WhenAllAsync
+        └── agent.tool.invoke                ← one per tool call, dispatched serially in model order
 ```
 
 The two `TemporalAgentTelemetry` spans bookend the trace — `agent.client.send` at the top (caller-side) and `agent.turn` at the bottom (inference-side). The Temporal SDK spans fill in the middle, showing the workflow and activity execution. `agent.tool.invoke` spans are siblings of `agent.turn` — each `InvokeAgentTool` activity dispatched for that turn's tool calls gets its own span, separate from the LLM-step span.

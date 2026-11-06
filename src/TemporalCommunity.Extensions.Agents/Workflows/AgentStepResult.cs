@@ -24,11 +24,9 @@ internal sealed class AgentStepResult
     public required bool IsFinal { get; init; }
 
     /// <summary>
-    /// The assistant message produced by this step. In tool-call iterations, this contains
-    /// one or more <see cref="FunctionCallContent"/> items; in the final iteration, it
-    /// contains the final text answer.
+    /// All response messages produced by this model step, preserved in their original order.
     /// </summary>
-    public required ChatMessage AssistantMessage { get; init; }
+    public required IReadOnlyList<ChatMessage> AssistantMessages { get; init; }
 
     /// <summary>
     /// When <see cref="IsFinal"/> is <see langword="false"/>, this contains the
@@ -67,4 +65,11 @@ internal sealed class AgentStepResult
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ProxyResolvedWorkerConfig? ResolvedWorkerConfig { get; init; }
+
+    /// <summary>
+    /// Names of registered functions carrying MAF's approval-required marker, including markers
+    /// exposed through delegating functions.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? ApprovalRequiredToolNames { get; init; }
 }

@@ -35,7 +35,7 @@ builder.Services
         agent.Instructions = "Use lookup_inventory for inventory questions.";
         agent.ChatClient = services => services.GetRequiredService<Microsoft.Extensions.AI.IChatClient>();
         agent.AddTool(lookup);
-        agent.AddTool(delete, policy => policy.NoRetry().RequireApproval());
+        agent.AddTool(delete, policy => policy.RequireApproval());
     }));
 
 using var host = builder.Build();

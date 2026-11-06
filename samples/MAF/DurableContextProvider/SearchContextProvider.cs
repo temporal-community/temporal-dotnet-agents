@@ -50,7 +50,7 @@ public sealed class SearchContextProvider : AIContextProvider, IDurableToolSourc
 
         // Declare the tool this provider contributes. The framework will register
         // web_search as a durable Temporal activity (InvokeAgentTool:SearchAgent:web_search).
-        // Write tools MUST set Configure = opts => opts.NoRetry() to prevent double-execution.
+        // Tool activities use one attempt by default; retries are opted into per agent.
         // web_search is read-only, so we use the default retry policy (idempotent).
         _specs =
         [

@@ -86,7 +86,8 @@ builder.Services
         // ── Approach B: explicit DurableToolRegistrationSpec ──────────────────
         // Use this when you don't control the provider type. The provider is transparently
         // wrapped in DurableContextProviderWrapper, which implements IDurableToolSource.
-        // Non-idempotent write tools MUST call opts.NoRetry() to prevent double-execution.
+        // Tool activities use one attempt by default. Agent-level retries apply to
+        // every tool on that agent.
         opts.AddDurableAgent("WeatherAgent", agent =>
         {
             agent.Instructions =

@@ -14,6 +14,7 @@ using TemporalCommunity.Extensions.Agents.Internal;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.Agents.Tools;
+using TemporalCommunity.Extensions.Agents.Exceptions;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Session;
@@ -94,7 +95,7 @@ internal sealed class AgentActivities(
     /// <summary>
     /// Step activity used by durable agents. Performs ONE LLM call without invoking any tools.
     /// Returns either a final assistant message or one or more <see cref="FunctionCallContent"/>
-    /// items that the workflow then dispatches in parallel as separate
+    /// items that the workflow then dispatches serially as separate
     /// <c>TemporalCommunity.Extensions.Agents.InvokeAgentTool</c> activities.
     /// </summary>
     [Activity("TemporalCommunity.Extensions.Agents.RunDurableAgentStep")]
@@ -190,8 +191,8 @@ internal sealed class AgentActivities(
                 ?? agentsOptions.DefaultActivityTimeout;
             var effectiveHeartbeatTimeout = registration.HeartbeatTimeout
                 ?? agentsOptions.DefaultHeartbeatTimeout;
-            var effectiveRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
-                registration.RetryPolicy ?? agentsOptions.DefaultRetryPolicy);
+            var effectiveRetryPolicy =
+                TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(registration.RetryPolicy);
 
             resolvedToolOpts = DefaultTemporalAgentClient.BuildDurableAgentToolActivityOptions(
                 registration,
@@ -253,7 +254,7 @@ internal sealed class AgentActivities(
             modelContextBudget,
             scopedServices).ToList();
 
-        // LLM call goes through agent.RunStreamingAsync (NOT chatClient directly),
+        // LLM call goes through agent.RunAsync (NOT chatClient directly),
         // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire
         // around the call. The agent is built fresh per call via BuildLiveAgentPipeline above.
 
@@ -348,7 +349,7 @@ internal sealed class AgentActivities(
                     "Provider-contributed tools are not dispatched as durable activities and are ignored. " +
                     "To register these tools with durable execution: " +
                     "(a) implement IDurableToolSource on the provider type and use AddContextProvider(provider), or " +
-                    "(b) pass tools explicitly via AddContextProvider(provider, durableTools: [new DurableToolRegistrationSpec(yourTool, opts => opts.NoRetry())]).",
+                    "(b) pass tools explicitly via AddContextProvider(provider, durableTools: [new DurableToolRegistrationSpec(yourTool)]).",
                     firstToolProviderType, firstToolCount, input.AgentName);
             }
         }
@@ -385,25 +386,32 @@ internal sealed class AgentActivities(
                 ChatOptions = chatOptions,
             };
 
-            var collected = new List<AgentResponseUpdate>();
             // Outer middleware receives the exact restored TemporalAgentSession. The internal
             // innermost boundary translates to null only for ChatClientAgent, which then mints
             // the transient sealed ChatClientAgentSession required by its leaf implementation.
-            await foreach (var update in agent.RunStreamingAsync(
-                    augmentedMessages, session, runOptions, ct).WithCancellation(ct).ConfigureAwait(false))
+            var response = await RunWithHeartbeatsAsync(
+                ctx,
+                () => agent.RunAsync(augmentedMessages, session, runOptions, ct)).ConfigureAwait(false);
+            var responseMessages = response.Messages.ToList();
+            var assistantMessages = responseMessages.Count > 0
+                ? responseMessages
+                : [new ChatMessage(ChatRole.Assistant, string.Empty)];
+            var callResolution = TemporalCommunity.Extensions.AI.Internal.DurableToolCallResolver.Resolve(
+                input.AccumulatedMessages,
+                responseMessages);
+            if (callResolution.Failure is { } failure)
             {
-                collected.Add(update);
-                ctx.Heartbeat();
+                throw new ApplicationFailureException(
+                    $"The model returned invalid tool-call output ({failure}); no tool was dispatched.",
+                    errorType: "DurableModelOutputInvalid",
+                    nonRetryable: true);
             }
 
-            var response = collected.ToAgentResponse();
-            var assistantMessage = response.Messages.Count > 0
-                ? response.Messages[^1]
-                : new ChatMessage(ChatRole.Assistant, string.Empty);
-
-            var toolCalls = assistantMessage.Contents
-                .OfType<FunctionCallContent>()
-                .ToList();
+            var toolCalls = callResolution.ActionableCalls;
+            var approvalRequiredToolNames = blueprint.Tools
+                .Where(pair => pair.Value.GetService<ApprovalRequiredAIFunction>() is not null)
+                .Select(pair => pair.Key)
+                .ToArray();
 
             if (!upstreamOwnsUsage && span?.IsAllDataRequested == true)
             {
@@ -529,8 +537,8 @@ internal sealed class AgentActivities(
                         ?? agentsOptions.DefaultActivityTimeout;
                     var effectiveHeartbeat = registration.HeartbeatTimeout
                         ?? agentsOptions.DefaultHeartbeatTimeout;
-                    var effectiveRetry = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForTool(
-                        registration.RetryPolicy ?? agentsOptions.DefaultRetryPolicy);
+                    var effectiveRetry =
+                        TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(registration.RetryPolicy);
 
                     interceptorActivityOpts = new ActivityOptions
                     {
@@ -601,16 +609,47 @@ internal sealed class AgentActivities(
                 };
             }
 
-            return new AgentStepResult
+            var stepResult = new AgentStepResult
             {
                 IsFinal = isFinal,
-                AssistantMessage = assistantMessage,
+                AssistantMessages = assistantMessages,
                 ToolCalls = isFinal ? null : toolCalls,
                 UpdatedStateBag = serializedStateBag,
                 Usage = response.Usage,
                 ResponseId = response.ResponseId,
                 ResolvedWorkerConfig = resolvedConfig,
+                ApprovalRequiredToolNames = approvalRequiredToolNames,
             };
+            try
+            {
+                TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    ctx.PayloadConverter,
+                    stepResult,
+                    input.MaximumTransportPayloadSizeBytes,
+                    input.PayloadCodecExpansionAllowanceBytes,
+                    "model-step activity result");
+            }
+            catch (TemporalCommunity.Extensions.AI.Exceptions.DurableTransportPayloadTooLargeException exception)
+            {
+                throw new ApplicationFailureException(
+                    "The model response exceeded the configured durable activity result budget.",
+                    exception,
+                    errorType: "DurableModelResultTooLarge",
+                    nonRetryable: true);
+            }
+            catch (ApplicationFailureException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                throw TemporalCommunity.Extensions.AI.Internal.DurableActivityFailurePolicy.CreateBounded(
+                    exception,
+                    "DurableModelResultSerializationFailed",
+                    nonRetryable: true);
+            }
+
+            return stepResult;
         }
         catch (Exception ex)
         {
@@ -680,6 +719,46 @@ internal sealed class AgentActivities(
             var (self, providerServices) = ctx;
             return self.BuildAgentBlueprint(n, providerServices);
         }, (this, services));
+    }
+
+    private static async Task<T> RunWithHeartbeatsAsync<T>(
+        ActivityExecutionContext context,
+        Func<Task<T>> operation)
+    {
+        using var heartbeatStop = CancellationTokenSource.CreateLinkedTokenSource(
+            context.CancellationToken);
+        var heartbeatTask = Task.Run(() => HeartbeatAsync(context, heartbeatStop.Token));
+        try
+        {
+            return await operation().ConfigureAwait(false);
+        }
+        finally
+        {
+            heartbeatStop.Cancel();
+            await heartbeatTask.ConfigureAwait(false);
+        }
+    }
+
+    private static async Task HeartbeatAsync(
+        ActivityExecutionContext context,
+        CancellationToken stopToken)
+    {
+        var interval = context.Info.HeartbeatTimeout is { } timeout && timeout > TimeSpan.Zero
+            ? TimeSpan.FromTicks(Math.Max(
+                TimeSpan.TicksPerMillisecond,
+                Math.Min(timeout.Ticks / 2, TimeSpan.TicksPerSecond)))
+            : TimeSpan.FromSeconds(1);
+        try
+        {
+            while (!stopToken.IsCancellationRequested)
+            {
+                context.Heartbeat();
+                await Task.Delay(interval, stopToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (stopToken.IsCancellationRequested)
+        {
+        }
     }
 
     /// <summary>
@@ -1128,6 +1207,14 @@ internal sealed class AgentActivities(
                 $"Tool '{input.ToolName}' is not registered on agent '{input.AgentName}'.");
         }
 
+        if (fn.GetService<ApprovalRequiredAIFunction>() is not null && !input.ApprovalAccepted)
+        {
+            throw new ApplicationFailureException(
+                $"Tool '{input.ToolName}' requires a durable accepted approval before invocation.",
+                errorType: "DurableToolApprovalRequired",
+                nonRetryable: true);
+        }
+
         ctx.Heartbeat();
 
         using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
@@ -1212,13 +1299,30 @@ internal sealed class AgentActivities(
                 ? new AIFunctionArguments()
                 : new AIFunctionArguments(input.Arguments);
 
-            var result = await TemporalCommunity.Extensions.AI.Internal.DurableActivityHeartbeat
-                .RunWithHeartbeatsAsync(
-                    ctx,
-                    async () => await fn.InvokeAsync(arguments, ct).ConfigureAwait(false))
-                .ConfigureAwait(false);
-
-            _logger.LogAgentToolInvocationCompleted(input.AgentName, input.ToolName);
+            object? result;
+            try
+            {
+                result = await TemporalCommunity.Extensions.AI.Internal.DurableActivityHeartbeat
+                    .RunWithHeartbeatsAsync(
+                        ctx,
+                        async () => await fn.InvokeAsync(arguments, ct).ConfigureAwait(false))
+                    .ConfigureAwait(false);
+                _logger.LogAgentToolInvocationCompleted(input.AgentName, input.ToolName);
+            }
+            catch (DurableToolFailureException exception) when (!ct.IsCancellationRequested)
+            {
+                span?.SetStatus(ActivityStatusCode.Error, "Tool reported a safe failure.");
+                var captureTelemetryContent =
+                    TemporalCommunity.Extensions.AI.Internal.DurableTelemetryContentCapturePolicy.Resolve(
+                        scope.ServiceProvider.GetService<TemporalCommunity.Extensions.AI.DurableExecutionOptions>());
+                TemporalCommunity.Extensions.AI.Internal.DurableFailureLogger.LogException(
+                    _logger,
+                    exception,
+                    captureTelemetryContent,
+                    "InvokeAgentTool",
+                    $"agent {input.AgentName}, tool {input.ToolName}; classified safe failure");
+                result = $"[Tool failed safely] {exception.ModelVisibleMessage}";
+            }
 
             // X-1: capture StateBag write-back. Only emit UpdatedStateBag when the serialized
             // bag actually changed, so the no-mutation case stays null (wire-compatible). The
@@ -1233,12 +1337,59 @@ internal sealed class AgentActivities(
                 }
             }
 
-            return new InvokeAgentToolResult
+            var toolResult = new InvokeAgentToolResult
             {
                 Result = result,
                 CallId = input.CallId,
                 UpdatedStateBag = updatedStateBag,
             };
+            try
+            {
+                TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    ctx.PayloadConverter,
+                    toolResult,
+                    input.MaximumTransportPayloadSizeBytes,
+                    input.PayloadCodecExpansionAllowanceBytes,
+                    "tool activity result");
+            }
+            catch (TemporalCommunity.Extensions.AI.Exceptions.DurableTransportPayloadTooLargeException)
+            {
+                toolResult = new InvokeAgentToolResult
+                {
+                    Result = InvokeAgentToolResult.ResultTooLargeMessage,
+                    CallId = input.CallId,
+                    UpdatedStateBag = updatedStateBag,
+                };
+                try
+                {
+                    TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                        ctx.PayloadConverter,
+                        toolResult,
+                        input.MaximumTransportPayloadSizeBytes,
+                        input.PayloadCodecExpansionAllowanceBytes,
+                        "bounded tool activity result");
+                }
+                catch (Exception exception)
+                {
+                    throw TemporalCommunity.Extensions.AI.Internal.DurableActivityFailurePolicy.CreateBounded(
+                        exception,
+                        "DurableToolResultTooLarge",
+                        nonRetryable: true);
+                }
+            }
+            catch (ApplicationFailureException)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                throw TemporalCommunity.Extensions.AI.Internal.DurableActivityFailurePolicy.CreateBounded(
+                    exception,
+                    "DurableToolResultSerializationFailed",
+                    nonRetryable: true);
+            }
+
+            return toolResult;
         }
         catch (Exception ex)
         {

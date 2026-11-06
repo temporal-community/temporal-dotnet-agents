@@ -187,16 +187,16 @@ The `durableTools:` parameter has no such requirement and reaches the same place
 One turn can involve several LLM calls — one per iteration of the tool-call loop — and every
 provider fires on each.
 
-Count the **steps**, not the tools. All tool calls the model asks for in a single response are
-dispatched as one batch, and only then does the next LLM call happen. So three tools requested at
-once is two steps — providers run twice. Three tools requested one at a time, across three
-responses, is four steps.
+Count the **steps**, not the tools. Tool calls the model asks for in a single response are
+dispatched serially in model order, and only then does the next LLM call happen. So three tools
+requested at once is two steps — providers run twice. Three tools requested one at a time, across
+three responses, is four steps.
 
 **`StateBag` caching is not deduplication.** A `StateBag` write becomes durable only when the whole
 step succeeds. If your provider calls an external service, writes the result, and the step then
 fails, the write is discarded while the external call already happened — and the retry calls it
-again. Caching saves tokens and latency; it does not make a side effect happen once. If a side
-effect must happen at most once, it belongs in a durable tool with `NoRetry()`, not a provider.
+again. Caching saves tokens and latency; it does not make a side effect happen once. Tools use one activity attempt by default. If you opt into retries through `agent.RetryPolicy`, the
+policy applies to every tool on that agent; make sure they are all safe to retry.
 
 **Keep providers cheap.** They run inside the activity's start-to-close budget, ahead of the model
 call. A slow provider eats the timeout the model needs, and the resulting failure looks like a model

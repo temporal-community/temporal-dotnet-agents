@@ -97,7 +97,7 @@ public class SplitDeploymentTests
     }
 
     [Fact]
-    public async Task SplitDeployment_UnconfiguredToolRetry_UsesBoundedToolDefault()
+    public async Task SplitDeployment_UnconfiguredTool_UsesOneAttemptDefault()
     {
         await using var env = await TestEnvironmentHelper.StartLocalAsync();
         env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
@@ -128,17 +128,14 @@ public class SplitDeploymentTests
 
             await Assert.ThrowsAnyAsync<Exception>(() => proxy.RunAsync("Hello", session));
 
-            Assert.Equal(5, recorder.CallCount);
+            Assert.Equal(1, recorder.CallCount);
             var handle = env.Client.GetWorkflowHandle(session.SessionId.WorkflowId);
             await foreach (var ev in handle.FetchHistoryEventsAsync())
             {
                 if (ev.ActivityTaskScheduledEventAttributes is { } scheduled
                     && scheduled.ActivityType.Name == InvokeAgentToolActivity)
                 {
-                    Assert.Equal(5, scheduled.RetryPolicy.MaximumAttempts);
-                    Assert.Equal(
-                        TimeSpan.FromSeconds(30),
-                        scheduled.RetryPolicy.MaximumInterval.ToTimeSpan());
+                    Assert.Equal(1, scheduled.RetryPolicy.MaximumAttempts);
                     return;
                 }
             }

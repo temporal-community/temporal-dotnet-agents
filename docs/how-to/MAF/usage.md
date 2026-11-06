@@ -54,20 +54,17 @@ builder.Services
                 sp.GetRequiredService<OrderService>().LookupOrder,
                 name: "lookup_order"));
 
-            // Write tools must opt out of retry — non-idempotent re-execution is the foot-gun.
             agent.AddTool(
                 "apply_refund",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<RefundService>().ApplyRefund,
-                    name: "apply_refund"),
-                opts => opts.NoRetry());
+                    name: "apply_refund"));
 
             agent.AddTool(
                 "send_email",
                 sp => AIFunctionFactory.Create(
                     sp.GetRequiredService<EmailService>().SendEmail,
-                    name: "send_email"),
-                opts => opts.NoRetry());
+                    name: "send_email"));
 
             agent.MaxToolCallsPerTurn = 10;
         });
@@ -722,9 +719,9 @@ Console.WriteLine($"Processing request for session: {sessionId.WorkflowId}");
 ## Streaming Limitation
 
 `TemporalAIAgent` and `TemporalAIAgentProxy` do not support `RunStreamingAsync`; both throw
-`NotSupportedException`. The durable model-step activity may consume provider updates internally
-to form one durable response, but it never exposes an at-least-once token stream to callers.
-Use `RunAsync` and deliver the completed response from your application boundary.
+`NotSupportedException`. The durable model-step activity uses MAF's non-streaming `RunAsync` and
+returns the completed response. Use `RunAsync` and deliver that response from your application
+boundary.
 
 ---
 
@@ -982,7 +979,7 @@ builder.Services
             agent.Instructions = "You can call the configured MCP tools.";
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
             agent.AddTool(lookup);
-            agent.AddTool(delete, policy => policy.NoRetry().RequireApproval());
+            agent.AddTool(delete, policy => policy.RequireApproval());
         });
     });
 ```
@@ -1014,9 +1011,14 @@ with `IDurableToolSource` or the `durableTools` overload.
 
 ---
 
-## Per-Tool Activity Configuration
+## Tool Activity Ordering and Retry Policy
 
-Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity (`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). Its retry policy resolves through four rungs — the tool's own `DurableToolOptions.RetryPolicy`, then `agent.RetryPolicy`, then `opts.DefaultRetryPolicy`, then the library's bounded five-attempt backstop with backoff capped at 30 seconds. [Durable Agents](./durable-agents.md#retry-policy-hierarchy) is the canonical reference for all three activity types. Override per tool via the `configure` callback on `AddTool` — see the [`DurableToolOptions` reference](#durabletooloptions-reference) below for the full property list.
+Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activity
+(`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). Tool calls from one model response run
+serially in model order. Each tool activity gets one attempt by default. Retries are opted into via
+the agent-level retry policy and apply uniformly to that agent's tools; only enable them when all
+registered tools are safe to retry. See [Durable Agents](./durable-agents.md#retry-policy-hierarchy)
+for the activity policy details.
 
 `agent.MaxToolCallsPerTurn` (default `20` when not set) caps step-loop iterations per single agent turn. The value propagates from the agent's registration into session-based workflows, scheduled jobs, and sub-agent calls via `GetTemporalAgent()` — you configure it once on the builder and it takes effect everywhere. When exceeded, the workflow returns a structured "iteration cap exceeded" assistant message rather than letting workflow history grow unbounded.
 
@@ -1032,19 +1034,18 @@ builder.Services
             agent.Instructions = "You help customers with support requests.";
             agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
 
-            // Read tool — no per-tool policy, so it falls through to agent.RetryPolicy,
-            // then opts.DefaultRetryPolicy, then the bounded five-attempt backstop.
+            // Tool activities get one attempt by default.
             agent.AddTool(lookupOrderTool);
 
-            // Write tool — bind NoRetry() to the AIFunction reference. Cannot mistype the name.
-            agent.AddTool(sendEmailTool, opts => opts.NoRetry().WithTimeout(TimeSpan.FromSeconds(30)));
+            // Tool timeouts remain configurable per tool. Retry policy is agent-level only.
+            agent.AddTool(sendEmailTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
 
             agent.MaxToolCallsPerTurn = 10;
         });
     });
 ```
 
-For the canonical write-vs-read tool example, the per-tool retry hierarchy, and what the Temporal Web UI shows, see [Durable Agents](./durable-agents.md).
+For serial tool dispatch, one-attempt defaults, and agent-level retry opt-in, see [Durable Agents](./durable-agents.md).
 
 To add a pre-dispatch lifecycle hook — for risk scoring, PII scrubbing, argument enrichment, or dynamic approval gates — register an `IAgentToolInterceptor`. See [Tool Interceptor](./tool-interceptor.md) for the full guide.
 
@@ -1173,12 +1174,12 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 | `Instructions` | Agent system prompt. Library stamps onto every LLM call's `ChatOptions.Instructions`. Optional. |
 | `ChatClient` | **Required.** `Func<IServiceProvider, IChatClient>` factory invoked at activity execution time to resolve the model's `IChatClient`. Throws `InvalidOperationException` if omitted. |
 | `ChatOptions` | LLM-call template (Temperature, ResponseFormat, MaxOutputTokens, etc.). `Tools` and `Instructions` set on this property are ignored. |
-| `AddTool(AIFunction tool, Action<DurableToolOptions>? configure = null)` | Registers a concrete `AIFunction`. Per-tool retry / timeout via `configure`. |
+| `AddTool(AIFunction tool, Action<DurableToolOptions>? configure = null)` | Registers a concrete `AIFunction`. Per-tool timeout and interceptor/approval settings via `configure`. |
 | `AddTool(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure = null)` | DI-resolving tool factory. |
 | `AddTools(params AIFunction[] tools)` | Bulk registration of concrete tools. |
 | `AddContextProvider(AIContextProvider provider, IEnumerable<DurableToolRegistrationSpec>? durableTools = null)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the chat pipeline. `Invoking/InvokedAsync` fire once per LLM call. Concrete providers can also contribute durable tools through specs or `IDurableToolSource`. |
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
-| `RetryPolicy` | Agent-level retry policy. Applies to the `RunDurableAgentStep` (LLM) activity **and** to every tool and interceptor activity on this agent that does not override it — not LLM-only. A tool overrides it via `DurableToolOptions.RetryPolicy`. |
+| `RetryPolicy` | Agent-level retry policy. Applies to the `RunDurableAgentStep` activity and all tool and interceptor activities for the agent; this is the only supported retry opt-in for tools. |
 | `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
 | `ContextReducerKey` | Per-agent MEAI context reducer key. Inherits `opts.DefaultContextReducerKey`; affects only the model request, not retained history. |
 | `MaxModelContextTokens`, `ModelOutputTokenReserve` | Optional per-agent estimated model-context limit and output reserve. Inherit worker defaults when unset. |
@@ -1189,9 +1190,8 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 
 | Property / Method | Purpose |
 |-------------------|---------|
-| `StartToCloseTimeout`, `HeartbeatTimeout`, `RetryPolicy` | Standard Temporal activity overrides. `null` inherits worker default. |
-| `NoRetry()` | Sets `RetryPolicy = new() { MaximumAttempts = 1 }`. Use on write tools. |
-| `WithMaxAttempts(int n)` | Sets a fixed-retry policy. |
+| `StartToCloseTimeout`, `HeartbeatTimeout` | Per-tool activity timeout overrides. `null` inherits the worker/agent timeout. |
+| `RetryPolicy` | Per-tool retry overrides are not supported. Tools use one attempt by default or the agent's explicit policy. |
 | `WithTimeout(TimeSpan t)` | Sets `StartToCloseTimeout`. |
 | `SkipInterceptor()` | Bypasses `IAgentToolInterceptor` for this specific tool. |
 | `WithInterceptorTimeout(TimeSpan t)` | Per-tool timeout for the interceptor activity. |
@@ -1216,23 +1216,17 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
 | `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
 
-Retry adds rungs above this table for tools and scheduled runs, and one below it for everything:
+Retry policy resolution for agent activities:
 
-1. `agent.AddTool(t, opts => opts.RetryPolicy = ...)` — the per-tool override, and the only
-   tool-specific rung. The property is `RetryPolicy`; `opts.NoRetry()` is the shorthand write tools
-   want.
-2. `OneTimeAgentRun.RetryPolicy` — scheduled and one-time runs only, and *not* LLM-only: it is also
-   the default for that run's tool and interceptor activities.
-3. `agent.RetryPolicy` — the agent-level default, shared by the LLM step, the tools, and the
-   interceptor activity.
-4. `opts.DefaultRetryPolicy` — the worker-level default for agents that do not override.
-5. The library's bounded backstop — 5 attempts, capped at 2s backoff for model calls and 30s for
-   tool and interceptor calls. This applies when rungs 1–4 are all unset, in place of Temporal's
-   server default of unlimited retries.
+1. A run-level policy, when the run path supports one, applies to the agent's activities.
+2. `agent.RetryPolicy` applies uniformly to the model step, tools, and interceptor.
+3. `opts.DefaultRetryPolicy` is the worker-level policy when the agent does not override it.
+4. With no explicit policy, model steps use the bounded model default and tools/interceptors use
+   one attempt rather than Temporal's unlimited server default.
 
-Rungs 2 and 3 are the ones people mis-set: both are defaults for *all* of the agent's activities,
-not model-call-only knobs. When a tool genuinely needs different behavior from the rest of the
-agent, set it on that tool. Full table in
+Agent- and run-level policies affect all tool activities on that path, not only model calls. If
+tools need different retry behavior, separate them across agents or make every affected tool
+idempotent. Full table in
 [Durable Agents](./durable-agents.md#retry-policy-hierarchy).
 
 ### Custom agent middleware
@@ -1282,7 +1276,7 @@ For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientA
 - [Using Temporal SDK plugins](../../library-combinations.md#using-temporal-sdk-plugins) — registering your own Temporal worker or client plugins alongside this library
 **How-to guides**
 
-- [Durable Agents](durable-agents.md) — the canonical write-vs-read tool example and per-tool retry hierarchy
+- [Durable Agents](durable-agents.md) — the canonical write-vs-read tool example and per-agent retry policy
 - [Context Providers](context-providers.md) — writing and registering an `AIContextProvider`
 - [HITL Patterns](hitl-patterns.md) — the two approval flavors, full guide and testing patterns
 - [Routing Patterns](routing.md) — static and dynamic agent routing

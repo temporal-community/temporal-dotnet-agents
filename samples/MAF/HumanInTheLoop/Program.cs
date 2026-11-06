@@ -92,8 +92,9 @@ builder.Services
         //
         // What heartbeating does NOT buy you: the wait is WORKER-RESIDENT. The activity lives on
         // one worker for its whole duration, so a deploy, crash, or scale-down during the review
-        // ends it — and with NoRetry() on a write tool, ends the turn. That is why this sample
-        // uses minutes rather than the hours a real approval queue implies.
+        // ends it. Tool activities use one attempt by default; an explicit agent retry policy
+        // applies to every tool on the agent. That is why this sample uses minutes rather than
+        // the hours a real approval queue implies.
         //
         // For unattended review that must survive worker restarts, use WORKFLOW-PARKED approval
         // instead: RequireApproval() on the tool, or PauseForApproval() from an
@@ -112,7 +113,7 @@ builder.Services
                 If a send is rejected, explain what happened and offer to revise.
                 """;
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-            agent.AddTool(sendEmailTool, opts => opts.NoRetry());
+            agent.AddTool(sendEmailTool);
 
             // Per-agent override of opts.DefaultApprovalTimeout. Demonstrates the builder slot —
             // not required (it would inherit opts.DefaultApprovalTimeout otherwise). It must stay

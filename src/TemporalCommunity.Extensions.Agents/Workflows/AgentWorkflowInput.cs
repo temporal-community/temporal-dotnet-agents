@@ -47,10 +47,8 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? CarriedStateBag { get; init; }
 
-    // RetryPolicy is inherited from DurableChatWorkflowInput (added in S-X-5). It applies to
-    // the agent's RunAgentStep activity (the LLM call); per-tool retry policies are configured
-    // separately via DurableAgentToolActivityOptions. The MAF construction sites assign it as
-    // before — behavior is unchanged, the declaration just moved to the shared base.
+    // RetryPolicy is inherited from DurableChatWorkflowInput. It applies to the model step;
+    // tool activities use one attempt unless the agent explicitly opts all tools into this policy.
 
     /// <summary>
     /// Gets the bundle of worker-side settings resolved either eagerly at workflow start
@@ -66,7 +64,7 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 
     /// <summary>
     /// Maximum number of LLM-step iterations within a single agent turn. Each iteration may
-    /// dispatch a parallel batch of tool activities. When the cap is exceeded the workflow
+    /// dispatch a serial batch of tool activities. When the cap is exceeded the workflow
     /// returns a structured error response. Forwards to
     /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.MaxToolCallsPerTurn"/>;
     /// defaults to <c>20</c> when the config has not yet been resolved (proxy-started, pre-handshake).

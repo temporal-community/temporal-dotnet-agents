@@ -31,15 +31,15 @@ re-executed on replay.
 
 ## Non-idempotent write tools
 
-Write tools (send email, apply refund, write file) **must** call `opts.NoRetry()` to prevent
-double-execution on activity retry:
+Tool activities use one attempt by default. Retries are an explicit agent-level opt-in and apply
+to every tool on the agent:
 
 ```csharp
 agent.AddContextProvider(
     myProvider,
     durableTools:
     [
-        new DurableToolRegistrationSpec(sendEmailTool, opts => opts.NoRetry()),
+        new DurableToolRegistrationSpec(sendEmailTool),
         new DurableToolRegistrationSpec(searchTool),  // read-only — default retry is fine
     ]);
 ```

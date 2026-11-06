@@ -300,6 +300,12 @@ public sealed class TemporalAIAgent : AIAgent
                 NeedsWorkerSettingsResolution = !_settingsResolved && iteration == 0,
             };
 
+            TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                stepInput,
+                stepInput.MaximumTransportPayloadSizeBytes,
+                stepInput.PayloadCodecExpansionAllowanceBytes,
+                "model-step activity input");
             var stepResult = await Workflow.ExecuteActivityAsync(
                 (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                 _activityOptions);
@@ -318,6 +324,13 @@ public sealed class TemporalAIAgent : AIAgent
                 _settingsResolved = true;
                 _resolvedMaxToolCallsPerTurn = stepResult.ResolvedWorkerConfig.MaxToolCallsPerTurn;
                 maxIterations = _resolvedMaxToolCallsPerTurn;
+            }
+            if (stepResult.ApprovalRequiredToolNames is { Count: > 0 } markedTools)
+            {
+                _requiresApprovalTools = (_requiresApprovalTools ?? [])
+                    .Concat(markedTools)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
             }
 
             // Capture worker-side config from the first resolution step.
@@ -360,8 +373,8 @@ public sealed class TemporalAIAgent : AIAgent
                 totalUsage.TotalTokenCount = (totalUsage.TotalTokenCount ?? 0) + (stepResult.Usage.TotalTokenCount ?? 0);
             }
 
-            accumulated.Add(stepResult.AssistantMessage);
-            allTurnMessages.Add(stepResult.AssistantMessage);
+            accumulated.AddRange(stepResult.AssistantMessages);
+            allTurnMessages.AddRange(stepResult.AssistantMessages);
 
             if (stepResult.IsFinal || stepResult.ToolCalls is null || stepResult.ToolCalls.Count == 0)
             {
@@ -445,7 +458,7 @@ public sealed class TemporalAIAgent : AIAgent
                             RequiresApproval = _requiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true
                                 || _scopeAwareApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
                         };
-                        // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel typed dispatch
+                        // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel interceptor dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.RunToolInterceptorAsync(interceptorInput),
                             DurableToolDecisionPolicy.ResolveInterceptorActivityOptions(tc.Name, interceptorOpts, _interceptorToolActivityOptions)));
@@ -454,14 +467,9 @@ public sealed class TemporalAIAgent : AIAgent
                 interceptorResults = await Workflow.WhenAllAsync(interceptorTasks).ConfigureAwait(true);
             }
 
-            // Snapshot the session bag once for this iteration's tool fan-out: every tool in the
-            // turn must observe the same pre-fan-out state, and re-serializing per tool would both
-            // cost more and risk handing different tools different views.
-            var toolDispatchStateBag = temporalSession.SerializeStateBag();
-
             // Feature L: Phase 2 — process decisions. PauseForApproval degrades to Block
             // since TemporalAIAgent has no DurableApprovalMixin.
-            var toolTasks = new List<Task<InvokeAgentToolResult>?>(toolCalls.Count);
+            var toolResults = new InvokeAgentToolResult?[toolCalls.Count];
             var syntheticResults = new string?[toolCalls.Count];
 
             for (var i = 0; i < toolCalls.Count; i++)
@@ -470,7 +478,6 @@ public sealed class TemporalAIAgent : AIAgent
                 if (!enabledToolCalls[i])
                 {
                     syntheticResults[i] = AgentRunToolSelectionPolicy.CreateBlockedResult(tc.Name);
-                    toolTasks.Add(null);
                     continue;
                 }
 
@@ -505,7 +512,7 @@ public sealed class TemporalAIAgent : AIAgent
                             // Closing this means adding SessionId to InvokeAgentToolInput and
                             // preferring it — a wire addition with approval-routing implications, so
                             // it needs its own design rather than a change in passing.
-                            SerializedStateBag = toolDispatchStateBag,
+                            SerializedStateBag = temporalSession.SerializeStateBag(),
                         };
                         // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)
                         // falling back to the shared _activityOptions (P1-2 fix).
@@ -529,10 +536,27 @@ public sealed class TemporalAIAgent : AIAgent
                             tc.Name,
                             out var perToolOpts)
                                 ? perToolOpts
-                                : _activityOptions;
-                        toolTasks.Add(Workflow.ExecuteActivityAsync(
+                                : new ActivityOptions
+                                {
+                                    StartToCloseTimeout = _activityOptions.StartToCloseTimeout,
+                                    HeartbeatTimeout = _activityOptions.HeartbeatTimeout,
+                                    Summary = _activityOptions.Summary,
+                                    RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy
+                                        .ResolveForAgentTool(null),
+                                };
+                        TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                            Workflow.PayloadConverter,
+                            toolInput,
+                            toolInput.MaximumTransportPayloadSizeBytes,
+                            toolInput.PayloadCodecExpansionAllowanceBytes,
+                            "tool-activity input");
+                        toolResults[i] = await Workflow.ExecuteActivityAsync(
                             (AgentActivities a) => a.InvokeAgentToolAsync(toolInput),
-                            toolDispatchOpts));
+                            toolDispatchOpts).ConfigureAwait(true);
+                        temporalSession.MergeToolStateBagWriteBacks(
+                            [toolResults[i]!.UpdatedStateBag],
+                            alwaysScopesStoreKey: null,
+                            Workflow.Logger);
                         break;
 
                     case AgentsToolOutcome.PauseForApproval:
@@ -543,34 +567,20 @@ public sealed class TemporalAIAgent : AIAgent
                             "but TemporalAIAgent does not support workflow-parked approval. Degrading to Block.",
                             tc.Name, _agentName);
                         syntheticResults[i] = $"[Blocked] Tool '{tc.Name}' requires approval but approval is not supported in sub-agent context.";
-                        toolTasks.Add(null);
                         break;
 
                     case AgentsToolOutcome.Skip:
                         syntheticResults[i] = DurableToolDecisionPolicy.SkipMessage(interceptorResult?.Message);
-                        toolTasks.Add(null);
                         break;
 
                     case AgentsToolOutcome.Block:
                     default:
                         syntheticResults[i] = DurableToolDecisionPolicy.BlockMessage(interceptorResult?.Message);
-                        toolTasks.Add(null);
                         break;
                 }
             }
 
-            // Phase 3: await approved tasks.
-            var pendingTasks = toolTasks.Where(t => t is not null).Cast<Task<InvokeAgentToolResult>>().ToList();
-            InvokeAgentToolResult[]? toolResults = pendingTasks.Count > 0
-                ? await Workflow.WhenAllAsync(pendingTasks).ConfigureAwait(true)
-                : null;
-
             var functionResultContents = new List<AIContent>(toolCalls.Count);
-            // X-1: collect tool StateBag write-backs by tool-call index for a deterministic
-            // index-order merge (later index wins). toolResults is in ascending tool-call-index
-            // order (pendingTasks was built by iterating toolTasks in index order).
-            var toolStateBagWriteBacks = new JsonElement?[toolCalls.Count];
-            var pendingIdx = 0;
             for (var i = 0; i < toolCalls.Count; i++)
             {
                 if (syntheticResults[i] is { } synthetic)
@@ -579,26 +589,13 @@ public sealed class TemporalAIAgent : AIAgent
                         callId: toolCalls[i].CallId,
                         result: synthetic));
                 }
-                else if (toolResults is not null && pendingIdx < toolResults.Length)
+                else if (toolResults[i] is { } toolResult)
                 {
-                    var toolResult = toolResults[pendingIdx++];
-                    toolStateBagWriteBacks[i] = toolResult.UpdatedStateBag;
                     functionResultContents.Add(new FunctionResultContent(
                         callId: toolCalls[i].CallId,
                         result: toolResult.Result));
                 }
             }
-
-            // X-1: merge tool StateBag mutations back so the next RunDurableAgentStep sees them.
-            // Post-result; does not re-run tools (.NoRetry() semantics unaffected).
-            // SECURITY: the merge applies the reserved approval-scope deny-list
-            // (StateBagMerge.ApprovalScopesReservedPrefix). TemporalAIAgent has no approval-scope
-            // store plumbing, so there is no custom always-scopes store key to pass — the prefix
-            // deny-list (covering the session key and default always key) is sufficient here.
-            temporalSession.MergeToolStateBagWriteBacks(
-                toolStateBagWriteBacks,
-                alwaysScopesStoreKey: null,
-                Workflow.Logger);
 
             var toolResultMessage = new ChatMessage(ChatRole.Tool, functionResultContents);
             accumulated.Add(toolResultMessage);

@@ -79,10 +79,10 @@ rejects that client anywhere in a chat chain, throwing `DurableFunctionInvocatio
 — see [design-decisions.md](../../design-decisions.md).
 
 The rejection is the whole point of the library. Each tool call is dispatched as its own
-`InvokeAgentTool` Temporal activity, so it is independently retried, timed out, and recorded in
-workflow history. Collapse that into one in-process loop and a crash mid-loop re-runs every tool in
-the batch — including write-style tools that `NoRetry()` exists to protect. Per-tool timeouts, retry
-policy, and Web UI visibility all disappear with it.
+`InvokeAgentTool` Temporal activity in model order. Tool activities use one attempt by default, and
+an explicit agent retry policy applies uniformly to all of them. Collapse dispatch into one
+in-process loop and a crash mid-loop loses the individual activity boundaries and tool visibility
+in workflow history.
 
 ---
 

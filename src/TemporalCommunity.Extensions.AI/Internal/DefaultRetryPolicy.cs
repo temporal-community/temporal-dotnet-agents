@@ -64,6 +64,14 @@ internal static class DefaultRetryPolicy
         };
 
     /// <summary>
+    /// Resolves the MAF integration's tool policy: one attempt unless the agent explicitly opts
+    /// into retries. Unlike the managed-session tool default, a tool failure may follow an
+    /// external effect whose completion is uncertain.
+    /// </summary>
+    internal static RetryPolicy ResolveForAgentTool(RetryPolicy? perAgentPolicy) =>
+        perAgentPolicy ?? new RetryPolicy { MaximumAttempts = 1 };
+
+    /// <summary>
     /// Caps the inter-attempt backoff for the bounded model default policy (seconds).
     /// </summary>
     internal const int DefaultModelMaximumIntervalSeconds = 2;

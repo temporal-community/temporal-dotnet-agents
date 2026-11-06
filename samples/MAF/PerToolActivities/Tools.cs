@@ -1,9 +1,9 @@
-// Tools.cs — three tool services demonstrating the read-vs-write retry policy split.
+// Tools.cs — tool services for the one-attempt-default and serial-dispatch sample.
 //
 // All three are registered as DI singletons. Each method becomes an AIFunction via
 // AIFunctionFactory.Create and is registered with the agent via agent.AddTool(). The
 // durable-agent loop dispatches each tool call as a separate InvokeAgentTool activity;
-// per-tool retry policy is bound to the AIFunction reference at registration time.
+// retries are configured at agent level, not per tool.
 
 using System.Collections.Frozen;
 using System.ComponentModel;
@@ -11,13 +11,12 @@ using System.ComponentModel;
 namespace PerToolActivities;
 
 /// <summary>
-/// Read-style order-status tool. Idempotent — safe to retry on transient failures, so
-/// it deliberately receives no per-tool override and falls through to the default
-/// retry policy from <c>TemporalAgentsOptions.RetryPolicy</c>.
+/// Read-style order-status tool. It uses the one-attempt default. An agent-level retry
+/// policy would also apply to every other tool registered on that agent.
 /// <para>
 /// <see cref="FailOnceEnabled"/> is the demo toggle for scenario 2: when set, the
-/// first call throws so we can observe Temporal retrying just <c>InvokeAgentTool:RefundAgent:lookup_order</c>
-/// without re-running the write-tool activities.
+/// first call throws so we can observe the tool activity fail after one attempt and
+/// later calls from the same model response remain undispatched.
 /// </para>
 /// </summary>
 public sealed class OrderService
@@ -61,11 +60,11 @@ public sealed class OrderService
         Interlocked.Increment(ref _lookupCalls);
 
         // Atomically consume the one-shot latch. If armed, swap to disarmed and throw;
-        // Temporal retries the InvokeAgentTool activity automatically (default unbounded
-        // retry) and the second attempt sees the latch already consumed.
+        // The default tool policy gives this activity one attempt. The latch remains
+        // available only if a later model turn deliberately calls the tool again.
         if (Interlocked.CompareExchange(ref _failArmed, 0, 1) == 1)
         {
-            throw new InvalidOperationException("Transient lookup failure — should retry");
+            throw new InvalidOperationException("Lookup failed before returning a result.");
         }
 
         return _orders.TryGetValue(orderId, out var status)
@@ -75,10 +74,8 @@ public sealed class OrderService
 }
 
 /// <summary>
-/// Write-style refund tool. Non-idempotent: a retry would issue a second refund.
-/// The agent registration binds <c>opts.NoRetry()</c> (<c>MaximumAttempts = 1</c>) to
-/// this tool's <c>AIFunction</c> reference so Temporal will surface the failure rather
-/// than re-charge.
+/// Write-style refund tool. Non-idempotent: an explicitly configured agent retry policy
+/// could issue a second refund after an ambiguous failure. Use downstream idempotency.
 /// </summary>
 public sealed class RefundService
 {
@@ -98,8 +95,8 @@ public sealed class RefundService
 }
 
 /// <summary>
-/// Write-style email tool. Non-idempotent: a retry would deliver a duplicate. Same
-/// <c>MaximumAttempts = 1</c> treatment as <see cref="RefundService.ApplyRefund"/>.
+/// Write-style email tool. Non-idempotent: an explicitly configured agent retry policy
+/// could deliver a duplicate after an ambiguous failure. Use downstream idempotency.
 /// </summary>
 public sealed class EmailService
 {

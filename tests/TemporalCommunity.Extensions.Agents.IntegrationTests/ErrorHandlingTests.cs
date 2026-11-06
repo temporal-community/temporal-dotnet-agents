@@ -87,13 +87,11 @@ public class ErrorHandlingTests : IClassFixture<IntegrationTestFixture>
     // ── Activity Heartbeat Timeout ───────────────────────────────────────────
 
     [Fact]
-    public async Task HeartbeatTimeout_RetriesWhenNoHeartbeatSent()
+    public async Task HeartbeatPump_KeepsLongModelCallAliveWithoutRetry()
     {
-        // Agent delays 60s without sending heartbeats; heartbeat timeout is 2s.
-        // Since the non-streaming path doesn't heartbeat, Temporal detects the
-        // missing heartbeat and retries the activity.
+        // The non-streaming model call is kept alive by the activity heartbeat pump.
         var taskQueue = $"heartbeat-test-{Guid.NewGuid():N}";
-        var agent = new SlowThenFastChatClient(TimeSpan.FromSeconds(60));
+        var agent = new SlowThenFastChatClient(TimeSpan.FromSeconds(3));
 
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(_fixture.Client);
@@ -102,9 +100,8 @@ public class ErrorHandlingTests : IClassFixture<IntegrationTestFixture>
             .AddTemporalAgents(options =>
             {
                 options.AddDurableAgent("HeartbeatAgent", a => a.ChatClient = _ => agent);
-                // Leave the activity timeout at a generous value so it doesn't interfere.
-                options.DefaultActivityTimeout = TimeSpan.FromMinutes(5);
-                options.DefaultHeartbeatTimeout = TimeSpan.FromSeconds(2);
+                options.DefaultActivityTimeout = TimeSpan.FromSeconds(10);
+                options.DefaultHeartbeatTimeout = TimeSpan.FromSeconds(1);
             });
 
         using var host = builder.Build();
@@ -123,15 +120,12 @@ public class ErrorHandlingTests : IClassFixture<IntegrationTestFixture>
             Assert.NotEmpty(response.Messages);
             Assert.Contains("Echo [1]:", response.Messages[0].Text);
 
-            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(30),
-                $"Expected completion in under 30s but took {sw.Elapsed}");
-
-            Assert.True(agent.CallCount >= 2,
-                $"Expected at least 2 agent calls but got {agent.CallCount}");
+            Assert.True(sw.Elapsed >= TimeSpan.FromSeconds(2),
+                $"Expected the first slow call to finish, but it took {sw.Elapsed}");
+            Assert.Equal(1, agent.CallCount);
 
             _output.WriteLine(
-                $"Completed in {sw.Elapsed.TotalSeconds:F1}s with {agent.CallCount} agent call(s). " +
-                $"HeartbeatTimeout enforcement confirmed.");
+                $"Completed in {sw.Elapsed.TotalSeconds:F1}s with one model call; heartbeat pump kept it alive.");
         }
         finally
         {

@@ -36,7 +36,7 @@ internal sealed class InvokeAgentToolInput
 
     /// <summary>
     /// Originating <c>FunctionCallContent.CallId</c> from the LLM. Echoed back in the result so the
-    /// workflow can correlate parallel tool invocations to the right pending tool-call slot.
+    /// workflow can correlate the activity result with its pending tool-call slot.
     /// </summary>
     public string? CallId { get; init; }
 
@@ -50,4 +50,13 @@ internal sealed class InvokeAgentToolInput
     /// <remarks><see langword="null"/> means no accumulated state.</remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? SerializedStateBag { get; init; }
+
+    /// <summary>Whether the workflow recorded an accepted approval for this exact call.</summary>
+    public bool ApprovalAccepted { get; init; }
+
+    /// <summary>Maximum serialized activity payload size, including codec expansion allowance.</summary>
+    public int MaximumTransportPayloadSizeBytes { get; init; } = 1024 * 1024;
+
+    /// <summary>Allowance reserved for payload codec expansion.</summary>
+    public int PayloadCodecExpansionAllowanceBytes { get; init; }
 }
