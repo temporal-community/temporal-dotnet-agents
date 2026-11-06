@@ -4,8 +4,8 @@
 # WHY THIS EXISTS
 #   The harness compiles documented registration examples so the compiler — not a regex — decides
 #   whether they bind to real overloads. But a harness only proves something about the snippets it
-#   actually contains. Adding a new `AddDurableAgent(` / `AddTool(` example to a MAF how-to doc is
-#   exactly the moment a fresh defect can land, and the harness would stay silent about it.
+#   actually contains. Adding a new `AddTemporalAgent(` / `AddDurableAgent(` / `AddTool(` example
+#   to a MAF how-to doc is exactly the moment a fresh defect can land, and the harness would stay silent about it.
 #   Existence of a harness file is not usage of it; this check converts existence into coverage.
 #
 #   Mirrors `just _verify-sample-coverage`: a declared set, a discovered set, and a failure when the
@@ -63,7 +63,7 @@ fail() {
 }
 
 # Emits one `key` line per qualifying fenced block: a ```csharp block whose body contains
-# `AddDurableAgent(` or `AddTool(`, every MEAI usage/embeddings/scheduling/operations block, selected MEAI tool/HITL
+# `AddTemporalAgent(`, `AddDurableAgent(`, or `AddTool(`, every MEAI usage/embeddings/scheduling/operations block, selected MEAI tool/HITL
 # examples, or phase harness examples.
 # Headings inside fences are skipped, matching the slugger in
 # verify-markdown-links.sh — `# comment` in a shell example is not a section heading.
@@ -89,7 +89,8 @@ scan_docs() {
                 next
             }
             infence = 0
-            if (lang ~ /^csharp/ && (body ~ /AddDurableAgent\(/ || body ~ /AddTool\(/ ||
+            if (lang ~ /^csharp/ && (body ~ /AddTemporalAgent\(/ ||
+                body ~ /AddDurableAgent\(/ || body ~ /AddTool\(/ ||
                 FILENAME == "docs/how-to/MEAI/embeddings.md" ||
                 FILENAME == "docs/how-to/MEAI/usage.md" ||
                 FILENAME == "docs/how-to/MEAI/scheduling.md" ||

@@ -5,11 +5,11 @@
 The simplest way to get started with `TemporalCommunity.Extensions.Agents`. A single process registers a Temporal worker and an AI agent, then runs a multi-turn conversation where every exchange is durably recorded in workflow state.
 
 This sample demonstrates:
-- Registering an agent with `AddTemporalAgents()` + `opts.AddDurableAgent("name", agent => { ... })`
-- Resolving the agent's `IChatClient` via `agent.ChatClient = sp => ...`
-- Adding a tool with `agent.AddTool(weatherTool)`
+- Registering an agent with MAF `ChatClientAgentOptions` and Temporal-only `TemporalAgentOptions`
+- Resolving the keyed MAF `AIAgent` proxy for the durable session
+- Dispatching a tool as a durable activity with an invocation-scoped service dependency
 - Opening a session with `CreateSessionAsync()` and sending turns with `RunAsync()`
-- Multi-turn context: the caller sends only the new message — the library retrieves full conversation history from workflow state and includes it in each LLM call automatically
+- Multi-turn context: the workflow owns conversation history and includes it in each LLM call
 
 ## Highlights
 
@@ -17,6 +17,7 @@ This sample demonstrates:
 - **History lives in the workflow.** Conversation context is stored in `AgentWorkflow` state, not in the client. Any authorized process with the session ID can send a follow-up. At the configured entry limit, history is not silently trimmed: configure a keyed retained-history reducer or inspect `GetHistoryBudgetAsync()` and use the explicit recovery updates on `ITemporalAgentClient`.
 - **Sessions are lazy.** `CreateSessionAsync()` creates a local session token — no Temporal workflow exists yet. The `AgentWorkflow` starts on the first `RunAsync()` call. Querying the workflow handle before sending any message will return "workflow not found".
 - **Tool calls are durable per-tool activities.** `get_weather` executes inside its own `InvokeAgentTool` activity. If the worker restarts between the tool call and the model response, the tool result is replayed from history.
+- **Scoped tool dependencies.** The sample tool receives `IServiceProvider` through `AIFunctionArguments.Services`; scoped services are resolved for each tool invocation rather than captured at registration time.
 - **Turn cancellation is explicit.** Resolve `ITemporalAgentClient` and call `CancelTurnAsync(session.SessionId, requestId)` with the ID supplied to `RunAsync`. Cancelling the caller's `RunAsync` RPC wait does not cancel the accepted turn. The workflow propagates cancellation to active model/tool activities and waits for their cancellation to complete before stopping. Activity code must cooperate, and cancellation never rolls back an external tool effect.
 - **Single-process simplicity.** Worker, agent, and caller all live in the same `IHost` — the minimum viable setup before splitting into separate processes.
 
@@ -25,7 +26,7 @@ This sample demonstrates:
 ### Prerequisites
 
 - [.NET 10 SDK](https://dot.net) or later
-- Temporal Service 1.31.0 or newer (local: `temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`)
+- Temporal Service 1.31.0 or newer. Search attributes are enabled by default; start a local server with `temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`.
 - An OpenAI-compatible API key
 
 ### Configure API credentials

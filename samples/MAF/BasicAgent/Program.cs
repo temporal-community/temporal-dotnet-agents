@@ -1,13 +1,14 @@
 // BasicAgent — single durable agent session via TemporalCommunity.Extensions.Agents.
 //
-// Demonstrates the canonical AddDurableAgent registration: an IChatClient registered
-// in DI, an agent registered via opts.AddDurableAgent("name", agent => { ... }), and
-// a DI-backed tool resolved in a fresh activity scope for each tool invocation. The library composes the chat pipeline
-// internally — do NOT call .UseFunctionInvocation() on the IChatClient.
+// Demonstrates MAF ChatClientAgentOptions registration, Temporal-only settings in
+// TemporalAgentOptions, keyed AIAgent proxy resolution, and a scoped service resolved
+// from AIFunctionArguments.Services for each durable tool invocation.
 //
 // Run:  dotnet run --project samples/MAF/BasicAgent/BasicAgent.csproj
 
 using System.ClientModel;
+using System.ComponentModel;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -40,36 +41,44 @@ var openAiClient = new OpenAIClient(
     new ApiKeyCredential(apiKey),
     new OpenAIClientOptions { Endpoint = new Uri(apiBaseUrl) });
 
-// ── Step 3: Register the IChatClient and tool dependency in DI ────────────────
-// Register a bare IChatClient — the durable-agent path composes its own pipeline
-// internally. Calling .UseFunctionInvocation() here would short-circuit Temporal's
-// per-tool activity dispatch.
+// ── Step 3: Register the IChatClient and scoped tool dependency in DI ─────────
+// The durable-agent path owns tool dispatch. Do not call .UseFunctionInvocation()
+// on the chat client.
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient());
 builder.Services.AddScoped<WeatherService>();
 
+static string GetCurrentWeather(
+    string city,
+    IServiceProvider services) =>
+    services.GetRequiredService<WeatherService>().GetCurrentWeather(city);
+
+var weatherTool = AIFunctionFactory.Create(
+    GetCurrentWeather,
+    name: "get_weather",
+    description: "Returns the current weather conditions for a city.");
+
 // ── Step 4: Register the durable agent ───────────────────────────────────────
-// AddDurableAgent is the single registration entry point:
-//   • agent.ChatClient   — DI factory for the agent's IChatClient (required)
-//   • agent.AddTool(...) — resolves the tool from a fresh activity scope per invocation
-//   • agent.TimeToLive   — per-agent override of opts.DefaultTimeToLive (14 days)
 builder.Services.AddTemporalClient(temporalAddress, "default");
 builder.Services
     .AddHostedTemporalWorker("agents")
-    .AddTemporalAgents(opts =>
-    {
-        opts.AddDurableAgent("Assistant", agent =>
+    .AddTemporalAgents(agents =>
+        agents.AddTemporalAgent(
+            "Assistant",
+            new ChatClientAgentOptions
         {
-            agent.Instructions =
-                "You are a helpful geography and weather assistant. " +
-                "When asked about weather, always use the get_weather tool.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-            agent.AddTool("get_weather", sp => AIFunctionFactory.Create(
-                sp.GetRequiredService<WeatherService>().GetCurrentWeather,
-                name: "get_weather",
-                description: "Returns the current weather conditions."));
-            agent.TimeToLive   = TimeSpan.FromHours(1); // shortened for demo; production default is 14 days
-        });
-    });
+                Description = "A geography and weather assistant.",
+                ChatOptions = new ChatOptions
+                {
+                    Instructions =
+                        "You are a helpful geography and weather assistant. " +
+                        "When asked about weather, always use the get_weather tool.",
+                    Tools = [weatherTool],
+                },
+            },
+            new TemporalAgentOptions
+            {
+                TimeToLive = TimeSpan.FromHours(1), // shortened for demo; production default is 14 days
+            }));
 
 // ── Step 5: Start the host (worker runs as IHostedService) ───────────────────
 var host = builder.Build();
@@ -78,9 +87,8 @@ await host.StartAsync();
 Console.WriteLine("Worker started. Sending messages...\n");
 
 // ── Step 6: Resolve the proxy and open a session ─────────────────────────────
-// GetTemporalAgentProxy returns the keyed TemporalAIAgentProxy registered for "Assistant".
-// Under the hood it will start (or resume) an AgentWorkflow in Temporal.
-var proxy = host.Services.GetTemporalAgentProxy("Assistant");
+// Resolve the keyed TemporalAIAgentProxy through the MAF AIAgent surface.
+var proxy = host.Services.GetRequiredKeyedService<AIAgent>("Assistant");
 var session = await proxy.CreateSessionAsync();
 
 Console.WriteLine($"Session workflow ID: {session}\n");
@@ -127,6 +135,6 @@ Console.WriteLine("Done.");
 
 sealed class WeatherService
 {
-    public string GetCurrentWeather() =>
-        Random.Shared.NextDouble() > 0.5 ? "It's sunny" : "It's raining";
+    public string GetCurrentWeather(string city) =>
+        $"{city}: " + (Random.Shared.NextDouble() > 0.5 ? "It's sunny" : "It's raining");
 }

@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
@@ -52,6 +53,18 @@ internal static class TemporalAgentsRegistrar
                 "on the worker service but does not register ITemporalClient in DI — " +
                 "AddTemporalClient is required separately.");
         }
+
+        if (agentsOptions.RequiresRegisteredChatClient
+            && !services.Any(d => d.ServiceType == typeof(IChatClient)))
+        {
+            throw new InvalidOperationException(
+                "A Temporal agent registered with ChatClientAgentOptions requires an unkeyed IChatClient in DI. " +
+                "Call services.AddChatClient(...) before AddTemporalAgents(), or use the overload with an explicit chat-client factory.");
+        }
+
+        ServiceCollectionExtensions.ValidateNoDuplicateAgentKeys(
+            services,
+            agentsOptions.GetRegisteredAgentNames());
 
         var taskQueue = builder?.TaskQueue ?? string.Empty;
 

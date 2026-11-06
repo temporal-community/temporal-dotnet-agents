@@ -99,6 +99,37 @@ public class TemporalWorkerBuilderExtensionsTests
     }
 
     [Fact]
+    public void AddTemporalAgents_RejectsMissingChatClientForMafRegistration()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        var builder = services.AddHostedTemporalWorker("test-task-queue");
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            builder.AddTemporalAgents(opts =>
+                opts.AddTemporalAgent("test-agent", new ChatClientAgentOptions())));
+
+        Assert.Contains("unkeyed IChatClient", exception.Message);
+        Assert.Contains("AddChatClient", exception.Message);
+    }
+
+    [Fact]
+    public void AddTemporalAgents_RejectsExistingKeyedAgent()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        services.AddKeyedSingleton<AIAgent>("TEST-AGENT", (_, _) => throw new NotImplementedException());
+        var builder = services.AddHostedTemporalWorker("test-task-queue");
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            builder.AddTemporalAgents(opts =>
+                opts.AddDurableAgent("test-agent", ConfigureWithChatClient)));
+
+        Assert.Contains("keyed AIAgent", exception.Message);
+        Assert.Contains("unique", exception.Message);
+    }
+
+    [Fact]
     public void AddTemporalAgents_KeyedProxiesAreSingletons()
     {
         var services = new ServiceCollection();

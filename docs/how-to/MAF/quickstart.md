@@ -34,12 +34,13 @@ temporal server start-dev \
 
 ## 1. Register the agent on a worker
 
-`AddDurableAgent` is the only worker-hosted definition path. Tools, chat client, and instructions
-all hang off one builder, and dependencies resolve through per-slot factories — no
-`BuildServiceProvider()` bootstrap.
+Configure MAF behavior once in `ChatClientAgentOptions`; keep workflow and activity settings in
+`TemporalAgentOptions`. The chat client resolves from the activity's scoped service provider, and
+durable tools receive that same scope through `AIFunctionArguments.Services`.
 
 ```csharp
 using System.ClientModel;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,7 +48,6 @@ using Microsoft.Extensions.Hosting;
 using OpenAI;
 using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
-using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -56,110 +56,89 @@ var apiKey = builder.Configuration["OPENAI_API_KEY"]
     ?? throw new InvalidOperationException("OPENAI_API_KEY is not configured.");
 var openAiClient = new OpenAIClient(new ApiKeyCredential(apiKey));
 
-// The tool the agent may call. Each invocation the model requests becomes its own
-// InvokeAgentTool activity.
-static string GetWeather(string city) => $"It is sunny in {city}.";
+// Each model-requested invocation becomes its own durable tool activity. Resolve scoped
+// dependencies through the IServiceProvider parameter rather than capturing them here.
+static string GetWeather(string city, IServiceProvider services) =>
+    services.GetRequiredService<WeatherService>().GetForecast(city);
 var weatherTool = AIFunctionFactory.Create(
     GetWeather,
     name: "get_weather",
     description: "Returns the current weather for a city.");
 
 builder.Services.AddChatClient(openAiClient.GetChatClient("gpt-4o-mini").AsIChatClient());
+builder.Services.AddScoped<WeatherService>();
 builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
     .AddHostedTemporalWorker("agents")
-    .AddTemporalAgents(opts =>
-    {
-        opts.AddDurableAgent("Assistant", agent =>
-        {
-            agent.Instructions = "You are a helpful assistant.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-            agent.AddTool(weatherTool);
-        });
-    })
-    .AddWorkflow<AskWorkflow>();   // only needed for step 3; see below
+    .AddTemporalAgents(agents =>
+        agents.AddTemporalAgent(
+            "Assistant",
+            new ChatClientAgentOptions
+            {
+                Description = "A helpful weather assistant.",
+                ChatOptions = new ChatOptions
+                {
+                    Instructions = "You are a helpful assistant. Use get_weather for forecasts.",
+                    Tools = [weatherTool],
+                },
+            },
+            new TemporalAgentOptions { TimeToLive = TimeSpan.FromHours(1) }));
 
 var host = builder.Build();
 await host.StartAsync();
 ```
 
-Three things that bite people here:
+`AddTemporalAgents` still requires an explicitly registered `ITemporalClient`; the hosted-worker
+overload that takes address, namespace, and queue does not add one to DI. Do not call
+`.UseFunctionInvocation()` on the chat client: the Temporal workflow owns the tool loop. The
+`WeatherService.GetForecast(string city)` implementation is application code; the tool resolves it
+through the invocation-scoped service provider.
 
-- **Register `ITemporalClient` explicitly.** The three-argument
-  `AddHostedTemporalWorker(address, namespace, queue)` overload configures a worker-internal client
-  but does not put `ITemporalClient` in DI, and `AddTemporalAgents` needs one.
-- **Do not call `.UseFunctionInvocation()`** on your chat client. The workflow owns tool dispatch;
-  an in-process loop is rejected at runtime.
-- **A tool that needs a service from DI takes the name first.** `AddTool` has two overloads: the
-  one above, `AddTool(AIFunction tool, ...)`, for a tool you already built, and
-  `AddTool(string name, Func<IServiceProvider, AIFunction> factory, ...)` for one that must resolve
-  dependencies — for example `agent.AddTool("get_weather", sp =>
-  AIFunctionFactory.Create(sp.GetRequiredService<WeatherService>().GetWeather, name:
-  "get_weather"))`. There is no factory-only overload; passing a bare `sp => ...` lambda does not
-  compile.
+## 2. Call it through the keyed MAF proxy
 
-## 2. Call it from outside a workflow
-
-The worker is running in the same process, so the host can talk to its own agent:
+The worker and caller can share a process. Resolve the proxy as a keyed MAF `AIAgent`:
 
 ```csharp
-var proxy   = host.Services.GetTemporalAgentProxy("Assistant");
-var session = await proxy.CreateSessionAsync();
+var agent   = host.Services.GetRequiredKeyedService<AIAgent>("Assistant");
+var session = await agent.CreateSessionAsync();
 
-var reply = await proxy.RunAsync("What's the weather in Kingston?", session);
+var reply = await agent.RunAsync("What's the weather in Kingston?", session);
 Console.WriteLine(reply.Text);
 ```
 
-Reuse that `session` for the rest of the conversation — it is what accumulates history. A second
-independent conversation gets its own `CreateSessionAsync()`.
+Reuse the session for later turns; it is backed by the same durable workflow and owns the
+conversation history. For ambiguous-response recovery, persist and reuse a caller-supplied
+`TemporalAgentRunOptions.RequestId`.
 
-## 3. Or call it from inside a workflow
+## 3. Split the client from the worker
 
-Sub-agent calls use `WorkflowAgents.GetTemporalAgent`, which is workflow-context only — the proxy
-above is the external equivalent.
-
-```csharp
-[Workflow]
-public class AskWorkflow
-{
-    [WorkflowRun]
-    public async Task<string> RunAsync(string question)
-    {
-        var agent   = WorkflowAgents.GetTemporalAgent("Assistant");
-        var session = await agent.CreateSessionAsync().ConfigureAwait(true);
-        var reply   = await agent.RunAsync([new ChatMessage(ChatRole.User, question)], session)
-            .ConfigureAwait(true);
-
-        return reply.Messages[^1].Text ?? string.Empty;
-    }
-}
-```
-
-A workflow only runs if the worker knows about it, which is what the `.AddWorkflow<AskWorkflow>()`
-in step 1 is for. It has to go there, chained onto the same worker builder, for two reasons: the
-service collection is closed once `builder.Build()` runs, and `AddTemporalAgents` throws if called
-a second time on the same builder rather than silently replacing your agent registrations.
-
-Start it like any other workflow:
+The client process needs only the task queue and agent name; it does not register a chat client,
+tools, or context providers:
 
 ```csharp
-var result = await host.Services.GetRequiredService<ITemporalClient>().ExecuteWorkflowAsync(
-    (AskWorkflow wf) => wf.RunAsync("What's the weather in Kingston?"),
-    new WorkflowOptions(id: $"ask-{Guid.NewGuid():N}", taskQueue: "agents"));
+var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddTemporalClient(options => options.TargetHost = "localhost:7233");
+builder.Services.AddTemporalAgentProxies("agents", "Assistant");
 
-Console.WriteLine(result);
+using var clientHost = builder.Build();
+var agent = clientHost.Services.GetRequiredKeyedService<AIAgent>("Assistant");
+var session = await agent.CreateSessionAsync();
+Console.WriteLine((await agent.RunAsync("Weather in Kingston?", session)).Text);
 ```
 
 ---
 
 ## Rules worth knowing on day one
 
-- **Tool activities use one attempt by default.** An `agent.RetryPolicy` opts every tool on the
+- **Tool activities use one attempt by default.** `TemporalAgentOptions.RetryPolicy` opts every tool on the
   agent into the same retry policy, so only configure retries when all its tools are safe to retry.
 - **One run at a time per session.** Overlapping `RunAsync` calls on the same session throw.
   Parallel conversations get a session each.
 - **A session belongs to its agent.** Passing one agent's session to another is rejected.
+- `ChatClientAgentOptions.ChatOptions.ResponseFormat` can be set at registration. At run time,
+  `ChatClientAgentRunOptions` supports only `ChatOptions.ResponseFormat`; custom history providers,
+  streaming, per-run chat-client factories, and other run-time chat-option overrides are rejected.
 
 ## Where to go next
 

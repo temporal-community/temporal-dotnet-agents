@@ -189,6 +189,26 @@ public class AgentActivitiesContextProviderTests
     }
 
     [Fact]
+    public async Task RunDurableAgentStep_PreservesConfiguredResponseFormatWithoutRunOverride()
+    {
+        var client = new SimpleStreamingChatClient();
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("ResponseFormatAgent", agent =>
+            {
+                agent.ChatClient = _ => client;
+                agent.ChatOptions = new ChatOptions { ResponseFormat = ChatResponseFormat.Json };
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        await env.RunAsync(() => activities.RunDurableAgentStepAsync(
+            MakeInput("ResponseFormatAgent")));
+
+        Assert.IsType<ChatResponseFormatJson>(client.LastOptions!.ResponseFormat);
+    }
+
+    [Fact]
     public async Task RunDurableAgentStep_AppliesContextReducerToPriorTurnsOnly()
     {
         var client = new SimpleStreamingChatClient();

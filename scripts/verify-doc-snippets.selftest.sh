@@ -83,6 +83,19 @@ covered_snippet='// BEGIN SNIPPET docs/how-to/MAF/example.md#registration (lines
 
 run_case covered-block pass "$covered_doc" "$covered_snippet"
 
+# The compact Temporal-named registration entry point must be included in coverage discovery.
+temporal_registration_doc='# Example
+
+## MAF registration
+
+```csharp
+agents.AddTemporalAgent("A", new ChatClientAgentOptions());
+```'
+temporal_registration_snippet='// BEGIN SNIPPET docs/how-to/MAF/example.md#maf-registration
+// END SNIPPET docs/how-to/MAF/example.md#maf-registration'
+run_case temporal-registration pass "$temporal_registration_doc" "$temporal_registration_snippet"
+run_case temporal-registration-uncovered reject "$temporal_registration_doc" ''
+
 # The case this gate is FOR: a new registration example lands with no compiled counterpart.
 run_case uncovered-block reject "$covered_doc" ''
 

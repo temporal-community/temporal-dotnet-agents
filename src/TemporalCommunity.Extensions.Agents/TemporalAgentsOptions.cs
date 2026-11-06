@@ -1,4 +1,6 @@
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Client.Schedules;
 using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.Approvals;
@@ -11,9 +13,9 @@ using TemporalCommunity.Extensions.AI.Tools;
 namespace TemporalCommunity.Extensions.Agents;
 
 /// <summary>
-/// Options for configuring Temporal agents. Agents are registered exclusively via
-/// <see cref="AddDurableAgent(string, Action{DurableAgentBuilder})"/>; the v0.2 surface
-/// (<c>AddAIAgent</c>, <c>AddAIAgentFactory</c>, etc.) is not supported.
+/// Options for configuring Temporal agents. Prefer <see cref="AddTemporalAgent(string, ChatClientAgentOptions, TemporalAgentOptions?)"/>
+/// to register a MAF-configured agent; <see cref="AddDurableAgent(string, Action{DurableAgentBuilder})"/>
+/// remains available for advanced Temporal-specific composition.
 /// </summary>
 /// <remarks>
 /// Worker-level default properties on this class use the <c>Default*</c> prefix
@@ -37,6 +39,7 @@ public sealed class TemporalAgentsOptions
         new(StringComparer.OrdinalIgnoreCase);
 
     private readonly List<ScheduleAgentRegistration> _scheduledRuns = [];
+    private bool _requiresRegisteredChatClient;
 
     internal TemporalAgentsOptions()
     {
@@ -336,6 +339,174 @@ public sealed class TemporalAgentsOptions
     }
 
     /// <summary>
+    /// Registers a durable agent from MAF options and resolves its <see cref="IChatClient"/> from
+    /// the invocation's activity scope.
+    /// </summary>
+    /// <param name="name">Case-insensitive agent name, unique within this options instance.</param>
+    /// <param name="agentOptions">MAF chat-client-agent configuration.</param>
+    /// <param name="temporalOptions">Optional Temporal workflow and activity settings.</param>
+    /// <returns>This options instance, for fluent chaining.</returns>
+    /// <remarks>
+    /// The MAF options' instructions, tools, description, and context providers are transferred to
+    /// the durable agent. The chat client must be registered as an unkeyed <see cref="IChatClient"/>
+    /// before <c>AddTemporalAgents</c> is called.
+    /// </remarks>
+    public TemporalAgentsOptions AddTemporalAgent(
+        string name,
+        ChatClientAgentOptions agentOptions,
+        TemporalAgentOptions? temporalOptions = null)
+    {
+        return AddTemporalAgentCore(
+            name,
+            provider => provider.GetRequiredService<IChatClient>(),
+            agentOptions,
+            temporalOptions,
+            requiresRegisteredChatClient: true);
+    }
+
+    /// <summary>
+    /// Registers a durable agent from MAF options with an invocation-scoped chat-client factory.
+    /// </summary>
+    /// <param name="name">Case-insensitive agent name, unique within this options instance.</param>
+    /// <param name="chatClientFactory">Factory evaluated from a fresh activity scope per model call.</param>
+    /// <param name="agentOptions">MAF chat-client-agent configuration.</param>
+    /// <param name="temporalOptions">Optional Temporal workflow and activity settings.</param>
+    /// <returns>This options instance, for fluent chaining.</returns>
+    public TemporalAgentsOptions AddTemporalAgent(
+        string name,
+        Func<IServiceProvider, IChatClient> chatClientFactory,
+        ChatClientAgentOptions agentOptions,
+        TemporalAgentOptions? temporalOptions = null)
+    {
+        ArgumentNullException.ThrowIfNull(chatClientFactory);
+        return AddTemporalAgentCore(
+            name,
+            chatClientFactory,
+            agentOptions,
+            temporalOptions,
+            requiresRegisteredChatClient: false);
+    }
+
+    private TemporalAgentsOptions AddTemporalAgentCore(
+        string name,
+        Func<IServiceProvider, IChatClient> chatClientFactory,
+        ChatClientAgentOptions agentOptions,
+        TemporalAgentOptions? temporalOptions,
+        bool requiresRegisteredChatClient)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(agentOptions);
+
+        if (!string.IsNullOrWhiteSpace(agentOptions.Name)
+            && !string.Equals(agentOptions.Name, name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException(
+                $"ChatClientAgentOptions.Name ('{agentOptions.Name}') must match the Temporal agent name ('{name}').",
+                nameof(agentOptions));
+        }
+
+        if (agentOptions.Id is not null)
+        {
+            throw new NotSupportedException(
+                $"ChatClientAgentOptions.Id is not supported for Temporal agent '{name}'; " +
+                "the Temporal session workflow ID identifies the durable agent session.");
+        }
+
+        if (agentOptions.ChatHistoryProvider is not null)
+        {
+            throw new NotSupportedException(
+                $"ChatClientAgentOptions.ChatHistoryProvider is not supported for Temporal agent '{name}'. " +
+                "The Temporal workflow owns chat history.");
+        }
+
+        var chatOptions = agentOptions.ChatOptions;
+        if (chatOptions?.ConversationId is not null
+            || chatOptions?.ContinuationToken is not null
+            || chatOptions?.AllowBackgroundResponses is true)
+        {
+            throw new NotSupportedException(
+                $"ChatOptions.ConversationId, ContinuationToken, and background responses are not supported " +
+                $"for Temporal agent '{name}'; the workflow owns session history and expects completed model responses.");
+        }
+
+        var unsupportedOptions = new List<string>();
+        if (agentOptions.AllowConcurrentInvocation)
+        {
+            unsupportedOptions.Add(nameof(agentOptions.AllowConcurrentInvocation));
+        }
+
+        if (agentOptions.RequirePerServiceCallChatHistoryPersistence)
+        {
+            unsupportedOptions.Add(nameof(agentOptions.RequirePerServiceCallChatHistoryPersistence));
+        }
+
+        if (agentOptions.EnableMessageInjection)
+        {
+            unsupportedOptions.Add(nameof(agentOptions.EnableMessageInjection));
+        }
+
+        if (agentOptions.DisableApprovalNotRequiredFunctionBypassing)
+        {
+            unsupportedOptions.Add(nameof(agentOptions.DisableApprovalNotRequiredFunctionBypassing));
+        }
+
+        if (agentOptions.DisableApprovalResponseBinding)
+        {
+            unsupportedOptions.Add(nameof(agentOptions.DisableApprovalResponseBinding));
+        }
+
+#pragma warning disable MAAI001 // Inspecting the experimental option is necessary to reject an unsupported execution mode.
+        if (agentOptions.EnableInvocableFunctionBypassing)
+        {
+            unsupportedOptions.Add(nameof(agentOptions.EnableInvocableFunctionBypassing));
+        }
+#pragma warning restore MAAI001
+
+        if (unsupportedOptions.Count > 0)
+        {
+            throw new NotSupportedException(
+                $"Temporal agent '{name}' does not support these ChatClientAgentOptions settings: " +
+                $"{string.Join(", ", unsupportedOptions)}.");
+        }
+
+        temporalOptions?.Validate(name);
+        var optionsSnapshot = agentOptions.Clone();
+        var configuredTools = optionsSnapshot.ChatOptions?.Tools?.ToArray() ?? [];
+        if (configuredTools.Any(tool => tool is not AIFunction))
+        {
+            throw new NotSupportedException(
+                $"Temporal agent '{name}' supports only AIFunction entries in ChatClientAgentOptions.ChatOptions.Tools. " +
+                "Register each function as a durable tool.");
+        }
+
+        AddDurableAgent(name, agent =>
+        {
+            agent.Description = optionsSnapshot.Description;
+            agent.Instructions = optionsSnapshot.ChatOptions?.Instructions;
+            agent.ChatClient = chatClientFactory;
+            agent.ChatOptions = optionsSnapshot.ChatOptions;
+
+            foreach (var tool in configuredTools.Cast<AIFunction>())
+            {
+                agent.AddTool(tool);
+            }
+
+            if (optionsSnapshot.AIContextProviders is not null)
+            {
+                foreach (var provider in optionsSnapshot.AIContextProviders)
+                {
+                    agent.AddContextProvider(provider);
+                }
+            }
+
+            temporalOptions?.ApplyTo(agent);
+        });
+
+        _requiresRegisteredChatClient |= requiresRegisteredChatClient;
+        return this;
+    }
+
+    /// <summary>
     /// Declares a named agent proxy for client-only scenarios where the real agent
     /// implementation runs in a separate worker process. No factory is required; call this from
     /// <see cref="ServiceCollectionExtensions.AddTemporalAgentProxies"/> instead of
@@ -447,6 +618,8 @@ public sealed class TemporalAgentsOptions
     /// </summary>
     internal IReadOnlyDictionary<string, DurableAgentRegistration> DurableAgentRegistrations =>
         _durableAgentRegistrations;
+
+    internal bool RequiresRegisteredChatClient => _requiresRegisteredChatClient;
 
     /// <summary>Gets the proxy-only declarations.</summary>
     internal IReadOnlyDictionary<string, TimeSpan?> ProxyDeclarations => _proxyDeclarations;

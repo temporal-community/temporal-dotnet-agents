@@ -3,6 +3,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Collections.Generic;
+using System.Linq;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents.Workflows;
 
@@ -13,6 +15,37 @@ namespace TemporalCommunity.Extensions.Agents;
 /// </summary>
 public static class ServiceCollectionExtensions
 {
+    /// <summary>
+    /// Registers client-side Temporal agent proxies for the specified agent names.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="taskQueue">The Temporal task queue that hosts the agents.</param>
+    /// <param name="agentNames">The case-insensitive names of the remote agents.</param>
+    /// <returns>The service collection.</returns>
+    public static IServiceCollection AddTemporalAgentProxies(
+        this IServiceCollection services,
+        string taskQueue,
+        params string[] agentNames)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskQueue);
+        ArgumentNullException.ThrowIfNull(agentNames);
+        if (agentNames.Length == 0)
+        {
+            throw new ArgumentException("At least one Temporal agent name is required.", nameof(agentNames));
+        }
+
+        return services.AddTemporalAgentProxies(
+            options =>
+            {
+                foreach (var name in agentNames)
+                {
+                    options.AddAgentProxy(name);
+                }
+            },
+            taskQueue);
+    }
+
     /// <summary>
     /// Registers the privileged, session-scoped approval-grant administration capability.
     /// </summary>
@@ -68,6 +101,7 @@ public static class ServiceCollectionExtensions
 
         var options = new TemporalAgentsOptions();
         configure(options);
+        ValidateNoDuplicateAgentKeys(services, options.GetRegisteredAgentNames());
 
         // Options are used by DefaultTemporalAgentClient for TTL resolution when starting sessions.
         services.AddSingleton(options);
@@ -117,6 +151,26 @@ public static class ServiceCollectionExtensions
         if (!options.IsAgentRegistered(agentName))
         {
             throw new AgentNotRegisteredException(agentName);
+        }
+    }
+
+    internal static void ValidateNoDuplicateAgentKeys(
+        IServiceCollection services,
+        IEnumerable<string> agentNames)
+    {
+        var existingKeys = services
+            .Where(descriptor => descriptor.ServiceType == typeof(AIAgent) && descriptor.IsKeyedService)
+            .Select(descriptor => descriptor.ServiceKey)
+            .OfType<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in agentNames)
+        {
+            if (existingKeys.Contains(name))
+            {
+                throw new InvalidOperationException(
+                    $"A keyed AIAgent with key '{name}' is already registered. Temporal agent proxy keys must be unique.");
+            }
         }
     }
 }

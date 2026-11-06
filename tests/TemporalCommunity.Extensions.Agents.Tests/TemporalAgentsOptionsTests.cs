@@ -1,5 +1,7 @@
 using FakeItEasy;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Client.Schedules;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using Xunit;
@@ -281,5 +283,129 @@ public class TemporalAgentsOptionsTests
         options.AddAgentProxy("Agent");
 
         Assert.Throws<InvalidOperationException>(() => options.AddAgentProxy("Agent"));
+    }
+
+    [Fact]
+    public void AddTemporalAgent_MapsMafOptionsAndTemporalSettings()
+    {
+        static string GetWeather(string city) => $"Weather in {city}.";
+
+        var tool = AIFunctionFactory.Create(GetWeather, name: "get_weather");
+        var firstProvider = new TestContextProvider();
+        var secondProvider = new TestContextProvider();
+        var chatClient = A.Fake<IChatClient>();
+        var agentOptions = new ChatClientAgentOptions
+        {
+            Name = "Weather",
+            Description = "Answers weather questions.",
+            ChatOptions = new ChatOptions
+            {
+                Instructions = "Use the weather tool.",
+                Temperature = 0.25f,
+                Tools = [tool],
+            },
+            AIContextProviders = [firstProvider, secondProvider],
+        };
+        var temporalOptions = new TemporalAgentOptions
+        {
+            TimeToLive = TimeSpan.FromHours(2),
+            ActivityTimeout = TimeSpan.FromMinutes(3),
+            MaxEntryCount = 40,
+        };
+
+        var options = new TemporalAgentsOptions().AddTemporalAgent(
+            "Weather",
+            _ => chatClient,
+            agentOptions,
+            temporalOptions);
+
+        var registration = options.DurableAgentRegistrations["Weather"];
+        var serviceProvider = new ServiceCollection().BuildServiceProvider();
+
+        Assert.Equal("Answers weather questions.", registration.Description);
+        Assert.Equal("Use the weather tool.", registration.Instructions);
+        Assert.Equal(0.25f, registration.ChatOptions!.Temperature);
+        Assert.Same(chatClient, registration.ChatClient(serviceProvider));
+        Assert.Same(tool, registration.Tools.Single().Factory(serviceProvider));
+        Assert.Collection(
+            registration.ContextProviderFactories,
+            provider => Assert.Same(firstProvider, provider.Factory(serviceProvider)),
+            provider => Assert.Same(secondProvider, provider.Factory(serviceProvider)));
+        Assert.Equal(TimeSpan.FromHours(2), registration.TimeToLive);
+        Assert.Equal(TimeSpan.FromMinutes(3), registration.ActivityTimeout);
+        Assert.Equal(40, registration.MaxEntryCount);
+    }
+
+    [Fact]
+    public void AddTemporalAgent_RejectsHistoryProvider()
+    {
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            new TemporalAgentsOptions().AddTemporalAgent(
+                "Weather",
+                _ => A.Fake<IChatClient>(),
+                new ChatClientAgentOptions
+                {
+                    ChatHistoryProvider = A.Fake<ChatHistoryProvider>(),
+                }));
+
+        Assert.Contains(nameof(ChatClientAgentOptions.ChatHistoryProvider), exception.Message);
+        Assert.Contains("workflow owns chat history", exception.Message);
+    }
+
+    [Fact]
+    public void AddTemporalAgent_RejectsUnsupportedFunctionInvocationOptions()
+    {
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            new TemporalAgentsOptions().AddTemporalAgent(
+                "Weather",
+                _ => A.Fake<IChatClient>(),
+                new ChatClientAgentOptions { AllowConcurrentInvocation = true }));
+
+        Assert.Contains(nameof(ChatClientAgentOptions.AllowConcurrentInvocation), exception.Message);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void AddTemporalAgent_RejectsServiceManagedChatHistory(bool hasConversationId, bool allowBackgroundResponses)
+    {
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            new TemporalAgentsOptions().AddTemporalAgent(
+                "Weather",
+                _ => A.Fake<IChatClient>(),
+                new ChatClientAgentOptions
+                {
+                    ChatOptions = new ChatOptions
+                    {
+                        ConversationId = hasConversationId ? "service-conversation" : null,
+                        AllowBackgroundResponses = allowBackgroundResponses ? true : null,
+                    },
+                }));
+
+        Assert.Contains("workflow owns session history", exception.Message);
+    }
+
+    [Fact]
+    public void AddTemporalAgent_RejectsNonFunctionTools()
+    {
+        var exception = Assert.Throws<NotSupportedException>(() =>
+            new TemporalAgentsOptions().AddTemporalAgent(
+                "Weather",
+                _ => A.Fake<IChatClient>(),
+                new ChatClientAgentOptions
+                {
+                    ChatOptions = new ChatOptions { Tools = [AIFunctionFactory.Create(() => "ok"), new TestTool()] },
+                }));
+
+        Assert.Contains("only AIFunction", exception.Message);
+    }
+
+    private sealed class TestContextProvider : AIContextProvider
+    {
+    }
+
+    private sealed class TestTool : AITool
+    {
+        public override string Name => "test-tool";
     }
 }

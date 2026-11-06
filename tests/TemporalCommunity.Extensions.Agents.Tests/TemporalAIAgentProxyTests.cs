@@ -249,6 +249,121 @@ public class TemporalAIAgentProxyTests
     }
 
     [Fact]
+    public async Task RunAsync_ChatClientAgentResponseFormat_IsForwarded()
+    {
+        RunRequest? capturedRequest = null;
+        var fakeClient = A.Fake<ITemporalAgentClient>();
+        A.CallTo(() => fakeClient.SendAsync(
+                A<TemporalAgentSessionId>._,
+                A<RunRequest>._,
+                A<CancellationToken>._))
+            .Invokes((TemporalAgentSessionId _, RunRequest request, CancellationToken _) => capturedRequest = request)
+            .Returns(Task.FromResult(new AgentResponse()));
+
+        var proxy = new TemporalAIAgentProxy("TestAgent", fakeClient);
+        var session = await proxy.CreateSessionAsync();
+
+        await proxy.RunAsync(
+            "Return JSON.",
+            session,
+            new ChatClientAgentRunOptions
+            {
+                ChatOptions = new ChatOptions { ResponseFormat = ChatResponseFormat.Json },
+            });
+
+        Assert.IsType<ChatResponseFormatJson>(capturedRequest!.ResponseFormat);
+    }
+
+    [Fact]
+    public async Task RunAsync_ChatClientAgentRunOptions_RejectsUnsupportedChatOptions()
+    {
+        var fakeClient = A.Fake<ITemporalAgentClient>();
+        var proxy = new TemporalAIAgentProxy("TestAgent", fakeClient);
+        var session = await proxy.CreateSessionAsync();
+
+        var exception = await Assert.ThrowsAsync<NotSupportedException>(() =>
+            proxy.RunAsync(
+                "Hello",
+                session,
+                new ChatClientAgentRunOptions
+                {
+                    ChatOptions = new ChatOptions { Temperature = 0.5f },
+                }));
+
+        Assert.Contains(nameof(ChatOptions.Temperature), exception.Message);
+        A.CallTo(() => fakeClient.SendAsync(
+                A<TemporalAgentSessionId>._,
+                A<RunRequest>._,
+                A<CancellationToken>._))
+            .MustNotHaveHappened();
+    }
+
+    [Fact]
+    public async Task RunAsync_ChatClientAgentRunOptions_RejectsChatClientFactory()
+    {
+        var fakeClient = A.Fake<ITemporalAgentClient>();
+        var proxy = new TemporalAIAgentProxy("TestAgent", fakeClient);
+        var session = await proxy.CreateSessionAsync();
+
+        var exception = await Assert.ThrowsAsync<NotSupportedException>(() =>
+            proxy.RunAsync(
+                "Hello",
+                session,
+                new ChatClientAgentRunOptions { ChatClientFactory = client => client }));
+
+        Assert.Contains(nameof(ChatClientAgentRunOptions.ChatClientFactory), exception.Message);
+    }
+
+    [Fact]
+    public async Task RunAsync_UnknownAgentRunOptions_AreRejected()
+    {
+        var fakeClient = A.Fake<ITemporalAgentClient>();
+        var proxy = new TemporalAIAgentProxy("TestAgent", fakeClient);
+        var session = await proxy.CreateSessionAsync();
+
+        var exception = await Assert.ThrowsAsync<NotSupportedException>(() =>
+            proxy.RunAsync("Hello", session, new UnknownRunOptions()));
+
+        Assert.Contains(nameof(TemporalAgentRunOptions), exception.Message);
+        Assert.Contains(nameof(ChatClientAgentRunOptions), exception.Message);
+    }
+
+    [Fact]
+    public async Task RunAsync_BaseAgentRunOptions_ForwardsResponseFormat()
+    {
+        RunRequest? capturedRequest = null;
+        var fakeClient = A.Fake<ITemporalAgentClient>();
+        A.CallTo(() => fakeClient.SendAsync(
+                A<TemporalAgentSessionId>._,
+                A<RunRequest>._,
+                A<CancellationToken>._))
+            .Invokes((TemporalAgentSessionId _, RunRequest request, CancellationToken _) => capturedRequest = request)
+            .Returns(Task.FromResult(new AgentResponse()));
+
+        var proxy = new TemporalAIAgentProxy("TestAgent", fakeClient);
+        var session = await proxy.CreateSessionAsync();
+
+        await proxy.RunAsync("Return JSON.", session, new AgentRunOptions
+        {
+            ResponseFormat = ChatResponseFormat.Json,
+        });
+
+        Assert.IsType<ChatResponseFormatJson>(capturedRequest!.ResponseFormat);
+    }
+
+    [Fact]
+    public async Task RunAsync_BaseAgentRunOptions_RejectsBackgroundResponses()
+    {
+        var proxy = CreateProxy("TestAgent");
+        var session = await proxy.CreateSessionAsync();
+
+        var exception = await Assert.ThrowsAsync<NotSupportedException>(() =>
+            proxy.RunAsync("Hello", session, new AgentRunOptions { AllowBackgroundResponses = true }));
+
+        Assert.Contains(nameof(AgentRunOptions.AllowBackgroundResponses), exception.Message);
+    }
+
+    [Fact]
     public async Task RunAsync_WithEmptyCorrelationIdInOptions_AutoGenerates()
     {
         // Empty string is treated the same as null — auto-generate a fresh GUID.
@@ -336,5 +451,9 @@ public class TemporalAIAgentProxyTests
             .Returns(Task.FromResult(new AgentResponse()));
 
         return new TemporalAIAgentProxy(name, fakeClient);
+    }
+
+    private sealed class UnknownRunOptions : AgentRunOptions
+    {
     }
 }

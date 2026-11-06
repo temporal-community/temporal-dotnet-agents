@@ -51,18 +51,14 @@ builder.Services.AddChatClient(chatClient);
 builder.Services.AddTemporalClient("localhost:7233", "default");
 builder.Services
     .AddHostedTemporalWorker("agents")
-    .AddTemporalAgents(opts =>
-    {
-        opts.AddDurableAgent("MyAgent", a =>
+    .AddTemporalAgents(agents =>
+        agents.AddTemporalAgent(
+            "MyAgent",
+            new ChatClientAgentOptions
         {
-            a.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-            a.Instructions = "You are a helpful assistant.";
-            a.TimeToLive = TimeSpan.FromHours(24);
-        });
-        // Optional opt-out for clusters where the three custom search attributes
-        // have not been registered yet.
-        // opts.EnableSearchAttributes = false;
-    });
+                ChatOptions = new ChatOptions { Instructions = "You are a helpful assistant." },
+            },
+            new TemporalAgentOptions { TimeToLive = TimeSpan.FromHours(24) }));
 
 using var host = builder.Build();
 await host.StartAsync();
@@ -71,17 +67,19 @@ await host.StartAsync();
 ### 2. Send a Message
 
 ```csharp
-// Resolve the agent proxy from the started host.
-AIAgent proxy = host.Services.GetTemporalAgentProxy("MyAgent");
+// Resolve the Temporal proxy through the standard keyed MAF surface.
+AIAgent agent = host.Services.GetRequiredKeyedService<AIAgent>("MyAgent");
 
 // Create a session and send a message
-var session = await proxy.CreateSessionAsync();
-var response = await proxy.RunAsync("Hello, agent!", session);
+var session = await agent.CreateSessionAsync();
+var response = await agent.RunAsync("Hello, agent!", session);
 
 Console.WriteLine(response.Text);
 ```
 
-`AddTemporalAgents()` is the only registration path for agent infrastructure.
+`ChatClientAgentOptions` holds MAF configuration; `TemporalAgentOptions` holds only Temporal
+execution settings. The chat client is resolved from the activity scope. To register a client-only
+proxy, use `services.AddTemporalAgentProxies("agents", "MyAgent")`.
 
 ### 3. Run a Sample
 

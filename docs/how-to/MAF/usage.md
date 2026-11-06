@@ -3,8 +3,10 @@
 `TemporalCommunity.Extensions.Agents` makes a Microsoft Agent Framework (`Microsoft.Agents.AI`)
 `AIAgent` durable with Temporal. It builds on `TemporalCommunity.Extensions.AI`, adding named
 agents, `AgentSessionStateBag`, `AIContextProvider` support, and Temporal Web UI search attributes.
-There is one worker-hosted definition path (`AddDurableAgent`) and two ways to interact with a
-registered agent:
+The preferred worker registration path is `AddTemporalAgent`, which accepts standard MAF
+`ChatClientAgentOptions` and a separate `TemporalAgentOptions` for Temporal concerns. The lower-level
+`AddDurableAgent` builder remains available for advanced Temporal composition. There are two ways to
+interact with a registered agent:
 
 - **From outside a workflow** — external callers (ASP.NET, console, background service) resolve a
   `TemporalAIAgentProxy` via `GetTemporalAgentProxy`.
@@ -22,57 +24,104 @@ before calling a durable client.
 
 ## Registration
 
-`AddDurableAgent` is the only **worker-hosted durable-agent definition** path. The client-only
-counterpart is `AddTemporalAgentProxies` plus `AddAgentProxy`; it declares proxies for an agent
-hosted by another process and does not register a worker or agent implementation.
+`AddTemporalAgent` is the preferred worker-hosted registration path. It accepts a MAF
+`ChatClientAgentOptions` plus optional `TemporalAgentOptions`; the client-only counterpart is
+`AddTemporalAgentProxies(taskQueue, agentNames...)`, which registers keyed `AIAgent` proxies without
+registering the worker or agent implementation. `AddAgentProxy` is still available for client-only
+registrations that need per-agent proxy settings.
 
-`AddDurableAgent(string name, Action<DurableAgentBuilder> configure)` consolidates the worker's chat
-client, instructions, durable tools, compatible context providers, and per-agent timeouts. It does
-not make provider-owned external history durable. DI access is provided via per-slot factories on
-the builder, so you do not need to call `BuildServiceProvider()` to wire dependencies. Tool
-factories run inside a fresh activity scope on every invocation; resolve scoped dependencies there,
-and do not capture scoped services in a tool instance created at registration time.
+The compact MAF path transfers `Description`, `ChatOptions`, `Tools`, and the ordered
+`AIContextProviders` from `ChatClientAgentOptions`. The unkeyed `IChatClient` resolves from the
+activity scope for each model call. `TemporalAgentOptions` holds Temporal-only values such as
+`TimeToLive`, `ActivityTimeout`, `HeartbeatTimeout`, `ApprovalTimeout`, retry settings, and history
+bounds. Custom `ChatHistoryProvider` and MAF options that would start a second tool loop or require
+non-durable per-call behavior are rejected.
 
-### Worker-hosted example
+### MAF-options worker example
 
 ```csharp
-builder.Services.AddSingleton<OrderService>();
-builder.Services.AddSingleton<RefundService>();
-builder.Services.AddSingleton<EmailService>();
-builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient()).Build();
+static string GetWeather(string city, IServiceProvider services) =>
+    services.GetRequiredService<WeatherService>().GetForecast(city);
+
+var weatherTool = AIFunctionFactory.Create(
+    GetWeather,
+    name: "get_weather",
+    description: "Returns a forecast for a city.");
+
+builder.Services.AddScoped<WeatherService>();
+builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient());
 builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
     .AddHostedTemporalWorker(taskQueue)
-    .AddTemporalAgents(opts =>
-    {
-        opts.AddDurableAgent("RefundAgent", agent =>
-        {
-            agent.Description = "Issues refunds and notifies the customer.";
-            agent.Instructions = "You are a refund specialist.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-
-            agent.AddTool("lookup_order", sp => AIFunctionFactory.Create(
-                sp.GetRequiredService<OrderService>().LookupOrder,
-                name: "lookup_order"));
-
-            agent.AddTool(
-                "apply_refund",
-                sp => AIFunctionFactory.Create(
-                    sp.GetRequiredService<RefundService>().ApplyRefund,
-                    name: "apply_refund"));
-
-            agent.AddTool(
-                "send_email",
-                sp => AIFunctionFactory.Create(
-                    sp.GetRequiredService<EmailService>().SendEmail,
-                    name: "send_email"));
-
-            agent.MaxToolCallsPerTurn = 10;
-        });
-    })
-    .AddWorkflow<RefundWorkflow>();
+    .AddTemporalAgents(agents =>
+        agents.AddTemporalAgent(
+            "WeatherAgent",
+            new ChatClientAgentOptions
+            {
+                Description = "Answers weather questions.",
+                ChatOptions = new ChatOptions
+                {
+                    Instructions = "Use get_weather for forecasts.",
+                    Tools = [weatherTool],
+                },
+            },
+            new TemporalAgentOptions { TimeToLive = TimeSpan.FromHours(24) }));
 ```
+
+`IServiceProvider` parameters in `AIFunctionFactory` functions are bound from
+`AIFunctionArguments.Services`; the library supplies the invocation's activity scope. Do not capture
+a scoped service in a tool instance at registration time.
+
+### Migrating from the builder API
+
+The former builder surface remains available for settings that do not map to MAF agent options.
+For the common configuration, move the corresponding values as follows:
+
+| `DurableAgentBuilder` | MAF / Temporal registration |
+|---|---|
+| `Description` | `ChatClientAgentOptions.Description` |
+| `Instructions` | `ChatClientAgentOptions.ChatOptions.Instructions` |
+| `AddTool(AIFunction)` | `ChatClientAgentOptions.ChatOptions.Tools` |
+| `AddContextProvider(provider)` | `ChatClientAgentOptions.AIContextProviders` |
+| `ChatClient = sp => sp.GetRequiredService<IChatClient>()` | `AddChatClient(...)` registration in DI |
+| `TimeToLive`, activity/approval timeouts, retry, history bounds | `TemporalAgentOptions` |
+
+Use `AddDurableAgent` when you need builder-only integration points such as custom pipeline
+configuration or tool-interceptor factories. Both paths use workflow-owned history and the same
+durable activity boundaries.
+
+### Supported MAF options
+
+The compact registration path preserves these MAF inputs:
+
+| MAF input | Temporal behavior |
+|---|---|
+| `ChatClientAgentOptions.Name` | Optional; when supplied, it must match the Temporal name, case-insensitively. |
+| `Description` | Preserved as the agent description. |
+| `ChatOptions` | Cloned and forwarded to model calls. `Instructions` becomes the registered agent instruction; the tool list is replaced by the durable tools below. |
+| `ChatOptions.Tools` | Only `AIFunction` instances are accepted. Each function is dispatched through a separate Temporal activity. |
+| `AIContextProviders` | Preserved in the configured order. |
+| `TemporalAgentOptions` | Carries per-agent TTL, activity/heartbeat/approval timeouts, retry policy, and history/context bounds. |
+
+`ChatClientAgentOptions.Id` and a custom `ChatHistoryProvider` are rejected. The workflow owns the
+session identity and all conversation history. `ChatOptions.ConversationId`, a continuation token,
+and enabled background responses are also rejected because this integration requires completed
+model responses and workflow-owned history. Other registration-time `ChatOptions` values are
+forwarded. Temporal owns the tool loop and does not add MAF's in-process function-invocation
+decorator; the worker's `IChatClient` must be registered without `.UseFunctionInvocation()`.
+
+The following `ChatClientAgentOptions` switches are rejected when enabled because they conflict
+with serial durable tool dispatch or per-turn workflow-owned history: `AllowConcurrentInvocation`,
+`RequirePerServiceCallChatHistoryPersistence`, `EnableMessageInjection`,
+`DisableApprovalNotRequiredFunctionBypassing`, `DisableApprovalResponseBinding`, and
+`EnableInvocableFunctionBypassing`.
+
+For invocation options, `AgentRunOptions.ResponseFormat` is supported. `TemporalAgentRunOptions`
+also supports tool selection, fire-and-forget, correlation ID, and request ID. The
+`ChatClientAgentRunOptions` path supports `ResponseFormat` only; its `ChatClientFactory` and other
+run-time `ChatOptions` overrides are rejected. Unknown run-option subclasses and
+`RunStreamingAsync` are explicitly unsupported.
 
 > **Note:** the alternate three-argument `AddHostedTemporalWorker(address, namespace, queue)`
 > overload configures a worker-internal client but does not register `ITemporalClient` in DI. If

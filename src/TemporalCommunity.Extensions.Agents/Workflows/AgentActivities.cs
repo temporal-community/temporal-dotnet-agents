@@ -212,7 +212,10 @@ internal sealed class AgentActivities(
             input.Request.EnableToolCalls,
             input.Request.EnableToolNames is { } enabledToolNames ? [.. enabledToolNames] : null);
         chatOptions.Tools = selectedTools.Count > 0 ? [.. selectedTools] : null;
-        chatOptions.ResponseFormat = input.Request.ResponseFormat;
+        if (input.Request.ResponseFormat is { } responseFormat)
+        {
+            chatOptions.ResponseFormat = responseFormat;
+        }
 
         var contextReducerKey = registration.ContextReducerKey ?? agentsOptions.DefaultContextReducerKey;
         var currentTurnStartIndex = input.CurrentTurnStartIndex;

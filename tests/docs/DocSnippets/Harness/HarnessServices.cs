@@ -41,6 +41,8 @@ internal sealed class EmailService
 internal sealed class WeatherService
 {
     public string GetWeather(string city) => city;
+
+    public string GetForecast(string city) => city;
 }
 
 internal sealed class DataService
