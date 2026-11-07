@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using TemporalCommunity.Extensions.Agents.Approvals;
+using Microsoft.Agents.AI;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;
@@ -9,15 +9,6 @@ using TemporalCommunity.Extensions.AI.Session;
 namespace TemporalCommunity.Extensions.Agents.State;
 
 [JsonSourceGenerationOptions(WriteIndented = false)]
-// Feature B — approval scope types
-[JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord))]
-[JsonSerializable(typeof(List<TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord>))]
-[JsonSerializable(typeof(IReadOnlyList<TemporalCommunity.Extensions.Agents.Approvals.ApprovalScopeRecord>))]
-[JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision))]
-[JsonSerializable(typeof(List<TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision>))]
-[JsonSerializable(typeof(IReadOnlyList<TemporalCommunity.Extensions.Agents.Approvals.DurableAgentApprovalDecision>))]
-[JsonSerializable(typeof(SessionApprovalScopeGrantRequest))]
-[JsonSerializable(typeof(SessionApprovalScopeGrantResult))]
 [JsonSerializable(typeof(DurableSessionEntry))]
 [JsonSerializable(typeof(DurableSessionRequest))]
 [JsonSerializable(typeof(DurableSessionResponse))]
@@ -28,9 +19,23 @@ namespace TemporalCommunity.Extensions.Agents.State;
 [JsonSerializable(typeof(TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionSnapshot))]
 // Activity I/O types — workflow ↔ activity boundary
 [JsonSerializable(typeof(AgentStepInput))]
+[JsonSerializable(typeof(PrepareAgentTurnInput))]
+[JsonSerializable(typeof(PreparedAgentTurn))]
+[JsonSerializable(typeof(PreparedMessageAttribution))]
+[JsonSerializable(typeof(IReadOnlyList<PreparedMessageAttribution>))]
+[JsonSerializable(typeof(PreparedAgentTool))]
+[JsonSerializable(typeof(ChatHistoryMemoryProviderScope))]
+[JsonSerializable(typeof(ChatHistoryMemoryProvider.State))]
+[JsonSerializable(typeof(TemporalMemoryScopeSnapshot))]
+[JsonSerializable(typeof(InitializeChatHistoryMemoryInput))]
+[JsonSerializable(typeof(InitializedChatHistoryMemory))]
+[JsonSerializable(typeof(IReadOnlyList<PreparedAgentTool>))]
+[JsonSerializable(typeof(CompleteAgentTurnInput))]
+[JsonSerializable(typeof(CompletedAgentTurn))]
 [JsonSerializable(typeof(DurableChatTurnRange))]
 [JsonSerializable(typeof(AgentStepResult))]
 [JsonSerializable(typeof(StateBagDelta))]
+[JsonSerializable(typeof(TemporalCommunity.Extensions.AI.Internal.DurableFunctionDeclarationSnapshot))]
 [JsonSerializable(typeof(InvokeAgentToolInput))]
 [JsonSerializable(typeof(InvokeAgentToolResult))]
 [JsonSerializable(typeof(IReadOnlyList<DurableSessionEntry>))]

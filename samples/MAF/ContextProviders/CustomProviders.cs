@@ -5,9 +5,9 @@
 // and are not direct drop-ins for this library's durable tool dispatch (see
 // docs/how-to/MAF/context-providers.md).
 //
-// TurnCounterProvider — stateful: increments a per-session LLM-call counter in StateBag
-//                       and injects it as a system message on every step.
-// DateTimeProvider    — stateless: injects the current UTC date/time on every step.
+// TurnCounterProvider — stateful: increments a per-session turn counter in StateBag
+//                       and injects it as a system message once per turn.
+// DateTimeProvider    — stateless: injects the current UTC date/time once per turn.
 //                       Shows that providers do not have to use StateBag.
 
 using Microsoft.Agents.AI;
@@ -18,7 +18,7 @@ using TemporalCommunity.Extensions.Agents.Session;
 namespace ContextProviders;
 
 /// <summary>
-/// Tracks how many LLM calls have fired in this session across all turns.
+/// Tracks how many logical turns have started in this session.
 /// Stores the counter under <c>"session.turn_count"</c> in <see cref="AgentSessionStateBag"/>
 /// so the value survives worker restarts and continue-as-new transitions.
 /// </summary>
@@ -59,14 +59,14 @@ public sealed class TurnCounterProvider : AIContextProvider
                 count = existing + 1;
             }
 
-            // The activity re-serializes the bag after the step, so this survives worker
-            // restarts and continue-as-new.
+            // Preparation returns the StateBag delta to the workflow, which carries it across
+            // worker restarts and continue-as-new.
             stateBag.SetValue(StateBagKey, count.ToString(),
                 System.Text.Json.JsonSerializerOptions.Default);
 
             // Sample-only: makes the provider's effect visible on the console. A real provider
             // would not write to stdout from inside an activity.
-            Console.WriteLine($"[TurnCounter] LLM call #{count}");
+            Console.WriteLine($"[TurnCounter] Turn #{count}");
         }
 
         return new ValueTask<AIContext>(new AIContext
@@ -75,7 +75,7 @@ public sealed class TurnCounterProvider : AIContextProvider
             [
                 new ChatMessage(
                     ChatRole.System,
-                    $"[Context] This is LLM call #{count} in this session."),
+                    $"[Context] This is turn #{count} in this session."),
             ],
         });
     }
@@ -83,7 +83,7 @@ public sealed class TurnCounterProvider : AIContextProvider
 }
 
 /// <summary>
-/// Injects the current UTC date/time as a system message on every LLM step.
+/// Injects the current UTC date/time as a system message once per logical turn.
 /// Stateless — no <see cref="AgentSessionStateBag"/> access required.
 /// </summary>
 public sealed class DateTimeProvider : AIContextProvider

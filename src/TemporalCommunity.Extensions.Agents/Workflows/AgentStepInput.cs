@@ -22,6 +22,24 @@ internal sealed class AgentStepInput
     public required RunRequest Request { get; init; }
 
     /// <summary>
+    /// Provider context prepared once at the beginning of a logical agent turn. When supplied,
+    /// this step must not invoke provider hooks again.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PreparedInstructions { get; init; }
+
+    public bool ProvidersPrepared { get; init; }
+
+    /// <summary>
+    /// Frozen registered tools selected by provider preparation for this logical turn.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PreparedAgentTool>? PreparedTools { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PreparedMessageAttribution>? AccumulatedMessageAttributions { get; init; }
+
+    /// <summary>
     /// Gets the messages accumulated across the step loop. On the first iteration this contains
     /// the original user request messages; on subsequent iterations it also contains the
     /// assistant tool-call message and the prior <see cref="FunctionResultContent"/> messages.
@@ -46,6 +64,9 @@ internal sealed class AgentStepInput
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public JsonElement? SerializedStateBag { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TemporalMemoryScopeSnapshot? MemoryScope { get; init; }
 
     /// <summary>
     /// Gets the explicit session ID for this agent call. When provided, the activity uses this

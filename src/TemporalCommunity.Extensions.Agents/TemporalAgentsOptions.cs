@@ -1,9 +1,7 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
-using Temporalio.Client.Schedules;
 using Temporalio.Common;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.Agents.Tools;
@@ -13,7 +11,7 @@ using TemporalCommunity.Extensions.AI.Tools;
 namespace TemporalCommunity.Extensions.Agents;
 
 /// <summary>
-/// Options for configuring Temporal agents. Prefer <see cref="AddTemporalAgent(string, ChatClientAgentOptions, TemporalAgentOptions?)"/>
+/// Options for configuring Temporal agents. Prefer <see cref="Agent(string, ChatClientAgentOptions, Action{TemporalAgentOptions}?)"/>
 /// to register a MAF-configured agent; <see cref="AddDurableAgent(string, Action{DurableAgentBuilder})"/>
 /// remains available for advanced Temporal-specific composition.
 /// </summary>
@@ -38,7 +36,6 @@ public sealed class TemporalAgentsOptions
     private readonly Dictionary<string, TimeSpan?> _proxyDeclarations =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly List<ScheduleAgentRegistration> _scheduledRuns = [];
     private bool _requiresRegisteredChatClient;
 
     internal TemporalAgentsOptions()
@@ -147,26 +144,6 @@ public sealed class TemporalAgentsOptions
             throw new InvalidOperationException("The default model-context token budget is invalid.");
         }
 
-        var duplicateScheduleId = _scheduledRuns
-            .GroupBy(registration => registration.ScheduleId, StringComparer.Ordinal)
-            .FirstOrDefault(group => group.Count() > 1)?.Key;
-        if (duplicateScheduleId is not null)
-        {
-            throw new InvalidOperationException(
-                $"Schedule ID '{duplicateScheduleId}' was registered more than once. " +
-                "Schedule IDs must be unique within TemporalAgentsOptions.");
-        }
-
-        foreach (var scheduledRun in _scheduledRuns)
-        {
-            if (!_durableAgentRegistrations.ContainsKey(scheduledRun.AgentName))
-            {
-                throw new InvalidOperationException(
-                    $"Scheduled run '{scheduledRun.ScheduleId}' references agent '{scheduledRun.AgentName}', " +
-                    "but that agent is not registered with AddDurableAgent. Register the durable agent " +
-                    "in the same AddTemporalAgents configuration as the schedule.");
-            }
-        }
     }
 
     /// <summary>
@@ -344,23 +321,26 @@ public sealed class TemporalAgentsOptions
     /// </summary>
     /// <param name="name">Case-insensitive agent name, unique within this options instance.</param>
     /// <param name="agentOptions">MAF chat-client-agent configuration.</param>
-    /// <param name="temporalOptions">Optional Temporal workflow and activity settings.</param>
+    /// <param name="configureTemporalOptions">
+    /// Optional callback that configures Temporal workflow, activity, tool-middleware, and memory settings.
+    /// When omitted, Temporal settings use their defaults.
+    /// </param>
     /// <returns>This options instance, for fluent chaining.</returns>
     /// <remarks>
     /// The MAF options' instructions, tools, description, and context providers are transferred to
     /// the durable agent. The chat client must be registered as an unkeyed <see cref="IChatClient"/>
     /// before <c>AddTemporalAgents</c> is called.
     /// </remarks>
-    public TemporalAgentsOptions AddTemporalAgent(
+    public TemporalAgentsOptions Agent(
         string name,
         ChatClientAgentOptions agentOptions,
-        TemporalAgentOptions? temporalOptions = null)
+        Action<TemporalAgentOptions>? configureTemporalOptions = null)
     {
-        return AddTemporalAgentCore(
+        return RegisterAgentCore(
             name,
             provider => provider.GetRequiredService<IChatClient>(),
             agentOptions,
-            temporalOptions,
+            configureTemporalOptions,
             requiresRegisteredChatClient: true);
     }
 
@@ -370,28 +350,31 @@ public sealed class TemporalAgentsOptions
     /// <param name="name">Case-insensitive agent name, unique within this options instance.</param>
     /// <param name="chatClientFactory">Factory evaluated from a fresh activity scope per model call.</param>
     /// <param name="agentOptions">MAF chat-client-agent configuration.</param>
-    /// <param name="temporalOptions">Optional Temporal workflow and activity settings.</param>
+    /// <param name="configureTemporalOptions">
+    /// Optional callback that configures Temporal workflow, activity, tool-middleware, and memory settings.
+    /// When omitted, Temporal settings use their defaults.
+    /// </param>
     /// <returns>This options instance, for fluent chaining.</returns>
-    public TemporalAgentsOptions AddTemporalAgent(
+    public TemporalAgentsOptions Agent(
         string name,
         Func<IServiceProvider, IChatClient> chatClientFactory,
         ChatClientAgentOptions agentOptions,
-        TemporalAgentOptions? temporalOptions = null)
+        Action<TemporalAgentOptions>? configureTemporalOptions = null)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
-        return AddTemporalAgentCore(
+        return RegisterAgentCore(
             name,
             chatClientFactory,
             agentOptions,
-            temporalOptions,
+            configureTemporalOptions,
             requiresRegisteredChatClient: false);
     }
 
-    private TemporalAgentsOptions AddTemporalAgentCore(
+    private TemporalAgentsOptions RegisterAgentCore(
         string name,
         Func<IServiceProvider, IChatClient> chatClientFactory,
         ChatClientAgentOptions agentOptions,
-        TemporalAgentOptions? temporalOptions,
+        Action<TemporalAgentOptions>? configureTemporalOptions,
         bool requiresRegisteredChatClient)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -469,7 +452,9 @@ public sealed class TemporalAgentsOptions
                 $"{string.Join(", ", unsupportedOptions)}.");
         }
 
-        temporalOptions?.Validate(name);
+        var temporalOptions = new TemporalAgentOptions();
+        configureTemporalOptions?.Invoke(temporalOptions);
+        temporalOptions.Validate(name);
         var optionsSnapshot = agentOptions.Clone();
         var configuredTools = optionsSnapshot.ChatOptions?.Tools?.ToArray() ?? [];
         if (configuredTools.Any(tool => tool is not AIFunction))
@@ -499,7 +484,7 @@ public sealed class TemporalAgentsOptions
                 }
             }
 
-            temporalOptions?.ApplyTo(agent);
+            temporalOptions.ApplyTo(agent);
         });
 
         _requiresRegisteredChatClient |= requiresRegisteredChatClient;
@@ -535,41 +520,6 @@ public sealed class TemporalAgentsOptions
         _proxyDeclarations.Add(name, timeToLive);
         return this;
     }
-
-    /// <summary>
-    /// Registers a scheduled agent run that is created with Temporal at worker startup.
-    /// </summary>
-    /// <param name="agentName">Name of the agent to invoke on each schedule tick.</param>
-    /// <param name="scheduleId">
-    /// Unique schedule identifier. If a schedule with this ID already exists on startup,
-    /// a warning is logged and the existing schedule is left unchanged.
-    /// </param>
-    /// <param name="request">The request to send to the agent on each scheduled run.</param>
-    /// <param name="spec">When and how often the schedule fires.</param>
-    /// <param name="policy">Overlap and catchup policy. Defaults to <see cref="SchedulePolicy"/> defaults.</param>
-    /// <remarks>
-    /// At the end of <c>AddTemporalAgents</c> configuration, validation requires
-    /// <paramref name="agentName"/> to identify a durable agent in the same options instance and
-    /// requires every schedule ID to be unique.
-    /// </remarks>
-    public TemporalAgentsOptions AddScheduledAgentRun(
-        string agentName,
-        string scheduleId,
-        RunRequest request,
-        ScheduleSpec spec,
-        SchedulePolicy? policy = null)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(spec);
-
-        _scheduledRuns.Add(new ScheduleAgentRegistration(agentName, scheduleId, request, spec, policy));
-        return this;
-    }
-
-    /// <summary>Gets all registered scheduled runs for use by <see cref="ScheduleRegistrationService"/>.</summary>
-    internal IReadOnlyList<ScheduleAgentRegistration> GetScheduledRuns() => _scheduledRuns;
 
     // ── Agent Registry (read-only introspection) ──────────────────────────
 

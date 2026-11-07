@@ -1,15 +1,18 @@
 using System.Text.Json;
+using TemporalCommunity.Extensions.Agents.Internal;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Temporalio.Common;
 using Temporalio.Exceptions;
-using TemporalCommunity.Extensions.Agents.Approvals;
+using TemporalCommunity.Extensions.Agents.Exceptions;
+using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
 using Temporalio.Workflows;
@@ -41,19 +44,12 @@ internal class AgentWorkflow :
     // MAF-specific input (typed view of the base's Input). Set in RunAsync.
     private AgentWorkflowInput? _input;
 
-    // MAF's complete approval decisions. The shared base owns the core decision archive; this
-    // list carries the additional scope identity in the same order and with the same retention
-    // bound. A pending entry is held separately until the request completes so eviction occurs
-    // only when both archives record the final resolution.
-    private const int MaxRetainedAgentApprovalResolutions = 32;
-    private readonly List<DurableAgentApprovalDecision> _resolvedAgentApprovals = [];
-    private DurableAgentApprovalDecision? _pendingAgentApprovalDecision;
-    private DurableAgentApprovalDecision? _resolvingAgentApprovalDecision;
-
     // GAP 6: StateBag persisted across turns so AIContextProvider state survives replay.
     private JsonElement? _currentStateBag;
     private long _stateBagRevision;
     private long _stateBagRevisionAtTurnStart;
+    private TemporalMemoryScopeSnapshot? _memoryScope;
+    private bool _memoryInitializationChecked;
 
     private int _pendingFireAndForgetTurns;
 
@@ -68,7 +64,8 @@ internal class AgentWorkflow :
         _input = input;
         _currentStateBag = input.CarriedStateBag ?? StateBagMerge.EmptyStateBag;
         _stateBagRevision = input.CarriedStateBagRevision;
-        RestoreResolvedAgentApprovals(input.AgentApprovalResolutionHistory);
+        _memoryScope = input.CarriedMemoryScope;
+        _memoryInitializationChecked = input.MemoryInitializationChecked;
 
         Workflow.Logger.LogWorkflowStarted(input.AgentName, Workflow.Info.WorkflowId, input.TimeToLive);
         if (input.InitialFireAndForgetRequest is { } initialRequest)
@@ -220,170 +217,7 @@ internal class AgentWorkflow :
         _ = ProcessFireAndForgetAsync(request);
     }
 
-    /// <summary>
-    /// Resolves a pending agent approval with optional MAF-only reusable-scope semantics.
-    /// </summary>
-    internal async Task<DurableApprovalResolutionResult> ResolveAgentApprovalAsync(
-        DurableAgentApprovalDecision decision)
-    {
-        ArgumentNullException.ThrowIfNull(decision);
-
-        // The base handler waits for its own input initialization. AgentWorkflow's typed ledger
-        // has a parallel carried input, so initialize it before comparing an early update retry.
-        if (_input is null)
-        {
-            await Workflow.WaitConditionAsync(() => _input is not null).ConfigureAwait(true);
-        }
-
-        if (_resolvedAgentApprovals.Count == 0
-            && _input!.AgentApprovalResolutionHistory is { Count: > 0 } carriedResolutions)
-        {
-            RestoreResolvedAgentApprovals(carriedResolutions);
-        }
-
-        var coreDecision = new DurableApprovalDecision
-        {
-            RequestId = decision.RequestId,
-            CallId = decision.CallId,
-            FunctionName = decision.FunctionName,
-            Approved = decision.Approved,
-            Reason = decision.Reason,
-        };
-
-        _resolvingAgentApprovalDecision = decision;
-        try
-        {
-            var genericResult = await base.ResolveApprovalAsync(coreDecision).ConfigureAwait(true);
-            if (genericResult.Status == DurableApprovalResolutionStatus.Accepted)
-            {
-                return genericResult;
-            }
-
-            var knownDecision = FindKnownAgentApproval(decision.RequestId);
-            return knownDecision is null
-                ? genericResult
-                : CreateResolutionResult(
-                    IsEquivalent(knownDecision, decision)
-                        ? DurableApprovalResolutionStatus.AlreadyResolved
-                        : DurableApprovalResolutionStatus.Conflict,
-                    decision.RequestId);
-        }
-        finally
-        {
-            _resolvingAgentApprovalDecision = null;
-        }
-    }
-
-    /// <summary>
-    /// Privileged update used only by the opt-in session-scope administration service.
-    /// </summary>
-    [WorkflowUpdate("GrantSessionApprovalScope")]
-    public async Task<SessionApprovalScopeGrantResult> GrantSessionApprovalScopeAsync(
-        SessionApprovalScopeGrantRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (_input is null)
-        {
-            await Workflow.WaitConditionAsync(() => _input is not null).ConfigureAwait(true);
-        }
-
-        if (_input!.UseApprovalScopes != true)
-        {
-            throw ScopeAdministrationFailure(
-                "This agent is not configured for reusable session approval scopes.");
-        }
-        if (string.IsNullOrWhiteSpace(request.RequestId))
-        {
-            throw ScopeAdministrationFailure("RequestId is required.");
-        }
-        if ((request.Pattern is null) == !request.MatchAllArguments)
-        {
-            throw ScopeAdministrationFailure(
-                "Specify exactly one of Pattern or MatchAllArguments.");
-        }
-        if (request.ExpiresAt <= Workflow.UtcNow)
-        {
-            throw ScopeAdministrationFailure("ExpiresAt must be later than workflow time.");
-        }
-
-        var known = FindKnownAgentApproval(request.RequestId);
-        var pending = GetPendingApproval();
-        var matchingPending = string.Equals(
-            pending?.RequestId,
-            request.RequestId,
-            StringComparison.Ordinal) ? pending : null;
-        var grantId = known?.GrantId ?? Workflow.NewGuid().ToString("N");
-        var decision = new DurableAgentApprovalDecision
-        {
-            RequestId = request.RequestId,
-            CallId = known?.CallId ?? matchingPending?.CallId,
-            FunctionName = known?.FunctionName ?? matchingPending?.FunctionName,
-            Approved = true,
-            Reason = request.Reason,
-            Scope = ApprovalScope.Session,
-            ScopePattern = request.Pattern,
-            GrantId = grantId,
-            MatchAllArguments = request.MatchAllArguments,
-            ExpiresAt = request.ExpiresAt,
-            Actor = request.Actor,
-        };
-
-        var resolution = await ResolveAgentApprovalAsync(decision).ConfigureAwait(true);
-        return new SessionApprovalScopeGrantResult
-        {
-            Resolution = resolution,
-            GrantId = resolution.Status is DurableApprovalResolutionStatus.Accepted
-                or DurableApprovalResolutionStatus.AlreadyResolved
-                ? grantId
-                : null,
-        };
-    }
-
-    /// <summary>Revokes one reusable session grant by stable grant ID.</summary>
-    [WorkflowUpdate("RevokeSessionApprovalScope")]
-    public Task<bool> RevokeSessionApprovalScopeAsync(string grantId)
-    {
-        if (string.IsNullOrWhiteSpace(grantId))
-        {
-            throw ScopeAdministrationFailure("GrantId is required.");
-        }
-
-        var (updatedStateBag, removed) = ApprovalScopeCoordinator.RevokeSessionScopeFromStateBag(
-            _currentStateBag,
-            grantId);
-        _currentStateBag = updatedStateBag;
-        return Task.FromResult(removed);
-    }
-
-    private static ApplicationFailureException ScopeAdministrationFailure(string message) =>
-        new(message, errorType: "TemporalAgentApprovalScopeInvalidRequest", nonRetryable: true);
-
     // ── Hooks supplied to the base class ────────────────────────────────────
-
-    /// <inheritdoc/>
-    protected override void OnApprovalResolutionAccepted(DurableApprovalDecision decision)
-    {
-        // The generic update is a shared-dashboard path and therefore has no scope. When the
-        // typed update entered the base state machine, preserve its complete MAF identity
-        // instead. The entry is finalized only from OnApprovalRequestResolved so both retained
-        // archives add and evict the same request IDs together.
-        _pendingAgentApprovalDecision = _resolvingAgentApprovalDecision is { } typed
-            && string.Equals(typed.RequestId, decision.RequestId, StringComparison.Ordinal)
-            ? typed
-            : CreateThisCallOnlyDecision(decision);
-    }
-
-    /// <inheritdoc/>
-    protected override void OnApprovalRequestResolved(DurableApprovalDecision decision)
-    {
-        var resolvedDecision = _pendingAgentApprovalDecision is { } pending
-            && string.Equals(pending.RequestId, decision.RequestId, StringComparison.Ordinal)
-            ? pending
-            : CreateThisCallOnlyDecision(decision);
-
-        RememberResolvedAgentApproval(resolvedDecision);
-        _pendingAgentApprovalDecision = null;
-    }
 
     protected override long? GetCommittedTurnRevision(AgentResponse? output) => _stateBagRevision;
 
@@ -441,6 +275,8 @@ internal class AgentWorkflow :
         {
             CarriedStateBag = _currentStateBag,
             CarriedStateBagRevision = _stateBagRevision,
+            CarriedMemoryScope = _memoryScope,
+            MemoryInitializationChecked = _memoryInitializationChecked,
             InitialFireAndForgetRequest = null,
             // Base class CAN fields — sourced from the base DurableChatWorkflowInput arg.
             TimeToLive = input.TimeToLive,
@@ -460,7 +296,6 @@ internal class AgentWorkflow :
             MaxTerminalOutcomeBytes = input.MaxTerminalOutcomeBytes,
             ActivityTimeout = input.ActivityTimeout,
             HeartbeatTimeout = input.HeartbeatTimeout,
-            AgentApprovalResolutionHistory = _resolvedAgentApprovals.ToList(),
         };
 
         // StateBag size guard (Feature D): emit a warning when the serialized StateBag
@@ -506,6 +341,18 @@ internal class AgentWorkflow :
 
     protected override JsonSerializerOptions TerminalOutcomeJsonSerializerOptions =>
         TemporalAgentJsonUtilities.DefaultOptions;
+
+    internal override Exception ReportTurnFailure(
+        Exception exception,
+        TemporalCommunity.Extensions.AI.Internal.DurableTurnFailureDetails details) =>
+        new ApplicationFailureException(
+            JsonSerializer.Serialize(
+                details,
+                TemporalCommunity.Extensions.AI.DurableAIJsonUtilities.DefaultOptions.GetTypeInfo(
+                    typeof(TemporalCommunity.Extensions.AI.Internal.DurableTurnFailureDetails))),
+            exception,
+            errorType: TemporalCommunity.Extensions.AI.Internal.DurableTurnFailureMapper.TurnFailedErrorType,
+            nonRetryable: true);
 
     /// <inheritdoc/>
     protected override void UpsertCustomSearchAttributes()
@@ -574,53 +421,119 @@ internal class AgentWorkflow :
     {
         Workflow.Logger.LogDurableAgentTurnStarted(_input!.AgentName, Workflow.Info.WorkflowId);
 
-        var accumulated = FlattenHistoryMessages();
-
+        var initialMessages = FlattenHistoryMessages();
+        var accumulated = initialMessages.ToList();
         var allTurnMessages = new List<ChatMessage>();
         UsageDetails? totalUsage = null;
+        IReadOnlyList<PreparedMessageAttribution>? preparedMessageAttributions = null;
+        var preparedTools = new Dictionary<string, PreparedAgentTool>(
+            StringComparer.OrdinalIgnoreCase);
 
         // Note: do NOT snapshot _input.MaxToolCallsPerTurn here. The resolution handshake
         // mutates _input mid-loop on proxy-started sessions, so we must re-read it each iteration
         // (and again after the loop for the aborted-response log/message).
-        for (var iteration = 0; iteration < _input!.MaxToolCallsPerTurn; iteration++)
+        try
         {
-            ThrowIfCurrentTurnCancellationRequested();
-
-            // Proxy-started sessions have WorkerSettingsResolved=false.
-            // On the first step of the first turn, ask the activity to resolve worker-side
-            // settings (per-tool activity options) and return them.
-            var needsResolution = iteration == 0 && !_input!.WorkerSettingsResolved;
-
-            // The workflow is authoritative; every activity receives an explicit snapshot,
-            // including when no StateBag key changed since the preceding dispatch.
-            var bagForStep = GetStateBagForDispatch();
-
-            var stepInput = new AgentStepInput
+            if (!_memoryInitializationChecked)
             {
-                AgentName = _input!.AgentName,
-                Request = runRequest,
-                AccumulatedMessages = accumulated,
-                CurrentTurnStartIndex = CurrentTurnStartIndex,
-                PreviousTurnRanges = PreviousTurnRanges,
-                MaxModelContextTokens = _input.MaxModelContextTokens,
-                ModelOutputTokenReserve = _input.ModelOutputTokenReserve,
-                SerializedStateBag = bagForStep,
-                SessionId = null,
-                NeedsWorkerSettingsResolution = needsResolution,
+                var memoryInitInput = new InitializeChatHistoryMemoryInput
+                {
+                    AgentName = _input!.AgentName,
+                    SessionId = Workflow.Info.WorkflowId!,
+                    SerializedStateBag = GetStateBagForDispatch(),
+                    MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
+                    PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
+                };
+                var initializerOptions = ApplyCurrentTurnCancellation(new ActivityOptions
+                {
+                    StartToCloseTimeout = TimeSpan.FromSeconds(30),
+                    RetryPolicy = new RetryPolicy
+                    {
+                        InitialInterval = TimeSpan.FromSeconds(1),
+                        MaximumAttempts = 2,
+                    },
+                    Summary = AgentActivities.BuildActivitySummary(_input.AgentName),
+                });
+                var initializedMemory = await Workflow.ExecuteActivityAsync(
+                    (AgentActivities activities) => activities.InitializeChatHistoryMemoryAsync(memoryInitInput),
+                    initializerOptions).ConfigureAwait(true);
+                _currentStateBag = StateBagMerge.ApplyTrustedDelta(
+                    _currentStateBag,
+                    initializedMemory.StateBagDelta);
+                _memoryScope = initializedMemory.Scope;
+                _memoryInitializationChecked = true;
+            }
+
+            var preparationInput = new PrepareAgentTurnInput
+            {
+                AgentName = _input.AgentName,
+                SessionId = Workflow.Info.WorkflowId!,
+                Messages = initialMessages,
+                SerializedStateBag = GetStateBagForDispatch(),
+                MemoryScope = _memoryScope,
                 MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
                 PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
             };
-
             TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
                 Workflow.PayloadConverter,
-                stepInput,
+                preparationInput,
                 _input.MaximumTransportPayloadSizeBytes,
                 _input.PayloadCodecExpansionAllowanceBytes,
-                "model-step activity input");
-            var stepResult = await Workflow.ExecuteActivityAsync(
-                (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
+                "agent-turn context preparation input");
+            var preparedContext = await Workflow.ExecuteActivityAsync(
+                (AgentActivities activities) => activities.PrepareAgentTurnAsync(preparationInput),
                 stepActivityOptions).ConfigureAwait(true);
-            ThrowIfCurrentTurnCancellationRequested();
+            _currentStateBag = StateBagMerge.ApplyTrustedDelta(_currentStateBag, preparedContext.StateBagDelta);
+            accumulated = preparedContext.Messages.ToList();
+            preparedMessageAttributions = preparedContext.MessageAttributions;
+            preparedTools = preparedContext.Tools.ToDictionary(
+                tool => tool.Name,
+                StringComparer.OrdinalIgnoreCase);
+
+            for (var iteration = 0; iteration < _input!.MaxToolCallsPerTurn; iteration++)
+            {
+                ThrowIfCurrentTurnCancellationRequested();
+
+                // Proxy-started sessions have WorkerSettingsResolved=false.
+                // On the first step of the first turn, ask the activity to resolve worker-side
+                // settings (per-tool activity options) and return them.
+                var needsResolution = iteration == 0 && !_input!.WorkerSettingsResolved;
+
+                // The workflow is authoritative; every activity receives an explicit snapshot,
+                // including when no StateBag key changed since the preceding dispatch.
+                var bagForStep = GetStateBagForDispatch();
+
+                var stepInput = new AgentStepInput
+                {
+                    AgentName = _input!.AgentName,
+                    Request = runRequest,
+                    AccumulatedMessages = accumulated,
+                    AccumulatedMessageAttributions = preparedMessageAttributions,
+                    PreparedInstructions = preparedContext.Instructions,
+                    ProvidersPrepared = true,
+                    PreparedTools = preparedContext.Tools,
+                    CurrentTurnStartIndex = CurrentTurnStartIndex,
+                    PreviousTurnRanges = PreviousTurnRanges,
+                    MaxModelContextTokens = _input.MaxModelContextTokens,
+                    ModelOutputTokenReserve = _input.ModelOutputTokenReserve,
+                    SerializedStateBag = bagForStep,
+                    SessionId = TemporalAgentSessionId.Parse(Workflow.Info.WorkflowId!),
+                    MemoryScope = _memoryScope,
+                    NeedsWorkerSettingsResolution = needsResolution,
+                    MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
+                    PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
+                };
+
+                TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                    Workflow.PayloadConverter,
+                    stepInput,
+                    _input.MaximumTransportPayloadSizeBytes,
+                    _input.PayloadCodecExpansionAllowanceBytes,
+                    "model-step activity input");
+                var stepResult = await Workflow.ExecuteActivityAsync(
+                    (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
+                    stepActivityOptions).ConfigureAwait(true);
+                ThrowIfCurrentTurnCancellationRequested();
 
             // Apply resolved worker-side settings once and carry the complete bundle forward
             // through continue-as-new.
@@ -653,17 +566,6 @@ internal class AgentWorkflow :
                 };
             }
 
-            // Context providers run inside the LLM-step activity and are trusted-tier by design
-            // (developer-registered, same trust as the workflow), so their StateBag output is
-            // applied unfiltered here — unlike tool/interceptor write-backs, which are deny-list
-            // filtered via StateBagMerge.
-            //
-            // Overlay (not replace) the activity's StateBag output on top of the carried
-            // _currentStateBag. A replace loses workflow-thread writes (e.g. approval-scope records
-            // written by WriteSessionScopeToStateBag between activities, or a context provider's
-            // custom value) whenever a turn ends on a hash-gated LLM step that returns a
-            // null/subset bag. The overlay is unfiltered here because context-provider output is
-            // trusted-tier — see StateBagMerge.OverlayTrustedStateBag.
             _currentStateBag = StateBagMerge.ApplyTrustedDelta(_currentStateBag, stepResult.StateBagDelta);
 
             if (stepResult.Usage is not null)
@@ -687,10 +589,26 @@ internal class AgentWorkflow :
                     CreatedAt = Workflow.UtcNow,
                 };
 
+                await CompleteContextProviderTurnAsync(
+                    initialMessages,
+                    finalResponse.Messages.ToList(),
+                    invokeException: null).ConfigureAwait(true);
                 return finalResponse;
             }
 
             var toolCalls = stepResult.ToolCalls;
+            foreach (var call in toolCalls)
+            {
+                if (!preparedTools.ContainsKey(call.Name))
+                {
+                    throw new ApplicationFailureException(
+                        $"The model returned tool '{call.Name}' outside the frozen provider-selected tool set; " +
+                        "no tool was dispatched.",
+                        errorType: nameof(DurableConfigurationException),
+                        nonRetryable: true);
+                }
+            }
+
             foreach (var call in toolCalls)
             {
                 if (call.CallId is { Length: > 256 })
@@ -768,12 +686,7 @@ internal class AgentWorkflow :
                                 : new Dictionary<string, object?>(tc.Arguments),
                             CallId = tc.CallId,
                             SerializedStateBag = bagForInterceptors,
-                            // Feature B: populate scope-aware fields so the interceptor can
-                            // consult scope records and enforce the approval gate.
-                            ScopeAware = _input!.ScopeAwareTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
-                            RequiresApproval = _input!.RequiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true
-                                || _input!.ScopeAwareApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
-                            ApprovalEvaluationTime = Workflow.UtcNow,
+                            RequiresApproval = _input!.RequiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
                         };
 
                         // See also: DurableChatWorkflow.ExecutePattern3TurnAsync (MEAI path) — parallel interceptor dispatch
@@ -840,9 +753,12 @@ internal class AgentWorkflow :
                         pendingToolDispatches.Add((i, new InvokeAgentToolInput
                         {
                             AgentName = _input!.AgentName,
+                            SessionId = Workflow.Info.WorkflowId,
+                            MemoryScope = preparedTools[tc.Name].MemoryScope,
                             ToolName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
+                            PreparedTool = preparedTools[tc.Name],
                             MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
                             PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
                             // Refreshed at dispatch time after prior serial tool results are applied.
@@ -851,6 +767,11 @@ internal class AgentWorkflow :
                         break;
 
                     case DurableToolOutcome.PauseForApproval:
+                        var approvalArguments = DurableToolDecisionPolicy.GetEffectiveArguments(
+                            interceptorResult?.ModifiedArguments,
+                            (IReadOnlyDictionary<string, object?>?)tc.Arguments);
+                        var approvedCallFingerprint = DurableToolMiddleware.Fingerprint(
+                            tc.Name, tc.CallId, approvalArguments);
                         // Feature A: park the turn loop; wait for a human decision via
                         // the DurableApprovalMixin (compute-free durable wait).
                         var approvalRequest = new DurableApprovalRequest
@@ -881,53 +802,18 @@ internal class AgentWorkflow :
 
                         if (decision.Approved)
                         {
-                            // Feature B — Task 6.6: persist scope before dispatching the tool.
-                            var agentDecision = FindKnownAgentApproval(decision.RequestId)
-                                ?? CreateThisCallOnlyDecision(decision);
-                            var scope = NormalizeApprovalScopeForPersistence(agentDecision);
-                            var isScopeAwareTool = _input!.ScopeAwareTools?.Contains(
-                                tc.Name, StringComparer.OrdinalIgnoreCase) == true;
-
-
-                            if (scope == ApprovalScope.Session && isScopeAwareTool)
-                            {
-                                // Write session-scope record (pure workflow-thread, no I/O).
-                                _currentStateBag = ApprovalScopeCoordinator.WriteSessionScopeToStateBag(
-                                    _currentStateBag,
-                                    tc.Name,
-                                    agentDecision.ScopePattern,
-                                    agentDecision.MatchAllArguments,
-                                    agentDecision.GrantId!,
-                                    agentDecision.ExpiresAt!.Value,
-                                    agentDecision.Actor,
-                                    agentDecision.Reason,
-                                    decision.RequestId,
-                                    Workflow.UtcNow,
-                                    _input!.MaxAlwaysScopeCacheRecords,
-                                    _input!.MaxAlwaysScopeCacheBytes,
-                                    Workflow.Info.WorkflowId,
-                                    Workflow.Logger);
-                            }
-                            else if (scope == ApprovalScope.Session && !isScopeAwareTool)
-                            {
-                                Workflow.Logger.LogWarning(
-                                    "[{SessionId}] Approval scope '{Scope}' requested for non-scope-aware tool '{ToolName}'. " +
-                                    "The scope was ignored. Register the tool with ScopeAware() to persist reusable approvals.",
-                                    Workflow.Info.WorkflowId, scope, tc.Name);
-                                scope = ApprovalScope.ThisCallOnly;
-                            }
-
                             // Buffer the approved tool for dispatch in Phase 2.5.
-                            // F1 optimization: after WriteSessionScopeToStateBag the bag may
-                            // have changed (new scope record written), so force=true to ensure
-                            // the approved tool sees the updated state. The hash is refreshed.
                             pendingToolDispatches.Add((i, new InvokeAgentToolInput
                             {
                                 AgentName = _input!.AgentName,
+                                SessionId = Workflow.Info.WorkflowId,
+                                MemoryScope = preparedTools[tc.Name].MemoryScope,
                                 ToolName = tc.Name,
-                                Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
+                                Arguments = approvalArguments,
                                 CallId = tc.CallId,
+                                PreparedTool = preparedTools[tc.Name],
                                 ApprovalAccepted = true,
+                                ApprovedCallFingerprint = approvedCallFingerprint,
                                 MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
                                 PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
                                 SerializedStateBag = GetStateBagForDispatch(),
@@ -958,15 +844,29 @@ internal class AgentWorkflow :
             // All approval waits are resolved before the first tool starts. Serial dispatch makes
             // effect order explicit and lets each later tool observe earlier StateBag updates.
             ThrowIfCurrentTurnCancellationRequested();
+            var terminateTurn = false;
             foreach (var (idx, input, opts) in pendingToolDispatches)
             {
+                if (terminateTurn)
+                {
+                    syntheticResults[idx] = "[Tool skipped] Tool middleware terminated this turn.";
+                    continue;
+                }
                 var dispatchInput = new InvokeAgentToolInput
                 {
                     AgentName = input.AgentName,
+                    SessionId = input.SessionId,
+                    MemoryScope = input.MemoryScope,
                     ToolName = input.ToolName,
                     Arguments = input.Arguments,
                     CallId = input.CallId,
+                    PreparedTool = input.PreparedTool,
                     ApprovalAccepted = input.ApprovalAccepted,
+                    ApprovedCallFingerprint = input.ApprovedCallFingerprint,
+                    Messages = preparedContext.HasToolMiddleware ? accumulated.ToArray() : null,
+                    Iteration = preparedContext.HasToolMiddleware ? iteration + 1 : 0,
+                    FunctionCallIndex = preparedContext.HasToolMiddleware ? idx : 0,
+                    FunctionCount = preparedContext.HasToolMiddleware ? toolCalls.Count : 0,
                     MaximumTransportPayloadSizeBytes = input.MaximumTransportPayloadSizeBytes,
                     PayloadCodecExpansionAllowanceBytes = input.PayloadCodecExpansionAllowanceBytes,
                     SerializedStateBag = GetStateBagForDispatch(),
@@ -986,8 +886,10 @@ internal class AgentWorkflow :
                     interruptedBatchIndex,
                     idx,
                     toolResult.Result,
-                    wasDispatched: true);
+                    wasDispatched: true,
+                    failed: toolResult.Failed);
                 MergeStateBagWriteBacks([toolResult.StateBagDelta]);
+                terminateTurn = toolResult.Terminate;
             }
 
             for (var i = 0; i < toolCalls.Count; i++)
@@ -1033,13 +935,26 @@ internal class AgentWorkflow :
                         interruptedBatchIndex,
                         i,
                         toolResult.Result,
-                        wasDispatched: true);
+                        wasDispatched: true,
+                        failed: toolResult.Failed);
                 }
             }
 
             var toolResultMessage = new ChatMessage(ChatRole.Tool, functionResultContents);
             accumulated.Add(toolResultMessage);
             allTurnMessages.Add(toolResultMessage);
+            if (terminateTurn)
+            {
+                var finalResponse = new AgentResponse
+                {
+                    Messages = allTurnMessages,
+                    Usage = totalUsage,
+                    CreatedAt = Workflow.UtcNow,
+                };
+                await CompleteContextProviderTurnAsync(
+                    initialMessages, finalResponse.Messages.ToList(), invokeException: null).ConfigureAwait(true);
+                return finalResponse;
+            }
         }
 
         var effectiveMaxIterations = _input!.MaxToolCallsPerTurn;
@@ -1058,111 +973,87 @@ internal class AgentWorkflow :
             CreatedAt = Workflow.UtcNow,
         };
 
+        await CompleteContextProviderTurnAsync(
+            initialMessages,
+            abortedResponse.Messages.ToList(),
+            invokeException: null).ConfigureAwait(true);
         return abortedResponse;
+        }
+        catch (Exception exception)
+        {
+            await CompleteContextProviderTurnAsync(
+                initialMessages,
+                allTurnMessages.ToList(),
+                exception).ConfigureAwait(true);
+            throw;
+        }
     }
 
-    private void RestoreResolvedAgentApprovals(
-        IReadOnlyList<DurableAgentApprovalDecision>? decisions)
+    private async Task CompleteContextProviderTurnAsync(
+        IReadOnlyList<ChatMessage> requestMessages,
+        IReadOnlyList<ChatMessage> responseMessages,
+        Exception? invokeException)
     {
-        _resolvedAgentApprovals.Clear();
-        if (decisions is null)
+        var isCancellation = invokeException is OperationCanceledException
+            || IsCurrentTurnCancellationRequested();
+        var effectiveException = isCancellation && invokeException is not OperationCanceledException
+            ? new OperationCanceledException("The agent turn was cancelled.")
+            : invokeException;
+        var failureMessage = effectiveException is null
+            ? null
+            : $"{effectiveException.GetType().Name}: {effectiveException.Message}";
+        if (failureMessage is { Length: > 2048 })
         {
-            return;
+            failureMessage = failureMessage[..2048];
         }
 
-        foreach (var decision in decisions.TakeLast(MaxRetainedAgentApprovalResolutions))
+        var input = new CompleteAgentTurnInput
         {
-            _resolvedAgentApprovals.Add(decision);
-        }
-    }
-
-    private void RememberResolvedAgentApproval(DurableAgentApprovalDecision decision)
-    {
-        _resolvedAgentApprovals.RemoveAll(existing =>
-            string.Equals(existing.RequestId, decision.RequestId, StringComparison.Ordinal));
-        _resolvedAgentApprovals.Add(decision);
-        if (_resolvedAgentApprovals.Count > MaxRetainedAgentApprovalResolutions)
-        {
-            _resolvedAgentApprovals.RemoveRange(
-                0,
-                _resolvedAgentApprovals.Count - MaxRetainedAgentApprovalResolutions);
-        }
-    }
-
-    private DurableAgentApprovalDecision? FindKnownAgentApproval(string requestId)
-    {
-        if (_pendingAgentApprovalDecision is { } pending
-            && string.Equals(pending.RequestId, requestId, StringComparison.Ordinal))
-        {
-            return pending;
-        }
-
-        return _resolvedAgentApprovals.LastOrDefault(existing =>
-            string.Equals(existing.RequestId, requestId, StringComparison.Ordinal));
-    }
-
-    private static DurableAgentApprovalDecision CreateThisCallOnlyDecision(
-        DurableApprovalDecision decision) =>
-        new()
-        {
-            RequestId = decision.RequestId,
-            CallId = decision.CallId,
-            FunctionName = decision.FunctionName,
-            Approved = decision.Approved,
-            Reason = decision.Reason,
-            Scope = ApprovalScope.ThisCallOnly,
-            ScopePattern = null,
+            AgentName = _input!.AgentName,
+            SessionId = Workflow.Info.WorkflowId!,
+            RequestMessages = requestMessages,
+            ResponseMessages = responseMessages,
+            SerializedStateBag = GetStateBagForDispatch(),
+            MemoryScope = _memoryScope,
+            InvokeExceptionMessage = failureMessage,
+            IsCancellation = isCancellation,
+            MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
+            PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
         };
-
-    private static bool IsEquivalent(
-        DurableAgentApprovalDecision left,
-        DurableAgentApprovalDecision right) =>
-        left.Approved == right.Approved
-        && string.Equals(left.CallId, right.CallId, StringComparison.Ordinal)
-        && string.Equals(left.FunctionName, right.FunctionName, StringComparison.Ordinal)
-        && string.Equals(left.Reason, right.Reason, StringComparison.Ordinal)
-        && left.Scope == right.Scope
-        && AreEquivalent(left.ScopePattern, right.ScopePattern)
-        && string.Equals(left.GrantId, right.GrantId, StringComparison.Ordinal)
-        && left.MatchAllArguments == right.MatchAllArguments
-        && left.ExpiresAt == right.ExpiresAt
-        && string.Equals(left.Actor, right.Actor, StringComparison.Ordinal);
-
-    private static bool AreEquivalent(ApprovalScopePattern? left, ApprovalScopePattern? right) =>
-        ReferenceEquals(left, right)
-        || (left is not null
-            && right is not null
-            && left.Type == right.Type
-            && string.Equals(left.Parameter, right.Parameter, StringComparison.Ordinal)
-            && string.Equals(left.Pattern, right.Pattern, StringComparison.Ordinal));
-
-    private static DurableApprovalResolutionResult CreateResolutionResult(
-        DurableApprovalResolutionStatus status,
-        string requestId) =>
-        new()
+        try
         {
-            RequestId = requestId,
-            Status = status,
-        };
-
-    /// <summary>
-    /// Normalizes the <see cref="ApprovalScope"/> from an approved
-    /// <see cref="DurableAgentApprovalDecision"/>, applying all validation rules.
-    /// Returns <see cref="ApprovalScope.ThisCallOnly"/> for any invalid input.
-    /// Delegates to <see cref="ApprovalScopeCoordinator.EvaluateScopeNormalization"/> and logs
-    /// the degradation reason when applicable.
-    /// </summary>
-    private ApprovalScope NormalizeApprovalScopeForPersistence(DurableAgentApprovalDecision decision)
-    {
-        var (result, reason) = ApprovalScopeCoordinator.EvaluateScopeNormalization(decision);
-        if (result == ApprovalScope.ThisCallOnly && reason is not null)
+            TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                Workflow.PayloadConverter,
+                input,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "agent-turn completion input");
+            var completionOptions = new ActivityOptions
+            {
+                StartToCloseTimeout = isCancellation ? TimeSpan.FromSeconds(10) : _input.ActivityTimeout,
+                Summary = AgentActivities.BuildActivitySummary(_input.AgentName),
+                RetryPolicy = new RetryPolicy { MaximumAttempts = isCancellation ? 1 : 3 },
+                CancellationToken = isCancellation ? CancellationToken.None : CurrentTurnCancellationToken,
+                CancellationType = ActivityCancellationType.WaitCancellationCompleted,
+            };
+            var result = isCancellation
+                ? await Workflow.RunTaskAsync(
+                    () => Workflow.ExecuteActivityAsync(
+                        (AgentActivities activities) => activities.CompleteAgentTurnAsync(input),
+                        completionOptions),
+                    CancellationToken.None).ConfigureAwait(true)
+                : await Workflow.ExecuteActivityAsync(
+                    (AgentActivities activities) => activities.CompleteAgentTurnAsync(input),
+                    completionOptions).ConfigureAwait(true);
+            _currentStateBag = StateBagMerge.ApplyTrustedDelta(_currentStateBag, result.StateBagDelta);
+        }
+        catch (Exception exception)
         {
             Workflow.Logger.LogWarning(
-                "[{SessionId}] {Reason} Treating as ThisCallOnly.",
-                Workflow.Info.WorkflowId, reason);
+                "Context-provider completion could not be recorded for agent {AgentName}: {Error}",
+                _input.AgentName,
+                exception.Message);
         }
-
-        return result;
     }
 
     private void MergeStateBagWriteBacks(IReadOnlyList<StateBagDelta?> deltas)
@@ -1171,9 +1062,7 @@ internal class AgentWorkflow :
         {
             _currentStateBag = StateBagMerge.ApplyDelta(
                 _currentStateBag,
-                delta,
-                _input!.AlwaysScopesStoreKey,
-                Workflow.Logger);
+                delta);
         }
     }
 
@@ -1275,14 +1164,7 @@ internal class AgentWorkflow :
     void TemporalCommunity.Extensions.AI.Internal.IDurableTurnRollbackParticipant
         .RestoreTurnRollbackState(JsonElement? state)
     {
-        // Application/provider/tool StateBag changes belong to the failed turn and must not
-        // leak into a later update. Approval-scope records are different: they are committed
-        // by independent approval updates while the turn is parked, so retain those reserved
-        // records even though the surrounding turn failed.
-        _currentStateBag = StateBagMerge.RestoreTurnOwnedState(
-            state,
-            _currentStateBag,
-            _input?.AlwaysScopesStoreKey);
+        _currentStateBag = state;
         _stateBagRevision = _stateBagRevisionAtTurnStart;
     }
 }

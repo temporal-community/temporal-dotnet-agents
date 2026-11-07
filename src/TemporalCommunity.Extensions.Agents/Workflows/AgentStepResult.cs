@@ -35,6 +35,9 @@ internal sealed class AgentStepResult
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<FunctionCallContent>? ToolCalls { get; init; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PreparedAgentTool>? PreparedTools { get; init; }
+
     /// <summary>
     /// Key-level StateBag changes produced by context providers during this step.
     /// </summary>

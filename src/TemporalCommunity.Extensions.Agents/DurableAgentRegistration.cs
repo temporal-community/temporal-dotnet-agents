@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Temporalio.Common;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.AI.Tools;
 
@@ -33,9 +32,19 @@ internal sealed record DurableAgentRegistration(
     string? ContextReducerKey,
     Action<AIAgentBuilder>? ConfigureAgentPipeline,
     Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? ToolInterceptorFactory = null,
-    bool UseApprovalScopes = false,
-    ApprovalScopesOptions? ApprovalScopesOptions = null,
-    IReadOnlyList<(string ToolName, string SourceProviderType)>? ProviderContributedTools = null);
+    IReadOnlyList<(string ToolName, string SourceProviderType)>? ProviderContributedTools = null,
+    Func<AIAgent, FunctionInvocationContext,
+        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,
+        CancellationToken, ValueTask<object?>>? ToolMiddleware = null);
+
+internal sealed record TemporalMemorySearchRegistration(
+    Func<IServiceProvider, ChatHistoryMemoryProvider> ProviderFactory,
+    Func<IServiceProvider, TemporalMemoryScopeContext, CancellationToken,
+        Task<ChatHistoryMemoryProvider.State>>? ScopeInitializer,
+    string CollectionName,
+    bool AllowCrossSessionRecall,
+    ChatHistoryMemoryProviderOptions.SearchBehavior SearchTime,
+    string ToolName);
 
 /// <summary>
 /// One registered context provider, plus the registration-time fact the activity cannot recover
@@ -57,4 +66,5 @@ internal sealed record DurableAgentRegistration(
 /// </param>
 internal sealed record ContextProviderRegistration(
     Func<IServiceProvider, AIContextProvider> Factory,
-    bool DeclarationsRegistered);
+    bool DeclarationsRegistered,
+    TemporalMemorySearchRegistration? MemorySearch = null);

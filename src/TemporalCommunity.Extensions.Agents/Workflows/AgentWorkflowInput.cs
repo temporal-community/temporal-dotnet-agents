@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Temporalio.Common;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.AI;
 using Temporalio.Workflows;
@@ -19,13 +18,6 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// </summary>
 internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 {
-    /// <summary>
-    /// Gets the MAF-specific approval decisions retained across continue-as-new. This ledger is
-    /// ordered and request-ID aligned with the shared generic approval-resolution history.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public IReadOnlyList<DurableAgentApprovalDecision>? AgentApprovalResolutionHistory { get; init; }
-
     /// <summary>
     /// Optional first fire-and-forget request carried by a delayed workflow start.
     /// This is cleared when creating the next run.
@@ -49,6 +41,11 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 
     /// <summary>Revision of the workflow-owned StateBag carried into this run.</summary>
     public long CarriedStateBagRevision { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TemporalMemoryScopeSnapshot? CarriedMemoryScope { get; init; }
+
+    public bool MemoryInitializationChecked { get; init; }
 
     // RetryPolicy is inherited from DurableChatWorkflowInput. It applies to the model step;
     // tool activities use one attempt unless the agent explicitly opts all tools into this policy.
@@ -148,89 +145,5 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
     public new IReadOnlyList<string>? RequiresApprovalTools =>
         ResolvedWorkerConfig?.RequiresApprovalTools;
 
-    // ── Feature B — Approval Scopes forwarding properties ──
 
-    /// <summary>
-    /// When <see langword="true"/>, approval scopes are enabled for this agent. Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.UseApprovalScopes"/>.
-    /// Defaults to <see langword="false"/> when config has not yet been resolved.
-    /// </summary>
-    [JsonIgnore]
-    public bool UseApprovalScopes => ResolvedWorkerConfig?.UseApprovalScopes ?? false;
-
-    /// <summary>
-    /// When <see langword="true"/>, approval-scope store mode is enabled (always-scope store
-    /// configured and approval scopes active). Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.UseApprovalScopeStoreMode"/>.
-    /// Defaults to <see langword="false"/> when config has not yet been resolved.
-    /// </summary>
-    [JsonIgnore]
-    public bool UseApprovalScopeStoreMode => ResolvedWorkerConfig?.UseApprovalScopeStoreMode ?? false;
-
-    /// <summary>
-    /// The logical store key for always-scope records. Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.AlwaysScopesStoreKey"/>.
-    /// </summary>
-    [JsonIgnore]
-    public string? AlwaysScopesStoreKey => ResolvedWorkerConfig?.AlwaysScopesStoreKey;
-
-    /// <summary>
-    /// When <see langword="true"/>, always-scopes are loaded from the store at session start.
-    /// Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.ApplyAlwaysScopesAtSessionStart"/>.
-    /// Defaults to <see langword="false"/> when config has not yet been resolved.
-    /// </summary>
-    [JsonIgnore]
-    public bool ApplyAlwaysScopesAtSessionStart => ResolvedWorkerConfig?.ApplyAlwaysScopesAtSessionStart ?? false;
-
-    /// <summary>
-    /// Maximum number of always-scope records that may be cached into workflow StateBag.
-    /// Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.MaxAlwaysScopeCacheRecords"/>.
-    /// Defaults to 0 when config has not yet been resolved.
-    /// </summary>
-    [JsonIgnore]
-    public int MaxAlwaysScopeCacheRecords => ResolvedWorkerConfig?.MaxAlwaysScopeCacheRecords ?? 0;
-
-    /// <summary>
-    /// Maximum serialized byte size for the always-scope StateBag cache value.
-    /// Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.MaxAlwaysScopeCacheBytes"/>.
-    /// Defaults to 0 when config has not yet been resolved.
-    /// </summary>
-    [JsonIgnore]
-    public int MaxAlwaysScopeCacheBytes => ResolvedWorkerConfig?.MaxAlwaysScopeCacheBytes ?? 0;
-
-    /// <summary>
-    /// Start-to-close timeout for approval-scope store activities.
-    /// Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.ApprovalScopeActivityTimeout"/>.
-    /// Defaults to <see cref="TimeSpan.Zero"/> when config has not yet been resolved.
-    /// </summary>
-    [JsonIgnore]
-    public TimeSpan ApprovalScopeActivityTimeout => ResolvedWorkerConfig?.ApprovalScopeActivityTimeout ?? TimeSpan.Zero;
-
-    /// <summary>
-    /// Maximum attempts for approval-scope store activities.
-    /// Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.ApprovalScopeActivityMaximumAttempts"/>.
-    /// Defaults to 0 when config has not yet been resolved.
-    /// </summary>
-    [JsonIgnore]
-    public int ApprovalScopeActivityMaximumAttempts => ResolvedWorkerConfig?.ApprovalScopeActivityMaximumAttempts ?? 0;
-
-    /// <summary>
-    /// Names of tools registered with <c>ScopeAware()</c>. Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.ScopeAwareTools"/>.
-    /// </summary>
-    [JsonIgnore]
-    public IReadOnlyList<string>? ScopeAwareTools => ResolvedWorkerConfig?.ScopeAwareTools;
-
-    /// <summary>
-    /// Names of tools registered with both <c>ScopeAware()</c> and <c>RequireApproval()</c>.
-    /// These tools are NOT in <see cref="RequiresApprovalTools"/>. Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.ScopeAwareApprovalTools"/>.
-    /// </summary>
-    [JsonIgnore]
-    public IReadOnlyList<string>? ScopeAwareApprovalTools => ResolvedWorkerConfig?.ScopeAwareApprovalTools;
 }

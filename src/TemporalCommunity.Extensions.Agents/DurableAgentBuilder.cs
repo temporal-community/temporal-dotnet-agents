@@ -6,8 +6,6 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Common;
-using TemporalCommunity.Extensions.Agents.Approvals;
-using TemporalCommunity.Extensions.Agents.Skills;
 using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.Session;
@@ -23,7 +21,10 @@ namespace TemporalCommunity.Extensions.Agents;
 internal sealed record DurableToolRegistration(
     string Name,
     Func<IServiceProvider, AIFunction> Factory,
-    DurableToolOptions Options);
+    DurableToolOptions Options)
+{
+    public TemporalMemorySearchRegistration? MemorySearch { get; init; }
+}
 
 /// <summary>
 /// Fluent builder for registering a durable agent via <c>TemporalAgentsOptions.AddDurableAgent</c>.
@@ -62,8 +63,7 @@ public sealed class DurableAgentBuilder
     private readonly List<ContextProviderRegistration> _contextProviders = new();
     private readonly List<(string ToolName, string SourceProviderType)> _providerContributedTools = new();
     private Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>>? _toolInterceptorFactory;
-    private bool _useApprovalScopes;
-    private ApprovalScopesOptions? _approvalScopesOptions;
+    private bool _hasTemporalMemorySearch;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DurableAgentBuilder"/> class with the given agent
@@ -216,7 +216,7 @@ public sealed class DurableAgentBuilder
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The callback runs at activity dispatch time and lets users compose middleware such as
+    /// The callback builds model-step middleware at activity dispatch time, such as
     /// <c>UseOpenTelemetry()</c>, <c>UseLogging()</c>, or custom <see cref="DelegatingAIAgent"/>
     /// decorators. The library composes the inner <see cref="ChatClientAgent"/>; user code only
     /// adds decorators around it via the supplied <see cref="AIAgentBuilder"/>.
@@ -233,7 +233,9 @@ public sealed class DurableAgentBuilder
     /// </code>
     /// <para>
     /// <b>Construction and lifetime contract.</b> The callback runs once during startup validation
-    /// and once for every <c>RunDurableAgentStep</c> activity attempt, including retries. Each
+    /// and once for every <c>RunDurableAgentStep</c> activity attempt, including retries.
+    /// Provider preparation and completion also build a pipeline to supply their agent context,
+    /// without invoking its run middleware. Each
     /// live build uses that activity's scoped service provider. Custom wrappers must not implement
     /// <see cref="IDisposable"/> or <see cref="IAsyncDisposable"/> because MAF does not expose
     /// factory ownership; inject resource-owning dependencies from the activity scope instead.
@@ -256,6 +258,10 @@ public sealed class DurableAgentBuilder
     /// </para>
     /// </remarks>
     public Action<AIAgentBuilder>? ConfigureAgentPipeline { get; set; }
+
+    internal Func<AIAgent, FunctionInvocationContext,
+        Func<FunctionInvocationContext, CancellationToken, ValueTask<object?>>,
+        CancellationToken, ValueTask<object?>>? ToolMiddleware { get; set; }
 
     /// <summary>
     /// Registers a concrete <see cref="AIFunction"/> as a tool for this agent. The tool's
@@ -376,16 +382,14 @@ public sealed class DurableAgentBuilder
     /// </exception>
     /// <remarks>
     /// <para>
-    /// In durable agents, the provider's <c>InvokingAsync</c> and <c>InvokedAsync</c> hooks fire
-    /// once per LLM call (per <c>RunAgentStep</c> activity), not once per turn. Make these hooks
-    /// idempotent and cheap, or cache results via <c>StateBag</c> to skip redundant work within a
-    /// turn.
+    /// In managed session workflows, <c>InvokingAsync</c> prepares context once before the
+    /// model/tool loop and <c>InvokedAsync</c> runs at terminal turn completion. Activity retries
+    /// may repeat either hook. Workflow-local <c>TemporalAIAgent</c> calls retain per-step hooks.
     /// </para>
     /// <para>
-    /// When <paramref name="durableTools"/> is provided (or the provider implements
-    /// <see cref="IDurableToolSource"/>), the per-iteration strip in <c>AgentActivities</c>
-    /// automatically nulls out <c>AIContext.Tools</c> after this provider's <c>InvokingAsync</c>
-    /// call, preventing downstream providers from seeing stale tool lists.
+    /// Registered tools are seeded into provider context. Providers may select or filter only
+    /// those exact registered function instances. Provider-created functions and wrappers fail
+    /// before the first model call.
     /// </para>
     /// <para>
     /// Tool activities use one attempt by default. Setting this agent's
@@ -446,44 +450,40 @@ public sealed class DurableAgentBuilder
     }
 
     /// <summary>
-    /// Registers an <see cref="AIContextProvider"/> via a factory. The factory is invoked from the
-    /// activity's scoped service provider for every LLM-step activity attempt.
+    /// Registers an <see cref="AIContextProvider"/> via a factory. The factory is invoked from a
+    /// scoped service provider for provider preparation and terminal completion activity attempts
+    /// in managed session workflows; workflow-local <c>TemporalAIAgent</c> calls resolve it per
+    /// model-step attempt.
     /// </summary>
     /// <param name="factory">Factory that produces the <see cref="AIContextProvider"/>.</param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
     /// <remarks>
     /// <para>
-    /// In durable agents, the provider's <c>InvokingAsync</c> and <c>InvokedAsync</c> hooks fire
-    /// once per LLM call (per <c>RunAgentStep</c> activity), not once per turn. Make these hooks
-    /// idempotent and cheap, or cache results via <c>StateBag</c> to skip redundant work within a
-    /// turn. A provider may be constructed again for an activity retry or on another worker;
-    /// per-session state must live in the <c>StateBag</c>, and external effects must tolerate
-    /// activity retry.
+    /// Managed session workflows prepare provider context once per logical turn and record the
+    /// result; the completion hook runs at the terminal outcome. Activity retries can repeat
+    /// either callback, and workflow-local <c>TemporalAIAgent</c> calls retain per-step callbacks.
+    /// A provider may be constructed again for an activity retry or on another worker; per-session
+    /// state must live in the <c>StateBag</c>, and external effects must tolerate activity retry.
     /// </para>
     /// <para>
-    /// <b>Tool definitions returned in <c>AIContext.Tools</c> by context providers are ignored</b>
-    /// and will not be dispatched as durable activities. Providers that contribute tools
-    /// (e.g., <c>HyperlightCodeActProvider</c>, <c>LocalCodeActProvider</c>,
-    /// <c>TextSearchProvider</c> in on-demand mode, <c>AgentSkillsProvider</c>) are designed for
-    /// MAF's in-process function-invocation harness; their tools are not compatible with
-    /// per-tool durable activity dispatch. To register a tool with durable execution semantics,
-    /// use <see cref="AddTool(AIFunction, Action{DurableToolOptions}?)"/> instead. To register a
-    /// tool alongside a context provider, use the instance overload
-    /// <c>AddContextProvider(AIContextProvider, IEnumerable{DurableToolRegistrationSpec})</c> instead.
+    /// Provider-returned tools are accepted in managed session workflows only when they are the
+    /// exact registered function instances seeded into the MAF context. A changed tool set is
+    /// frozen for the turn. Provider-created functions, wrappers, and same-name/schema substitutes
+    /// fail before model dispatch. This narrow route does not support stock on-demand
+    /// memory-search providers.
     /// </para>
     /// <para>
-    /// A provider resolved by this factory does not exist at build time, so its durable tool
-    /// declarations cannot be collected. If it implements <see cref="IDurableToolSource"/>, the
-    /// first LLM step fails with a non-retryable configuration error rather than dropping its
-    /// tools silently — use the instance overload
+    /// A provider resolved by this factory does not exist at build time, so its
+    /// <see cref="IDurableToolSource"/> declarations cannot be collected. If it implements that
+    /// interface, the first preparation activity fails with a non-retryable configuration error;
+    /// use the instance overload
     /// <c>AddContextProvider(AIContextProvider, IEnumerable{DurableToolRegistrationSpec}?)</c>
     /// for such a provider.
     /// </para>
     /// <para>
-    /// A provider that merely returns tools from <c>InvokingAsync</c> without implementing that
-    /// interface is not rejected; those tools are dropped and a <c>LogError</c> is emitted once
-    /// per LLM step.
+    /// A provider that returns tools from <c>InvokingAsync</c> must return the exact registered
+    /// function objects; arbitrary returned tools are rejected before model dispatch.
     /// </para>
     /// </remarks>
     public DurableAgentBuilder AddContextProvider(Func<IServiceProvider, AIContextProvider> factory)
@@ -495,146 +495,55 @@ public sealed class DurableAgentBuilder
         return this;
     }
 
-    /// <summary>
-    /// Registers progressive-disclosure skills support for this agent. Internally creates a
-    /// <see cref="SkillsContextProvider"/> (registered via <c>AddContextProvider(AIContextProvider)</c>)
-    /// and the skill tools <c>load_skill</c>, <c>read_skill_resource</c>, and optionally
-    /// <c>run_skill_script</c> (when <see cref="SkillsBuilder.EnableScriptExecution"/> is called).
-    /// </summary>
-    /// <param name="configure">Callback to register skills and configure options.</param>
-    /// <returns>This builder, for fluent chaining.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="configure"/> is <see langword="null"/>.</exception>
-    /// <remarks>
-    /// <para>
-    /// <b>How it works.</b> The skill index (name + description per skill, ~100 tokens per skill)
-    /// is injected as a system message on every LLM call via <see cref="SkillsContextProvider"/>.
-    /// The index is built on first use and cached in <c>AgentSessionStateBag["temporal.skills_index"]</c>
-    /// so it survives continue-as-new transitions. Full skill content is loaded on demand by the
-    /// <c>load_skill</c> tool — each invocation is a separate <c>InvokeAgentTool</c> Temporal
-    /// activity visible in the Web UI.
-    /// </para>
-    /// <para>
-    /// <b>Script execution.</b> Script support is disabled by default. Call
-    /// <see cref="SkillsBuilder.EnableScriptExecution"/> to register <c>run_skill_script</c>
-    /// with a <c>RequireApproval()</c> gate. File-backed scripts additionally require a runner
-    /// supplied to <see cref="SkillsBuilder.AddSkillsFromDirectory"/>. The runner is rejected
-    /// unless script execution is enabled, so every file-backed script runs through the same
-    /// approval-gated durable tool path.
-    /// </para>
-    /// <para>
-    /// <b>File-skill drift.</b> <see cref="SkillResolver"/> re-materialises from file sources
-    /// on first use after a worker restart or continue-as-new. If the directory contents have
-    /// changed, the resolver reflects the new state while the StateBag still holds the old index.
-    /// Treat file skill sources as immutable for the lifetime of a session.
-    /// </para>
-    /// </remarks>
-    public DurableAgentBuilder UseSkills(Action<SkillsBuilder> configure)
+    internal DurableAgentBuilder AddTemporalMemorySearchBridge(
+        TemporalMemorySearchRegistration bridge,
+        string toolDescription,
+        Action<DurableToolOptions>? configureTool = null)
     {
-        ArgumentNullException.ThrowIfNull(configure);
-
-        var builder = new SkillsBuilder();
-        configure(builder);
-        var resolver = builder.BuildResolver();
-        bool scriptsEnabled = builder.ScriptsEnabled;
-
-        // 1. Register the provider (injects skill index as system message each LLM call).
-        AddContextProvider(new SkillsContextProvider(resolver, scriptsEnabled));
-
-        // 2. Register load_skill with SkipInterceptor — read-only, no side effects.
-        AddTool(
-            "load_skill",
-            _ => AIFunctionFactory.Create(
-                async ([Description("Skill name")] string name, CancellationToken ct) =>
-                {
-                    var skill = await resolver.FindByNameAsync(name, ct).ConfigureAwait(false);
-                    if (skill is null)
-                    {
-                        return $"Skill '{name}' not found.";
-                    }
-
-                    var content = await skill.GetContentAsync(ct).ConfigureAwait(false);
-                    if (!scriptsEnabled && content.Contains("<scripts>", StringComparison.Ordinal))
-                    {
-                        content = SkillsContextProvider.StripScriptsSection(content);
-                    }
-
-                    return content;
-                },
-                name: "load_skill",
-                description: "Load the full instructions for a skill by name."),
-            opts => opts.SkipInterceptor());
-
-        // 3. Register read_skill_resource — no SkipInterceptor by default; resource delegates
-        //    can be side-effectful and users may want interceptor coverage.
-        AddTool(
-            "read_skill_resource",
-            sp => AIFunctionFactory.Create(
-                async (
-                    [Description("Skill name")] string skillName,
-                    [Description("Resource name")] string resourceName,
-                    CancellationToken ct) =>
-                {
-                    var skill = await resolver.FindByNameAsync(skillName, ct).ConfigureAwait(false);
-                    if (skill is null)
-                    {
-                        return $"Skill '{skillName}' not found.";
-                    }
-
-                    var resource = await skill.GetResourceAsync(resourceName, ct).ConfigureAwait(false);
-                    if (resource is null)
-                    {
-                        return $"Resource '{resourceName}' not found in '{skillName}'.";
-                    }
-
-                    return await resource.ReadAsync(sp, ct).ConfigureAwait(false);
-                },
-                name: "read_skill_resource",
-                description: "Read a supplementary resource file from a skill."));
-
-        // 4. Register run_skill_script only when EnableScriptExecution() was called.
-        if (scriptsEnabled)
+        ArgumentNullException.ThrowIfNull(bridge);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toolDescription);
+        if (bridge.ProviderFactory is null || string.IsNullOrWhiteSpace(bridge.CollectionName))
         {
-            AddTool(
-                "run_skill_script",
-                sp => AIFunctionFactory.Create(
-                    async (
-                        [Description("Skill name")] string skillName,
-                        [Description("Script name")] string scriptName,
-                        [Description("JSON arguments object")] string argumentsJson,
-                        CancellationToken ct) =>
-                    {
-                        var skill = await resolver.FindByNameAsync(skillName, ct).ConfigureAwait(false);
-                        if (skill is null)
-                        {
-                            return $"Skill '{skillName}' not found.";
-                        }
-
-                        var script = await skill.GetScriptAsync(scriptName, ct).ConfigureAwait(false);
-                        if (script is null)
-                        {
-                            return $"Script '{scriptName}' not found in '{skillName}'.";
-                        }
-
-                        JsonElement? argsElement = null;
-                        try
-                        {
-                            argsElement = JsonSerializer.Deserialize<JsonElement>(
-                                argumentsJson, AIJsonUtilities.DefaultOptions);
-                        }
-                        catch (JsonException ex)
-                        {
-                            return $"Invalid arguments JSON: {ex.Message}";
-                        }
-
-                        return await script.RunAsync(skill, argsElement, sp, ct).ConfigureAwait(false);
-                    },
-                    name: "run_skill_script",
-                    description: "Execute a script from a skill."),
-                opts => opts.NoRetry().RequireApproval());
+            throw new ArgumentException("Memory-search provider and collection must be configured.", nameof(bridge));
+        }
+        if (string.IsNullOrWhiteSpace(bridge.ToolName))
+        {
+            throw new ArgumentException("Memory-search tool names cannot be empty.", nameof(bridge));
+        }
+        if (_hasTemporalMemorySearch)
+        {
+            throw new ArgumentException($"Agent '{Name}' can register only one Temporal memory-search bridge.");
         }
 
+        if (bridge.SearchTime == ChatHistoryMemoryProviderOptions.SearchBehavior.OnDemandFunctionCalling)
+        {
+            AddToolCore(
+                bridge.ToolName,
+                _ => CreateMemorySearchPlaceholder(bridge.ToolName, toolDescription),
+                configureTool,
+                sourceHint: "Temporal memory-search bridge");
+            _tools[^1] = _tools[^1] with { MemorySearch = bridge };
+        }
+
+        _contextProviders.Add(new ContextProviderRegistration(
+            services => bridge.ProviderFactory(services),
+            DeclarationsRegistered: true,
+            MemorySearch: bridge));
+        _hasTemporalMemorySearch = true;
         return this;
     }
+
+    private static AIFunction CreateMemorySearchPlaceholder(string name, string description) =>
+        AIFunctionFactory.Create(
+            (Func<string, CancellationToken, Task<string>>)UnavailableMemorySearchAsync,
+            name,
+            description);
+
+    private static Task<string> UnavailableMemorySearchAsync(
+        string userQuestion,
+        CancellationToken cancellationToken) =>
+        throw new InvalidOperationException(
+            "Temporal memory-search functions are invoked only through the durable activity route.");
 
     /// <summary>
     /// Registers a per-agent interceptor factory. The factory is invoked from the activity's scoped
@@ -653,62 +562,12 @@ public sealed class DurableAgentBuilder
     /// <param name="factory">Factory that produces the interceptor.</param>
     /// <returns>This builder, for fluent chaining.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="factory"/> is <see langword="null"/>.</exception>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown when <see cref="UseApprovalScopes"/> has already been called. Approval scopes
-    /// install the built-in <c>ScopedApprovalInterceptor</c>, and scope-aware required tools have
-    /// been excluded from <c>RequiresApprovalTools</c> — replacing the interceptor would silently
-    /// bypass approval for those tools.
-    /// </exception>
     public DurableAgentBuilder AddToolInterceptor(
         Func<IServiceProvider, IDurableToolInterceptor<AgentToolContext>> factory)
     {
         ArgumentNullException.ThrowIfNull(factory);
 
-        if (_useApprovalScopes)
-        {
-            throw new InvalidOperationException(
-                "Cannot register a custom tool interceptor after UseApprovalScopes() — scope-aware " +
-                "required tools have been excluded from RequiresApprovalTools and rely on " +
-                "ScopedApprovalInterceptor to enforce the approval gate. Replacing the interceptor " +
-                "would silently bypass approval for those tools.");
-        }
-
         _toolInterceptorFactory = factory;
-        return this;
-    }
-
-    /// <summary>
-    /// Registers the built-in scope-aware approval interceptor for this agent. The interceptor
-    /// checks session and always-scopes before parking the workflow for human approval; tools
-    /// that are not scope-annotated or have no matching scope record fall through to the standard
-    /// <see cref="DurableToolOptions.RequireApproval()"/> gate.
-    /// </summary>
-    /// <param name="configure">
-    /// Optional callback to configure <see cref="ApprovalScopesOptions"/>. When
-    /// <see langword="null"/>, default options are used.
-    /// </param>
-    /// <returns>This builder, for fluent chaining.</returns>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown when <see cref="AddToolInterceptor"/> has already been called. Approval scopes
-    /// install the built-in <c>ScopedApprovalInterceptor</c>, and this release does not compose
-    /// approval scopes with custom tool interceptors.
-    /// </exception>
-    public DurableAgentBuilder UseApprovalScopes(Action<ApprovalScopesOptions>? configure = null)
-    {
-        if (_toolInterceptorFactory is not null)
-        {
-            throw new InvalidOperationException(
-                "UseApprovalScopes() cannot be combined with AddToolInterceptor(). Approval scopes " +
-                "install the built-in ScopedApprovalInterceptor, and this release does not compose " +
-                "approval scopes with custom tool interceptors.");
-        }
-
-        var opts = new ApprovalScopesOptions();
-        configure?.Invoke(opts);
-        _approvalScopesOptions = opts;
-        _useApprovalScopes = true;
-        _toolInterceptorFactory = _ => new ScopedApprovalInterceptor(opts);
-
         return this;
     }
 
@@ -732,44 +591,6 @@ public sealed class DurableAgentBuilder
         {
             throw new InvalidOperationException(
                 $"DurableAgentBuilder for agent '{Name}' has no ChatClient set. Assign agent.ChatClient = sp => ... in the configure delegate.");
-        }
-
-        // Builder-time validation for approval-scope related combinations.
-        if (_useApprovalScopes && _approvalScopesOptions is { } scopeOpts)
-        {
-            if (scopeOpts.MaxSessionScopeRecords <= 0)
-            {
-                throw new InvalidOperationException(
-                    $"ApprovalScopesOptions.MaxSessionScopeRecords for agent '{Name}' must be a positive integer.");
-            }
-
-            if (scopeOpts.MaxSessionScopeBytes <= 0)
-            {
-                throw new InvalidOperationException(
-                    $"ApprovalScopesOptions.MaxSessionScopeBytes for agent '{Name}' must be a positive integer.");
-            }
-        }
-
-        // Validate per-tool combinations.
-        foreach (var toolReg in _tools)
-        {
-            var opts = toolReg.Options;
-
-            // RequireApproval + ScopeAware requires UseApprovalScopes to be called.
-            if (opts.RequireApprovalFlag && opts.ScopeAwareFlag && !_useApprovalScopes)
-            {
-                throw new InvalidOperationException(
-                    $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{Name}'. " +
-                    "Call UseApprovalScopes() before registering scope-aware required tools.");
-            }
-
-            // RequireApproval + ScopeAware + SkipInterceptor is always invalid.
-            if (opts.RequireApprovalFlag && opts.ScopeAwareFlag && opts.SkipInterceptorFlag)
-            {
-                throw new InvalidOperationException(
-                    $"Tool '{toolReg.Name}' cannot combine RequireApproval(), ScopeAware(), and SkipInterceptor(); approval " +
-                    "scopes require the interceptor to enforce the missing-scope approval gate.");
-            }
         }
 
         // Validate loop / history bounds. A non-positive MaxToolCallsPerTurn makes the
@@ -818,9 +639,8 @@ public sealed class DurableAgentBuilder
             HistoryReducerKey: HistoryReducerKey,
             ContextReducerKey: ContextReducerKey,
             ConfigureAgentPipeline: ConfigureAgentPipeline,
+            ToolMiddleware: ToolMiddleware,
             ToolInterceptorFactory: _toolInterceptorFactory,
-            UseApprovalScopes: _useApprovalScopes,
-            ApprovalScopesOptions: _approvalScopesOptions,
             ProviderContributedTools: _providerContributedTools.Count > 0
                 ? _providerContributedTools.ToArray()
                 : null);

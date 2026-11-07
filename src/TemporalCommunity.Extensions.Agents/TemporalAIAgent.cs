@@ -2,7 +2,6 @@ using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.State;
@@ -11,6 +10,7 @@ using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.Session;
 using TemporalCommunity.Extensions.AI.Tools;
+using Temporalio.Common;
 using Temporalio.Workflows;
 
 using AgentsInterceptorInput = TemporalCommunity.Extensions.Agents.Workflows.DurableToolInterceptorInput;
@@ -48,9 +48,6 @@ public sealed class TemporalAIAgent : AIAgent
     private IReadOnlyDictionary<string, ActivityOptions>? _interceptorToolActivityOptions;
     private IReadOnlyList<string>? _interceptorSkippedTools;
     private IReadOnlyList<string>? _requiresApprovalTools;
-    // Feature B: scope-aware tool lists captured from first-step resolved config (Task 4.7).
-    private IReadOnlyList<string>? _scopeAwareTools;
-    private IReadOnlyList<string>? _scopeAwareApprovalTools;
 
     internal TemporalAIAgent(string agentName, ActivityOptions? activityOptions = null)
     {
@@ -274,6 +271,26 @@ public sealed class TemporalAIAgent : AIAgent
 
         Workflow.Logger.LogInWorkflowAgentDispatching(_agentName, temporalSession.RunCount);
 
+        var initializedMemory = await Workflow.ExecuteActivityAsync(
+            (AgentActivities activities) => activities.InitializeChatHistoryMemoryAsync(
+                new InitializeChatHistoryMemoryInput
+                {
+                    AgentName = _agentName,
+                    SessionId = sessionId.WorkflowId,
+                    SerializedStateBag = temporalSession.SerializeStateBag(),
+                }),
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromSeconds(30),
+                RetryPolicy = new RetryPolicy
+                {
+                    InitialInterval = TimeSpan.FromSeconds(1),
+                    MaximumAttempts = 2,
+                },
+                Summary = AgentActivities.BuildActivitySummary(_agentName),
+            });
+        temporalSession.ApplyTrustedStateBagDelta(initializedMemory.StateBagDelta);
+
         // Drive the durable-agent dispatch loop for sub-agents inside an orchestrating workflow.
         // Mirrors the AgentWorkflow main loop but without continue-as-new / search attributes /
         // history reduction (the orchestrating workflow owns those concerns).
@@ -297,6 +314,7 @@ public sealed class TemporalAIAgent : AIAgent
                 AccumulatedMessages = accumulated,
                 SerializedStateBag = temporalSession.SerializeStateBag(),
                 SessionId = sessionId,
+                MemoryScope = initializedMemory.Scope,
                 NeedsWorkerSettingsResolution = !_settingsResolved && iteration == 0,
             };
 
@@ -312,11 +330,6 @@ public sealed class TemporalAIAgent : AIAgent
 
             // Persist the step's StateBag mutations on the session so context-provider state
             // survives across steps, turns, and continue-as-new.
-            // Context providers run inside the LLM-step activity and are trusted-tier by design,
-            // so their output is overlaid unfiltered — unlike tool/interceptor write-backs below,
-            // which are deny-list filtered. Overlay rather than replace: a hash-gated step returns
-            // a null or partial bag, and replacing would wipe keys the workflow thread wrote
-            // between activities.
             temporalSession.ApplyTrustedStateBagDelta(stepResult.StateBagDelta);
 
             if (stepResult.ResolvedWorkerConfig is not null)
@@ -341,28 +354,6 @@ public sealed class TemporalAIAgent : AIAgent
                 _interceptorToolActivityOptions = resolvedConfig.InterceptorToolActivityOptions;
                 _interceptorSkippedTools = resolvedConfig.InterceptorSkippedTools;
                 _requiresApprovalTools = resolvedConfig.RequiresApprovalTools;
-                // Feature B (Task 4.7): capture scope-aware tool lists.
-                _scopeAwareTools = resolvedConfig.ScopeAwareTools;
-                _scopeAwareApprovalTools = resolvedConfig.ScopeAwareApprovalTools;
-
-                // Feature B — Task 7.2: warn when scope-aware required tools are present.
-                // TemporalAIAgent has no DurableApprovalMixin so workflow-parked approval is
-                // not supported. When the interceptor returns PauseForApproval for a
-                // scope-aware required tool (because no matching scope record exists), the
-                // decision degrades to Block below. Emitting a LogWarning here after the first
-                // step's ResolvedWorkerConfig arrives makes this degradation visible before
-                // the tool call rather than silently at block time.
-                // Note: TemporalAIAgent's interceptor input still passes a null SerializedStateBag
-                // (constructed below), so scope records in StateBag are not consulted on this path
-                // even though the session now has a StateBag to consult.
-                if (resolvedConfig.ScopeAwareApprovalTools is { Count: > 0 } scopeApprovalTools)
-                {
-                    var names = string.Join(", ", scopeApprovalTools);
-                    Workflow.Logger.LogWarning(
-                        "Tool(s) '{ToolNames}' are configured with RequireApproval().ScopeAware() but this execution " +
-                        "context does not support workflow-parked approval. Unapproved calls will be blocked.",
-                        names);
-                }
             }
 
             if (stepResult.Usage is not null)
@@ -444,19 +435,10 @@ public sealed class TemporalAIAgent : AIAgent
                             ToolName = tc.Name,
                             Arguments = tc.Arguments is null ? null : new Dictionary<string, object?>(tc.Arguments),
                             CallId = tc.CallId,
-                            // Still null here, but NOT because there is no StateBag to send — as of
-                            // session ownership there is one (see toolDispatchStateBag below, and
-                            // AgentWorkflow, which does pass its bag to interceptors). Passing it
-                            // would let a scope-aware interceptor find a matching approval-scope
-                            // record and return Proceed where it currently returns
-                            // PauseForApproval, which degrades to Block on this path. That is a
-                            // change to approval semantics and needs its own design and tests, so
-                            // it is deliberately left alone here rather than altered in passing.
+                            // Workflow-local interceptors currently receive no session snapshot.
+                            // Preserve this path while the child-agent state protocol is unresolved.
                             SerializedStateBag = null,
-                            // Feature B (Task 4.7): populate scope-aware fields.
-                            ScopeAware = _scopeAwareTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
-                            RequiresApproval = _requiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true
-                                || _scopeAwareApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
+                            RequiresApproval = _requiresApprovalTools?.Contains(tc.Name, StringComparer.OrdinalIgnoreCase) == true,
                         };
                         // See also: AgentWorkflow.ExecuteDurableAgentTurnAsync (MAF path) — parallel interceptor dispatch
                         interceptorTasks.Add(Workflow.ExecuteActivityAsync(
@@ -492,26 +474,20 @@ public sealed class TemporalAIAgent : AIAgent
                         var toolInput = new InvokeAgentToolInput
                         {
                             AgentName = _agentName,
+                            SessionId = sessionId.WorkflowId,
+                            MemoryScope = stepResult.PreparedTools?
+                                .FirstOrDefault(tool => string.Equals(
+                                    tool.Name,
+                                    tc.Name,
+                                    StringComparison.OrdinalIgnoreCase))?.MemoryScope,
                             ToolName = tc.Name,
                             Arguments = DurableToolDecisionPolicy.GetEffectiveArguments(interceptorResult?.ModifiedArguments, (IReadOnlyDictionary<string, object?>?)tc.Arguments),
                             CallId = tc.CallId,
-                            // X-1: seed the tool with accumulated session state so context
-                            // providers / scope-aware tools see it.
-                            //
-                            // KNOWN LIMITATION (pre-existing, not introduced by session ownership):
-                            // this bag is currently ignored on the sub-agent path. InvokeAgentToolInput
-                            // carries no SessionId, so InvokeAgentToolAsync derives the session from
-                            // ActivityExecutionContext.Info.WorkflowId — which here is the ORCHESTRATING
-                            // workflow's ID, not a "ta-{agent}-{key}" session ID. The parse fails, no
-                            // TemporalAgentContext is established, and the tool's StateBag write-back
-                            // comes back null. So toolStateBagWriteBacks below is always all-null on
-                            // this path and the merge is a no-op. RunDurableAgentStepAsync does not
-                            // have this problem because AgentStepInput does carry SessionId and it is
-                            // preferred over the workflow ID; that is why context-provider StateBag
-                            // threading works for sub-agents while tool write-backs do not.
-                            // Closing this means adding SessionId to InvokeAgentToolInput and
-                            // preferring it — a wire addition with approval-routing implications, so
-                            // it needs its own design rather than a change in passing.
+                            PreparedTool = stepResult.PreparedTools?
+                                .FirstOrDefault(tool => string.Equals(
+                                    tool.Name,
+                                    tc.Name,
+                                    StringComparison.OrdinalIgnoreCase)),
                             SerializedStateBag = temporalSession.SerializeStateBag(),
                         };
                         // Use per-tool ActivityOptions when resolved (honours NoRetry(), WithTimeout(), etc.)
@@ -554,9 +530,7 @@ public sealed class TemporalAIAgent : AIAgent
                             (AgentActivities a) => a.InvokeAgentToolAsync(toolInput),
                             toolDispatchOpts).ConfigureAwait(true);
                         temporalSession.ApplyToolStateBagDeltas(
-                            [toolResults[i]!.StateBagDelta],
-                            alwaysScopesStoreKey: null,
-                            Workflow.Logger);
+                            [toolResults[i]!.StateBagDelta]);
                         break;
 
                     case AgentsToolOutcome.PauseForApproval:

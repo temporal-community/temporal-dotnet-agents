@@ -9,7 +9,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Activities;
 using Temporalio.Exceptions;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Internal;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.State;
@@ -30,8 +29,8 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// Contains only things that depend on registration <em>shape</em>, not live DI instances:
 /// the tool registry, frozen per-tool activity options, and the source-of-truth
 /// <see cref="DurableAgentRegistration"/>. Live DI instances
-/// (<see cref="IChatClient"/>, context providers, tool interceptor, approval scope
-/// store) are resolved fresh per activity call via an <see cref="IServiceScope"/> so that scoped
+/// (<see cref="IChatClient"/>, context providers, tool interceptor)
+/// are resolved fresh per activity call via an <see cref="IServiceScope"/> so that scoped
 /// services (e.g. <c>DbContext</c>) are never captured as implicit captive singletons.
 /// </summary>
 /// <param name="ToolRegistrations">Immutable registrations; implementations are resolved per activity attempt.</param>
@@ -58,6 +57,94 @@ internal sealed class AgentActivities(
     // — no live DI instances. Live instances are resolved per call via scope.
     private readonly ConcurrentDictionary<string, AgentBlueprint> _blueprintCache =
         new(StringComparer.OrdinalIgnoreCase);
+
+    [Activity("TemporalCommunity.Extensions.Agents.InitializeChatHistoryMemory")]
+    public async Task<InitializedChatHistoryMemory> InitializeChatHistoryMemoryAsync(
+        InitializeChatHistoryMemoryInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var blueprint = ResolveBlueprint(input.AgentName);
+        var registration = blueprint.Registration.ContextProviderFactories
+            .Select(provider => provider.MemorySearch)
+            .SingleOrDefault(memory => memory is not null);
+        if (registration is null)
+        {
+            return new InitializedChatHistoryMemory();
+        }
+
+        using var scope = serviceScopeFactory.CreateScope();
+        var sessionId = TemporalAgentSessionId.Parse(input.SessionId);
+        var session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
+        var beforeStateBag = session.SerializeStateBag();
+
+        var hasState = session.StateBag.TryGetValue<ChatHistoryMemoryProvider.State>(
+            TemporalChatHistoryMemoryBuilder.StateKey,
+            out var state);
+        var hasScope = session.StateBag.TryGetValue<TemporalMemoryScopeSnapshot>(
+            TemporalChatHistoryMemoryBuilder.ScopeKey,
+            out var existingScope);
+        if (hasScope && !hasState)
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                "The recorded chat-history memory scope exists but its provider state is missing; the initializer will not be rerun.");
+        }
+
+        if (!hasState || state is null)
+        {
+            if (registration.ScopeInitializer is { } initializer)
+            {
+                state = await initializer(
+                    scope.ServiceProvider,
+                    new TemporalMemoryScopeContext(
+                        input.SessionId,
+                        input.AgentName,
+                        registration.CollectionName),
+                    ActivityExecutionContext.Current.CancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                var defaultScope = new ChatHistoryMemoryProviderScope
+                {
+                    AgentId = input.AgentName,
+                    SessionId = input.SessionId,
+                };
+                state = new ChatHistoryMemoryProvider.State(defaultScope, defaultScope);
+            }
+
+            var memoryScope = TemporalMemoryScopeSnapshot.Create(
+                state,
+                input.AgentName,
+                input.SessionId,
+                registration.AllowCrossSessionRecall);
+            session.StateBag.SetValue(TemporalChatHistoryMemoryBuilder.StateKey, state);
+            session.StateBag.SetValue(TemporalChatHistoryMemoryBuilder.ScopeKey, memoryScope);
+
+            var result = new InitializedChatHistoryMemory
+            {
+                Scope = memoryScope,
+                StateBagDelta = StateBagMerge.CreateDelta(beforeStateBag, session.SerializeStateBag()),
+            };
+            TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                ActivityExecutionContext.Current.PayloadConverter,
+                result,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "chat-history memory initialization result");
+            return result;
+        }
+
+        var validatedScope = TemporalMemoryScopeSnapshot.Create(
+            state,
+            input.AgentName,
+            input.SessionId,
+            registration.AllowCrossSessionRecall);
+        if (!hasScope || existingScope is null || existingScope != validatedScope)
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                "The retained chat-history memory scope does not match the provider state.");
+        }
+        return new InitializedChatHistoryMemory { Scope = validatedScope };
+    }
 
     /// <summary>
     /// Builds the activity summary value (visible in the Temporal Web UI activity list).
@@ -135,7 +222,8 @@ internal sealed class AgentActivities(
                 scope.ServiceProvider.GetService<TemporalCommunity.Extensions.AI.DurableExecutionOptions>());
 
         var chatClient = registration.ChatClient(scopedServices);
-        AIContextProvider[] contextProviders = registration.ContextProviderFactories.Count == 0
+        AIContextProvider[] contextProviders = input.ProvidersPrepared
+            || registration.ContextProviderFactories.Count == 0
             ? []
             : ResolveContextProviders(registration, scopedServices);
 
@@ -201,17 +289,82 @@ internal sealed class AgentActivities(
                 effectiveHeartbeatTimeout,
                 effectiveRetryPolicy);
         }
-        IReadOnlyList<ChatMessage> messagesForLlm = input.AccumulatedMessages;
+        IReadOnlyList<ChatMessage> messagesForLlm = PreparedMessageAttribution.Restore(
+            input.AccumulatedMessages,
+            input.AccumulatedMessageAttributions);
 
         var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
-        chatOptions.Instructions = registration.Instructions;
-        // Spread [..] makes a per-call copy so downstream mutation (EnableToolNames filter below)
-        // cannot corrupt the cached IReadOnlyList.
-        var selectedTools = AgentRunToolSelectionPolicy.FilterProviderTools(
-            toolFunctions.Values.Cast<AITool>().ToArray(),
-            input.Request.EnableToolCalls,
-            input.Request.EnableToolNames is { } enabledToolNames ? [.. enabledToolNames] : null);
-        chatOptions.Tools = selectedTools.Count > 0 ? [.. selectedTools] : null;
+        chatOptions.Instructions = input.ProvidersPrepared
+            ? input.PreparedInstructions
+            : registration.Instructions;
+        var availableToolFunctions = new List<AITool>();
+        var preparedApprovalTools = new List<string>();
+        if (input.ProvidersPrepared)
+        {
+            if (input.PreparedTools is null)
+            {
+                throw new ApplicationFailureException(
+                    $"Agent '{input.AgentName}' model step is missing its prepared tool manifest.",
+                    errorType: nameof(DurableConfigurationException),
+                    nonRetryable: true);
+            }
+
+            foreach (var binding in input.PreparedTools)
+            {
+                if (!toolFunctions.TryGetValue(binding.Name, out var function))
+                {
+                    throw new ApplicationFailureException(
+                        $"Tool '{binding.Name}' is not registered on agent '{input.AgentName}'.",
+                        errorType: nameof(DurableConfigurationException),
+                        nonRetryable: true);
+                }
+
+                if (!blueprint.ToolRegistrations.TryGetValue(binding.Name, out var toolRegistration)
+                    || binding.IsTemporalMemorySearch != (toolRegistration.MemorySearch is not null))
+                {
+                    throw BuildMemorySearchConfigurationFailure(
+                        $"Prepared tool '{binding.Name}' does not match the worker registration for agent '{input.AgentName}'.");
+                }
+
+                if (binding.IsFrozenProviderSelection)
+                {
+                    if (binding.Declaration is null)
+                    {
+                        throw new ApplicationFailureException(
+                            $"Provider-selected tool '{binding.Name}' on agent '{input.AgentName}' has no frozen declaration.",
+                            errorType: nameof(DurableConfigurationException),
+                            nonRetryable: true);
+                    }
+
+                    if (binding.IsTemporalMemorySearch)
+                    {
+                        function = await ResolveTemporalMemorySearchFunctionAsync(
+                            toolRegistration.MemorySearch!,
+                            binding,
+                            sessionId,
+                            input.SerializedStateBag,
+                            agent,
+                            scopedServices,
+                            ct).ConfigureAwait(false);
+                    }
+
+                    binding.Declaration.ValidateImplementation(function);
+                }
+
+                availableToolFunctions.Add(function);
+                if (binding.RequiresApproval)
+                {
+                    preparedApprovalTools.Add(binding.Name);
+                }
+            }
+        }
+        else
+        {
+            availableToolFunctions.AddRange(toolFunctions
+                .Where(pair => blueprint.ToolRegistrations[pair.Key].MemorySearch is null)
+                .Select(pair => pair.Value));
+        }
+
         if (input.Request.ResponseFormat is { } responseFormat)
         {
             chatOptions.ResponseFormat = responseFormat;
@@ -262,6 +415,8 @@ internal sealed class AgentActivities(
         // so any DelegatingAIAgent decorators the user added via ConfigureAgentPipeline fire
         // around the call. The agent is built fresh per call via BuildLiveAgentPipeline above.
 
+        var workflowLocalMemorySearchTools = new List<
+            (AITool Tool, TemporalMemorySearchRegistration Registration, ChatHistoryMemoryProviderScope Scope)>();
         var augmentedMessages = messagesForLlm;
         if (contextProviders.Length > 0)
         {
@@ -287,11 +442,62 @@ internal sealed class AgentActivities(
             string? firstToolProviderType = null;
             int firstToolCount = 0;
 
-            foreach (var provider in contextProviders)
+            for (var providerIndex = 0; providerIndex < contextProviders.Length; providerIndex++)
             {
+                var provider = contextProviders[providerIndex];
+                var providerRegistration = registration.ContextProviderFactories[providerIndex];
+                var previousTools = aggregated.Tools?.ToList() ?? [];
+                if (providerRegistration.MemorySearch is { } memoryRegistration)
+                {
+                    if (input.MemoryScope is null)
+                    {
+                        throw BuildMemorySearchConfigurationFailure(
+                            "Chat-history memory was not initialized before provider invocation.");
+                    }
+
+                    _ = GetMemorySearchScope(
+                        (ChatHistoryMemoryProvider)provider,
+                        session,
+                        memoryRegistration,
+                        input.MemoryScope);
+                }
+
                 var invokingCtx = new Microsoft.Agents.AI.AIContextProvider.InvokingContext(
                     agent, session, aggregated);
                 aggregated = await provider.InvokingAsync(invokingCtx, ct).ConfigureAwait(false);
+
+                if (providerRegistration.MemorySearch is { } bridge)
+                {
+                    var newTools = aggregated.Tools?
+                        .Where(tool => !previousTools.Any(previous => ReferenceEquals(previous, tool)))
+                        .ToList() ?? [];
+                    if (bridge.SearchTime == ChatHistoryMemoryProviderOptions.SearchBehavior.OnDemandFunctionCalling)
+                    {
+                        var memoryTools = newTools
+                            .Where(tool => string.Equals(tool.Name, bridge.ToolName, StringComparison.Ordinal))
+                            .ToList();
+                        if (newTools.Count != 1 || memoryTools.Count != 1 || memoryTools[0] is not AIFunction)
+                        {
+                            throw BuildMemorySearchConfigurationFailure(
+                                $"The Temporal memory-search provider for agent '{input.AgentName}' must return only " +
+                                $"its stock on-demand function '{bridge.ToolName}'.");
+                        }
+
+                        var providerFunction = (AIFunction)memoryTools[0];
+                        var memoryScope = GetMemorySearchScope(
+                            (ChatHistoryMemoryProvider)provider,
+                            session,
+                            bridge,
+                            input.MemoryScope!);
+                        workflowLocalMemorySearchTools.Add((providerFunction, bridge, memoryScope));
+                        availableToolFunctions.Add(providerFunction);
+                    }
+                    else if (newTools.Count > 0)
+                    {
+                        throw BuildMemorySearchConfigurationFailure(
+                            "The before-model-call memory provider returned unexpected tools.");
+                    }
+                }
 
                 // Strip tools from IDurableToolSource providers immediately after their iteration.
                 // Their tools are already registered as durable activities; leaving them in aggregated
@@ -308,6 +514,7 @@ internal sealed class AgentActivities(
 
                 // Capture the first non-IDurableToolSource provider that returned tools for the warning below.
                 if (firstToolProviderType is null && provider is not IDurableToolSource
+                    && providerRegistration.MemorySearch is null
                     && aggregated.Tools is { } tools)
                 {
                     var count = tools is ICollection<Microsoft.Extensions.AI.AITool> c ? c.Count : tools.Count();
@@ -357,6 +564,26 @@ internal sealed class AgentActivities(
                     firstToolProviderType, firstToolCount, input.AgentName);
             }
         }
+
+        // Spread [..] makes a per-call copy so downstream mutation cannot corrupt the cached registry.
+        var selectedTools = AgentRunToolSelectionPolicy.FilterProviderTools(
+            availableToolFunctions,
+            input.Request.EnableToolCalls,
+            input.Request.EnableToolNames is { } enabledToolNames ? [.. enabledToolNames] : null);
+        var selectedMemoryTools = workflowLocalMemorySearchTools
+            .Where(entry => selectedTools.Any(tool => ReferenceEquals(tool, entry.Tool)))
+            .Select(entry => new PreparedAgentTool
+            {
+                Name = entry.Registration.ToolName,
+                IsFrozenProviderSelection = true,
+                IsTemporalMemorySearch = true,
+                MemorySearchScope = entry.Scope,
+                MemoryScope = input.MemoryScope,
+                Declaration = TemporalCommunity.Extensions.AI.Internal.DurableFunctionDeclarationSnapshot.Create(
+                    ((AIFunction)entry.Tool).AsDeclarationOnly()),
+            })
+            .ToList();
+        chatOptions.Tools = selectedTools.Count > 0 ? [.. selectedTools] : null;
 
         EnsureModelContextFits(augmentedMessages, chatOptions, modelContextBudget, scopedServices);
 
@@ -413,8 +640,11 @@ internal sealed class AgentActivities(
 
             var toolCalls = callResolution.ActionableCalls;
             var approvalRequiredToolNames = toolFunctions
-                .Where(pair => pair.Value.GetService<ApprovalRequiredAIFunction>() is not null)
+                .Where(pair => selectedTools.Contains(pair.Value)
+                    && pair.Value.GetService<ApprovalRequiredAIFunction>() is not null)
                 .Select(pair => pair.Key)
+                .Concat(preparedApprovalTools)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
 
             if (!upstreamOwnsUsage && span?.IsAllDataRequested == true)
@@ -434,8 +664,14 @@ internal sealed class AgentActivities(
                     session,
                     requestMessages: augmentedMessages,
                     responseMessages: response.Messages);
-                foreach (var provider in contextProviders)
+                for (var providerIndex = 0; providerIndex < contextProviders.Length; providerIndex++)
                 {
+                    var provider = contextProviders[providerIndex];
+                    EnsureMemoryScopeBeforeProviderHook(
+                        provider,
+                        registration.ContextProviderFactories[providerIndex],
+                        session,
+                        input.MemoryScope);
                     try
                     {
                         await provider.InvokedAsync(invokedCtx, ct).ConfigureAwait(false);
@@ -479,58 +715,18 @@ internal sealed class AgentActivities(
                 ActivityOptions? interceptorActivityOpts = null;
                 List<string>? interceptorSkippedTools = null;
                 List<string>? requiresApprovalTools = null;
-                List<string>? scopeAwareTools = null;
-                List<string>? scopeAwareApprovalTools = null;
 
                 // requiresApprovalTools is populated unconditionally — RequireApproval() is an
                 // absolute floor that must be enforced even when no tool interceptor is registered
                 // (BLOCK-2 fix). Only interceptorActivityOpts and the skip list need the interceptor guard.
-                // Feature B: RequiresApprovalTools exclusion guard — scope-aware required tools go into
-                // scopeAwareApprovalTools, NOT requiresApprovalTools (spec Section 13, critical guard).
                 foreach (var toolReg in registration.Tools)
                 {
                     var toolOpts = toolReg.Options;
-                    if (toolOpts.RequireApprovalFlag && !toolOpts.ScopeAwareFlag)
+                    if (toolOpts.RequireApprovalFlag)
                     {
                         (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
                     }
 
-                    if (toolOpts.ScopeAwareFlag)
-                    {
-                        (scopeAwareTools ??= new List<string>()).Add(toolReg.Name);
-                        if (toolOpts.RequireApprovalFlag)
-                        {
-                            (scopeAwareApprovalTools ??= new List<string>()).Add(toolReg.Name);
-                        }
-                    }
-                }
-
-                // Feature B: DefaultToolInterceptor incompatibility check at proxy-start resolution.
-                if (registration.UseApprovalScopes && agentsOptions.DefaultToolInterceptor is not null)
-                {
-                    throw new InvalidOperationException(
-                        "UseApprovalScopes() cannot be combined with TemporalAgentsOptions.DefaultToolInterceptor. " +
-                        "This release does not compose approval scopes with worker-default tool interceptors. " +
-                        "Remove DefaultToolInterceptor from TemporalAgentsOptions or do not call UseApprovalScopes() on this agent.");
-                }
-
-                // Feature B: startup validation for scope-aware required tools at proxy-start resolution.
-                foreach (var toolReg in registration.Tools)
-                {
-                    var toolOpts = toolReg.Options;
-                    if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && !registration.UseApprovalScopes)
-                    {
-                        throw new InvalidOperationException(
-                            $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{registration.Name}'. " +
-                            "Call UseApprovalScopes() before registering scope-aware required tools.");
-                    }
-
-                    if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && toolOpts.SkipInterceptorFlag)
-                    {
-                        throw new InvalidOperationException(
-                            $"Tool '{toolReg.Name}' cannot combine RequireApproval(), ScopeAware(), and SkipInterceptor(); approval " +
-                            "scopes require the interceptor to enforce the missing-scope approval gate.");
-                    }
                 }
 
                 Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
@@ -573,25 +769,6 @@ internal sealed class AgentActivities(
                     }
                 }
 
-                // Feature B: resolve approval-scopes config for proxy-start resolution.
-                var useApprovalScopes = registration.UseApprovalScopes;
-                int maxAlwaysScopeCacheRecords = 0;
-                int maxAlwaysScopeCacheBytes = 0;
-
-                if (useApprovalScopes)
-                {
-                    var scopeOpts = registration.ApprovalScopesOptions!;
-
-                    // Options validation (positive bounds) — same as direct-start path.
-                    if (scopeOpts.MaxSessionScopeRecords <= 0)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxSessionScopeRecords for agent '{registration.Name}' must be a positive integer.");
-                    if (scopeOpts.MaxSessionScopeBytes <= 0)
-                        throw new InvalidOperationException($"ApprovalScopesOptions.MaxSessionScopeBytes for agent '{registration.Name}' must be a positive integer.");
-
-                    maxAlwaysScopeCacheRecords = scopeOpts.MaxSessionScopeRecords;
-                    maxAlwaysScopeCacheBytes = scopeOpts.MaxSessionScopeBytes;
-                }
-
                 resolvedConfig = new ProxyResolvedWorkerConfig
                 {
                     MaxToolCallsPerTurn = resolvedMaxToolCalls ?? registration.MaxToolCallsPerTurn,
@@ -600,16 +777,6 @@ internal sealed class AgentActivities(
                     InterceptorToolActivityOptions = perToolInterceptorOpts,
                     InterceptorSkippedTools = interceptorSkippedTools,
                     RequiresApprovalTools = requiresApprovalTools,
-                    ScopeAwareTools = scopeAwareTools,
-                    ScopeAwareApprovalTools = scopeAwareApprovalTools,
-                    UseApprovalScopes = useApprovalScopes,
-                    UseApprovalScopeStoreMode = false,
-                    AlwaysScopesStoreKey = null,
-                    ApplyAlwaysScopesAtSessionStart = false,
-                    MaxAlwaysScopeCacheRecords = maxAlwaysScopeCacheRecords,
-                    MaxAlwaysScopeCacheBytes = maxAlwaysScopeCacheBytes,
-                    ApprovalScopeActivityTimeout = TimeSpan.Zero,
-                    ApprovalScopeActivityMaximumAttempts = 0,
                 };
             }
 
@@ -618,6 +785,7 @@ internal sealed class AgentActivities(
                 IsFinal = isFinal,
                 AssistantMessages = assistantMessages,
                 ToolCalls = isFinal ? null : toolCalls,
+                PreparedTools = selectedMemoryTools.Count > 0 ? selectedMemoryTools : null,
                 StateBagDelta = stateBagDelta,
                 Usage = response.Usage,
                 ResponseId = response.ResponseId,
@@ -670,8 +838,14 @@ internal sealed class AgentActivities(
             {
                 var invokedCtx = new Microsoft.Agents.AI.AIContextProvider.InvokedContext(
                     agent, session, requestMessages: augmentedMessages, invokeException: ex);
-                foreach (var provider in contextProviders)
+                for (var providerIndex = 0; providerIndex < contextProviders.Length; providerIndex++)
                 {
+                    var provider = contextProviders[providerIndex];
+                    EnsureMemoryScopeBeforeProviderHook(
+                        provider,
+                        registration.ContextProviderFactories[providerIndex],
+                        session,
+                        input.MemoryScope);
                     try
                     {
                         await provider.InvokedAsync(invokedCtx, ct).ConfigureAwait(false);
@@ -700,6 +874,336 @@ internal sealed class AgentActivities(
             }
 
             throw;
+        }
+        finally
+        {
+            TemporalAgentContext.SetCurrent(null);
+        }
+    }
+
+    [Activity("TemporalCommunity.Extensions.Agents.PrepareAgentTurn")]
+    public async Task<PreparedAgentTurn> PrepareAgentTurnAsync(PrepareAgentTurnInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var context = ActivityExecutionContext.Current;
+        var blueprint = ResolveBlueprint(input.AgentName);
+        var registration = blueprint.Registration;
+        using var scope = serviceScopeFactory.CreateScope();
+        var scopedServices = scope.ServiceProvider;
+        var chatClient = registration.ChatClient(scopedServices);
+        var providers = registration.ContextProviderFactories.Count == 0
+            ? []
+            : ResolveContextProviders(registration, scopedServices);
+        var toolFunctions = ResolveToolFunctions(blueprint, scopedServices);
+        var registeredTools = toolFunctions
+            .Where(pair => blueprint.ToolRegistrations[pair.Key].MemorySearch is null)
+            .Select(pair => (Tool: new PreparationOnlyFunction(pair.Value), Name: pair.Key))
+            .ToList();
+        var initialTools = registeredTools.Select(registered => (AITool)registered.Tool).ToList();
+        var sessionId = TemporalAgentSessionId.Parse(input.SessionId);
+        var session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
+        var turnTelemetry = new TemporalAgentTurnTelemetryContext(null);
+
+        AgentPipelineLease pipelineLease;
+        try
+        {
+            pipelineLease = BuildLiveAgentPipeline(
+                blueprint,
+                chatClient,
+                session,
+                turnTelemetry,
+                scopedServices);
+        }
+        catch (DurableConfigurationException exception)
+        {
+            throw new ApplicationFailureException(
+                exception.Message,
+                exception,
+                errorType: nameof(DurableConfigurationException),
+                nonRetryable: true);
+        }
+
+        using var pipeline = pipelineLease;
+        var chatOptions = registration.ChatOptions?.Clone() ?? new ChatOptions();
+        chatOptions.Instructions = registration.Instructions;
+        var beforeStateBag = session.SerializeStateBag();
+        var aggregate = new Microsoft.Agents.AI.AIContext
+        {
+            Instructions = chatOptions.Instructions,
+            Messages = input.Messages,
+            Tools = initialTools,
+        };
+
+        var memorySearchTools = new List<
+            (AITool Tool, TemporalMemorySearchRegistration Registration, ChatHistoryMemoryProviderScope Scope)>();
+        for (var providerIndex = 0; providerIndex < providers.Length; providerIndex++)
+        {
+            var provider = providers[providerIndex];
+            var providerRegistration = registration.ContextProviderFactories[providerIndex];
+            if (providerRegistration.MemorySearch is not null
+                && provider is not ChatHistoryMemoryProvider)
+            {
+                throw BuildMemorySearchConfigurationFailure(
+                    $"The Temporal memory-search registration for agent '{input.AgentName}' did not resolve " +
+                    $"a {nameof(ChatHistoryMemoryProvider)}.");
+            }
+
+            var previousTools = aggregate.Tools?.ToList() ?? [];
+            if (providerRegistration.MemorySearch is { } registeredMemory)
+            {
+                if (input.MemoryScope is null)
+                {
+                    throw BuildMemorySearchConfigurationFailure(
+                        "Chat-history memory was not initialized before provider invocation.");
+                }
+
+                _ = GetMemorySearchScope(
+                    (ChatHistoryMemoryProvider)provider,
+                    session,
+                    registeredMemory,
+                    input.MemoryScope);
+            }
+
+            var invokingContext = new Microsoft.Agents.AI.AIContextProvider.InvokingContext(
+                pipeline.Agent,
+                session,
+                aggregate);
+            aggregate = await provider.InvokingAsync(invokingContext, context.CancellationToken)
+                .ConfigureAwait(false);
+
+            if (registeredTools.Any(registered => registered.Tool.InvocationAttempted))
+            {
+                throw PreparationOnlyFunction.CreateFailure();
+            }
+
+            if (providerRegistration.MemorySearch is { } bridge)
+            {
+                var providerTools = aggregate.Tools?
+                    .Where(tool => !previousTools.Any(previous => ReferenceEquals(previous, tool)))
+                    .ToList() ?? [];
+                var memoryTools = providerTools
+                    .Where(tool => string.Equals(tool.Name, bridge.ToolName, StringComparison.Ordinal))
+                    .ToList();
+                if (bridge.SearchTime == ChatHistoryMemoryProviderOptions.SearchBehavior.OnDemandFunctionCalling
+                    && (providerTools.Count != 1 || memoryTools.Count != 1 || memoryTools[0] is not AIFunction))
+                {
+                    throw BuildMemorySearchConfigurationFailure(
+                        $"The Temporal memory-search provider for agent '{input.AgentName}' must return only " +
+                        $"its stock on-demand function '{bridge.ToolName}'.");
+                }
+                if (bridge.SearchTime != ChatHistoryMemoryProviderOptions.SearchBehavior.OnDemandFunctionCalling
+                    && providerTools.Count != 0)
+                {
+                    throw BuildMemorySearchConfigurationFailure(
+                        "The before-model-call memory provider returned unexpected tools.");
+                }
+
+                var initializedScope = input.MemoryScope
+                    ?? throw BuildMemorySearchConfigurationFailure(
+                        "Chat-history memory was not initialized before provider invocation.");
+                var memorySearchScope = GetMemorySearchScope(
+                    (ChatHistoryMemoryProvider)provider,
+                    session,
+                    bridge,
+                    initializedScope);
+                if (bridge.SearchTime == ChatHistoryMemoryProviderOptions.SearchBehavior.OnDemandFunctionCalling)
+                {
+                    memorySearchTools.Add((memoryTools[0], bridge, memorySearchScope));
+                }
+            }
+        }
+
+        var effectiveTools = aggregate.Tools?.ToList() ?? [];
+        var providerChangedToolSet = effectiveTools.Count != initialTools.Count
+            || effectiveTools.Where((tool, index) => !ReferenceEquals(tool, initialTools[index])).Any();
+        var preparedTools = new List<PreparedAgentTool>(effectiveTools.Count);
+        var seenToolNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tool in effectiveTools)
+        {
+            var registeredToolIndex = registeredTools.FindIndex(
+                registered => ReferenceEquals(registered.Tool, tool));
+            if (registeredToolIndex < 0)
+            {
+                var memorySearchIndex = memorySearchTools.FindIndex(
+                    entry => ReferenceEquals(entry.Tool, tool));
+                if (memorySearchIndex >= 0
+                    && tool is AIFunction memorySearchFunction
+                    && blueprint.ToolRegistrations.TryGetValue(
+                        memorySearchTools[memorySearchIndex].Registration.ToolName,
+                        out var memoryToolRegistration))
+                {
+                    var memorySearch = memorySearchTools[memorySearchIndex];
+                    preparedTools.Add(new PreparedAgentTool
+                    {
+                        Name = memorySearch.Registration.ToolName,
+                        IsFrozenProviderSelection = true,
+                        Declaration = TemporalCommunity.Extensions.AI.Internal.DurableFunctionDeclarationSnapshot.Create(
+                            memorySearchFunction.AsDeclarationOnly()),
+                        RequiresApproval = memoryToolRegistration.Options.RequireApprovalFlag
+                            || memorySearchFunction.GetService<ApprovalRequiredAIFunction>() is not null,
+                        IsTemporalMemorySearch = true,
+                        MemorySearchScope = memorySearch.Scope,
+                        MemoryScope = input.MemoryScope,
+                    });
+                    continue;
+                }
+
+                throw new ApplicationFailureException(
+                    $"Context preparation for agent '{input.AgentName}' returned tool '{tool.Name}' that is not " +
+                    "the exact function instance seeded for durable execution. Provider-created tools, " +
+                    "wrappers, and same-name/schema substitutes are not eligible.",
+                    errorType: nameof(DurableConfigurationException),
+                    nonRetryable: true);
+            }
+
+            var name = registeredTools[registeredToolIndex].Name;
+            if (!seenToolNames.Add(name))
+            {
+                throw new ApplicationFailureException(
+                    $"Context preparation for agent '{input.AgentName}' returned the registered tool '{name}' more than once.",
+                    errorType: nameof(DurableConfigurationException),
+                    nonRetryable: true);
+            }
+
+            var toolRegistration = blueprint.ToolRegistrations[name];
+            preparedTools.Add(new PreparedAgentTool
+            {
+                Name = name,
+                IsFrozenProviderSelection = providerChangedToolSet,
+                Declaration = providerChangedToolSet
+                    ? TemporalCommunity.Extensions.AI.Internal.DurableFunctionDeclarationSnapshot.Create(
+                        ((AIFunction)tool).AsDeclarationOnly())
+                    : null,
+                RequiresApproval = toolRegistration.Options.RequireApprovalFlag
+                    || tool.GetService<ApprovalRequiredAIFunction>() is not null,
+            });
+        }
+
+        var preparedMessages = aggregate.Messages?.ToList() ?? input.Messages.ToList();
+        var prepared = new PreparedAgentTurn
+        {
+            Messages = preparedMessages,
+            MessageAttributions = PreparedMessageAttribution.Capture(preparedMessages),
+            Instructions = aggregate.Instructions,
+            Tools = preparedTools,
+            HasToolMiddleware = registration.ToolMiddleware is not null,
+            StateBagDelta = StateBagMerge.CreateDelta(beforeStateBag, session.SerializeStateBag()),
+        };
+        TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+            context.PayloadConverter,
+            prepared,
+            input.MaximumTransportPayloadSizeBytes,
+            input.PayloadCodecExpansionAllowanceBytes,
+            "agent-turn context preparation result");
+        return prepared;
+    }
+
+    private sealed class PreparationOnlyFunction(AIFunction innerFunction) : DelegatingAIFunction(innerFunction)
+    {
+        internal bool InvocationAttempted { get; private set; }
+
+        protected override ValueTask<object?> InvokeCoreAsync(
+            AIFunctionArguments arguments, CancellationToken cancellationToken)
+        {
+            InvocationAttempted = true;
+            throw CreateFailure();
+        }
+
+        internal static ApplicationFailureException CreateFailure() =>
+            new(
+                "Context providers may select seeded tools, but cannot invoke them during preparation. " +
+                "Tools execute only after workflow dispatch and approval.",
+                errorType: nameof(DurableConfigurationException),
+                nonRetryable: true);
+    }
+
+    [Activity("TemporalCommunity.Extensions.Agents.CompleteAgentTurn")]
+    public async Task<CompletedAgentTurn> CompleteAgentTurnAsync(CompleteAgentTurnInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+
+        var context = ActivityExecutionContext.Current;
+        var blueprint = ResolveBlueprint(input.AgentName);
+        var registration = blueprint.Registration;
+        using var scope = serviceScopeFactory.CreateScope();
+        var scopedServices = scope.ServiceProvider;
+        var chatClient = registration.ChatClient(scopedServices);
+        var providers = registration.ContextProviderFactories.Count == 0
+            ? []
+            : ResolveContextProviders(registration, scopedServices);
+        var sessionId = TemporalAgentSessionId.Parse(input.SessionId);
+        var session = TemporalAgentSession.FromStateBag(sessionId, input.SerializedStateBag);
+        var turnTelemetry = new TemporalAgentTurnTelemetryContext(null);
+        using var pipeline = BuildLiveAgentPipeline(
+            blueprint,
+            chatClient,
+            session,
+            turnTelemetry,
+            scopedServices);
+
+        TemporalAgentContext.SetCurrent(
+            new TemporalAgentContext(context.TemporalClient, session, scopedServices));
+        try
+        {
+            var beforeStateBag = session.SerializeStateBag();
+            Exception? invokeException = input.InvokeExceptionMessage is null
+                ? null
+                : input.IsCancellation
+                    ? new OperationCanceledException(input.InvokeExceptionMessage)
+                    : new InvalidOperationException(input.InvokeExceptionMessage);
+
+            for (var providerIndex = 0; providerIndex < providers.Length; providerIndex++)
+            {
+                var provider = providers[providerIndex];
+                EnsureMemoryScopeBeforeProviderHook(
+                    provider,
+                    registration.ContextProviderFactories[providerIndex],
+                    session,
+                    input.MemoryScope);
+
+                var stateBeforeProvider = session.SerializeStateBag();
+                var invokedContext = invokeException is null
+                    ? new Microsoft.Agents.AI.AIContextProvider.InvokedContext(
+                        pipeline.Agent,
+                        session,
+                        input.RequestMessages,
+                        input.ResponseMessages)
+                    : new Microsoft.Agents.AI.AIContextProvider.InvokedContext(
+                        pipeline.Agent,
+                        session,
+                        input.RequestMessages,
+                        invokeException);
+                try
+                {
+                    await provider.InvokedAsync(invokedContext, context.CancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception exception) when (
+                    exception is not OperationCanceledException || !context.CancellationToken.IsCancellationRequested)
+                {
+                    session.RestoreStateBag(stateBeforeProvider);
+                    TemporalCommunity.Extensions.AI.Internal.DurableFailureLogger.LogException(
+                        _logger,
+                        exception,
+                        TemporalCommunity.Extensions.AI.Internal.DurableTelemetryContentCapturePolicy.Resolve(
+                            scopedServices.GetService<TemporalCommunity.Extensions.AI.DurableExecutionOptions>()),
+                        "AIContextProvider.InvokedAsync",
+                        $"provider {provider.GetType().Name}, agent {input.AgentName}; turn result unaffected");
+                }
+            }
+
+            var result = new CompletedAgentTurn
+            {
+                StateBagDelta = StateBagMerge.CreateDelta(beforeStateBag, session.SerializeStateBag()),
+            };
+            TemporalCommunity.Extensions.AI.Internal.DurableTransportPayloadGuard.EnsureWithinLimit(
+                context.PayloadConverter,
+                result,
+                input.MaximumTransportPayloadSizeBytes,
+                input.PayloadCodecExpansionAllowanceBytes,
+                "agent-turn completion result");
+            return result;
         }
         finally
         {
@@ -807,6 +1311,142 @@ internal sealed class AgentActivities(
         return resolvedTools;
     }
 
+    internal static async Task<AIFunction> ResolveTemporalMemorySearchFunctionAsync(
+        TemporalMemorySearchRegistration registration,
+        PreparedAgentTool preparedTool,
+        TemporalAgentSessionId sessionId,
+        System.Text.Json.JsonElement? serializedStateBag,
+        AIAgent agent,
+        IServiceProvider scopedServices,
+        CancellationToken cancellationToken)
+    {
+        if (!preparedTool.IsTemporalMemorySearch
+            || !string.Equals(preparedTool.Name, registration.ToolName, StringComparison.Ordinal)
+            || preparedTool.MemorySearchScope is null
+            || preparedTool.MemoryScope is null
+            || preparedTool.Declaration is null)
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                $"The prepared memory-search binding '{preparedTool.Name}' does not match the worker registration.");
+        }
+
+        var provider = registration.ProviderFactory(scopedServices);
+        var isolatedSession = TemporalAgentSession.FromStateBag(sessionId, serializedStateBag);
+        var validatedScope = GetMemorySearchScope(
+            provider,
+            isolatedSession,
+            registration,
+            preparedTool.MemoryScope);
+        if (!string.Equals(
+                validatedScope.SessionId,
+                preparedTool.MemorySearchScope.SessionId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                validatedScope.AgentId,
+                preparedTool.MemorySearchScope.AgentId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                validatedScope.ApplicationId,
+                preparedTool.MemorySearchScope.ApplicationId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                validatedScope.UserId,
+                preparedTool.MemorySearchScope.UserId,
+                StringComparison.Ordinal))
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                "The prepared memory-search scope does not match the retained workflow-owned scope.");
+        }
+
+        var invokingContext = new Microsoft.Agents.AI.AIContextProvider.InvokingContext(
+            agent,
+            isolatedSession,
+            new Microsoft.Agents.AI.AIContext { Messages = [] });
+        var context = await provider.InvokingAsync(invokingContext, cancellationToken)
+            .ConfigureAwait(false);
+        var functions = context.Tools?.OfType<AIFunction>().ToList() ?? [];
+        if (context.Tools?.Count() != 1
+            || functions.Count != 1
+            || !string.Equals(functions[0].Name, registration.ToolName, StringComparison.Ordinal))
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                $"The registered ChatHistoryMemoryProvider did not rebuild the stock search function '{registration.ToolName}'.");
+        }
+
+        preparedTool.Declaration.ValidateImplementation(functions[0]);
+        return functions[0];
+    }
+
+    private static ChatHistoryMemoryProviderScope GetMemorySearchScope(
+        ChatHistoryMemoryProvider provider,
+        TemporalAgentSession session,
+        TemporalMemorySearchRegistration registration,
+        TemporalMemoryScopeSnapshot expectedScope)
+    {
+        if (provider.StateKeys.Count != 1
+            || !string.Equals(
+                provider.StateKeys[0],
+                TemporalChatHistoryMemoryBuilder.StateKey,
+                StringComparison.Ordinal))
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                "The ChatHistoryMemoryProvider must retain the library-owned state key for its durable bridge.");
+        }
+
+        var stateKey = provider.StateKeys[0];
+        if (!session.StateBag.TryGetValue<ChatHistoryMemoryProvider.State>(stateKey, out var state)
+            || state is null)
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                $"The retained ChatHistoryMemoryProvider state '{stateKey}' is missing; the memory initializer will not be rerun.");
+        }
+
+        if (!session.StateBag.TryGetValue<TemporalMemoryScopeSnapshot>(
+                TemporalChatHistoryMemoryBuilder.ScopeKey,
+                out var recordedScope)
+            || recordedScope is null
+            || recordedScope != expectedScope
+            || !expectedScope.Matches(state))
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                "The retained ChatHistoryMemoryProvider scope does not match the initialized workflow-owned scope.");
+        }
+
+        return new ChatHistoryMemoryProviderScope(state.SearchScope);
+    }
+
+    private static void EnsureMemoryScopeBeforeProviderHook(
+        AIContextProvider provider,
+        ContextProviderRegistration providerRegistration,
+        TemporalAgentSession session,
+        TemporalMemoryScopeSnapshot? memoryScope)
+    {
+        if (providerRegistration.MemorySearch is not { } registration)
+        {
+            return;
+        }
+
+        if (memoryScope is null)
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                "Chat-history memory scope is missing before a provider hook.");
+        }
+
+        if (provider is not ChatHistoryMemoryProvider memoryProvider)
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                "The registered chat-history memory provider could not be resolved before a provider hook.");
+        }
+
+        _ = GetMemorySearchScope(memoryProvider, session, registration, memoryScope);
+    }
+
+    private static ApplicationFailureException BuildMemorySearchConfigurationFailure(string message) =>
+        new(
+            message,
+            errorType: nameof(DurableConfigurationException),
+            nonRetryable: true);
+
     // ── Per-call helper: build and own a live AIAgent pipeline ───────────────────────────────
     /// <summary>
     /// Resolves each registered context provider from the attempt's scope, rejecting a
@@ -815,10 +1455,8 @@ internal sealed class AgentActivities(
     /// </summary>
     /// <remarks>
     /// Declarations can only be collected on the instance path, where the provider exists at build
-    /// time. A factory-resolved source would otherwise have its tools stripped further down —
-    /// silently, because implementing the interface is exactly what excludes it from the
-    /// provider-tool warning. Tools vanishing with no diagnostic is the worst available outcome, so
-    /// this fails the attempt instead. The failure is non-retryable: no number of retries turns an
+    /// time. A factory-resolved source would otherwise return functions that have no registered
+    /// durable activity route. Fail before model dispatch; no number of retries turns an
     /// unregistered declaration into a registered one.
     /// </remarks>
     private static AIContextProvider[] ResolveContextProviders(
@@ -832,14 +1470,30 @@ internal sealed class AgentActivities(
             var entry = registration.ContextProviderFactories[i];
             var provider = entry.Factory(scopedServices);
 
+            if (provider is ChatHistoryMemoryProvider && entry.MemorySearch is null)
+            {
+                throw BuildMemorySearchConfigurationFailure(
+                    $"Agent '{registration.Name}' registered {nameof(ChatHistoryMemoryProvider)} through " +
+                    "the generic context-provider path. Register it with " +
+                    $"{nameof(TemporalAgentOptions)}.{nameof(TemporalAgentOptions.UseChatHistoryMemory)} " +
+                    "so its scope is initialized and validated before vector-store access.");
+            }
+
+            if (entry.MemorySearch is not null && provider is not ChatHistoryMemoryProvider)
+            {
+                throw BuildMemorySearchConfigurationFailure(
+                    $"The Temporal memory-search registration for agent '{registration.Name}' did not resolve " +
+                    $"a {nameof(ChatHistoryMemoryProvider)}.");
+            }
+
             if (!entry.DeclarationsRegistered && provider is IDurableToolSource)
             {
                 var conflict = new DurableConfigurationException(
                     $"Agent '{registration.Name}' registered '{provider.GetType().Name}' through the " +
                     "AddContextProvider(Func<IServiceProvider, AIContextProvider>) overload, but it " +
                     "implements IDurableToolSource. Declarations can only be collected when the " +
-                    "provider instance is available at build time, so its tools would be dropped " +
-                    "without a warning. Register it as an instance — AddContextProvider(provider) — " +
+                    "provider instance is available at build time. Register it as an instance " +
+                    "(AddContextProvider(provider)) or pass its tools explicitly via " +
                     "or pass its tools explicitly via AddContextProvider(provider, durableTools: [...]).");
 
                 throw new ApplicationFailureException(
@@ -988,7 +1642,8 @@ internal sealed class AgentActivities(
             "(InvokeAgentTool); installing agent-side function-invocation middleware would " +
             "conflict with this contract and silently break per-tool durability. Remove the " +
             ".Use(functionInvocationCallback) / UseFunctionInvocation() call from your " +
-            "ConfigureAgentPipeline configuration.";
+            "ConfigureAgentPipeline configuration. Use TemporalAgentOptions.ToolMiddleware " +
+            "for callbacks inside the durable tool activity.";
         return innerException is null
             ? new DurableFunctionInvocationConflictException(message)
             {
@@ -1014,16 +1669,8 @@ internal sealed class AgentActivities(
     /// <see cref="DurableToolInterceptorResult"/> DTO for the workflow to act on.
     /// </summary>
     /// <remarks>
-    /// <b>Missing-interceptor security posture (fail-CLOSED — intentional asymmetry with MEAI).</b>
-    /// When no interceptor is resolved at activity time (e.g. worker restart without
-    /// re-registration), a <c>ScopeAware + RequiresApproval</c> tool returns
-    /// <see cref="DurableToolOutcome.PauseForApproval"/> rather than proceeding: those tools were
-    /// excluded from the unconditional approval list and rely on the interceptor to enforce the
-    /// missing-scope approval gate, so silently proceeding would bypass a security control. All
-    /// other tools degrade to <see cref="DurableToolOutcome.Proceed"/> to keep the session live.
-    /// This differs deliberately from the MEAI <c>DurableChatActivities.RunToolInterceptorAsync</c>
-    /// path, which always fails OPEN (Proceed) because MEAI has no built-in approval floor to fall
-    /// back to.
+    /// Missing interceptors return Proceed. The workflow independently enforces each tool's
+    /// RequireApproval registration, including when the interceptor is missing or skipped.
     /// </remarks>
     [Activity("TemporalCommunity.Extensions.Agents.RunToolInterceptor")]
     public async Task<DurableToolInterceptorResult> RunToolInterceptorAsync(DurableToolInterceptorInput input)
@@ -1045,24 +1692,6 @@ internal sealed class AgentActivities(
         {
             // Interceptor was removed between workflow dispatch and activity execution
             // (e.g. worker restart without interceptor re-registration).
-            // Scope-aware required tools must not silently proceed — they were excluded from
-            // RequiresApprovalTools and rely on the interceptor for the approval gate.
-            if (input.ScopeAware && input.RequiresApproval)
-            {
-                _logger.LogWarning(
-                    "RunToolInterceptor dispatched for agent '{AgentName}' tool '{ToolName}' " +
-                    "(ScopeAware+RequiresApproval) but no IAgentToolInterceptor is resolved. " +
-                    "Returning PauseForApproval to enforce the approval gate.",
-                    input.AgentName, input.ToolName);
-                return new DurableToolInterceptorResult
-                {
-                    Outcome = DurableToolOutcome.PauseForApproval,
-                    Message = $"Tool '{input.ToolName}' requires approval. No interceptor resolved — defaulting to approval gate.",
-                };
-            }
-
-            // Non-required or non-scope-aware: degrade to Proceed
-            // so the tool still runs rather than silently blocking the session.
             _logger.LogWarning(
                 "RunToolInterceptor dispatched for agent '{AgentName}' tool '{ToolName}' " +
                 "but no IAgentToolInterceptor is resolved. Defaulting to Proceed.",
@@ -1096,10 +1725,7 @@ internal sealed class AgentActivities(
             CallId = input.CallId,
             SessionId = ctx.Info.WorkflowId,
             StateBag = stateBag,
-            // Feature B: pass through scope-aware fields so the interceptor can consult scope records.
-            ScopeAware = input.ScopeAware,
             RequiresApproval = input.RequiresApproval,
-            ApprovalEvaluationTime = input.ApprovalEvaluationTime ?? DateTimeOffset.MinValue,
         };
 
         // Snapshot the bag's serialized form before the interceptor runs so we can detect
@@ -1170,6 +1796,12 @@ internal sealed class AgentActivities(
                 $"Tool '{input.ToolName}' is not registered on agent '{input.AgentName}'.");
         }
 
+        if ((input.PreparedTool?.IsTemporalMemorySearch == true) != (toolRegistration.MemorySearch is not null))
+        {
+            throw BuildMemorySearchConfigurationFailure(
+                $"Tool '{input.ToolName}' does not match the expected durable route on agent '{input.AgentName}'.");
+        }
+
         ctx.Heartbeat();
 
         using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
@@ -1184,8 +1816,32 @@ internal sealed class AgentActivities(
 
         // Open a per-call scope so any scoped services the tool resolves via TemporalAgentContext
         // are properly lifetime-managed and not captured as captive singletons.
-        using var scope = serviceScopeFactory.CreateScope();
+        await using var scope = serviceScopeFactory.CreateAsyncScope();
         var fn = ResolveToolFunction(toolRegistration, scope.ServiceProvider, input.AgentName);
+        if (input.PreparedTool is { } preparedTool)
+        {
+            if (!string.Equals(preparedTool.Name, input.ToolName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ApplicationFailureException(
+                    $"Prepared provider-tool binding '{preparedTool.Name}' does not match dispatched tool '{input.ToolName}'.",
+                    errorType: nameof(DurableConfigurationException),
+                    nonRetryable: true);
+            }
+
+            if (preparedTool.IsFrozenProviderSelection)
+            {
+                if (preparedTool.Declaration is null)
+                {
+                    throw new ApplicationFailureException(
+                        $"Provider-selected tool '{input.ToolName}' on agent '{input.AgentName}' has no frozen declaration.",
+                        errorType: nameof(DurableConfigurationException),
+                        nonRetryable: true);
+                }
+
+                preparedTool.Declaration.ValidateImplementation(fn);
+            }
+        }
+
         if (fn.GetService<ApprovalRequiredAIFunction>() is not null && !input.ApprovalAccepted)
         {
             throw new ApplicationFailureException(
@@ -1212,22 +1868,21 @@ internal sealed class AgentActivities(
         TemporalAgentSession? session = null;
         try
         {
-            ArgumentNullException.ThrowIfNull(ctx.Info.WorkflowId, nameof(ctx.Info.WorkflowId));
-            var sessionId = TemporalAgentSessionId.Parse(ctx.Info.WorkflowId);
+            var workflowId = input.SessionId ?? ctx.Info.WorkflowId;
+            ArgumentNullException.ThrowIfNull(workflowId, nameof(ctx.Info.WorkflowId));
+            var sessionId = TemporalAgentSessionId.Parse(workflowId);
 
             // Validate that the parsed agent name matches the tool's registered agent.
-            // Scheduled-job workflow IDs (ta-{agent}-scheduled-{runId}) parse successfully
-            // but produce a wrong agent name (e.g. "refundagent-scheduled"). Setting a
-            // context with a mismatched ID would let tools call RequestApprovalAsync against
-            // the wrong workflow; skip context setup in that case.
+            // A mismatched ID would let tools call RequestApprovalAsync against the wrong
+            // workflow; skip context setup in that case.
             if (!sessionId.AgentName.Equals(input.AgentName, StringComparison.OrdinalIgnoreCase))
             {
-                // Workflow ID parsed but belongs to a different agent (e.g. a scheduled job).
+                // Workflow ID parsed but belongs to a different agent.
                 // Leave TemporalAgentContext unset, recording why so a tool that reaches for it
                 // gets told which path it is on rather than a bare "no context".
                 TemporalAgentContext.SetUnavailable(
-                    ContextUnavailableReason.ScheduledJobPath,
-                    ctx.Info.WorkflowId,
+                    ContextUnavailableReason.AgentIdentityMismatch,
+                    workflowId,
                     detail: $"names agent '{sessionId.AgentName}', not '{input.AgentName}'");
             }
             else
@@ -1247,7 +1902,7 @@ internal sealed class AgentActivities(
             // there is no agent session to attach. (A test environment using an arbitrary workflow
             // ID lands here too — the message describes the observable fact first for that reason.)
             TemporalAgentContext.SetUnavailable(
-                ContextUnavailableReason.SubAgentPath, ctx.Info.WorkflowId);
+                ContextUnavailableReason.SubAgentPath, input.SessionId ?? ctx.Info.WorkflowId);
         }
 
         // Snapshot the bag's serialized form before invocation so we can detect (and write back)
@@ -1256,6 +1911,35 @@ internal sealed class AgentActivities(
 
         try
         {
+            if (input.PreparedTool?.IsTemporalMemorySearch == true)
+            {
+                if (session is null || input.PreparedTool is not { } memoryPreparedTool
+                    || toolRegistration.MemorySearch is not { } memorySearch)
+                {
+                    throw BuildMemorySearchConfigurationFailure(
+                        $"Temporal memory-search tool '{input.ToolName}' requires a managed agent session.");
+                }
+
+                var isolatedSession = TemporalAgentSession.FromStateBag(
+                    session.SessionId,
+                    input.SerializedStateBag);
+                var chatClient = blueprint.Registration.ChatClient(scope.ServiceProvider);
+                using var pipeline = BuildLiveAgentPipeline(
+                    blueprint,
+                    chatClient,
+                    isolatedSession,
+                    new TemporalAgentTurnTelemetryContext(null),
+                    scope.ServiceProvider);
+                fn = await ResolveTemporalMemorySearchFunctionAsync(
+                    memorySearch,
+                    memoryPreparedTool,
+                    session.SessionId,
+                    input.SerializedStateBag,
+                    pipeline.Agent,
+                    scope.ServiceProvider,
+                    ct).ConfigureAwait(false);
+            }
+
             _logger.LogAgentToolInvocationStarted(input.AgentName, input.ToolName);
 
             var arguments = input.Arguments is null
@@ -1264,17 +1948,31 @@ internal sealed class AgentActivities(
             arguments.Services = scope.ServiceProvider;
 
             object? result;
+            var failed = false;
+            var terminate = false;
             try
             {
-                result = await TemporalCommunity.Extensions.AI.Internal.DurableActivityHeartbeat
-                    .RunWithHeartbeatsAsync(
-                        ctx,
-                        async () => await fn.InvokeAsync(arguments, ct).ConfigureAwait(false))
-                    .ConfigureAwait(false);
+                if (blueprint.Registration.ToolMiddleware is not null)
+                {
+                    (result, terminate) = await TemporalCommunity.Extensions.AI.Internal.DurableActivityHeartbeat
+                        .RunWithHeartbeatsAsync(ctx, async () =>
+                            await DurableToolMiddleware.InvokeAsync(
+                                blueprint.Registration, input, fn, arguments, ct).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    result = await TemporalCommunity.Extensions.AI.Internal.DurableActivityHeartbeat
+                        .RunWithHeartbeatsAsync(
+                            ctx,
+                            async () => await fn.InvokeAsync(arguments, ct).ConfigureAwait(false))
+                        .ConfigureAwait(false);
+                }
                 _logger.LogAgentToolInvocationCompleted(input.AgentName, input.ToolName);
             }
             catch (DurableToolFailureException exception) when (!ct.IsCancellationRequested)
             {
+                failed = true;
                 span?.SetStatus(ActivityStatusCode.Error, "Tool reported a safe failure.");
                 var captureTelemetryContent =
                     TemporalCommunity.Extensions.AI.Internal.DurableTelemetryContentCapturePolicy.Resolve(
@@ -1296,6 +1994,8 @@ internal sealed class AgentActivities(
             {
                 Result = result,
                 CallId = input.CallId,
+                Failed = failed,
+                Terminate = terminate,
                 StateBagDelta = stateBagDelta,
             };
             try
@@ -1313,6 +2013,8 @@ internal sealed class AgentActivities(
                 {
                     Result = InvokeAgentToolResult.ResultTooLargeMessage,
                     CallId = input.CallId,
+                    Failed = failed,
+                    Terminate = terminate,
                     StateBagDelta = stateBagDelta,
                 };
                 try

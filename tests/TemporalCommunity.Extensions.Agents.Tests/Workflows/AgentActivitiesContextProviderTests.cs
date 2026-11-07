@@ -9,6 +9,7 @@ using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.VectorData;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tools;
@@ -93,6 +94,109 @@ public class AgentActivitiesContextProviderTests
         Assert.IsAssignableFrom<DurableConfigurationException>(ex.InnerException);
         Assert.Contains("SeveredAgent", ex.Message);
         Assert.Equal(0, replacement.StreamingRunCount);
+    }
+
+    [Fact]
+    public async Task RunDurableAgentStep_MissingFrozenTool_FailsAsNotRegistered()
+    {
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.SkipDryRunCCheck = true;
+            opts.AddDurableAgent("MissingToolAgent", agent =>
+                agent.ChatClient = _ => new SimpleStreamingChatClient());
+        });
+        var input = new AgentStepInput
+        {
+            AgentName = "MissingToolAgent",
+            Request = new RunRequest("hello"),
+            AccumulatedMessages = [new ChatMessage(ChatRole.User, "hello")],
+            PreparedInstructions = "instructions",
+            ProvidersPrepared = true,
+            PreparedTools = [new PreparedAgentTool
+            {
+                Name = "missing_tool",
+                IsFrozenProviderSelection = true,
+            }],
+            SessionId = TemporalAgentSessionId.WithRandomKey("MissingToolAgent"),
+        };
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        var exception = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => env.RunAsync(() => activities.RunDurableAgentStepAsync(input)));
+
+        Assert.True(exception.NonRetryable);
+        Assert.Contains("not registered", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(ChatHistoryMemoryProviderOptions.SearchBehavior.BeforeAIInvoke, false)]
+    [InlineData(ChatHistoryMemoryProviderOptions.SearchBehavior.BeforeAIInvoke, true)]
+    [InlineData(ChatHistoryMemoryProviderOptions.SearchBehavior.OnDemandFunctionCalling, false)]
+    [InlineData(ChatHistoryMemoryProviderOptions.SearchBehavior.OnDemandFunctionCalling, true)]
+    public async Task ChatHistoryMemoryProvider_GenericRegistrationFailsBeforeProviderLifecycle(
+        ChatHistoryMemoryProviderOptions.SearchBehavior searchBehavior,
+        bool useFactory)
+    {
+        var initializationCount = 0;
+        var provider = new ChatHistoryMemoryProvider(
+            A.Fake<VectorStore>(),
+            "memories",
+            vectorDimensions: 1,
+            _ =>
+            {
+                initializationCount++;
+                return new ChatHistoryMemoryProvider.State(new ChatHistoryMemoryProviderScope
+                {
+                    ApplicationId = "app",
+                    AgentId = "agent",
+                    SessionId = "session",
+                    UserId = "user",
+                });
+            },
+            new ChatHistoryMemoryProviderOptions
+            {
+                SearchTime = searchBehavior,
+            });
+        var (activities, _) = BuildHarness(opts =>
+        {
+            opts.AddDurableAgent("MemoryProviderAgent", agent =>
+            {
+                agent.ChatClient = _ => new SimpleStreamingChatClient();
+                if (useFactory)
+                {
+                    agent.AddContextProvider(_ => provider);
+                }
+                else
+                {
+                    agent.AddContextProvider(provider);
+                }
+            });
+        });
+        var env = new ActivityEnvironment { TemporalClient = A.Fake<ITemporalClient>() };
+
+        var prepareException = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => env.RunAsync(() =>
+                activities.PrepareAgentTurnAsync(new PrepareAgentTurnInput
+                {
+                    AgentName = "MemoryProviderAgent",
+                    SessionId = "ta-MemoryProviderAgent-test",
+                    Messages = [new ChatMessage(ChatRole.User, "hello")],
+                })));
+        var completeException = await Assert.ThrowsAsync<ApplicationFailureException>(
+            () => env.RunAsync(() =>
+                activities.CompleteAgentTurnAsync(new CompleteAgentTurnInput
+                {
+                    AgentName = "MemoryProviderAgent",
+                    SessionId = "ta-MemoryProviderAgent-test",
+                    RequestMessages = [new ChatMessage(ChatRole.User, "hello")],
+                    ResponseMessages = [new ChatMessage(ChatRole.Assistant, "hi")],
+                })));
+
+        Assert.True(prepareException.NonRetryable);
+        Assert.True(completeException.NonRetryable);
+        Assert.Contains("UseChatHistoryMemory", prepareException.Message, StringComparison.Ordinal);
+        Assert.Contains("UseChatHistoryMemory", completeException.Message, StringComparison.Ordinal);
+        Assert.Equal(0, initializationCount);
     }
 
     [Fact]
