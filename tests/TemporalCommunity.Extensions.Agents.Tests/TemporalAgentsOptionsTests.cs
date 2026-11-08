@@ -2,8 +2,8 @@ using FakeItEasy;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
-using Temporalio.Client.Schedules;
-using TemporalCommunity.Extensions.Agents.Scheduling;
+using Microsoft.Extensions.VectorData;
+using Temporalio.Common;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.Tests;
@@ -60,47 +60,6 @@ public class TemporalAgentsOptionsTests
 
         var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
         Assert.Contains("DefaultMaxEntryCount", exception.Message);
-    }
-
-    [Fact]
-    public void Validate_ScheduledRunReferencesUnknownAgent_ThrowsActionableError()
-    {
-        var options = new TemporalAgentsOptions();
-        options.AddScheduledAgentRun(
-            "MissingAgent",
-            "daily-report",
-            new RunRequest("Generate the report."),
-            new ScheduleSpec());
-
-        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
-
-        Assert.Contains("daily-report", exception.Message);
-        Assert.Contains("MissingAgent", exception.Message);
-        Assert.Contains("AddDurableAgent", exception.Message);
-    }
-
-    [Fact]
-    public void Validate_DuplicateScheduleIds_ThrowsActionableError()
-    {
-        var options = new TemporalAgentsOptions();
-        options.AddDurableAgent("Agent", agent => agent.ChatClient = NewChatClient());
-        options.AddScheduledAgentRun("Agent", "duplicate", new RunRequest("First."), new ScheduleSpec());
-        options.AddScheduledAgentRun("Agent", "duplicate", new RunRequest("Second."), new ScheduleSpec());
-
-        var exception = Assert.Throws<InvalidOperationException>(() => options.Validate());
-
-        Assert.Contains("duplicate", exception.Message);
-        Assert.Contains("unique", exception.Message);
-    }
-
-    [Fact]
-    public void Validate_ScheduledRunReferencesDurableAgent_Succeeds()
-    {
-        var options = new TemporalAgentsOptions();
-        options.AddDurableAgent("Agent", agent => agent.ChatClient = NewChatClient());
-        options.AddScheduledAgentRun("Agent", "daily-report", new RunRequest("Run."), new ScheduleSpec());
-
-        options.Validate();
     }
 
     [Fact]
@@ -286,7 +245,7 @@ public class TemporalAgentsOptionsTests
     }
 
     [Fact]
-    public void AddTemporalAgent_MapsMafOptionsAndTemporalSettings()
+    public void Agent_MapsMafOptionsAndTemporalSettings()
     {
         static string GetWeather(string city) => $"Weather in {city}.";
 
@@ -306,18 +265,31 @@ public class TemporalAgentsOptionsTests
             },
             AIContextProviders = [firstProvider, secondProvider],
         };
-        var temporalOptions = new TemporalAgentOptions
+        Action<TemporalAgentOptions> configureTemporalOptions = temporal =>
         {
-            TimeToLive = TimeSpan.FromHours(2),
-            ActivityTimeout = TimeSpan.FromMinutes(3),
-            MaxEntryCount = 40,
+            temporal.TimeToLive = TimeSpan.FromHours(2);
+            temporal.ActivityTimeout = TimeSpan.FromMinutes(3);
+            temporal.ApprovalTimeout = TimeSpan.FromMinutes(7);
+            temporal.MaxEntryCount = 40;
+            temporal.MaxModelContextTokens = 8192;
+            temporal.ModelOutputTokenReserve = 256;
+            temporal.HeartbeatTimeout = TimeSpan.FromSeconds(12);
+            temporal.RetryPolicy = new RetryPolicy { MaximumAttempts = 2 };
+            temporal.ToolMiddleware = (_, context, next, cancellationToken) =>
+                next(context, cancellationToken);
+            temporal.UseChatHistoryMemory(memory =>
+            {
+                memory.UseVectorStore(_ => A.Fake<VectorStore>(), "memory", 1536);
+                memory.WithRecall(options =>
+                    options.SearchTime = ChatHistoryMemoryProviderOptions.SearchBehavior.BeforeAIInvoke);
+            });
         };
 
-        var options = new TemporalAgentsOptions().AddTemporalAgent(
+        var options = new TemporalAgentsOptions().Agent(
             "Weather",
             _ => chatClient,
             agentOptions,
-            temporalOptions);
+            configureTemporalOptions);
 
         var registration = options.DurableAgentRegistrations["Weather"];
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
@@ -328,19 +300,60 @@ public class TemporalAgentsOptionsTests
         Assert.Same(chatClient, registration.ChatClient(serviceProvider));
         Assert.Same(tool, registration.Tools.Single().Factory(serviceProvider));
         Assert.Collection(
-            registration.ContextProviderFactories,
+            registration.ContextProviderFactories.Take(2),
             provider => Assert.Same(firstProvider, provider.Factory(serviceProvider)),
             provider => Assert.Same(secondProvider, provider.Factory(serviceProvider)));
         Assert.Equal(TimeSpan.FromHours(2), registration.TimeToLive);
         Assert.Equal(TimeSpan.FromMinutes(3), registration.ActivityTimeout);
+        Assert.Equal(TimeSpan.FromMinutes(7), registration.ApprovalTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(12), registration.HeartbeatTimeout);
+        Assert.Equal(2, registration.RetryPolicy!.MaximumAttempts);
         Assert.Equal(40, registration.MaxEntryCount);
+        Assert.Equal(8192, registration.MaxModelContextTokens);
+        Assert.Equal(256, registration.ModelOutputTokenReserve);
+        Assert.NotNull(registration.ToolMiddleware);
+        Assert.NotNull(registration.ContextProviderFactories[^1].MemorySearch);
     }
 
     [Fact]
-    public void AddTemporalAgent_RejectsHistoryProvider()
+    public void Agent_RegisteredChatClientOverloadUsesTemporalDefaultsWhenCallbackOmitted()
+    {
+        var options = new TemporalAgentsOptions().Agent(
+            "Weather",
+            new ChatClientAgentOptions());
+
+        var registration = options.DurableAgentRegistrations["Weather"];
+
+        Assert.Equal(TimeSpan.FromDays(14), options.GetTimeToLive("Weather"));
+        Assert.Null(registration.ActivityTimeout);
+        Assert.Null(registration.HeartbeatTimeout);
+        Assert.Null(registration.ToolMiddleware);
+        Assert.Null(registration.ContextProviderFactories.SingleOrDefault()?.MemorySearch);
+    }
+
+    [Fact]
+    public void Agent_ChatClientFactoryOverloadUsesTemporalDefaultsWhenCallbackOmitted()
+    {
+        var chatClient = A.Fake<IChatClient>();
+        var options = new TemporalAgentsOptions().Agent(
+            "Weather",
+            _ => chatClient,
+            new ChatClientAgentOptions());
+
+        var registration = options.DurableAgentRegistrations["Weather"];
+
+        Assert.Same(chatClient, registration.ChatClient(new ServiceCollection().BuildServiceProvider()));
+        Assert.Equal(TimeSpan.FromDays(14), options.GetTimeToLive("Weather"));
+        Assert.Null(registration.ActivityTimeout);
+        Assert.Null(registration.ToolMiddleware);
+        Assert.Empty(registration.ContextProviderFactories);
+    }
+
+    [Fact]
+    public void Agent_RejectsHistoryProvider()
     {
         var exception = Assert.Throws<NotSupportedException>(() =>
-            new TemporalAgentsOptions().AddTemporalAgent(
+            new TemporalAgentsOptions().Agent(
                 "Weather",
                 _ => A.Fake<IChatClient>(),
                 new ChatClientAgentOptions
@@ -353,10 +366,10 @@ public class TemporalAgentsOptionsTests
     }
 
     [Fact]
-    public void AddTemporalAgent_RejectsUnsupportedFunctionInvocationOptions()
+    public void Agent_RejectsUnsupportedFunctionInvocationOptions()
     {
         var exception = Assert.Throws<NotSupportedException>(() =>
-            new TemporalAgentsOptions().AddTemporalAgent(
+            new TemporalAgentsOptions().Agent(
                 "Weather",
                 _ => A.Fake<IChatClient>(),
                 new ChatClientAgentOptions { AllowConcurrentInvocation = true }));
@@ -367,10 +380,10 @@ public class TemporalAgentsOptionsTests
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, true)]
-    public void AddTemporalAgent_RejectsServiceManagedChatHistory(bool hasConversationId, bool allowBackgroundResponses)
+    public void Agent_RejectsServiceManagedChatHistory(bool hasConversationId, bool allowBackgroundResponses)
     {
         var exception = Assert.Throws<NotSupportedException>(() =>
-            new TemporalAgentsOptions().AddTemporalAgent(
+            new TemporalAgentsOptions().Agent(
                 "Weather",
                 _ => A.Fake<IChatClient>(),
                 new ChatClientAgentOptions
@@ -386,10 +399,10 @@ public class TemporalAgentsOptionsTests
     }
 
     [Fact]
-    public void AddTemporalAgent_RejectsNonFunctionTools()
+    public void Agent_RejectsNonFunctionTools()
     {
         var exception = Assert.Throws<NotSupportedException>(() =>
-            new TemporalAgentsOptions().AddTemporalAgent(
+            new TemporalAgentsOptions().Agent(
                 "Weather",
                 _ => A.Fake<IChatClient>(),
                 new ChatClientAgentOptions

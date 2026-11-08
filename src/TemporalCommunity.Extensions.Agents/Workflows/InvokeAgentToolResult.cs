@@ -39,6 +39,13 @@ internal sealed class InvokeAgentToolResult
     /// </summary>
     public string? CallId { get; init; }
 
+    /// <summary>Whether the function threw an explicitly classified, model-safe failure.</summary>
+    public bool Failed { get; init; }
+
+    /// <summary>Whether tool middleware requested that the workflow end this turn.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Terminate { get; init; }
+
     /// <summary>
     /// Key-level StateBag changes made by the tool. Removed keys are explicit so deletion is
     /// preserved when the workflow applies the result.

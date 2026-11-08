@@ -77,8 +77,7 @@ internal sealed record ProxyResolvedWorkerConfig
     public IReadOnlyList<string>? InterceptorSkippedTools { get; init; }
 
     /// <summary>
-    /// Names of tools that have <see cref="DurableToolOptions.RequireApprovalFlag"/> set
-    /// and <see cref="DurableToolOptions.ScopeAwareFlag"/> NOT set.
+    /// Names of every tool that has <see cref="DurableToolOptions.RequireApprovalFlag"/> set.
     /// The workflow forces a workflow-parked approval for these tools even if the interceptor
     /// returns <c>Proceed</c> (Rule 2 — absolute configuration-time floor).
     /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> is
@@ -87,68 +86,4 @@ internal sealed record ProxyResolvedWorkerConfig
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? RequiresApprovalTools { get; init; }
 
-    // ── Feature B — Approval Scopes ──────────────────────────────────────────
-
-    /// <summary>
-    /// When <see langword="true"/>, the agent has session approval scopes enabled via
-    /// <c>UseApprovalScopes()</c>.
-    /// </summary>
-    public bool UseApprovalScopes { get; init; }
-
-    /// <summary>
-    /// Legacy wire field retained so histories written by the removed cross-session store mode
-    /// remain deserializable. New workflow inputs always set this to false.
-    /// </summary>
-    public bool UseApprovalScopeStoreMode { get; init; }
-
-    /// <summary>
-    /// Legacy wire field retained for replay compatibility. New workflow inputs set it to null.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? AlwaysScopesStoreKey { get; init; }
-
-    /// <summary>
-    /// Legacy wire field retained for replay compatibility. New workflow inputs set it to false.
-    /// </summary>
-    public bool ApplyAlwaysScopesAtSessionStart { get; init; }
-
-    /// <summary>
-    /// Maximum number of reusable session grants retained in workflow StateBag.
-    /// </summary>
-    public int MaxAlwaysScopeCacheRecords { get; init; }
-
-    /// <summary>
-    /// Maximum serialized byte size for reusable session grants.
-    /// </summary>
-    public int MaxAlwaysScopeCacheBytes { get; init; }
-
-    /// <summary>
-    /// Legacy wire field retained for replay compatibility.
-    /// </summary>
-    public TimeSpan ApprovalScopeActivityTimeout { get; init; }
-
-    /// <summary>
-    /// Legacy wire field retained for replay compatibility.
-    /// </summary>
-    public int ApprovalScopeActivityMaximumAttempts { get; init; }
-
-    /// <summary>
-    /// Names of tools registered with <see cref="DurableToolOptions.ScopeAware()"/>.
-    /// The workflow passes <c>ScopeAware = true</c> on the interceptor input for these tools.
-    /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> is
-    /// equivalent to an empty list.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public IReadOnlyList<string>? ScopeAwareTools { get; init; }
-
-    /// <summary>
-    /// Names of tools registered with both <see cref="DurableToolOptions.ScopeAware()"/> and
-    /// <see cref="DurableToolOptions.RequireApproval()"/>. These tools are NOT in
-    /// <see cref="RequiresApprovalTools"/> — the interceptor is responsible for enforcing the
-    /// approval gate when no matching scope record exists.
-    /// Nullable and NOT <c>required</c> for forward-compat — <see langword="null"/> is
-    /// equivalent to an empty list.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public IReadOnlyList<string>? ScopeAwareApprovalTools { get; init; }
 }

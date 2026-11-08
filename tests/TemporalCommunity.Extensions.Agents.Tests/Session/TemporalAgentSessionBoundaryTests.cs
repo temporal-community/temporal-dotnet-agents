@@ -10,18 +10,16 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.Tests.Session;
 
 /// <summary>
-/// Option D Gate 5 (structural subcase) — round-trips a session through the public MAF
-/// serialization boundary (<c>SerializeSessionAsync</c> / <c>DeserializeSessionAsync</c>) and
+/// Round-trips a session through the public MAF serialization boundary (<c>SerializeSessionAsync</c> / <c>DeserializeSessionAsync</c>) and
 /// asserts that both the typed StateBag and the session-owned history survive.
 /// </summary>
 /// <remarks>
-/// The end-to-end subcase (history accumulated by an actual agent run) belongs to Phase 1d and
-/// lives in the integration suite, because <see cref="TemporalAIAgent"/> can only run inside a
-/// Temporal workflow. Serialization itself touches no workflow API, so it is exercised here.
+/// Serialization itself touches no workflow API, so it is exercised against the registered-agent proxy.
 /// </remarks>
 public class TemporalAgentSessionBoundaryTests
 {
-    private static TemporalAIAgent CreateAgent() => new("Assistant");
+    private static TemporalAIAgentProxy CreateAgent() =>
+        new("Assistant", A.Fake<ITemporalAgentClient>());
 
     private static AgentSessionRequest Request(string correlationId, string text) => new()
     {
@@ -120,18 +118,15 @@ public class TemporalAgentSessionBoundaryTests
     }
 
     [Fact]
-    public async Task Gate5_ProxyAndWorkflowAgent_ShareTheSameWireShape()
+    public async Task Gate5_ProxySession_RoundTripsTheSameWireShape()
     {
-        // Both agent types delegate to the same session helpers. If they ever diverge, a session
-        // serialized by one could not be restored by the other.
         var session = new TemporalAgentSession(new TemporalAgentSessionId("Assistant", "abc123"));
         session.StateBag.SetValue("k", "v");
         session.AppendHistoryEntry(Request("c1", "hello"));
 
-        var workflowAgent = CreateAgent();
         var proxy = new TemporalAIAgentProxy("Assistant", A.Fake<ITemporalAgentClient>());
 
-        var fromWorkflowAgent = await workflowAgent.SerializeSessionAsync(session);
+        var fromWorkflowAgent = await CreateAgent().SerializeSessionAsync(session);
         var fromProxy = await proxy.SerializeSessionAsync(session);
 
         Assert.Equal(fromWorkflowAgent.GetRawText(), fromProxy.GetRawText());

@@ -1,6 +1,4 @@
 using Microsoft.Agents.AI;
-using Temporalio.Client.Schedules;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.AI;
@@ -20,6 +18,19 @@ public interface ITemporalAgentClient
     Task<AgentResponse> SendAsync(
         TemporalAgentSessionId sessionId,
         RunRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reads the active or retained outcome for a request without submitting or resubmitting it.
+    /// </summary>
+    /// <remarks>
+    /// The workflow retains only a bounded number and size of terminal outcomes. An unavailable
+    /// result means the workflow or request outcome is not available; it does not prove that the
+    /// request was never accepted. Do not automatically resubmit on that basis.
+    /// </remarks>
+    Task<TemporalAgentTurnOutcome> GetTurnOutcomeAsync(
+        TemporalAgentSessionId sessionId,
+        string requestId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -126,84 +137,7 @@ public interface ITemporalAgentClient
             cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Starts a new agent session with a deferred start time.
-    /// The agent workflow is created immediately but does not begin executing until
-    /// <paramref name="delay"/> has elapsed.
-    /// </summary>
-    /// <param name="sessionId">The session ID that identifies the agent and session key.</param>
-    /// <param name="request">The request to send once the delay has elapsed.</param>
-    /// <param name="delay">How long to wait before the workflow begins executing.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <remarks>
-    /// <para>
-    /// The initial request is carried in the delayed workflow's start input. If the session is
-    /// already running, the request is submitted as a validated fire-and-forget update instead.
-    /// </para>
-    /// <para>
-    /// <b>Duplicate-call behaviour within the delay window:</b> a repeated call submits another
-    /// validated update to the existing execution and can cause the workflow to begin before the
-    /// original delay elapses. Callers should not schedule the same session twice before its delay
-    /// expires.
-    /// </para>
-    /// <para>
-    /// <b>Already-running session:</b> if a workflow with the same <paramref name="sessionId"/>
-    /// is already running, the request is delivered as a validated update; no new workflow is
-    /// started.
-    /// </para>
-    /// </remarks>
-    Task RunAgentDelayedAsync(
-        TemporalAgentSessionId sessionId,
-        RunRequest request,
-        TimeSpan delay,
-        CancellationToken cancellationToken = default);
     
-    /// <summary>
-    /// Creates a Temporal Schedule that fires <see cref="AgentJobWorkflow"/> on the given spec.
-    /// Each scheduled run is fire-and-forget. Temporal Web exposes operational history, but the
-    /// workflow does not return a typed agent response; persist application output from a durable tool.
-    /// </summary>
-    /// <param name="agentName">Name of the agent to invoke on each schedule tick.</param>
-    /// <param name="scheduleId">
-    /// Unique identifier for this schedule. Also used to build the workflow ID for each run:
-    /// <c>ta-{agentName}-scheduled-{scheduleId}</c>.
-    /// </param>
-    /// <param name="request">The request to send to the agent on each scheduled run.</param>
-    /// <param name="spec">When and how often the schedule fires.</param>
-    /// <param name="policy">Overlap and catchup policy. Defaults to <see cref="SchedulePolicy"/> defaults.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A <see cref="ScheduleHandle"/> for pausing, triggering, updating, or deleting the schedule.</returns>
-    /// <exception cref="AgentNotRegisteredException">
-    /// No durable agent is registered with <paramref name="agentName"/>.
-    /// </exception>
-    /// <exception cref="InvalidOperationException">
-    /// The agent is declared only as a proxy. Stateless schedule creation requires the full local
-    /// durable-agent registration so its execution settings can be captured.
-    /// </exception>
-    /// <remarks>
-    /// The calling process must contain the full durable-agent registration. A proxy-only client
-    /// does not own the tool and execution settings required to build a correct job input.
-    ///
-    /// <b>Schedule orphaning:</b> schedules are independent of workers. Removing an agent from
-    /// <see cref="TemporalAgentsOptions"/> does <em>not</em> delete its schedule — it will keep
-    /// firing. Use <see cref="GetAgentScheduleHandle"/> to retrieve the handle and call
-    /// <c>DeleteAsync()</c> when decommissioning an agent.
-    /// </remarks>
-    Task<ScheduleHandle> ScheduleAgentAsync(
-        string agentName,
-        string scheduleId,
-        RunRequest request,
-        ScheduleSpec spec,
-        SchedulePolicy? policy = null,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Returns a <see cref="ScheduleHandle"/> for an existing schedule by its ID.
-    /// Use the handle to pause, trigger, update, or delete the schedule.
-    /// </summary>
-    /// <param name="scheduleId">The schedule ID passed to <see cref="ScheduleAgentAsync"/>.</param>
-    ScheduleHandle GetAgentScheduleHandle(string scheduleId);
-
     /// <summary>
     /// Sends a validated graceful-shutdown update to the agent session workflow, causing it to exit its
     /// session loop rather than sitting parked until the configured <c>TimeToLive</c>.

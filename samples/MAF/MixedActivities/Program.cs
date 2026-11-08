@@ -57,11 +57,9 @@ builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient()
 builder.Services.AddTemporalClient(temporalAddress, "default");
 
 // ── Key pattern: mixing regular activities with durable agent calls ────────────
-// The worker registers both DocumentActivities (plain [Activity] methods) and the
-// DocumentAnalyst durable agent on the same task queue. DocumentPipelineWorkflow
-// orchestrates them in sequence — regular activities for data I/O, the durable
-// agent for AI reasoning. Both are fully durable: a worker crash at any step
-// replays from history without re-executing completed steps.
+// The worker registers DocumentActivities, the agent-invocation activity, and the
+// DocumentAnalyst durable agent on the same task queue. Workflow code invokes the
+// agent only through the activity's registered Temporal proxy.
 
 // ── Step 5: Register activities, agent, and workflow on the same worker ───────
 builder.Services
@@ -79,7 +77,8 @@ builder.Services
             // No tools needed — pure text analysis via the LLM.
         });
     })
-    .AddWorkflow<DocumentPipelineWorkflow>();        // orchestrating workflow
+    .AddWorkflow<DocumentPipelineWorkflow>()          // orchestrating workflow
+    .AddScopedActivities<AgentInvocationActivities>();
 
 // ── Step 6: Start the host ───────────────────────────────────────────────────
 var host = builder.Build();

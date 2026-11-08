@@ -99,7 +99,7 @@ builder.Services
     })
     .AddWorkflow<CustomerServiceWorkflow>()
     .AddWorkflow<DynamicRoutingWorkflow>()
-    .AddSingletonActivities<RoutingActivities>();
+    .AddScopedActivities<RoutingActivities>();
 
 // ── Step 5: Start the host ───────────────────────────────────────────────────
 var host = builder.Build();

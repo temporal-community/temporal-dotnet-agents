@@ -1,10 +1,12 @@
 using FakeItEasy;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using System.Linq.Expressions;
 using Microsoft.Extensions.AI;
 using Temporalio.Client;
-using Temporalio.Client.Schedules;
+using Temporalio.Client.Interceptors;
+using Temporalio.Exceptions;
 using TemporalCommunity.Extensions.Agents.Scheduling;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Xunit;
@@ -12,8 +14,7 @@ using Xunit;
 namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
-/// Tests for <see cref="DefaultTemporalAgentClient"/> guard clauses and validation logic.
-/// These test the validation layer — all guards throw before touching the Temporal client.
+/// Tests for <see cref="DefaultTemporalAgentClient"/> guards and read-only query behavior.
 /// </summary>
 public class DefaultTemporalAgentClientTests
 {
@@ -23,6 +24,59 @@ public class DefaultTemporalAgentClientTests
 
     private DefaultTemporalAgentClient CreateClient() =>
         new(_fakeClient, _options, TaskQueue, logger: null);
+
+    [Theory]
+    [InlineData("namespace")]
+    [InlineData("unknown")]
+    [InlineData("no-details")]
+    [InlineData("empty-details")]
+    [InlineData("mixed-details")]
+    [InlineData("unavailable")]
+    public async Task GetTurnOutcomeAsync_UnrecognizedOrNonWorkflowFailure_Propagates(string failure)
+    {
+        var status = new Temporalio.Api.Common.V1.GrpcStatus();
+        switch (failure)
+        {
+            case "namespace":
+                status.Details.Add(Any.Pack(
+                    new Temporalio.Api.ErrorDetails.V1.NamespaceNotFoundFailure { Namespace = "missing" }));
+                break;
+            case "unknown":
+                status.Details.Add(Any.Pack(new StringValue { Value = "some other missing resource" }));
+                break;
+            case "mixed-details":
+                status.Details.Add(Any.Pack(new Temporalio.Api.ErrorDetails.V1.NotFoundFailure()));
+                status.Details.Add(Any.Pack(
+                    new Temporalio.Api.ErrorDetails.V1.NamespaceNotFoundFailure { Namespace = "missing" }));
+                break;
+        }
+        var exception = new RpcException(
+            failure == "unavailable" ? RpcException.StatusCode.Unavailable : RpcException.StatusCode.NotFound,
+            "Query failed.",
+            failure == "no-details" ? null : status.ToByteArray());
+        var sessionId = TemporalAgentSessionId.WithRandomKey("Agent");
+        A.CallTo(() => _fakeClient.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId, null, null))
+            .Returns(new WorkflowHandle<AgentWorkflow>(_fakeClient, sessionId.WorkflowId));
+        var interceptor = new FailingQueryInterceptor(exception);
+        A.CallTo(() => _fakeClient.OutboundInterceptor).Returns(interceptor);
+
+        var actual = await Assert.ThrowsAsync<RpcException>(() =>
+            CreateClient().GetTurnOutcomeAsync(sessionId, "request"));
+
+        Assert.Same(exception, actual);
+        Assert.Equal("GetTurnOutcome", interceptor.Query?.Query);
+    }
+
+    private sealed class FailingQueryInterceptor(RpcException exception) : ClientOutboundInterceptor(null!)
+    {
+        public QueryWorkflowInput? Query { get; private set; }
+
+        public override Task<TResult> QueryWorkflowAsync<TResult>(QueryWorkflowInput input)
+        {
+            Query = input;
+            return Task.FromException<TResult>(exception);
+        }
+    }
 
     // ─── SendAsync ───────────────────────────────────────────────────────────
 
@@ -88,135 +142,4 @@ public class DefaultTemporalAgentClientTests
             client.ResolveApprovalAsync(sessionId, null!));
     }
 
-    // ─── RunAgentDelayedAsync ────────────────────────────────────────────────
-
-    [Fact]
-    public async Task RunAgentDelayedAsync_NullRequest_ThrowsArgumentNullException()
-    {
-        var client = CreateClient();
-        var sessionId = TemporalAgentSessionId.WithRandomKey("Agent");
-
-        await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            client.RunAgentDelayedAsync(sessionId, null!, TimeSpan.FromMinutes(5)));
-    }
-
-    // ─── ScheduleAgentAsync ──────────────────────────────────────────────────
-
-    [Fact]
-    public async Task ScheduleAgentAsync_NullAgentName_ThrowsArgumentException()
-    {
-        var client = CreateClient();
-
-        await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            client.ScheduleAgentAsync(null!, "schedule-1", new RunRequest("test"),
-                new ScheduleSpec()));
-    }
-
-    [Fact]
-    public async Task ScheduleAgentAsync_WhitespaceAgentName_ThrowsArgumentException()
-    {
-        var client = CreateClient();
-
-        await Assert.ThrowsAsync<ArgumentException>(() =>
-            client.ScheduleAgentAsync("  ", "schedule-1", new RunRequest("test"),
-                new ScheduleSpec()));
-    }
-
-    [Fact]
-    public async Task ScheduleAgentAsync_NullScheduleId_ThrowsArgumentException()
-    {
-        var client = CreateClient();
-
-        await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            client.ScheduleAgentAsync("Agent", null!, new RunRequest("test"),
-                new ScheduleSpec()));
-    }
-
-    [Fact]
-    public async Task ScheduleAgentAsync_NullRequest_ThrowsArgumentNullException()
-    {
-        var client = CreateClient();
-
-        await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            client.ScheduleAgentAsync("Agent", "schedule-1", null!,
-                new ScheduleSpec()));
-    }
-
-    [Fact]
-    public async Task ScheduleAgentAsync_NullSpec_ThrowsArgumentNullException()
-    {
-        var client = CreateClient();
-
-        await Assert.ThrowsAsync<ArgumentNullException>(() =>
-            client.ScheduleAgentAsync("Agent", "schedule-1", new RunRequest("test"),
-                null!));
-    }
-
-    [Fact]
-    public async Task ScheduleAgentAsync_ProxyOnlyAgent_ThrowsBeforeCreatingIncompleteJob()
-    {
-        _options.AddAgentProxy("RemoteAgent");
-        var client = CreateClient();
-
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            client.ScheduleAgentAsync(
-                "RemoteAgent",
-                "schedule-1",
-                new RunRequest("Run."),
-                new ScheduleSpec()));
-
-        Assert.Contains("proxy-only", exception.Message);
-        Assert.Contains("RunAgentDelayedAsync", exception.Message);
-        A.CallTo(() => _fakeClient.CreateScheduleAsync(
-                A<string>._,
-                A<Schedule>._,
-                A<ScheduleOptions>._))
-            .MustNotHaveHappened();
-    }
-
-    [Fact]
-    public async Task ScheduleAgentAsync_DurableAgent_CreatesSchedule()
-    {
-        _options.AddDurableAgent("Agent", agent => agent.ChatClient = _ => A.Fake<IChatClient>());
-        var expected = new ScheduleHandle(_fakeClient, "schedule-1");
-        A.CallTo(() => _fakeClient.CreateScheduleAsync(
-                "schedule-1",
-                A<Schedule>._,
-                A<ScheduleOptions>._))
-            .Returns(expected);
-        var client = CreateClient();
-
-        var actual = await client.ScheduleAgentAsync(
-            "Agent",
-            "schedule-1",
-            new RunRequest("Run."),
-            new ScheduleSpec());
-
-        Assert.Same(expected, actual);
-        A.CallTo(() => _fakeClient.CreateScheduleAsync(
-                "schedule-1",
-                A<Schedule>._,
-                A<ScheduleOptions>._))
-            .MustHaveHappenedOnceExactly();
-    }
-
-    // ─── GetAgentScheduleHandle ──────────────────────────────────────────────
-
-    [Fact]
-    public void GetAgentScheduleHandle_NullScheduleId_ThrowsArgumentException()
-    {
-        var client = CreateClient();
-
-        Assert.Throws<ArgumentNullException>(() =>
-            client.GetAgentScheduleHandle(null!));
-    }
-
-    [Fact]
-    public void GetAgentScheduleHandle_WhitespaceScheduleId_ThrowsArgumentException()
-    {
-        var client = CreateClient();
-
-        Assert.Throws<ArgumentException>(() =>
-            client.GetAgentScheduleHandle("   "));
-    }
 }

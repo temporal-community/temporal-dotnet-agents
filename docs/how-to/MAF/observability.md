@@ -159,43 +159,6 @@ A standalone MEAI `OpenTelemetryChatClient` creates its chat span after the libr
 agent boundary. That child shares the `agent.turn` trace but does not inherit the Temporal tag;
 correlation is therefore trace-based for this topology. It still owns usage attributes.
 
-### `temporal.agent.schedule.create` (Client kind)
-
-**Emitted by:** `DefaultTemporalAgentClient.ScheduleAgentAsync`
-
-Wraps the creation of a recurring Temporal Schedule.
-
-| Attribute | Value |
-|-----------|-------|
-| `gen_ai.agent.name` | The agent being scheduled |
-| `schedule.id` | The Temporal schedule ID |
-
-### `temporal.agent.schedule.delayed` (Client kind)
-
-**Emitted by:** `DefaultTemporalAgentClient.RunAgentDelayedAsync`
-
-Wraps the creation of a delayed one-time agent session via `StartDelay`.
-
-| Attribute | Value |
-|-----------|-------|
-| `gen_ai.agent.name` | The agent being scheduled |
-| `gen_ai.conversation.id` | The Temporal workflow ID |
-| `schedule.delay` | The delay as `TimeSpan.ToString()` |
-
-### `temporal.agent.schedule.one_time` (Internal kind)
-
-**Emitted by:** `ScheduleActivities.ScheduleOneTimeAgentRunAsync`
-
-Wraps a one-time scheduled run started from within a workflow via an activity.
-
-| Attribute | Value |
-|-----------|-------|
-| `gen_ai.agent.name` | The agent being scheduled |
-| `schedule.job_id` | The run ID of the one-time job |
-| `schedule.delay` | The delay before execution |
-
----
-
 ## Attribute Reference
 
 All attributes are defined as constants on `TemporalAgentTelemetry`:
@@ -210,9 +173,6 @@ All attributes are defined as constants on `TemporalAgentTelemetry`:
 | `TotalTokensAttribute` | `gen_ai.usage.total_tokens` | int? | Fallback `agent.turn` only |
 | `AgentToolNameAttribute` | `agent.tool.name` | string | `agent.tool.invoke` |
 | `AgentToolCallIdAttribute` | `agent.tool.call_id` | string | `agent.tool.invoke` (when the model supplied a call ID) |
-| `ScheduleIdAttribute` | `schedule.id` | string | `schedule.create` |
-| `ScheduleDelayAttribute` | `schedule.delay` | string | `schedule.delayed`, `schedule.one_time` |
-| `ScheduleJobIdAttribute` | `schedule.job_id` | string | `schedule.one_time` |
 
 ---
 
@@ -349,10 +309,6 @@ AND gen_ai.usage.total_tokens > 10000
 
 This surfaces turns where the LLM consumed an unusually high number of tokens — useful for identifying agents that need prompt optimization or context trimming.
 
-### Monitoring Scheduling Spans
-
-The three scheduling spans (`temporal.agent.schedule.create`, `temporal.agent.schedule.delayed`, `temporal.agent.schedule.one_time`) help monitor the health of scheduled agent runs. Errors on these spans indicate schedule creation failures — check for missing agents, invalid schedule specs, or Temporal server connectivity issues.
-
 ### Error Detection via Span Status
 
 All agent spans set `ActivityStatusCode.Error` on failure with the exception message. Set up alerts in your tracing backend for:
@@ -380,7 +336,7 @@ This is a doc-only pattern with no library opt-in flag. See [Intercepting LLM Ca
 ## References
 
 - `src/TemporalCommunity.Extensions.Agents/TemporalAgentTelemetry.cs` — all span and attribute constants
-- `src/TemporalCommunity.Extensions.Agents/Workflows/DefaultTemporalAgentClient.cs` — `agent.client.send` and scheduling spans
+- `src/TemporalCommunity.Extensions.Agents/Workflows/DefaultTemporalAgentClient.cs` — `agent.client.send` spans
 - `src/TemporalCommunity.Extensions.Agents/Workflows/AgentActivities.cs` — `agent.turn` span with token metrics
 - `src/TemporalCommunity.Extensions.Agents/Workflows/AgentWorkflow.cs` — search attribute upserts
 - `samples/MAF/MultiAgentRouting/Program.cs` — complete OTel setup example

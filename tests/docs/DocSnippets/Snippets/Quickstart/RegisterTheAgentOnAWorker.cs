@@ -43,7 +43,7 @@ internal static class RegisterTheAgentOnAWorker
         builder.Services
             .AddHostedTemporalWorker("agents")
             .AddTemporalAgents(agents =>
-                agents.AddTemporalAgent(
+                agents.Agent(
                     "Assistant",
                     new ChatClientAgentOptions
                     {
@@ -54,7 +54,7 @@ internal static class RegisterTheAgentOnAWorker
                             Tools = [weatherTool],
                         },
                     },
-                    new TemporalAgentOptions { TimeToLive = TimeSpan.FromHours(1) }));
+                    temporal => temporal.TimeToLive = TimeSpan.FromHours(1)));
 
         var host = builder.Build();
         await host.StartAsync();

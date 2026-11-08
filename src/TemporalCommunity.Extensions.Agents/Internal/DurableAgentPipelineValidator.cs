@@ -193,5 +193,6 @@ internal sealed class DurableAgentPipelineValidator
         "(InvokeAgentTool); installing agent-side function-invocation middleware would conflict " +
         "with this contract and silently break per-tool durability. Remove the " +
         ".Use(functionInvocationCallback) / UseFunctionInvocation() call from your " +
-        "ConfigureAgentPipeline configuration.";
+        "ConfigureAgentPipeline configuration. Configure TemporalAgentOptions.ToolMiddleware " +
+        "instead for callbacks inside the durable tool activity.";
 }

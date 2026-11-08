@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Temporalio.Common;
 using Temporalio.Worker;
@@ -31,7 +32,6 @@ public class AgentWorkflowReplayTests
     [Theory]
     [InlineData("first-update-with-start-agent-workflow.json", typeof(AgentWorkflow))]
     [InlineData("tool-selection-agent-workflow.json", typeof(AgentWorkflow))]
-    [InlineData("tool-selection-agent-job-workflow.json", typeof(AgentJobWorkflow))]
     public async Task CorrectedToolSelectionHistory_ReplaysWithoutError(
         string filename,
         Type workflowType)
@@ -60,8 +60,18 @@ public class AgentWorkflowReplayTests
                 path);
         }
 
-        return WorkflowHistory.FromJson(
-            Path.GetFileNameWithoutExtension(filename),
-            File.ReadAllText(path));
+        var historyJson = File.ReadAllText(path);
+        using var document = JsonDocument.Parse(historyJson);
+        var workflowId = document.RootElement
+            .GetProperty("events")[0]
+            .GetProperty("workflowExecutionStartedEventAttributes")
+            .GetProperty("workflowId")
+            .GetString();
+        if (string.IsNullOrWhiteSpace(workflowId))
+        {
+            throw new InvalidDataException($"History file has no workflow ID: {path}");
+        }
+
+        return WorkflowHistory.FromJson(workflowId, historyJson);
     }
 }

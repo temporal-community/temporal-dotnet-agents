@@ -5,10 +5,9 @@
 // InvokeAgentTool activities under the hood; the workflow doesn't need to manage
 // the tool loop directly.
 
-using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace PerToolActivities;
 
@@ -30,19 +29,15 @@ public sealed class RefundWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(RefundTurnInput input)
     {
-        var agent = GetTemporalAgent("RefundAgent");
-        var session = await agent.CreateSessionAsync().ConfigureAwait(true);
-
-        var response = await agent.RunAsync(
-            [new ChatMessage(ChatRole.User, input.CustomerComplaint)],
-            session,
-            new TemporalAgentRunOptions
-            {
-                EnableToolCalls = input.EnableToolCalls,
-                EnableToolNames = input.EnableToolNames?.ToList(),
-            }).ConfigureAwait(true);
-
-        return response.Text ?? string.Empty;
+        var sessionId = WorkflowAgents.NewAgentSessionId("RefundAgent");
+        return await Workflow.ExecuteActivityAsync(
+            (RefundAgentActivities activities) => activities.RunAsync(
+                sessionId.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                input.CustomerComplaint,
+                input.EnableToolCalls,
+                input.EnableToolNames),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
     }
 }
 

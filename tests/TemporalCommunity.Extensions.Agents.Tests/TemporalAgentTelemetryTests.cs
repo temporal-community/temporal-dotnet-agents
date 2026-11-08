@@ -22,17 +22,6 @@ public class TemporalAgentTelemetryTests
     {
         Assert.Equal("agent.turn", TemporalAgentTelemetry.AgentTurnSpanName);
         Assert.Equal("agent.client.send", TemporalAgentTelemetry.AgentClientSendSpanName);
-        Assert.Equal("temporal.agent.schedule.create", TemporalAgentTelemetry.AgentScheduleCreateSpanName);
-        Assert.Equal("temporal.agent.schedule.delayed", TemporalAgentTelemetry.AgentScheduleDelayedSpanName);
-        Assert.Equal("temporal.agent.schedule.one_time", TemporalAgentTelemetry.AgentScheduleOneTimeSpanName);
-    }
-
-    [Fact]
-    public void SpanNames_ScheduleSpansUseTemporalPrefix()
-    {
-        Assert.Equal("temporal.agent.schedule.create", TemporalAgentTelemetry.AgentScheduleCreateSpanName);
-        Assert.Equal("temporal.agent.schedule.delayed", TemporalAgentTelemetry.AgentScheduleDelayedSpanName);
-        Assert.Equal("temporal.agent.schedule.one_time", TemporalAgentTelemetry.AgentScheduleOneTimeSpanName);
     }
 
     [Fact]
@@ -48,9 +37,6 @@ public class TemporalAgentTelemetryTests
         Assert.Equal("gen_ai.usage.output_tokens", TemporalAgentTelemetry.OutputTokensAttribute);
         // Extends gen_ai.usage namespace — no canonical OTel attribute for total tokens.
         Assert.Equal("gen_ai.usage.total_tokens", TemporalAgentTelemetry.TotalTokensAttribute);
-        Assert.Equal("schedule.id", TemporalAgentTelemetry.ScheduleIdAttribute);
-        Assert.Equal("schedule.delay", TemporalAgentTelemetry.ScheduleDelayAttribute);
-        Assert.Equal("schedule.job_id", TemporalAgentTelemetry.ScheduleJobIdAttribute);
     }
 
     [Fact]

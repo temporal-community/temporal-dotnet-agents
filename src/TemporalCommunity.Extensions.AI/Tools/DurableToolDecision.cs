@@ -48,8 +48,8 @@ public abstract class DurableToolDecision
     /// <paramref name="description"/> feeds the approval request shown to the reviewer.
     /// </summary>
     /// <remarks>
-    /// On execution paths that do not support workflow-parked HITL (e.g., scheduled jobs,
-    /// sub-agent workflows), this outcome degrades to <see cref="Block"/> with a warning logged.
+    /// On execution paths without the registered agent workflow's approval state, this outcome
+    /// degrades to <see cref="Block"/> with a warning logged.
     /// </remarks>
     /// <param name="description">Human-readable approval request description.</param>
     /// <param name="metadata">Optional key/value metadata carried for audit purposes.</param>

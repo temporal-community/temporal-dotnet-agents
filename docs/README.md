@@ -12,15 +12,14 @@ Welcome to the documentation for **Temporal .NET Agents**, providing durable exe
 - **[Quickstart](how-to/MAF/quickstart.md)** — One durable agent registered and called, start to finish.
 - **[Usage Reference](how-to/MAF/usage.md)** — Every builder slot, option, and hosting behaviour.
 - **[Durable Agents & Tools](how-to/MAF/durable-agents.md)** — Activity-backed tool execution, retry policies, and timeouts.
-- **[Routing & Agent Orchestration](how-to/MAF/routing.md)** — Multi-agent routing, workflow delegation, and sub-agents.
-- **[Human-in-the-Loop (HITL)](how-to/MAF/hitl-patterns.md)** — Workflow approval gates, session approval scopes, and interactive reviews.
+- **[Routing & Agent Orchestration](how-to/MAF/routing.md)** — Multi-agent routing and activity-based proxy invocation.
+- **[Human-in-the-Loop (HITL)](how-to/MAF/hitl-patterns.md)** — Workflow approval gates and interactive reviews.
 - **[Context Providers](how-to/MAF/context-providers.md)** — Writing and registering an `AIContextProvider`, session `StateBag` state, and dynamic prompt injection.
-- **[Skills & Toolsets](how-to/MAF/skills.md)** — Progressive skill loading and filesystem/inline skills.
+- **[Agent Memory](how-to/MAF/memory.md)** — Workflow-owned history and provider-backed memory guidance.
 - **[Tool Interceptors](how-to/MAF/tool-interceptor.md)** — Intercepting, auditing, and gating tool invocations.
 - **[Intercepting LLM Calls](how-to/MAF/llm-call-interception.md)** — Chat-client decorators and `ConfigureAgentPipeline` agent middleware: which layer sees what, and why decorators must use `GetStreamingResponseAsync`.
 - **[Observability & OpenTelemetry](how-to/MAF/observability.md)** — Distributed tracing, metrics, and activity sources.
 - **[Testing Agents](how-to/MAF/testing-agents.md)** — Unit testing and integration testing patterns.
-- **[Scheduling & Delayed Runs](how-to/MAF/scheduling.md)** — Delayed agent execution and background scheduling.
 - **[Structured Output](how-to/MAF/structured-output.md)** — Schema-enforced responses and JSON output.
 - **[Prompt Caching & Token Optimization](how-to/MAF/prompt-caching.md)** — History compaction, truncation, and token budgeting.
 - **[Do's and Don'ts](how-to/MAF/dos-and-donts.md)** — Best practices for deterministic workflow development.
@@ -48,7 +47,7 @@ Welcome to the documentation for **Temporal .NET Agents**, providing durable exe
 - **[Durable Chat Pipeline](architecture/MEAI/durable-chat-pipeline.md)** — Turn lifecycle and state management.
 - **[Cross-Library Integration](architecture/MEAI/cross-library-integration.md)** — How MEAI and MAF integrations fit together.
 - **[Session StateBag & Context Providers](architecture/MAF/session-statebag-and-context-providers.md)** — State storage across continue-as-new transitions.
-- **[Agent-to-Agent Communication](architecture/MAF/agent-to-agent-communication.md)** — Event-driven and direct sub-agent invocation.
+- **[Agent-to-Agent Communication](architecture/MAF/agent-to-agent-communication.md)** — Event-driven and activity-based agent orchestration.
 
 ---
 

@@ -6,6 +6,7 @@ namespace TemporalCommunity.Extensions.AI.Internal;
 internal static class DurableTurnFailureMapper
 {
     internal const string OutcomeTooLargeErrorType = "DurableTurnOutcomeTooLarge";
+    internal const string TurnFailedErrorType = "DurableTurnFailed";
 
     internal static Exception? Map(Exception exception, string? requestId)
     {
@@ -24,6 +25,16 @@ internal static class DurableTurnFailureMapper
             if (failure.ErrorType == OutcomeTooLargeErrorType)
             {
                 return DurableTurnOutcomeTooLargeException.FromFailure(failure.Message, exception);
+            }
+
+            if (failure.ErrorType == TurnFailedErrorType)
+            {
+                var details = System.Text.Json.JsonSerializer.Deserialize(
+                    failure.Message,
+                    DurableAIJsonUtilities.DefaultOptions.GetTypeInfo(typeof(DurableTurnFailureDetails)))
+                    as DurableTurnFailureDetails
+                    ?? throw new System.Text.Json.JsonException("The terminal failure details were missing.");
+                return new DurableTurnFailedException(details, exception);
             }
         }
 

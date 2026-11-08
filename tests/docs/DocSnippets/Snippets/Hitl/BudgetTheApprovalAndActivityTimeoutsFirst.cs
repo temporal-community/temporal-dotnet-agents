@@ -18,7 +18,7 @@ internal static class BudgetTheApprovalAndActivityTimeoutsFirst
         // Optional: change the inherited 2-minute heartbeat cadence.
         opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);   // pump runs at a third of this
 
-        agent.AddTool(publishDraft, tool => tool.NoRetry());
+        agent.AddTool(publishDraft);
         // END SNIPPET docs/how-to/MAF/hitl-patterns.md#budget-the-approval-and-activity-timeouts-first
     }
 }

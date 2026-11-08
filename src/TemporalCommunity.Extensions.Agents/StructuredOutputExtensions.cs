@@ -41,49 +41,6 @@ public static class StructuredOutputExtensions
     internal static readonly JsonSerializerOptions WebDefaults = new(JsonSerializerDefaults.Web);
 
     /// <summary>
-    /// Runs the agent and deserializes the response into <typeparamref name="T"/>, tolerating
-    /// markdown code fences and retrying with error context so the model can self-correct.
-    /// </summary>
-    /// <param name="correlationId">
-    /// Optional caller-supplied correlation ID for the underlying agent run. When
-    /// <see langword="null"/>/empty, the library auto-generates one — using
-    /// <c>Workflow.NewGuid()</c> when invoked from workflow context (deterministic on replay)
-    /// or <c>Guid.NewGuid()</c> otherwise.
-    /// </param>
-    public static async Task<T> RunStructuredAsync<T>(
-        this TemporalAIAgent agent,
-        IList<ChatMessage> messages,
-        AgentSession? session = null,
-        StructuredOutputOptions? options = null,
-        string? correlationId = null,
-        CancellationToken cancellationToken = default)
-    {
-        options ??= new StructuredOutputOptions();
-        var serializerOptions = options.JsonSerializerOptions ?? WebDefaults;
-        var workingMessages = new List<ChatMessage>(messages);
-        var runOptions = BuildRunOptions(correlationId);
-
-        for (int attempt = 0; attempt <= options.MaxRetries; attempt++)
-        {
-            // MAF's typed run sets ResponseFormat = ChatResponseFormat.ForJsonSchema<T>() and
-            // wraps non-object schemas. Going through it means the model is schema-constrained on
-            // the first attempt rather than only being asked nicely.
-            var response = await agent.RunAsync<T>(
-                workingMessages, session, serializerOptions, runOptions, cancellationToken);
-
-            if (TryRead(response, serializerOptions, attempt < options.MaxRetries,
-                        out var value, out var text, out var failure))
-            {
-                return value!;
-            }
-
-            AppendCorrection<T>(workingMessages, text, failure!, options);
-        }
-
-        throw new InvalidOperationException("Structured output retry loop exited unexpectedly.");
-    }
-
-    /// <summary>
     /// Runs the agent proxy and deserializes the response into <typeparamref name="T"/>, tolerating
     /// markdown code fences and retrying with error context so the model can self-correct.
     /// </summary>

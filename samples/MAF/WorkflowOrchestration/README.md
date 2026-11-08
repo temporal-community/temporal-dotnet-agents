@@ -1,51 +1,23 @@
-# Workflow Orchestration: Agent as Sub-Agent
+# Workflow Orchestration through Activities
 
-## Overview
+This sample shows a regular Temporal workflow invoking a registered MAF agent through a scoped
+activity. The workflow generates a deterministic `TemporalAgentSessionId` and `RequestId`; the
+activity resolves the registered proxy and passes both values through to the session workflow.
+This keeps workflow code deterministic and makes retries reuse the same logical agent turn.
 
-Shows how to call an AI agent from inside a custom Temporal workflow using `WorkflowAgents.GetTemporalAgent()`. The workflow itself is the orchestrator — it starts the agent, passes a question, and returns the result as its final output.
+The sample also demonstrates a fire-and-forget call through an activity with an explicit request
+ID. The model/tool loop remains owned by the registered agent's `AgentWorkflow`.
 
-This sample demonstrates:
-- A custom `[Workflow]` (`WeatherOrchestrationWorkflow`) driving an agent call
-- `GetTemporalAgent("WeatherAssistant")` resolving a registered agent by name inside workflow code
-- Deterministic agent execution via `Workflow.ExecuteActivityAsync()` under the hood
-- A weather tool registered via `agent.AddTool(weatherTool)` on the durable-agent builder
+## Run
 
-## Highlights
-
-- **Workflow as orchestrator, not just session container.** Unlike the external-caller pattern (where a client sends updates to `AgentWorkflow`), here a custom workflow controls the agent lifecycle and composes its output into a larger result.
-- **Replay safety.** `GetTemporalAgent().RunAsync()` dispatches through `Workflow.ExecuteActivityAsync()`. After the activity completes, its result is cached in event history — a worker restart replays the cached value and never re-calls the LLM.
-- **Composability.** Additional agents, activities, signals, or timers can be added to `WeatherOrchestrationWorkflow.RunAsync` alongside the agent call — standard Temporal workflow composition applies.
-- **`.AddWorkflow<T>()` on the same builder.** The orchestrating workflow is registered on the same hosted worker as the agents, keeping the setup to a single `AddHostedTemporalWorker` call.
-
-## Getting Started
-
-### Prerequisites
-
-- [.NET 10 SDK](https://dot.net) or later
-- Temporal Service 1.31.0 or newer (local: `temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`)
-- An OpenAI-compatible API key
-
-### Configure API credentials
+Start Temporal with the required search attributes:
 
 ```bash
-dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MAF/WorkflowOrchestration
-dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --project samples/MAF/WorkflowOrchestration
+temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int
 ```
 
-### Run
+Configure `OPENAI_API_KEY` and `OPENAI_API_BASE_URL`, then run:
 
 ```bash
 dotnet run --project samples/MAF/WorkflowOrchestration/WorkflowOrchestration.csproj
-```
-
-### Expected Output
-
-```
-Worker started. Submitting orchestration workflow...
-
-Orchestration workflow started: weather-orchestration-<guid>
-
-Orchestration workflow result: The weather is currently sunny.
-
-Done.
 ```

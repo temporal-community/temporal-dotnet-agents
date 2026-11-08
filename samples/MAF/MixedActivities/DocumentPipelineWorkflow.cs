@@ -1,17 +1,16 @@
 // DocumentPipelineWorkflow.cs — mixes plain [Activity] calls with a durable agent turn.
 //
 // Step 1: FetchDocumentAsync  — regular Temporal activity (data I/O, no AI)
-// Step 2: agent.RunAsync      — durable AI agent turn (LLM reasoning)
+// Step 2: InvokeAgentAsync    — scoped activity invoking the registered proxy
 // Step 3: StoreAnalysisAsync  — regular Temporal activity (data I/O, no AI)
 // Step 4: NotifyReviewerAsync — regular Temporal activity (side-effect, no AI)
 //
 // All four steps are durable. A worker crash at any point replays completed
 // steps from event history without re-executing them.
 
-using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Activities;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace MixedActivities;
 
@@ -19,10 +18,8 @@ namespace MixedActivities;
 /// Orchestrating workflow that processes a support document through a four-step
 /// pipeline: fetch, AI analysis, store, notify.
 /// <para>
-/// The key pattern: regular Temporal activities (<see cref="DocumentActivities"/>)
-/// and a durable AI agent turn (<c>GetTemporalAgent("DocumentAnalyst").RunAsync</c>) coexist
-/// in the same workflow. The Temporal runtime treats both as durable, replay-safe
-/// operations — the author does not need to coordinate them specially.
+/// The workflow orchestrates regular activities and an agent-invocation activity. That
+/// activity resolves the registered proxy, while the workflow owns stable retry identities.
 /// </para>
 /// </summary>
 [Workflow("MixedActivities.DocumentPipelineWorkflow")]
@@ -46,23 +43,18 @@ public sealed class DocumentPipelineWorkflow
             (DocumentActivities a) => a.FetchDocumentAsync(docId),
             DefaultActivityOptions).ConfigureAwait(true);
 
-        // Step 2 — Durable agent turn: analyze the document.
-        // GetTemporalAgent resolves "DocumentAnalyst" from the worker's registered agents.
-        // RunAsync dispatches a RunDurableAgentStep activity internally — the LLM call
-        // is durable and replay-cached just like the plain activities above and below.
-        var agent = GetTemporalAgent("DocumentAnalyst");
-        var session = await agent.CreateSessionAsync().ConfigureAwait(true);
-
+        // Step 2 — Invoke the registered agent through an activity. The session and request IDs
+        // are deterministic and are reused if Temporal retries this activity.
+        var sessionId = WorkflowAgents.NewAgentSessionId("DocumentAnalyst");
         var prompt = $"Analyze the following support document and reply with exactly two lines:\n" +
                      $"Category: <Bug|Feature|Billing|Other>\n" +
                      $"Summary: <one-sentence summary>\n\n" +
                      $"Document: {docText}";
 
-        var response = await agent.RunAsync(
-            [new ChatMessage(ChatRole.User, prompt)],
-            session).ConfigureAwait(true);
-
-        var analysisText = response.Text ?? string.Empty;
+        var analysisText = await Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), prompt),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
 
         // Parse the category from the agent response for use in subsequent steps.
         var category = ParseCategory(analysisText);

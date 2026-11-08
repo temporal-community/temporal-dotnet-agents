@@ -106,6 +106,29 @@ internal sealed class StubChatClient : HarnessChatClient;
 
 internal sealed class EchoChatClient : HarnessChatClient;
 
+internal sealed class AgentInvocationActivities(IServiceProvider services)
+{
+    [Activity]
+    public async Task<string> RunAsync(
+        string agentName,
+        string sessionWorkflowId,
+        string requestId,
+        string message)
+    {
+        var sessionId = TemporalCommunity.Extensions.Agents.Session.TemporalAgentSessionId
+            .Parse(sessionWorkflowId);
+        var agent = services.GetTemporalAgentProxy(agentName);
+        var response = await agent.RunAsync(
+            message,
+            new TemporalCommunity.Extensions.Agents.Session.TemporalAgentSession(sessionId),
+            new TemporalCommunity.Extensions.Agents.TemporalAgentRunOptions
+            {
+                RequestId = requestId,
+            });
+        return response.Text ?? string.Empty;
+    }
+}
+
 /// <summary>
 /// The decorator the docs use to show per-LLM-call visibility. Only the constructor shape is
 /// load-bearing: <c>(IChatClient inner, ILogger&lt;AuditingChatClient&gt; logger)</c>.
@@ -230,12 +253,14 @@ internal class AskWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string question)
     {
-        var agent = WorkflowAgents.GetTemporalAgent("Assistant");
-        var session = await agent.CreateSessionAsync().ConfigureAwait(true);
-        var reply = await agent.RunAsync([new ChatMessage(ChatRole.User, question)], session)
-            .ConfigureAwait(true);
-
-        return reply.Messages[^1].Text ?? string.Empty;
+        var session = WorkflowAgents.NewAgentSessionId("Assistant");
+        return await Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                "Assistant",
+                session.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                question),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
     }
 }
 

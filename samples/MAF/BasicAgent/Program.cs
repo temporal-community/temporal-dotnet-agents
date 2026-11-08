@@ -62,7 +62,7 @@ builder.Services.AddTemporalClient(temporalAddress, "default");
 builder.Services
     .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(agents =>
-        agents.AddTemporalAgent(
+        agents.Agent(
             "Assistant",
             new ChatClientAgentOptions
         {
@@ -75,14 +75,30 @@ builder.Services
                     Tools = [weatherTool],
                 },
             },
-            new TemporalAgentOptions
+            temporal =>
             {
-                TimeToLive = TimeSpan.FromHours(1), // shortened for demo; production default is 14 days
+                temporal.TimeToLive = TimeSpan.FromHours(1); // shortened for demo; production default is 14 days
             }));
 
 // ── Step 5: Start the host (worker runs as IHostedService) ───────────────────
-var host = builder.Build();
+using var host = builder.Build();
 await host.StartAsync();
+
+if (args.Length == 2 && args[0] is "--recovery-demo" or "--recover")
+{
+    try
+    {
+        if (args[0] == "--recovery-demo")
+            await TurnRecoveryExample.DispatchAsync(host.Services, args[1]);
+        else
+            await TurnRecoveryExample.RecoverAsync(host.Services, args[1]);
+    }
+    finally
+    {
+        await host.StopAsync();
+    }
+    return;
+}
 
 Console.WriteLine("Worker started. Sending messages...\n");
 
@@ -90,6 +106,7 @@ Console.WriteLine("Worker started. Sending messages...\n");
 // Resolve the keyed TemporalAIAgentProxy through the MAF AIAgent surface.
 var proxy = host.Services.GetRequiredKeyedService<AIAgent>("Assistant");
 var session = await proxy.CreateSessionAsync();
+var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
 
 Console.WriteLine($"Session workflow ID: {session}\n");
 
@@ -102,6 +119,13 @@ var r1 = await proxy.RunAsync(
     session,
     new TemporalAgentRunOptions { RequestId = "basic-agent-turn-1" });
 Console.WriteLine($"Agent: {r1.Text ?? "(no response)"}\n");
+if (session is TemporalAgentSession outcomeSession)
+{
+    var outcome = await agentClient.GetTurnOutcomeAsync(
+        outcomeSession.SessionId,
+        "basic-agent-turn-1");
+    Console.WriteLine($"Retained turn outcome: {outcome.Status}\n");
+}
 
 Console.WriteLine("User : What is its population?");
 var r2 = await proxy.RunAsync("What is its population?", session);
@@ -115,7 +139,6 @@ Console.WriteLine($"Agent: {r3.Text ?? "(no response)"}\n");
 // Request shutdown so the workflow exits its session loop rather than sitting parked for TimeToLive.
 if (session is TemporalAgentSession temporalSession)
 {
-    var agentClient = host.Services.GetRequiredService<ITemporalAgentClient>();
     await agentClient.ShutdownAsync(temporalSession.SessionId);
     Console.WriteLine("Shutdown update accepted by agent workflow.\n");
 }

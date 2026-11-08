@@ -16,7 +16,7 @@ namespace TemporalCommunity.Extensions.Agents.Session;
 /// <para>
 /// The session — not the agent — owns the conversation history and the
 /// <see cref="AgentSession.StateBag"/> for that conversation. One
-/// <see cref="TemporalAIAgent"/> instance may drive several concurrent sessions, so any state
+/// An agent proxy may drive several concurrent sessions, so any state
 /// held on the agent would be shared (and corrupted) across them. Keeping it here is what makes
 /// multi-session isolation and continue-as-new carry-forward possible.
 /// </para>
@@ -392,6 +392,8 @@ public sealed class TemporalAgentSession : AgentSession
     internal void ApplyTrustedStateBagDelta(StateBagDelta? delta) =>
         ReplaceStateBag(StateBagMerge.ApplyTrustedDelta(this.SerializeStateBag(), delta));
 
+    internal void RestoreStateBag(JsonElement? stateBag) => ReplaceStateBag(stateBag);
+
     /// <summary>
     /// Merges <em>untrusted</em> tool and interceptor StateBag write-backs into this session's bag.
     /// </summary>
@@ -402,15 +404,9 @@ public sealed class TemporalAgentSession : AgentSession
     /// must not drive merge order. Tool activities run serially; their write-backs are applied as
     /// each call completes. In both cases a later index wins a top-level key conflict.
     /// </para>
-    /// <para>
-    /// Reserved approval-scope keys are dropped from every contribution — see
-    /// <see cref="StateBagMerge.Merge"/>.
-    /// </para>
     /// </remarks>
     internal void MergeToolStateBagWriteBacks(
-        IReadOnlyList<JsonElement?> writeBacks,
-        string? alwaysScopesStoreKey = null,
-        ILogger? logger = null)
+        IReadOnlyList<JsonElement?> writeBacks)
     {
         ArgumentNullException.ThrowIfNull(writeBacks);
 
@@ -430,19 +426,17 @@ public sealed class TemporalAgentSession : AgentSession
         }
 
         ReplaceStateBag(StateBagMerge.Merge(
-            this.SerializeStateBag(), writeBacks, alwaysScopesStoreKey, logger));
+            this.SerializeStateBag(), writeBacks));
     }
 
     internal void ApplyToolStateBagDeltas(
-        IReadOnlyList<StateBagDelta?> deltas,
-        string? alwaysScopesStoreKey = null,
-        ILogger? logger = null)
+        IReadOnlyList<StateBagDelta?> deltas)
     {
         ArgumentNullException.ThrowIfNull(deltas);
         var merged = this.SerializeStateBag();
         foreach (var delta in deltas)
         {
-            merged = StateBagMerge.ApplyDelta(merged, delta, alwaysScopesStoreKey, logger);
+            merged = StateBagMerge.ApplyDelta(merged, delta);
         }
 
         ReplaceStateBag(merged);
@@ -462,7 +456,7 @@ public sealed class TemporalAgentSession : AgentSession
     /// instead.
     /// </para>
     /// <para>
-    /// That is harmless today — <see cref="TemporalAIAgent"/> has no hash gate, and bucket order is
+    /// That is harmless today — session operations have no hash gate, and bucket order is
     /// itself stable across processes and replays because the dictionary uses the non-randomized
     /// ordinal comparer (measured, not assumed). Replay determinism needs stability, which holds;
     /// it does not need sortedness. But the two agent loops are documented as mirrors, so if a hash

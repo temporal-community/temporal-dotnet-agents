@@ -1,5 +1,5 @@
-// WorkflowOrchestration — a Temporal workflow that calls a durable AI agent as a
-// sub-agent via WorkflowAgents.GetTemporalAgent().
+// WorkflowOrchestration — a Temporal workflow invokes a registered durable AI
+// agent through a scoped activity and its Temporal proxy.
 //
 // Run:  dotnet run --project samples/MAF/WorkflowOrchestration/WorkflowOrchestration.csproj
 
@@ -12,9 +12,10 @@ using Microsoft.Extensions.Logging;
 using OpenAI;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
+using WorkflowOrchestration;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -63,7 +64,8 @@ builder.Services
             agent.TimeToLive   = TimeSpan.FromHours(1);
         });
     })
-    .AddWorkflow<WeatherOrchestrationWorkflow>();
+    .AddWorkflow<WeatherOrchestrationWorkflow>()
+    .AddScopedActivities<AgentInvocationActivities>();
 
 // ── Step 6: Start the host ───────────────────────────────────────────────────
 var host = builder.Build();
@@ -76,7 +78,8 @@ var client = host.Services.GetRequiredService<ITemporalClient>();
 
 var weatherOrchestrationId = $"weather-orchestration-{Guid.NewGuid()}";
 var handle = await client.StartWorkflowAsync(
-    (WeatherOrchestrationWorkflow wf) => wf.RunAsync("What's the weather like?"),
+    (WeatherOrchestrationWorkflow wf) => wf.RunAsync(
+        new AgentInvocationInput("What's the weather like?")),
     new WorkflowOptions
     {
         Id = weatherOrchestrationId,
@@ -114,18 +117,28 @@ public class WeatherOrchestrationWorkflow
     /// Runs the orchestration: receives a question, calls the agent, returns the answer.
     /// </summary>
     /// <remarks>
-    /// Inside a workflow, use <c>WorkflowAgents.GetTemporalAgent</c> to obtain a
-    /// <c>TemporalAIAgent</c>. Each call to <c>RunAsync</c> dispatches activities
-    /// (RunDurableAgentStep + InvokeAgentTool per tool call) so results are durable and
-    /// replay-cached.
+    /// The workflow creates stable session and request IDs, then calls a scoped activity.
+    /// The activity resolves the registered proxy and awaits the durable agent session.
     /// </remarks>
     [WorkflowRun]
-    public async Task<string> RunAsync(string userQuestion)
+    public async Task<string> RunAsync(AgentInvocationInput input)
     {
-        var agent = GetTemporalAgent("WeatherAssistant");
-        var session = await agent.CreateSessionAsync().ConfigureAwait(true);
-        var response = await agent.RunAsync(userQuestion, session).ConfigureAwait(true);
+        var sessionId = WorkflowAgents.NewAgentSessionId("WeatherAssistant");
+        var requestId = Workflow.NewGuid().ToString("N");
+        if (input.FireAndForget)
+        {
+            await Workflow.ExecuteActivityAsync(
+                (AgentInvocationActivities activities) => activities.StartFireAndForgetAsync(
+                    sessionId.WorkflowId, requestId, input.UserQuestion),
+                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(2) });
+            return string.Empty;
+        }
 
-        return response.Text ?? string.Empty;
+        return await Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                sessionId.WorkflowId, requestId, input.UserQuestion),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
     }
 }
+
+public sealed record AgentInvocationInput(string UserQuestion, bool FireAndForget = false);

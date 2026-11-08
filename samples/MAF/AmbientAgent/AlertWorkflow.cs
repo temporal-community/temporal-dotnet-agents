@@ -1,7 +1,6 @@
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
+using TemporalCommunity.Extensions.Agents;
 
 namespace AmbientAgent;
 
@@ -58,17 +57,13 @@ public class AlertWorkflow
                              string.Join("\n", alert.RecentReadings.Select(r =>
                                  $"  [{r.Timestamp:HH:mm:ss}] CPU={r.CpuPercent:F1}% Mem={r.MemoryPercent:F1}% Temp={r.TemperatureCelsius:F1}°C"));
 
-                var alertAgent = GetTemporalAgent("AlertAgent");
+                var sessionId = WorkflowAgents.NewAgentSessionId("AlertAgent");
+                var notification = await Workflow.ExecuteActivityAsync(
+                    (AgentInvocationActivities activities) => activities.RunAsync(
+                        "AlertAgent", sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), prompt),
+                    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
 
-                // Fresh session per cycle: each LLM call is a stateless analysis of the current window.
-                // To accumulate cross-cycle conversation history, store the session in a field and reuse it.
-                var session = await alertAgent.CreateSessionAsync().ConfigureAwait(true);
-
-                var response = await alertAgent.RunAsync(
-                    [new ChatMessage(ChatRole.User, prompt)],
-                    session).ConfigureAwait(true);
-
-                var notification = response.Text ?? "(no notification text)";
+                notification = string.IsNullOrEmpty(notification) ? "(no notification text)" : notification;
                 _notifications.Add(notification);
 
                 Workflow.Logger.LogInformation("Alert notification dispatched: {Notification}", notification);

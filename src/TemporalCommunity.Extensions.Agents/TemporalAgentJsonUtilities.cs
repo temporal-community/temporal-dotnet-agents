@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.AI;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.State;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Session;

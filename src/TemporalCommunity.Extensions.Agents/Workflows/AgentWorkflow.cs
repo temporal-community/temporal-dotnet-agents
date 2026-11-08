@@ -177,6 +177,52 @@ internal class AgentWorkflow :
         }
     }
 
+    /// <summary>Returns the active or retained outcome for one logical agent request.</summary>
+    [WorkflowQuery("GetTurnOutcome")]
+    public TemporalAgentTurnOutcome? GetTurnOutcome(string requestId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+        if (requestId.Length > MaximumRequestIdLength)
+        {
+            throw new ArgumentException(
+                $"Request IDs cannot exceed {MaximumRequestIdLength} characters.",
+                nameof(requestId));
+        }
+
+        var terminal = base.GetTurnOutcome(requestId, out var isPending);
+        if (isPending)
+        {
+            return new TemporalAgentTurnOutcome
+            {
+                RequestId = requestId,
+                Status = TemporalAgentTurnOutcomeStatus.Pending,
+            };
+        }
+
+        if (terminal is null)
+        {
+            return null;
+        }
+
+        var retainedDetails = GetTerminalTurnOutcome(requestId);
+        return new TemporalAgentTurnOutcome
+        {
+            RequestId = terminal.RequestId,
+            Status = terminal.Status == "failed"
+                ? TemporalAgentTurnOutcomeStatus.Failed
+                : TemporalAgentTurnOutcomeStatus.Succeeded,
+            Response = retainedDetails?.Response,
+            FailureErrorType = retainedDetails?.FailureErrorType,
+            FailureMessage = terminal.OutcomeOmitted ? null : terminal.Failure?.Message,
+            FailureNonRetryable = terminal.OutcomeOmitted ? null : terminal.Failure?.NonRetryable,
+            DetailsOmitted = terminal.OutcomeOmitted || terminal.ToolCallSummariesTruncated,
+            CommittedRevision = terminal.CommittedRevision,
+            ToolCallSummaries = terminal.ToolCallSummaries,
+            ToolCallSummariesTruncated = terminal.ToolCallSummariesTruncated,
+            ToolCallCounts = terminal.ToolCallCounts,
+        };
+    }
+
     /// <summary>
     /// Validates a queued fire-and-forget run before it enters workflow history.
     /// </summary>

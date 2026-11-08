@@ -1,4 +1,5 @@
-// HARNESS for docs/how-to/MAF/usage.md § "Per-Tool Activity Configuration".
+// HARNESS for docs/how-to/MAF/usage.md § "Tool Activity Ordering and Retry Policy".
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -14,28 +15,23 @@ internal static class PerToolActivityConfiguration
         AIFunction lookupOrderTool,
         AIFunction sendEmailTool)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/usage.md#per-tool-activity-configuration (lines 872-893)
+        // BEGIN SNIPPET docs/how-to/MAF/usage.md#tool-activity-ordering-and-retry-policy (lines 1090-1115)
         builder.Services.AddTemporalClient("localhost:7233", "default");
 
         builder.Services
             .AddHostedTemporalWorker("agents")
-            .AddTemporalAgents(opts =>
-            {
-                opts.AddDurableAgent("SupportAgent", agent =>
-                {
-                    agent.Instructions = "You help customers with support requests.";
-                    agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-
-                    // Read tool — no per-tool policy, so it falls through to agent.RetryPolicy,
-                    // then opts.DefaultRetryPolicy, then the bounded five-attempt backstop.
-                    agent.AddTool(lookupOrderTool);
-
-                    // Write tool — bind NoRetry() to the AIFunction reference. Cannot mistype the name.
-                    agent.AddTool(sendEmailTool, opts => opts.NoRetry().WithTimeout(TimeSpan.FromSeconds(30)));
-
-                    agent.MaxToolCallsPerTurn = 10;
-                });
-            });
-        // END SNIPPET docs/how-to/MAF/usage.md#per-tool-activity-configuration
+            .AddTemporalAgents(agents =>
+                agents.Agent(
+                    "SupportAgent",
+                    new ChatClientAgentOptions
+                    {
+                        ChatOptions = new ChatOptions
+                        {
+                            Instructions = "You help customers with support requests.",
+                            Tools = [lookupOrderTool, sendEmailTool],
+                        },
+                },
+                _ => { }));
+        // END SNIPPET docs/how-to/MAF/usage.md#tool-activity-ordering-and-retry-policy
     }
 }

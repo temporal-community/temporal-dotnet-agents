@@ -52,13 +52,13 @@ builder.Services.AddTemporalClient("localhost:7233", "default");
 builder.Services
     .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(agents =>
-        agents.AddTemporalAgent(
+        agents.Agent(
             "MyAgent",
             new ChatClientAgentOptions
-        {
+            {
                 ChatOptions = new ChatOptions { Instructions = "You are a helpful assistant." },
             },
-            new TemporalAgentOptions { TimeToLive = TimeSpan.FromHours(24) }));
+            temporal => temporal.TimeToLive = TimeSpan.FromHours(24)));
 
 using var host = builder.Build();
 await host.StartAsync();
@@ -101,16 +101,15 @@ topology. It is validated against tracked sample projects.
 
 ## Documentation
 
-- [Durable approvals](../../docs/concepts/durable-approvals.md) — shared approval lifecycle and the MAF-only scope boundary
+- [Durable approvals](../../docs/concepts/durable-approvals.md) — shared per-call approval lifecycle
 
 ### How-To Guides
 
-- [Usage Guide](../../docs/how-to/MAF/usage.md) — structured output, orchestration, HITL, scheduling, OTel, and more
+- [Usage Guide](../../docs/how-to/MAF/usage.md) — structured output, orchestration, HITL, OTel, and more
 - [Routing Patterns](../../docs/how-to/MAF/routing.md) — static and dynamic workflow-based routing
 - [Testing Agents](../../docs/how-to/MAF/testing-agents.md) — unit and integration testing patterns
 - [Observability](../../docs/how-to/MAF/observability.md) — OpenTelemetry spans, search attributes, and operational queries
 - [Intercepting LLM Calls](../../docs/how-to/MAF/llm-call-interception.md) — per-LLM-call observability via a decorated `agent.ChatClient`
-- [Scheduling](../../docs/how-to/MAF/scheduling.md) — recurring and one-time agent runs, lifecycle management
 - [Structured Output](../../docs/how-to/MAF/structured-output.md) — typed responses with `RunStructuredAsync<T>`, fence stripping, and retry
 - [Human-in-the-Loop](../../docs/how-to/MAF/hitl-patterns.md) — approval gates, dashboards, timeouts, and testing
 - [History & Token Optimization](../../docs/how-to/MAF/prompt-caching.md) — managing conversation history and reducing costs
@@ -123,7 +122,7 @@ topology. It is validated against tracked sample projects.
 - [Session StateBag & Context Providers](../../docs/architecture/MAF/session-statebag-and-context-providers.md) — AIContextProvider integration and StateBag persistence
 - [Bounded Durable `ChatClientAgent` Compatibility](../../docs/architecture/MAF/bounded-durable-agent-compatibility.md) — supported agent/provider inputs and exclusions
 - [Pub/Sub & Event-Driven Patterns](../../docs/architecture/MAF/pub-sub-and-event-driven.md) — Temporal equivalents of pub/sub fan-out
-- [Agent-to-Agent Communication](../../docs/architecture/MAF/agent-to-agent-communication.md) — sub-agent calls, parallel fan-out, and cross-workflow signaling
+- [Agent Orchestration](../../docs/architecture/MAF/agent-to-agent-communication.md) — activity-based calls, parallel fan-out, and cross-workflow signaling
 
 ### External References
 
@@ -148,10 +147,9 @@ Key benefits over in-memory agent frameworks:
 
 - Durable multi-turn conversations with automatic history management
 - Workflow-based routing — durable, observable, and fully under your control
-- Parallel agent execution inside workflows (`ExecuteAgentsInParallelAsync`)
+- Activity-based parallel agent orchestration from regular workflows
 - Human-in-the-loop approval gates via `[WorkflowUpdate]`
 - Typed structured output with `RunStructuredAsync<T>` (markdown fence stripping + retry)
-- Recurring and one-time scheduled agent runs
 - MCP tool integration through ordinary `AddTool`/`AddTools` registration; see the
   [MCP guide](../../docs/how-to/MAF/mcp-tools.md)
 - External memory with `AIContextProvider` and `AgentSessionStateBag` persistence
@@ -224,10 +222,8 @@ An empty bag reports zero because durable agent workflows omit it from the paylo
 ## Core Components
 
 - **`AgentWorkflow`** — Long-lived workflow with `[WorkflowUpdate]` for request/response
-- **`AgentJobWorkflow`** — Fire-and-forget workflow for scheduled and deferred runs
-- **`TemporalAIAgent`** — For use inside Temporal workflows (via `GetTemporalAgent`)
-- **`TemporalAIAgentProxy`** — For external callers (via `GetTemporalAgentProxy`)
-- **`ITemporalAgentClient`** — Update-based client with routing, scheduling, and HITL support
+- **`TemporalAIAgentProxy`** — For external callers and activity-based invocation from regular workflows (via `GetTemporalAgentProxy`)
+- **`ITemporalAgentClient`** — Update-based client with routing and HITL support
 - **`TemporalAgentContext`** — Async-local context for agent tools running inside activities
 - **`StructuredOutputExtensions`** — `RunStructuredAsync<T>` with markdown fence stripping and retry
 - **`IAgentToolInterceptor`** (`TemporalCommunity.Extensions.Agents.Tools`) — pre-tool lifecycle hook; extends `IDurableToolInterceptor<AgentToolContext>` from `TemporalCommunity.Extensions.AI.Tools`; return `DurableToolDecision.Proceed/PauseForApproval/Skip/Block`
@@ -236,7 +232,7 @@ An empty bag reports zero because durable agent workflows omit it from the paylo
 
 This library depends on `TemporalCommunity.Extensions.AI`. Installing `TemporalCommunity.Extensions.Agents` pulls in `TemporalCommunity.Extensions.AI` automatically — no separate package reference is needed.
 
-The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI.Approvals`. Use the package-specific typed client for one-call decisions. MAF reusable session grants are available only through the explicitly registered `ITemporalAgentApprovalScopeAdministration` service.
+The shared HITL types (`DurableApprovalRequest`, `DurableApprovalDecision`) are defined in `TemporalCommunity.Extensions.AI.Approvals`. Use the package-specific typed client for one-call decisions.
 
 `TemporalAgentDataConverter` is auto-wired by `AddTemporalAgents()` for the standard registration
 patterns (3-arg `AddHostedTemporalWorker` and `AddTemporalClient`). If an application creates a

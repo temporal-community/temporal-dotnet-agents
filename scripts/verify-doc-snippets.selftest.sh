@@ -89,7 +89,7 @@ temporal_registration_doc='# Example
 ## MAF registration
 
 ```csharp
-agents.AddTemporalAgent("A", new ChatClientAgentOptions());
+agents.Agent("A", new ChatClientAgentOptions());
 ```'
 temporal_registration_snippet='// BEGIN SNIPPET docs/how-to/MAF/example.md#maf-registration
 // END SNIPPET docs/how-to/MAF/example.md#maf-registration'

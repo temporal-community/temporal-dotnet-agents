@@ -3,10 +3,10 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
-using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Client;
 using Temporalio.Exceptions;
 using Temporalio.Extensions.Hosting;
@@ -48,7 +48,7 @@ public class WorkerModelContextBudgetTests
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
 
             var oversizedSession = (TemporalAgentSession)await proxy.CreateSessionAsync();
-            var firstFailure = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(
+            var firstFailure = await Assert.ThrowsAsync<DurableTurnFailedException>(
                 () => proxy.RunAsync(
                     new string('x', 70), oversizedSession, cancellationToken: deadline.Token));
             AssertBudgetFailure(firstFailure);
@@ -59,85 +59,11 @@ public class WorkerModelContextBudgetTests
             Assert.Equal("done", response.Messages[^1].Text);
             Assert.Equal(1, client.CallCount);
 
-            var laterFailure = await Assert.ThrowsAsync<WorkflowUpdateFailedException>(
+            var laterFailure = await Assert.ThrowsAsync<DurableTurnFailedException>(
                 () => proxy.RunAsync(
                     new string('x', 70), session, cancellationToken: deadline.Token));
             AssertBudgetFailure(laterFailure);
             Assert.Equal(1, client.CallCount);
-        }
-        finally
-        {
-            await worker.StopAsync();
-        }
-    }
-
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task SubagentAndJob_EnforceWorkerBudget_OnFirstAndLaterModelSteps(
-        bool job,
-        bool afterTool)
-    {
-        await using var environment = await TestEnvironmentHelper.StartLocalAsync();
-        environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
-        var queue = $"dispatch-budget-{Guid.NewGuid():N}";
-        var client = new RecordingChatClient(returnToolCall: afterTool);
-        using var worker = BuildWorker(environment.Client, queue, client);
-        await worker.StartAsync();
-        try
-        {
-            var text = afterTool ? "small" : new string('x', 70);
-            WorkflowHandle handle;
-            if (job)
-            {
-                var input = DefaultTemporalAgentClient.BuildAgentJobInput(
-                    AgentName,
-                    new RunRequest(text),
-                    worker.Services.GetRequiredService<TemporalAgentsOptions>(),
-                    queue);
-                handle = await environment.Client.StartWorkflowAsync(
-                    (AgentJobWorkflow workflow) => workflow.RunAsync(input),
-                    new WorkflowOptions($"ta-BudgetAgent-scheduled-{Guid.NewGuid():N}", queue));
-            }
-            else
-            {
-                handle = await environment.Client.StartWorkflowAsync(
-                    (BudgetSubagentWorkflow workflow) => workflow.RunAsync(text),
-                    new WorkflowOptions($"budget-parent-{Guid.NewGuid():N}", queue));
-            }
-
-            if (job)
-            {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-                var failure = await Assert.ThrowsAsync<WorkflowFailedException>(
-                    () => handle.GetResultAsync(
-                        rpcOptions: new RpcOptions { CancellationToken = deadline.Token }));
-                AssertBudgetFailure(failure);
-            }
-            else
-            {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-                var history = await handle.FetchHistoryAsync();
-                while (!history.Events.Any(item =>
-                    item.ActivityTaskFailedEventAttributes?.Failure.ApplicationFailureInfo?.Type
-                    == "DurableContextBudgetExceeded"))
-                {
-                    deadline.Token.ThrowIfCancellationRequested();
-                    await Task.Delay(TimeSpan.FromMilliseconds(50), deadline.Token);
-                    history = await handle.FetchHistoryAsync();
-                }
-
-                var failedStep = Assert.Single(history.Events, item =>
-                    item.ActivityTaskFailedEventAttributes?.Failure.ApplicationFailureInfo?.Type
-                    == "DurableContextBudgetExceeded").ActivityTaskFailedEventAttributes!;
-                Assert.True(failedStep.Failure.ApplicationFailureInfo.NonRetryable);
-                Assert.Equal(afterTool ? 2 : 1, history.Events.Count(item =>
-                    item.ActivityTaskScheduledEventAttributes?.ActivityType.Name
-                    == "TemporalCommunity.Extensions.Agents.RunDurableAgentStep"));
-            }
-            Assert.Equal(afterTool ? 1 : 0, client.CallCount);
         }
         finally
         {
@@ -151,7 +77,6 @@ public class WorkerModelContextBudgetTests
         builder.Services.AddSingleton(temporalClient);
         builder.Services.AddSingleton<IDurableChatTokenEstimator>(new TextLengthEstimator());
         builder.Services.AddHostedTemporalWorker(queue)
-            .AddWorkflow<BudgetSubagentWorkflow>()
             .AddTemporalAgents(options =>
             {
                 options.EnableSearchAttributes = false;
@@ -181,18 +106,6 @@ public class WorkerModelContextBudgetTests
         }
 
         Assert.Fail($"Expected a model-context budget failure, got: {failure}");
-    }
-
-    [Workflow("WorkerModelContextBudget.Subagent")]
-    internal sealed class BudgetSubagentWorkflow
-    {
-        [WorkflowRun]
-        public async Task RunAsync(string text)
-        {
-            var agent = WorkflowAgents.GetTemporalAgent(AgentName);
-            var session = await agent.CreateSessionAsync();
-            await agent.RunAsync(text, session);
-        }
     }
 
     private sealed class TextLengthEstimator : IDurableChatTokenEstimator

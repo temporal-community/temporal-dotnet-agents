@@ -173,10 +173,8 @@ public class WorkerModelContextBudgetTests
         Assert.Equal(0, client.CallCount);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void InputBuilders_RejectInvalidInheritedBudget(bool job)
+    [Fact]
+    public void InputBuilder_RejectsInvalidInheritedBudget()
     {
         var options = new TemporalAgentsOptions { DefaultModelOutputTokenReserve = 40 };
         options.AddDurableAgent(AgentName, agent =>
@@ -186,17 +184,7 @@ public class WorkerModelContextBudgetTests
         });
 
         var failure = Assert.Throws<InvalidOperationException>(() =>
-        {
-            if (job)
-            {
-                DefaultTemporalAgentClient.BuildAgentJobInput(
-                    AgentName, new RunRequest("hello"), options, "worker");
-            }
-            else
-            {
-                DefaultTemporalAgentClient.BuildAgentWorkflowInputCore(AgentName, options, "worker");
-            }
-        });
+            DefaultTemporalAgentClient.BuildAgentWorkflowInputCore(AgentName, options, "worker"));
 
         Assert.Contains("effective model-context token budget", failure.Message);
     }

@@ -70,6 +70,10 @@ public sealed class DurableTurnOutcomeTooLargeException : InvalidOperationExcept
     /// <summary>Counts for all calls in the original turn.</summary>
     public DurableToolCallOutcomeCounts ToolCallCounts { get; }
 
+    /// <summary>Per-status counts for calls whose identities were not retained.</summary>
+    public DurableToolCallOutcomeCounts OmittedToolCallCounts =>
+        DurableToolCallSummaryBudget.GetOmittedCounts(ToolCallCounts, ToolCallSummaries);
+
     internal static DurableTurnOutcomeTooLargeException FromFailure(
         string message,
         Exception innerException)
@@ -81,6 +85,40 @@ public sealed class DurableTurnOutcomeTooLargeException : InvalidOperationExcept
             ?? throw new JsonException("The terminal-outcome failure details were missing.");
         return new DurableTurnOutcomeTooLargeException(details, innerException);
     }
+}
+
+/// <summary>
+/// A durable turn failed. Session state was rolled back, but dispatched external effects may
+/// have occurred. A retained request ID prevents a new turn, not activity retries within the turn.
+/// </summary>
+public sealed class DurableTurnFailedException : InvalidOperationException
+{
+    internal DurableTurnFailedException(DurableTurnFailureDetails details, Exception innerException)
+        : base(details.Message, innerException)
+    {
+        RequestId = details.RequestId;
+        ErrorType = details.ErrorType;
+        CommittedRevision = details.CommittedRevision;
+        ToolCallSummaries = details.ToolCallSummaries ?? [];
+        ToolCallSummariesTruncated = details.ToolCallSummariesTruncated;
+        ToolCallCounts = details.ToolCallCounts ?? new(0, 0, 0);
+    }
+
+    /// <summary>The failed logical request ID.</summary>
+    public string RequestId { get; }
+    /// <summary>The original failure type, bounded for transport.</summary>
+    public string ErrorType { get; }
+    /// <summary>The last committed session-state revision.</summary>
+    public long? CommittedRevision { get; }
+    /// <summary>Newest retained per-call identities and statuses; results are omitted.</summary>
+    public IReadOnlyList<DurableToolCallOutcomeSummary> ToolCallSummaries { get; }
+    /// <summary>Whether some call identities were omitted.</summary>
+    public bool ToolCallSummariesTruncated { get; }
+    /// <summary>Per-status counts for all calls.</summary>
+    public DurableToolCallOutcomeCounts ToolCallCounts { get; }
+    /// <summary>Per-status counts for calls whose identities were not retained.</summary>
+    public DurableToolCallOutcomeCounts OmittedToolCallCounts =>
+        DurableToolCallSummaryBudget.GetOmittedCounts(ToolCallCounts, ToolCallSummaries);
 }
 
 /// <summary>The outcome status recorded for one tool call in a compact terminal outcome.</summary>

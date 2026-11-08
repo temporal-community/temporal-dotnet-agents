@@ -13,7 +13,7 @@ internal static class WorkflowParkedApproval
         options.AddDurableAgent("Operations", agent =>
         {
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-            agent.AddTool(sendEmail, tool => tool.NoRetry().RequireApproval());
+            agent.AddTool(sendEmail, tool => tool.RequireApproval());
         });
         // END SNIPPET docs/how-to/MAF/hitl-patterns.md#workflow-parked-approval
     }

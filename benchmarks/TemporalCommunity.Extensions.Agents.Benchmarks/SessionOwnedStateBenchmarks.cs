@@ -124,7 +124,7 @@ public class SessionOwnedStateBenchmarks
 
             if (_hasToolRound)
             {
-                carriedBag = StateBagMerge.Merge(carriedBag, _toolWriteBacks, alwaysScopesStoreKey: null);
+                carriedBag = StateBagMerge.Merge(carriedBag, _toolWriteBacks);
             }
 
             history.Add(BuildResponse(turn));

@@ -71,13 +71,9 @@ over an extension method. An extension with that name is unreachable from the ca
 people write, and the only symptom is a quietly different return type. `RunStructuredAsync<T>`
 cannot be shadowed, and the call site says which behaviour is in play.
 
-### Available on all three receivers
+### Available on the registered proxy and client
 
 ```csharp
-// Inside a workflow
-var agent = WorkflowAgents.GetTemporalAgent("AnalystAgent");
-var analysis = await agent.RunStructuredAsync<AnalysisResult>(messages, session);
-
 // External caller
 var proxy = services.GetTemporalAgentProxy("AnalystAgent");
 var analysis = await proxy.RunStructuredAsync<AnalysisResult>(messages, session);

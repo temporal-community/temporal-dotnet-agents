@@ -18,7 +18,7 @@ MAF's own built-in providers (`TodoProvider`, `AgentModeProvider`, and the rest)
 - **Stateless providers need no StateBag.** `DateTimeProvider` computes its value on the fly and returns it directly — showing that `StateBag` is opt-in.
 - **Model context is bounded separately from Temporal payloads.** The sample configures an estimated 8192-token input limit plus a 1024-token output reserve. Provider-added messages and instructions are checked before the model call; over-budget protected content fails visibly instead of being silently dropped.
 - **Failures report recovery identity and call outcomes.** Each turn supplies a request ID. The sample reports typed failures or retained compact/minimal records rather than silently retrying with a new ID. Provider state rolls back on failure, but external effects do not; timeout or lost completion is an uncertain outcome. An application needing recovery after a process crash must persist its request ID before submitting the turn.
-- **`BackgroundAgentsProvider` is not supported.** It holds live `Task<T>` references that cannot survive serialization. Use `WorkflowAgents.ExecuteAgentsInParallelAsync` for parallel agent fan-out instead.
+- **`BackgroundAgentsProvider` is not supported.** It holds live `Task<T>` references that cannot survive serialization. For parallel agent fan-out, a regular workflow can schedule one activity per registered proxy and await them with `Workflow.WhenAllAsync`; see the [routing guide](../../../docs/how-to/MAF/routing.md#retry-identity-and-parallel-calls).
 
 ## Getting Started
 

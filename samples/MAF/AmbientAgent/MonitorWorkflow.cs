@@ -1,7 +1,6 @@
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
+using TemporalCommunity.Extensions.Agents;
 
 namespace AmbientAgent;
 
@@ -86,17 +85,11 @@ public class MonitorWorkflow
 
             // Analyze only the most recent AnalysisInterval readings, not the full buffer.
             var summary = FormatReadingsForAnalysis(_buffer.TakeLast(input.AnalysisInterval));
-            var analysisAgent = GetTemporalAgent("AnalysisAgent");
-
-            // Fresh session per cycle: each LLM call is a stateless analysis of the current window.
-            // To accumulate cross-cycle conversation history, store the session in a field and reuse it.
-            var session = await analysisAgent.CreateSessionAsync().ConfigureAwait(true);
-
-            var response = await analysisAgent.RunAsync(
-                [new ChatMessage(ChatRole.User, summary)],
-                session).ConfigureAwait(true);
-
-            var analysisResult = response.Text ?? string.Empty;
+            var sessionId = WorkflowAgents.NewAgentSessionId("AnalysisAgent");
+            var analysisResult = await Workflow.ExecuteActivityAsync(
+                (AgentInvocationActivities activities) => activities.RunAsync(
+                    "AnalysisAgent", sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), summary),
+                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
             _recentAnalyses.Enqueue(analysisResult);
 
             // Keep only the last 10 analyses in memory.

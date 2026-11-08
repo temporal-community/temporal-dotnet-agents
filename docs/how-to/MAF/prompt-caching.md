@@ -213,29 +213,34 @@ After TTL expires, the next message starts a fresh session with empty history.
 
 ### 2. Summarize History Before Sending
 
-Create a summarization step inside a workflow that condenses long histories before passing to a specialist agent:
+Create a summarization step inside a workflow that condenses long histories before passing the
+result to a specialist. Invoke both registered agents through activities:
 
 ```csharp
 [WorkflowRun]
 public async Task<string> RunAsync(string question)
 {
-    var researcher = GetTemporalAgent("Researcher");
-    var session = await researcher.CreateSessionAsync();
-
-    // Multiple turns build up history on the researcher agent
-    for (int i = 0; i < 5; i++)
+    var researchSession = WorkflowAgents.NewAgentSessionId("Researcher");
+    string lastResponse = string.Empty;
+    for (var i = 0; i < 5; i++)
     {
-        await researcher.RunAsync($"Research step {i}", session);
+        lastResponse = await Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                "Researcher",
+                researchSession.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                $"Research step {i}: {question}"),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
     }
 
-    // Summarize the researcher's findings with a fresh agent (no history baggage)
-    var summarizer = GetTemporalAgent("Summarizer");
-    var sumSession = await summarizer.CreateSessionAsync();
-    var summary = await summarizer.RunAsync(
-        $"Summarize these findings concisely: {lastResponse.Text}",
-        sumSession);
-
-    return summary.Text ?? string.Empty;
+    var summarySession = WorkflowAgents.NewAgentSessionId("Summarizer");
+    return await Workflow.ExecuteActivityAsync(
+        (AgentInvocationActivities activities) => activities.RunAsync(
+            "Summarizer",
+            summarySession.WorkflowId,
+            Workflow.NewGuid().ToString("N"),
+            $"Summarize these findings concisely: {lastResponse}"),
+        new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
 }
 ```
 
@@ -263,7 +268,6 @@ var session = new TemporalAgentSessionId("AnalystAgent", Guid.NewGuid().ToString
 var response = await client.SendAsync(session, new RunRequest("Analyze this data: ..."));
 ```
 
-Or use `AgentJobWorkflow` via scheduling, which always starts with empty history.
 
 > **Note:** The `RunAgentAsync(string agentName, string message)` convenience overload is deprecated. Use `SendAsync(TemporalAgentSessionId, RunRequest)` directly.
 

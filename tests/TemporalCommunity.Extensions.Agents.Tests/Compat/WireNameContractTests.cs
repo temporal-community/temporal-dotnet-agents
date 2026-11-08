@@ -16,7 +16,7 @@ namespace TemporalCommunity.Extensions.Agents.Tests.Compat;
 /// <para>
 /// <b>Purpose.</b> Temporal workflow and activity type names are part of the
 /// wire protocol. Any rename — even a "safe" refactor rename — breaks in-flight
-/// sessions, history replay, and scheduled workflows. These tests pin the exact
+/// sessions and history replay. These tests pin the exact
 /// strings so that a rename is a compile-level CI failure, not a silent runtime break.
 /// This is the cheap tripwire that would have caught the <c>Temporalio.Extensions.*</c> →
 /// <c>TemporalCommunity.Extensions.*</c> rebrand if a string were missed.
@@ -59,7 +59,6 @@ public class WireNameContractTests
 
         // Agents library
         "TemporalCommunity.Extensions.Agents.AgentWorkflow",
-        "TemporalCommunity.Extensions.Agents.AgentJobWorkflow",
     };
 
     /// <summary>
@@ -78,6 +77,9 @@ public class WireNameContractTests
         "TemporalCommunity.Extensions.AI.ResolveDurableToolsets",
 
         // Agents library activities
+        "TemporalCommunity.Extensions.Agents.PrepareAgentTurn",
+        "TemporalCommunity.Extensions.Agents.CompleteAgentTurn",
+        "TemporalCommunity.Extensions.Agents.InitializeChatHistoryMemory",
         "TemporalCommunity.Extensions.Agents.ReduceHistoryByKey",
         "TemporalCommunity.Extensions.Agents.RunDurableAgentStep",
         "TemporalCommunity.Extensions.Agents.RunToolInterceptor",

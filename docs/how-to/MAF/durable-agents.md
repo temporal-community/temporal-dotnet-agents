@@ -60,7 +60,10 @@ builder.Services
 
 The library composes the chat pipeline internally — the registration above is the whole story, with no extra bootstrap or wiring on your side.
 
-To use the agent, call `WorkflowAgents.GetTemporalAgent("RefundAgent")` inside a workflow (see [`usage.md`](./usage.md)), or `services.GetTemporalAgentProxy("RefundAgent")` from external code.
+To use the agent from a regular workflow, invoke `services.GetTemporalAgentProxy("RefundAgent")`
+inside a scoped activity and pass workflow-generated session and request IDs (see
+[`usage.md`](./usage.md#invoking-agents-from-a-workflow)). External callers resolve the registered
+proxy from their service provider.
 
 ## Fluent sugar on `DurableToolOptions`
 
@@ -72,8 +75,6 @@ opts => opts.SkipInterceptor()                      // bypass IAgentToolIntercep
 opts => opts.WithInterceptorTimeout(TimeSpan.FromSeconds(10))  // per-tool interceptor activity timeout
 opts => opts.RequireApproval()                      // absolute floor: always pause for human approval
                                                     // even if the interceptor returns Proceed
-opts => opts.ScopeAware()                           // opt in to expiring-grant auto-approval —
-                                                    // requires agent.UseApprovalScopes(); see hitl-patterns.md
 ```
 
 `RequireApproval()` and `PauseForApproval` are the two workflow-parked HITL triggers — the turn loop parks (no activity pinned) and retry-safe `ResolveApprovalAsync` unblocks it. This differs from the in-tool path (`TemporalAgentContext.Current.RequestApprovalAsync`), which keeps the activity running and heartbeating while waiting. See [HITL Patterns](./hitl-patterns.md) for a full comparison and the `IAgentToolInterceptor` registration pattern.

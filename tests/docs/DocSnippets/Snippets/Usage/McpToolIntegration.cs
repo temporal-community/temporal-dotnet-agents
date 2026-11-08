@@ -38,7 +38,7 @@ internal static class McpToolIntegration
                     agent.Instructions = "You can call the configured MCP tools.";
                     agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
                     agent.AddTool(lookup);
-                    agent.AddTool(delete, policy => policy.NoRetry().RequireApproval());
+                    agent.AddTool(delete, policy => policy.RequireApproval());
                 });
             });
         // END SNIPPET docs/how-to/MAF/usage.md#mcp-tool-integration

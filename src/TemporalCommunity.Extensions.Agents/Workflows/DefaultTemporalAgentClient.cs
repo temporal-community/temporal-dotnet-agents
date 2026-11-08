@@ -4,14 +4,13 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
-using Temporalio.Client.Schedules;
 using Temporalio.Common;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tools;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
+using Temporalio.Exceptions;
 using Temporalio.Workflows;
 
 namespace TemporalCommunity.Extensions.Agents.Workflows;
@@ -83,6 +82,39 @@ internal sealed class DefaultTemporalAgentClient(
 
         _logger.LogClientUpdateCompleted(sessionId.AgentName, sessionId.WorkflowId);
         return response;
+    }
+
+    /// <inheritdoc/>
+    public async Task<TemporalAgentTurnOutcome> GetTurnOutcomeAsync(
+        TemporalAgentSessionId sessionId,
+        string requestId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+
+        var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
+        TemporalAgentTurnOutcome? outcome;
+        try
+        {
+            outcome = await handle.QueryAsync<AgentWorkflow, TemporalAgentTurnOutcome?>(
+                workflow => workflow.GetTurnOutcome(requestId),
+                new WorkflowQueryOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } })
+                .ConfigureAwait(false);
+        }
+        catch (RpcException exception) when (
+            exception.Code == RpcException.StatusCode.NotFound
+            && exception.GrpcStatus.Value is { Details.Count: 1 } status
+            && status.Details[0].TryUnpack(
+                out Temporalio.Api.ErrorDetails.V1.NotFoundFailure _))
+        {
+            outcome = null;
+        }
+
+        return outcome ?? new TemporalAgentTurnOutcome
+        {
+            RequestId = requestId,
+            Status = TemporalAgentTurnOutcomeStatus.Unavailable,
+        };
     }
 
     /// <inheritdoc/>
@@ -196,109 +228,6 @@ internal sealed class DefaultTemporalAgentClient(
     }
 
     /// <inheritdoc/>
-    public async Task RunAgentDelayedAsync(
-        TemporalAgentSessionId sessionId,
-        RunRequest request,
-        TimeSpan delay,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
-            TemporalAgentTelemetry.AgentScheduleDelayedSpanName,
-            ActivityKind.Client);
-
-        span?.SetTag(TemporalAgentTelemetry.AgentNameAttribute, sessionId.AgentName);
-        span?.SetTag(TemporalAgentTelemetry.AgentSessionIdAttribute, sessionId.WorkflowId);
-        span?.SetTag(TemporalAgentTelemetry.ScheduleDelayAttribute, delay.ToString());
-
-        _logger.LogClientDelayedStart(sessionId.AgentName, sessionId.WorkflowId, delay);
-
-        var workflowOptions = new WorkflowOptions(sessionId.WorkflowId, taskQueue)
-        {
-            IdConflictPolicy = WorkflowIdConflictPolicy.Fail,
-            IdReusePolicy = WorkflowIdReusePolicy.AllowDuplicate,
-            StartDelay = delay,
-        };
-        try
-        {
-            var input = BuildAgentWorkflowInput(sessionId.AgentName) with
-            {
-                InitialFireAndForgetRequest = request,
-            };
-            workflowOptions.Rpc = new RpcOptions { CancellationToken = cancellationToken };
-            await client.StartWorkflowAsync(
-                (AgentWorkflow wf) => wf.RunAsync(input),
-                workflowOptions).ConfigureAwait(false);
-        }
-        catch (Temporalio.Exceptions.WorkflowAlreadyStartedException)
-        {
-            var handle = client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId);
-            await handle.ExecuteUpdateAsync(
-                workflow => workflow.RunAgentFireAndForgetAsync(request),
-                new WorkflowUpdateOptions
-                {
-                    Rpc = new RpcOptions { CancellationToken = cancellationToken },
-                }).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            span?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            throw;
-        }
-    }
-
-    /// <inheritdoc/>
-    public async Task<ScheduleHandle> ScheduleAgentAsync(
-        string agentName,
-        string scheduleId,
-        RunRequest request,
-        ScheduleSpec spec,
-        SchedulePolicy? policy = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(spec);
-
-        var workflowId = $"ta-{agentName.ToLowerInvariant()}-scheduled-{scheduleId}";
-
-        var action = ScheduleActionStartWorkflow.Create(
-            (AgentJobWorkflow wf) => wf.RunAsync(BuildAgentJobInput(agentName, request, options, taskQueue)),
-            new WorkflowOptions(workflowId, taskQueue));
-
-        using var span = TemporalAgentTelemetry.ActivitySource.StartActivity(
-            TemporalAgentTelemetry.AgentScheduleCreateSpanName,
-            ActivityKind.Client);
-
-        span?.SetTag(TemporalAgentTelemetry.AgentNameAttribute, agentName);
-        span?.SetTag(TemporalAgentTelemetry.ScheduleIdAttribute, scheduleId);
-
-        _logger.LogScheduleAgentCreating(scheduleId, agentName);
-
-        try
-        {
-            return await client.CreateScheduleAsync(
-                scheduleId,
-                new Schedule(action, spec) { Policy = policy ?? new SchedulePolicy() },
-                new ScheduleOptions { Rpc = new RpcOptions { CancellationToken = cancellationToken } }).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            span?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            throw;
-        }
-    }
-
-    /// <inheritdoc/>
-    public ScheduleHandle GetAgentScheduleHandle(string scheduleId)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(scheduleId);
-        return client.GetScheduleHandle(scheduleId);
-    }
-
-    /// <inheritdoc/>
     public async Task ShutdownAsync(
         TemporalAgentSessionId sessionId,
         CancellationToken cancellationToken = default)
@@ -376,36 +305,20 @@ internal sealed class DefaultTemporalAgentClient(
         // Feature L: pre-compute interceptor config (interceptor presence + skip/require-approval lists).
         // requiresApprovalTools is populated unconditionally — RequireApproval() is an absolute
         // floor that must be enforced even when no tool interceptor is registered (BLOCK-2 fix).
-        // Feature B: scope-aware required tools (RequireApproval + ScopeAware) are excluded from
-        // requiresApprovalTools and added to scopeAwareApprovalTools instead so GetEffectiveOutcome
-        // does not enforce Rule 2 for them (the interceptor is responsible for approval gating).
         var hasInterceptor = registration.ToolInterceptorFactory is not null
                            || options.DefaultToolInterceptor is not null;
         ActivityOptions? interceptorActivityOpts = null;
         List<string>? interceptorSkippedTools = null;
         List<string>? requiresApprovalTools = null;
-        List<string>? scopeAwareTools = null;
-        List<string>? scopeAwareApprovalTools = null;
 
         foreach (var toolReg in registration.Tools)
         {
             var toolOpts = toolReg.Options;
-            // RequiresApprovalTools exclusion guard (Task 3.4 / spec Section 13):
-            // Only non-scope-aware required tools enter the absolute approval floor.
-            if (toolOpts.RequireApprovalFlag && !toolOpts.ScopeAwareFlag)
+            if (toolOpts.RequireApprovalFlag)
             {
                 (requiresApprovalTools ??= []).Add(toolReg.Name);
             }
 
-            // Scope-aware tool lists.
-            if (toolOpts.ScopeAwareFlag)
-            {
-                (scopeAwareTools ??= []).Add(toolReg.Name);
-                if (toolOpts.RequireApprovalFlag)
-                {
-                    (scopeAwareApprovalTools ??= []).Add(toolReg.Name);
-                }
-            }
         }
 
         Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
@@ -440,54 +353,6 @@ internal sealed class DefaultTemporalAgentClient(
             }
         }
 
-        // Feature B: resolve approval-scopes config.
-        var useApprovalScopes = registration.UseApprovalScopes;
-        int maxAlwaysScopeCacheRecords = 0;
-        int maxAlwaysScopeCacheBytes = 0;
-
-        if (useApprovalScopes)
-        {
-            // DefaultToolInterceptor incompatibility check (spec Section 8 / Task 3.4).
-            if (options.DefaultToolInterceptor is not null)
-            {
-                throw new InvalidOperationException(
-                    "UseApprovalScopes() cannot be combined with TemporalAgentsOptions.DefaultToolInterceptor. " +
-                    "This release does not compose approval scopes with worker-default tool interceptors. " +
-                    "Remove DefaultToolInterceptor from TemporalAgentsOptions or do not call UseApprovalScopes() on this agent.");
-            }
-
-            var scopeOpts = registration.ApprovalScopesOptions!;
-
-            // Options validation (positive bounds).
-            if (scopeOpts.MaxSessionScopeRecords <= 0)
-                throw new InvalidOperationException($"ApprovalScopesOptions.MaxSessionScopeRecords for agent '{agentName}' must be a positive integer.");
-            if (scopeOpts.MaxSessionScopeBytes <= 0)
-                throw new InvalidOperationException($"ApprovalScopesOptions.MaxSessionScopeBytes for agent '{agentName}' must be a positive integer.");
-
-            maxAlwaysScopeCacheRecords = scopeOpts.MaxSessionScopeRecords;
-            maxAlwaysScopeCacheBytes = scopeOpts.MaxSessionScopeBytes;
-        }
-
-        // Startup validation for scope-aware required tools without UseApprovalScopes.
-        // (Also enforced in DurableAgentBuilder.ToRegistration but validated again here as defense-in-depth.)
-        foreach (var toolReg in registration.Tools)
-        {
-            var toolOpts = toolReg.Options;
-            if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && !useApprovalScopes)
-            {
-                throw new InvalidOperationException(
-                    $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{agentName}'. " +
-                    "Call UseApprovalScopes() before registering scope-aware required tools.");
-            }
-
-            if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && toolOpts.SkipInterceptorFlag)
-            {
-                throw new InvalidOperationException(
-                    $"Tool '{toolReg.Name}' cannot combine RequireApproval(), ScopeAware(), and SkipInterceptor(); approval " +
-                    "scopes require the interceptor to enforce the missing-scope approval gate.");
-            }
-        }
-
         return new AgentWorkflowInput
         {
             AgentName = agentName,
@@ -515,174 +380,7 @@ internal sealed class DefaultTemporalAgentClient(
                 InterceptorToolActivityOptions = perToolInterceptorOpts,
                 InterceptorSkippedTools = interceptorSkippedTools,
                 RequiresApprovalTools = requiresApprovalTools,
-                ScopeAwareTools = scopeAwareTools,
-                ScopeAwareApprovalTools = scopeAwareApprovalTools,
-                UseApprovalScopes = useApprovalScopes,
-                UseApprovalScopeStoreMode = false,
-                AlwaysScopesStoreKey = null,
-                ApplyAlwaysScopesAtSessionStart = false,
-                MaxAlwaysScopeCacheRecords = maxAlwaysScopeCacheRecords,
-                MaxAlwaysScopeCacheBytes = maxAlwaysScopeCacheBytes,
-                ApprovalScopeActivityTimeout = TimeSpan.Zero,
-                ApprovalScopeActivityMaximumAttempts = 0,
             },
-        };
-    }
-
-    /// <summary>
-    /// Builds a fully-populated <see cref="AgentJobInput"/> for a single fire-and-forget agent run.
-    /// Shared by <see cref="ScheduleAgentAsync"/> and <see cref="ScheduleActivities"/> so both paths
-    /// honour per-agent timeouts, per-tool options, and interceptor config.
-    /// </summary>
-    /// <exception cref="AgentNotRegisteredException">
-    /// No durable agent or proxy is registered with <paramref name="agentName"/>.
-    /// </exception>
-    /// <exception cref="InvalidOperationException">
-    /// The name identifies only a proxy, which does not provide the execution settings needed by
-    /// a stateless agent job.
-    /// </exception>
-    internal static AgentJobInput BuildAgentJobInput(
-        string agentName,
-        RunRequest request,
-        TemporalAgentsOptions options,
-        string taskQueue,
-        RetryPolicy? retryPolicyOverride = null)
-    {
-        if (!options.DurableAgentRegistrations.ContainsKey(agentName))
-        {
-            if (options.ProxyDeclarations.ContainsKey(agentName))
-            {
-                throw new InvalidOperationException(
-                    $"Cannot schedule stateless agent job '{agentName}' from a proxy-only client. " +
-                    "ScheduleAgentAsync must run in the process that registers the agent with " +
-                    "AddDurableAgent because the schedule action captures its tool and execution settings. " +
-                    "Use RunAgentDelayedAsync for a delayed full session from a split client process.");
-            }
-
-            throw new AgentNotRegisteredException(agentName);
-        }
-
-        var effectiveActivityTimeout = options.DefaultActivityTimeout;
-        var effectiveHeartbeatTimeout = options.DefaultHeartbeatTimeout;
-        // Bounded backstop (MaximumAttempts = 5) when unset — see DefaultRetryPolicy.
-        // retryPolicyOverride is the per-run value from OneTimeAgentRun.RetryPolicy and outranks
-        // both the per-agent and worker defaults; it is null on the ScheduleAgentAsync path.
-        var configuredRetryPolicy = retryPolicyOverride ?? options.DefaultRetryPolicy;
-        var effectiveModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
-            configuredRetryPolicy);
-        var effectiveToolRetryPolicy =
-            TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(null);
-        Dictionary<string, ActivityOptions>? toolActivityOptions = null;
-        ActivityOptions? interceptorActivityOpts = null;
-        Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
-        List<string>? interceptorSkippedTools = null;
-        List<string>? requiresApprovalTools = null;
-        List<string>? scopeAwareTools = null;
-        List<string>? scopeAwareApprovalTools = null;
-
-        if (options.DurableAgentRegistrations.TryGetValue(agentName, out var registration))
-        {
-            _ = AgentModelContextBudget.Resolve(registration, options);
-            effectiveActivityTimeout = registration.ActivityTimeout ?? options.DefaultActivityTimeout;
-            effectiveHeartbeatTimeout = registration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
-            configuredRetryPolicy = retryPolicyOverride ?? registration.RetryPolicy ?? options.DefaultRetryPolicy;
-            effectiveModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
-                configuredRetryPolicy);
-            effectiveToolRetryPolicy =
-                TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(registration.RetryPolicy);
-            toolActivityOptions = BuildDurableAgentToolActivityOptions(
-                registration, effectiveActivityTimeout, effectiveHeartbeatTimeout, effectiveToolRetryPolicy);
-
-            // Feature B: RequiresApprovalTools exclusion guard — scope-aware required tools
-            // go into scopeAwareApprovalTools, NOT requiresApprovalTools.
-            foreach (var toolReg in registration.Tools)
-            {
-                var toolOpts = toolReg.Options;
-                if (toolOpts.RequireApprovalFlag && !toolOpts.ScopeAwareFlag)
-                    (requiresApprovalTools ??= []).Add(toolReg.Name);
-
-                if (toolOpts.ScopeAwareFlag)
-                {
-                    (scopeAwareTools ??= []).Add(toolReg.Name);
-                    if (toolOpts.RequireApprovalFlag)
-                        (scopeAwareApprovalTools ??= []).Add(toolReg.Name);
-                }
-            }
-
-            // Feature B: DefaultToolInterceptor incompatibility check (same as workflow input path).
-            if (registration.UseApprovalScopes && options.DefaultToolInterceptor is not null)
-            {
-                throw new InvalidOperationException(
-                    "UseApprovalScopes() cannot be combined with TemporalAgentsOptions.DefaultToolInterceptor. " +
-                    "This release does not compose approval scopes with worker-default tool interceptors. " +
-                    "Remove DefaultToolInterceptor from TemporalAgentsOptions or do not call UseApprovalScopes() on this agent.");
-            }
-
-            // Feature B: startup validation for scope-aware required tools.
-            foreach (var toolReg in registration.Tools)
-            {
-                var toolOpts = toolReg.Options;
-                if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && !registration.UseApprovalScopes)
-                {
-                    throw new InvalidOperationException(
-                        $"Tool '{toolReg.Name}' has ScopeAware() set but approval scopes are not enabled on agent '{agentName}'. " +
-                        "Call UseApprovalScopes() before registering scope-aware required tools.");
-                }
-
-                if (toolOpts.RequireApprovalFlag && toolOpts.ScopeAwareFlag && toolOpts.SkipInterceptorFlag)
-                {
-                    throw new InvalidOperationException(
-                        $"Tool '{toolReg.Name}' cannot combine RequireApproval(), ScopeAware(), and SkipInterceptor(); approval " +
-                        "scopes require the interceptor to enforce the missing-scope approval gate.");
-                }
-            }
-
-            var hasInterceptor = registration.ToolInterceptorFactory is not null
-                              || options.DefaultToolInterceptor is not null;
-            if (hasInterceptor)
-            {
-                interceptorActivityOpts = new ActivityOptions
-                {
-                    StartToCloseTimeout = effectiveActivityTimeout,
-                    HeartbeatTimeout = effectiveHeartbeatTimeout,
-                    RetryPolicy = effectiveToolRetryPolicy,
-                };
-
-                foreach (var toolReg in registration.Tools)
-                {
-                    if (toolReg.Options.SkipInterceptorFlag)
-                        (interceptorSkippedTools ??= []).Add(toolReg.Name);
-
-                    if (toolReg.Options.InterceptorTimeout.HasValue)
-                    {
-                        perToolInterceptorOpts ??= new Dictionary<string, ActivityOptions>(StringComparer.OrdinalIgnoreCase);
-                        perToolInterceptorOpts[toolReg.Name] = new ActivityOptions
-                        {
-                            StartToCloseTimeout = toolReg.Options.InterceptorTimeout,
-                            HeartbeatTimeout = effectiveHeartbeatTimeout,
-                            RetryPolicy = effectiveToolRetryPolicy,
-                        };
-                    }
-                }
-            }
-        }
-
-        return new AgentJobInput
-        {
-            AgentName = agentName,
-            TaskQueue = taskQueue,
-            Request = request,
-            ActivityTimeout = effectiveActivityTimeout,
-            HeartbeatTimeout = effectiveHeartbeatTimeout,
-            RetryPolicy = effectiveModelRetryPolicy,
-            DurableAgentToolActivityOptions = toolActivityOptions,
-            MaxToolCallsPerTurn = registration?.MaxToolCallsPerTurn ?? 20,
-            InterceptorActivityOptions = interceptorActivityOpts,
-            InterceptorToolActivityOptions = perToolInterceptorOpts,
-            InterceptorSkippedTools = interceptorSkippedTools,
-            RequiresApprovalTools = requiresApprovalTools,
-            ScopeAwareTools = scopeAwareTools,
-            ScopeAwareApprovalTools = scopeAwareApprovalTools,
         };
     }
 

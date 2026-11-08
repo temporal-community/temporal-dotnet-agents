@@ -17,6 +17,9 @@ public sealed record DurableChatTerminalOutcome
     /// <summary>The bounded failure message for a failed turn, or null on success.</summary>
     public string? FailureMessage { get; init; }
 
-    /// <summary>Whether the recorded failure is non-retryable.</summary>
-    public bool FailureNonRetryable { get; init; }
+    /// <summary>
+    /// Whether the retained failure is non-retryable, or null when no failure classification
+    /// is retained. A retryable classification does not make external effects safe to repeat.
+    /// </summary>
+    public bool? FailureNonRetryable { get; init; }
 }

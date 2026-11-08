@@ -169,6 +169,9 @@ public class ProxyResolutionFailureTests
         public Task<AgentResponse> SendAsync(TemporalAgentSessionId session, RunRequest request, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
+        public Task<TemporalAgentTurnOutcome> GetTurnOutcomeAsync(TemporalAgentSessionId session, string requestId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
         public Task RunAgentFireAndForgetAsync(TemporalAgentSessionId session, RunRequest request, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
@@ -188,15 +191,6 @@ public class ProxyResolutionFailureTests
             => throw new NotImplementedException();
 
         public Task<TemporalCommunity.Extensions.AI.Approvals.DurableApprovalResolutionResult> ResolveApprovalAsync(TemporalAgentSessionId session, TemporalCommunity.Extensions.AI.Approvals.DurableApprovalDecision decision, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-
-        public Task RunAgentDelayedAsync(TemporalAgentSessionId session, RunRequest request, TimeSpan delay, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-
-        public Task<Temporalio.Client.Schedules.ScheduleHandle> ScheduleAgentAsync(string agentName, string scheduleId, RunRequest request, Temporalio.Client.Schedules.ScheduleSpec spec, Temporalio.Client.Schedules.SchedulePolicy? policy = null, CancellationToken cancellationToken = default)
-            => throw new NotImplementedException();
-
-        public Temporalio.Client.Schedules.ScheduleHandle GetAgentScheduleHandle(string scheduleId)
             => throw new NotImplementedException();
 
         public Task ShutdownAsync(TemporalAgentSessionId session, CancellationToken cancellationToken = default)

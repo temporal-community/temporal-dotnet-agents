@@ -388,19 +388,23 @@ public class ExtensibleDurableTurnIntegrationTests
     }
 
     [Theory]
-    [InlineData(800, 24)]
-    [InlineData(10000, 0)]
+    [InlineData(256, 72)]
+    [InlineData(257, 0)]
     public async Task InterruptedTurnHistory_ReservesIdentityBudgetBeforeDispatchingLaterBatches(
         int identityLength, int expectedInvocations)
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var invocations = 0;
-        var batches = Enumerable.Range(0, 4)
+        var batches = Enumerable.Range(0, 8)
             .Select(batch => new ChatResponse(new ChatMessage(
                 ChatRole.Assistant,
-                Enumerable.Range(0, 12).Select(index => (AIContent)new FunctionCallContent(
-                    $"{batch}-{index}-" + new string('i', identityLength), "success_tool")).ToList())))
+                Enumerable.Range(0, 12).Select(index =>
+                {
+                    var prefix = $"{batch}-{index}-";
+                    return (AIContent)new FunctionCallContent(
+                        prefix + new string('i', identityLength - prefix.Length), "success_tool");
+                }).ToList())))
             .ToArray();
         var model = new ScriptedChatClient(
         [
@@ -425,7 +429,9 @@ public class ExtensibleDurableTurnIntegrationTests
                 handle.ExecuteUpdateAsync<IntegrationDurableTurnWorkflow, DurableTurnResult<IntegrationTurnState>>(
                     wf => wf.TurnAsync(CreateRequest()),
                     new WorkflowUpdateOptions { Id = "identity-budget" }));
-            Assert.Equal("DurableInterruptionRecordBudgetExceeded",
+            Assert.Equal(expectedInvocations == 0
+                    ? "DurableToolCallIdTooLong"
+                    : "DurableInterruptionRecordBudgetExceeded",
                 Assert.IsType<Temporalio.Exceptions.ApplicationFailureException>(failure.InnerException).ErrorType);
             Assert.Equal(expectedInvocations, invocations);
             var retained = await handle.QueryAsync<IntegrationDurableTurnWorkflow, IReadOnlyList<DurableSessionEntry>>(

@@ -1,7 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode;
@@ -56,13 +55,9 @@ public sealed class ToolSelectionHistoryCaptureTests
 
     [Fact]
     public Task Capture_AgentWorkflow_BlockedToolCall() =>
-        CaptureAsync(CaptureKind.AgentWorkflow, "tool-selection-agent-workflow.json");
+        CaptureAsync();
 
-    [Fact]
-    public Task Capture_AgentJobWorkflow_BlockedToolCall() =>
-        CaptureAsync(CaptureKind.AgentJobWorkflow, "tool-selection-agent-job-workflow.json");
-
-    private static async Task CaptureAsync(CaptureKind kind, string filename)
+    private static async Task CaptureAsync()
     {
         await using var environment = await TestEnvironmentHelper.StartLocalAsync();
         environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
@@ -87,34 +82,17 @@ public sealed class ToolSelectionHistoryCaptureTests
         await host.StartAsync();
         try
         {
-            WorkflowHandle handle;
-            if (kind == CaptureKind.AgentWorkflow)
-            {
-                var proxy = host.Services.GetTemporalAgentProxy("ReplayAgent");
-                var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
-                await proxy.RunAsync(
-                    "Attempt the replay tool.",
-                    session,
-                    new TemporalAgentRunOptions { EnableToolCalls = false });
-                handle = environment.Client.GetWorkflowHandle(session.SessionId.WorkflowId);
-            }
-            else
-            {
-                var request = new RunRequest("Attempt the replay tool.", enableToolCalls: false);
-                var input = DefaultTemporalAgentClient.BuildAgentJobInput(
-                    "ReplayAgent",
-                    request,
-                    host.Services.GetRequiredService<TemporalAgentsOptions>(),
-                    taskQueue);
-                handle = await environment.Client.StartWorkflowAsync(
-                    (AgentJobWorkflow workflow) => workflow.RunAsync(input),
-                    new WorkflowOptions($"ta-replayagent-scheduled-{Guid.NewGuid():N}", taskQueue));
-                await handle.GetResultAsync();
-            }
+            var proxy = host.Services.GetTemporalAgentProxy("ReplayAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+            await proxy.RunAsync(
+                "Attempt the replay tool.",
+                session,
+                new TemporalAgentRunOptions { EnableToolCalls = false });
+            var handle = environment.Client.GetWorkflowHandle(session.SessionId.WorkflowId);
 
             Assert.Equal(0, recorder.CallCount);
             var history = await handle.FetchHistoryAsync();
-            await SaveHistoryAsync(filename, history);
+            await SaveHistoryAsync("tool-selection-agent-workflow.json", history);
         }
         finally
         {
@@ -134,9 +112,4 @@ public sealed class ToolSelectionHistoryCaptureTests
         await File.WriteAllTextAsync(Path.Combine(directory, filename), history.ToJson());
     }
 
-    private enum CaptureKind
-    {
-        AgentWorkflow,
-        AgentJobWorkflow,
-    }
 }

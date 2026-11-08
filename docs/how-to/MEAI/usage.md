@@ -47,6 +47,9 @@ retained response or bounded failure details, or `null` if the request has no re
 outcome. Matching retries are rejected before acceptance once admission is restricted or blocked;
 use the query to resolve the outcome instead. The ledger may evict old outcomes at its configured
 count or byte bound.
+`FailureNonRetryable` is nullable: `null` means no failure classification is retained (including
+compact outcomes and successful turns). A retryable classification does not make external tool
+effects safe to repeat; reconcile with the system of record.
 
 Phase 0 introduced no numeric ledger, joiner, token, event-reserve, or recovery limits; later units
 now define and test those boundaries explicitly rather than relying on provider or service payload

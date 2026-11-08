@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using Temporalio.Extensions.Hosting;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
+using TemporalCommunity.Extensions.Tests.Shared;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
@@ -120,7 +121,66 @@ public class AgentPipelineIntegrationTests
             Assert.Contains("again", secondResponse.Text);
             Assert.Equal(2, observation.BeforeCount);
             Assert.Equal(2, observation.AfterCount);
-            Assert.Equal(3, observation.ConstructionCount); // one startup validation + two activities
+            // Startup validation plus preparation, model, and completion for each turn.
+            Assert.Equal(7, observation.ConstructionCount);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ModelMiddleware_MultistepTurnRunsOnlyAtEachModelBoundary(bool retryFirstAttempt)
+    {
+        await using var environment = await TestEnvironmentHelper.StartLocalAsync();
+        environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var observation = new PipelineObservation();
+        var events = new ConcurrentQueue<string>();
+        var failuresRemaining = retryFirstAttempt ? 1 : 0;
+        var client = ScriptedChatClient.WithToolCallsThenFinal(
+            [new FunctionCallContent("boundary-call", "lookup", new Dictionary<string, object?>())],
+            "done");
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(environment.Client);
+        builder.Services
+            .AddHostedTemporalWorker($"middleware-boundary-{Guid.NewGuid():N}")
+            .AddTemporalAgents(options => options.AddDurableAgent("BoundaryAgent", agent =>
+            {
+                agent.ChatClient = _ => new ObservingChatClient(
+                    client, events, () => Interlocked.Exchange(ref failuresRemaining, 0) == 1);
+                agent.ConfigureAgentPipeline = pipeline => pipeline.Use(inner =>
+                    new ObservingDelegatingAgent(inner, observation, events));
+                agent.AddTool(AIFunctionFactory.Create(() =>
+                {
+                    events.Enqueue("tool");
+                    return "found";
+                }, "lookup"));
+            }));
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("BoundaryAgent");
+            var session = await proxy.CreateSessionAsync();
+            var response = await proxy.RunAsync("lookup", session);
+
+            Assert.Equal("done", response.Text);
+            Assert.Equal(2, client.CallCount);
+            Assert.Equal(retryFirstAttempt ? 3 : 2, observation.BeforeCount);
+            Assert.Equal(2, observation.AfterCount);
+            Assert.Equal(retryFirstAttempt ? 6 : 5, observation.ConstructionCount);
+            string[] successfulTurn =
+                ["agent-before", "transport-before", "transport-after", "agent-after", "tool",
+                 "agent-before", "transport-before", "transport-after", "agent-after"];
+            Assert.Equal(retryFirstAttempt
+                ? new[] { "agent-before", "transport-before", "transport-failed" }.Concat(successfulTurn)
+                : successfulTurn,
+                events.ToArray());
         }
         finally
         {
@@ -174,8 +234,9 @@ public class AgentPipelineIntegrationTests
             var response = await proxy.RunAsync("retry", session);
 
             Assert.Contains("retry", response.Text);
-            Assert.True(chatClient.CallCount >= 2);
-            Assert.True(wrappers.Count >= 3); // startup validation plus at least two attempts
+            Assert.Equal(2, chatClient.CallCount);
+            // Startup, preparation, two model attempts, and completion.
+            Assert.Equal(5, wrappers.Count);
             Assert.Equal(wrappers.Count, wrappers.Distinct(ReferenceEqualityComparer.Instance).Count());
 
             var countAfterAttempts = stopped.Count;
@@ -210,7 +271,8 @@ public class AgentPipelineIntegrationTests
 
     private sealed class ObservingDelegatingAgent(
         AIAgent inner,
-        PipelineObservation observation) : DelegatingAIAgent(inner)
+        PipelineObservation observation,
+        ConcurrentQueue<string>? events = null) : DelegatingAIAgent(inner)
     {
         public int ConstructionOrdinal { get; } =
             Interlocked.Increment(ref observation.ConstructionCount);
@@ -222,9 +284,34 @@ public class AgentPipelineIntegrationTests
             CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref observation.BeforeCount);
+            events?.Enqueue("agent-before");
             var response = await base.RunCoreAsync(messages, session, options, cancellationToken)
                 .ConfigureAwait(false);
+            events?.Enqueue("agent-after");
             Interlocked.Increment(ref observation.AfterCount);
+            return response;
+        }
+    }
+
+    private sealed class ObservingChatClient(
+        IChatClient inner,
+        ConcurrentQueue<string> events,
+        Func<bool> shouldFail) : DelegatingChatClient(inner)
+    {
+        public override async Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            events.Enqueue("transport-before");
+            if (shouldFail())
+            {
+                events.Enqueue("transport-failed");
+                throw new InvalidOperationException("Transient model transport failure.");
+            }
+            var response = await base.GetResponseAsync(messages, options, cancellationToken)
+                .ConfigureAwait(false);
+            events.Enqueue("transport-after");
             return response;
         }
     }

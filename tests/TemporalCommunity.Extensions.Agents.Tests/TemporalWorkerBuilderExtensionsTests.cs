@@ -107,7 +107,7 @@ public class TemporalWorkerBuilderExtensionsTests
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
             builder.AddTemporalAgents(opts =>
-                opts.AddTemporalAgent("test-agent", new ChatClientAgentOptions())));
+                opts.Agent("test-agent", new ChatClientAgentOptions())));
 
         Assert.Contains("unkeyed IChatClient", exception.Message);
         Assert.Contains("AddChatClient", exception.Message);

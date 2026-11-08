@@ -7,7 +7,6 @@ using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using Temporalio.Common;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
-using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tests.StepMode;
 using TemporalCommunity.Extensions.Agents.Tools;
@@ -25,7 +24,7 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 /// X-2 and X-1 — workflow-level merge of tool/interceptor StateBag write-backs.
 ///
 /// <list type="bullet">
-/// <item><b>X-2:</b> an interceptor that writes a non-reserved key to its StateBag has it merged into
+/// <item><b>X-2:</b> an interceptor that writes a flat key to its StateBag has it merged into
 /// the workflow bag BEFORE tool dispatch — the tool dispatched in the same step observes the
 /// interceptor's value.</item>
 /// <item><b>X-1:</b> two concurrent tool calls in one step that write the SAME StateBag key are merged
@@ -46,7 +45,7 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
         _output = output;
     }
 
-    // ── X-2: interceptor non-reserved write-back merged before tool dispatch ─────
+    // ── X-2: interceptor write-back merged before tool dispatch ───────────────
 
     [Fact]
     public async Task InterceptorWriteBack_NonReservedKey_VisibleToToolInSameStep()
@@ -119,13 +118,14 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
         var scripted = new ScriptedChatClient(
         [
             // Step 1: TWO tool calls in the same step. index 0 writes "A", index 1 writes "B"
-            // to the SAME key. Step 2: final (the provider on step 2 reads the merged value).
+            // to the SAME key. The terminal provider callback reads the merged value.
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
             [
                 new FunctionCallContent("c0", toolName, new Dictionary<string, object?> { ["val"] = "A" }),
                 new FunctionCallContent("c1", toolName, new Dictionary<string, object?> { ["val"] = "B" }),
             ])),
             new ChatResponse(new ChatMessage(ChatRole.Assistant, "Done.")),
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Second turn complete.")),
         ]);
 
         var provider = new ConflictKeyReadingProvider("conflict.key");
@@ -164,11 +164,14 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
             await proxy.RunAsync("go", session);
 
-            // The provider on step 2 reads the merged conflict.key. Tool-call index 1 ("B")
-            // must win over index 0 ("A") regardless of completion order — deterministic.
-            var observedOnStep2 = provider.LastObservedValue;
-            _output.WriteLine($"Step-2 provider observed conflict.key = {observedOnStep2}");
-            Assert.Equal("B", observedOnStep2);
+            // Tool-call index 1 ("B") must win over index 0 ("A") regardless of completion
+            // order — deterministic. The terminal callback sees the workflow-committed value.
+            _output.WriteLine($"Terminal provider callback observed conflict.key = {provider.LastObservedValue}");
+            Assert.Equal("B", provider.LastObservedValue);
+
+            await proxy.RunAsync("second turn", session);
+            Assert.True(provider.NextTurnObservedCompletionState,
+                "Successful InvokedAsync StateBag changes must be committed to the next turn.");
         }
         finally
         {
@@ -433,7 +436,7 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
         public Task DisposeAsync() => Environment.ShutdownAsync();
     }
 
-    /// <summary>Context provider that seeds a fixed key on every LLM call (so downstream bags are non-null).</summary>
+    /// <summary>Context provider that seeds a fixed key once before the logical turn.</summary>
     private sealed class SeedingProvider(string key, string value) : AIContextProvider
     {
         protected override ValueTask<AIContext> ProvideAIContextAsync(
@@ -445,25 +448,55 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
         }
     }
 
-    /// <summary>Context provider that records the value it reads for a key on each LLM call.</summary>
+    /// <summary>Context provider that records a key from the terminal workflow-owned StateBag.</summary>
     private sealed class ConflictKeyReadingProvider(string key) : AIContextProvider
     {
         public string? LastObservedValue { get; private set; }
 
+        public bool NextTurnObservedCompletionState { get; private set; }
+
         protected override ValueTask<AIContext> ProvideAIContextAsync(
             InvokingContext context, CancellationToken cancellationToken = default)
         {
-            if (context.Session is TemporalAgentSession s
-                && s.StateBag.TryGetValue<string>(key, out var v,
+            if (context.Session is TemporalAgentSession session
+                && Volatile.Read(ref _seenTerminalCallback) != 0
+                && session.StateBag.TryGetValue<string>(
+                    "provider.completion",
+                    out _,
+                    System.Text.Json.JsonSerializerOptions.Default))
+            {
+                NextTurnObservedCompletionState = true;
+            }
+
+            return new(new AIContext());
+        }
+
+        private int _seenTerminalCallback;
+
+        protected override ValueTask InvokedCoreAsync(
+            InvokedContext context, CancellationToken cancellationToken = default)
+        {
+            if (context.Session is TemporalAgentSession session
+                && session.StateBag.TryGetValue<string>(key, out var v,
                     System.Text.Json.JsonSerializerOptions.Default))
             {
                 LastObservedValue = v;
             }
-            return new ValueTask<AIContext>(new AIContext());
+
+            if (context.InvokeException is null && context.Session is TemporalAgentSession successfulSession)
+            {
+                successfulSession.StateBag.SetValue(
+                    "provider.completion",
+                    "committed",
+                    System.Text.Json.JsonSerializerOptions.Default);
+                Interlocked.Exchange(ref _seenTerminalCallback, 1);
+            }
+
+            return default;
         }
     }
 
-    /// <summary>Interceptor that proceeds, writing one non-reserved key to its StateBag.</summary>
+    /// <summary>Interceptor that proceeds, writing one flat key to its StateBag.</summary>
     private sealed class WritingInterceptor(string key, string value) : IAgentToolInterceptor
     {
         public Task<DurableToolDecision> BeforeToolCallAsync(
@@ -487,14 +520,7 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
                 return new ValueTask<AIContext>(new AIContext());
 
             var call = Interlocked.Increment(ref _callCount);
-            if (call == 1)
-            {
-                session.StateBag.SetValue(
-                    key,
-                    "must-be-rolled-back",
-                    System.Text.Json.JsonSerializerOptions.Default);
-            }
-            else if (call == 2)
+            if (call == 2)
             {
                 SecondTurnObservedFailedState = session.StateBag.TryGetValue<string>(
                     key,
@@ -503,6 +529,23 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             }
 
             return new ValueTask<AIContext>(new AIContext());
+        }
+
+        protected override ValueTask InvokedCoreAsync(
+            InvokedContext context,
+            CancellationToken cancellationToken = default)
+        {
+            if (context.InvokeException is not null
+                && context.Session is TemporalAgentSession session
+                && Volatile.Read(ref _callCount) == 1)
+            {
+                session.StateBag.SetValue(
+                    key,
+                    "must-be-rolled-back",
+                    System.Text.Json.JsonSerializerOptions.Default);
+            }
+
+            return default;
         }
     }
 

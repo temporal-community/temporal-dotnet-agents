@@ -30,8 +30,8 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 ///
 /// <para>
 /// The repro: one turn with TWO sequential tool-call iterations. A context provider writes a
-/// stable key on every LLM call — its value never changes after the first overlay, so the bag
-/// hash is unchanged by the time the SECOND tool dispatches. Pre-fix, that second tool observed
+/// stable key before the model/tool loop. Its value never changes after the first overlay, so the
+/// bag hash is unchanged by the time the SECOND tool dispatches. Pre-fix, that second tool observed
 /// <c>&lt;absent&gt;</c>. Post-fix (Proceed path always forces the bag), it observes the key.
 /// </para>
 /// </summary>
@@ -57,9 +57,9 @@ public class ProceedPathStateBagStarvationTests : IClassFixture<ProceedPathState
 
         // A single turn with THREE sequential tool-call iterations:
         //   step 0: reader_tool → step 1: reader_tool → step 2: reader_tool → step 3: final.
-        // The context provider seeds a stable providerKey on every LLM call. Step 0's bag is the
-        // provider's raw activity serialization; from step 1 on the bag is the workflow's canonical
-        // (Utf8JsonWriter, ordinal-sorted) re-serialization — byte-identical step-to-step, so its
+        // The context provider seeds a stable providerKey once before the model/tool loop. The
+        // prepared bag is the provider's raw activity serialization; from step 1 on, the workflow
+        // uses its canonical (Utf8JsonWriter, ordinal-sorted) re-serialization — byte-identical step-to-step, so its
         // FNV hash is UNCHANGED by the step-2 tool dispatch. That is exactly the hash-gate condition
         // that starved the Proceed-path tool of the bag pre-fix (it received null → EMPTY session).
         var scripted = new ScriptedChatClient(
@@ -145,7 +145,7 @@ public class ProceedPathStateBagStarvationTests : IClassFixture<ProceedPathState
         public Task DisposeAsync() => Environment.ShutdownAsync();
     }
 
-    /// <summary>Context provider that seeds a fixed, stable key on every LLM call. Because the
+    /// <summary>Context provider that seeds a fixed, stable key once per logical turn. Because the
     /// value never changes, the workflow-thread bag hash is unchanged by the second tool
     /// dispatch — exactly the condition that triggered the Proceed-path null-starvation bug.</summary>
     private sealed class SeedingProvider(string key, string value) : AIContextProvider

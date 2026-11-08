@@ -40,7 +40,7 @@ The extension builds a fresh `ChatClientAgent` inside each LLM-step activity fro
 | Middleware that requires `ChatClientAgentSession` | Unsupported | Outer middleware receives `TemporalAgentSession`; only the innermost library boundary lets the leaf create its transient sealed session. |
 | Function-invocation middleware or `FunctionInvokingChatClient` | Rejected | Inline function invocation bypasses durable tool activities, retries, approval, and Temporal visibility. |
 | Tools dynamically returned by `AIContextProvider.InvokingAsync` | Disabled | The activity drops them and logs an error. Convert them into static durable declarations. |
-| Provider-owned history or external writes (for example `ChatHistoryMemoryProvider`) | Unsupported | `InvokedAsync` runs in a retryable activity, and no atomic idempotent provider-history contract exists. |
+| Provider-owned history or external writes through a generic provider (for example direct `ChatHistoryMemoryProvider` registration) | Unsupported | Generic hooks run in retryable activities without a provider-history idempotency contract. The stock chat-history provider is supported only through the dedicated opt-in adapter in [Agent memory](../../how-to/MAF/memory.md). |
 | Providers that retain session data in process fields | Unsupported | Activity attempts can retry, move workers, and overlap sessions. Persist session state through `StateBag`. |
 | `HarnessAgent` and a full Harness profile | Deferred | A Temporal-native Harness profile is a future research track, not a compatibility promise for `HarnessAgent`. |
 

@@ -22,49 +22,52 @@ This gives you:
 
 | Pub/Sub capability | Temporal equivalent |
 |---|---|
-| Fire-and-forget to N subscribers | `RunAgentFireAndForgetAsync` × N (validated update) |
-| Wait for all subscribers to respond | `ExecuteAgentsInParallelAsync` (WhenAll) |
+| Fire-and-forget to N subscribers | N activities invoking registered proxies with `IsFireAndForget = true` |
+| Wait for all subscribers to respond | Parallel proxy-invocation activities + `Workflow.WhenAllAsync` |
 | Wait for the first subscriber to respond | `Workflow.WhenAnyAsync(tasks)` |
-| Fan-out with aggregation | Parallel agents + result aggregation in workflow code |
-| At-least-once delivery to subscribers | Default Temporal retry policy on activities |
+| Fan-out with aggregation | Parallel activities + result aggregation in workflow code |
+| At-least-once delivery to subscribers | Activity retry policy with stable session and request IDs |
 
 ---
 
-## Code Example — Fan-Out / Fan-In with `ExecuteAgentsInParallelAsync`
+## Code Example — Fan-Out / Fan-In with Activities
 
-The helper `ExecuteAgentsInParallelAsync` (from `WorkflowAgents`) dispatches
-multiple agents in parallel and returns all responses in input order.
+The workflow schedules one activity per agent. Each activity resolves the registered proxy; stable
+workflow-generated session and request IDs make an activity retry target the same logical turn.
 
 ```csharp
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
-
 [Workflow("EventDrivenFanOut")]
 public class EventDrivenFanOutWorkflow
 {
     [WorkflowRun]
     public async Task<string> RunAsync(string topic, string payload)
     {
-        // Simulate a "NewArticlePublished" event fan-out to three independent agents.
-        var summarySession  = await GetTemporalAgent("SummarizerAgent").CreateSessionAsync();
-        var taggingSession  = await GetTemporalAgent("TaggerAgent").CreateSessionAsync();
-        var moderationSession = await GetTemporalAgent("ModeratorAgent").CreateSessionAsync();
+        var summarySession = WorkflowAgents.NewAgentSessionId("SummarizerAgent");
+        var taggingSession = WorkflowAgents.NewAgentSessionId("TaggerAgent");
+        var moderationSession = WorkflowAgents.NewAgentSessionId("ModeratorAgent");
 
-        var prompt = new List<ChatMessage> { new(ChatRole.User, payload) };
+        var summary = Workflow.ExecuteActivityAsync(
+            (RoutingActivities a) => a.RunAgentAsync(
+                "SummarizerAgent", summarySession.WorkflowId,
+                Workflow.NewGuid().ToString("N"), payload),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+        var tags = Workflow.ExecuteActivityAsync(
+            (RoutingActivities a) => a.RunAgentAsync(
+                "TaggerAgent", taggingSession.WorkflowId,
+                Workflow.NewGuid().ToString("N"), payload),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+        var moderation = Workflow.ExecuteActivityAsync(
+            (RoutingActivities a) => a.RunAgentAsync(
+                "ModeratorAgent", moderationSession.WorkflowId,
+                Workflow.NewGuid().ToString("N"), payload),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
 
-        // All three agents run concurrently — equivalent to three pub/sub subscribers
-        // each independently processing the same event.
-        var results = await ExecuteAgentsInParallelAsync(new[]
-        {
-            (GetTemporalAgent("SummarizerAgent"),  prompt, summarySession),
-            (GetTemporalAgent("TaggerAgent"),      prompt, taggingSession),
-            (GetTemporalAgent("ModeratorAgent"),   prompt, moderationSession),
-        });
+        var results = await Workflow.WhenAllAsync([summary, tags, moderation]);
 
-        // Aggregate results (fan-in)
         return $"""
-            Summary:    {results[0].Text}
-            Tags:       {results[1].Text}
-            Moderation: {results[2].Text}
+            Summary:    {results[0]}
+            Tags:       {results[1]}
+            Moderation: {results[2]}
             """;
     }
 }
@@ -122,18 +125,16 @@ foreach (var name in subscriberNames)
 }
 ```
 
-> **Workflow-internal path:** If you are inside an orchestrating `[Workflow]` and need to
-> kick off sub-agents without waiting for their results, use `TemporalAIAgent.RunAsync`
-> inside `Workflow.ExecuteActivityAsync` (via `GetTemporalAgent`) — or use
-> `ExecuteAgentsInParallelAsync` if you do want to collect results later.
-> `AgentActivities`, `AgentStepInput`, and `InvokeAgentToolInput` are `internal` and cannot be
-> referenced from consumer code.
+> **Workflow-internal path:** Schedule an application-owned activity that resolves the registered
+> `TemporalAIAgentProxy`. For fire-and-forget, pass a workflow-generated `TemporalAgentSessionId`
+> and `RequestId`, and set `IsFireAndForget = true` in `TemporalAgentRunOptions`. The activity
+> implementation in `samples/MAF/WorkflowOrchestration` demonstrates this pattern.
 
 ---
 
 ## Key Differences vs. a Message Broker
 
-| Aspect | Pub/Sub broker (e.g. Kafka) | Temporal parallel orchestration |
+| Aspect | Pub/Sub broker (e.g. Kafka) | Temporal activity orchestration |
 |--------|---|---|
 | Subscriber discovery | Dynamic (any consumer group) | Static (known agent names at design time) |
 | Ordering guarantees | Per-partition ordering | No cross-agent ordering (each runs independently) |

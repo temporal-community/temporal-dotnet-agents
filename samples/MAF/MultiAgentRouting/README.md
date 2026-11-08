@@ -1,118 +1,25 @@
-# Multi-Agent Routing: Sequential and Parallel Dispatch
+# Multi-Agent Routing: Activity-Based Dispatch
 
-## Overview
+This sample demonstrates two regular workflow patterns over registered Temporal agents:
 
-Demonstrates two complementary patterns for dispatching to multiple agents: sequential routing
-(classify then dispatch to one specialist) and parallel fan-out (send the same query to all agents
-simultaneously). Both patterns include OpenTelemetry tracing through the Temporal SDK/library
-sources plus a named MAF `OpenTelemetryAgent` source.
+- `RoutingWorkflow` classifies the request in an activity, then invokes the selected specialist in
+  another activity.
+- `ParallelAgentWorkflow` schedules one proxy-invocation activity per specialist and collects the
+  responses with `Workflow.WhenAllAsync`.
 
-This sample demonstrates:
-- `RoutingWorkflow`: keyword-based classification via a `RoutingActivities.ClassifyRequest` activity, then dispatch to one of three specialists
-- `ParallelAgentWorkflow`: fan-out to all three specialists at once via `ExecuteAgentsInParallelAsync`
-- OTel tracing with `TracingInterceptor` and `TemporalAgentTelemetry` span sources
-- Routing decision as a durable, auditable activity result
+Each agent invocation receives a workflow-generated session ID and request ID. The scoped activity
+resolves the registered proxy by its exact registration name. This keeps workflow logic
+deterministic and preserves request identity if an activity is retried.
 
-## Architecture
+The worker also demonstrates OpenTelemetry tracing with Temporal's `TracingInterceptor` and the
+Temporal Agents activity sources. See [`Program.cs`](./Program.cs) for the complete registration
+and tracer configuration.
 
-```
-User Question
-    │
-    ▼
-RoutingWorkflow                         ParallelAgentWorkflow
-    │                                       │
-    ├─ Activity: ClassifyRequest()          ├─ GetTemporalAgent("WeatherAgent")    ─┐
-    │    └─ returns: "WeatherAgent"         ├─ GetTemporalAgent("BillingAgent")    ─┼─ ExecuteAgentsInParallelAsync
-    │                                       └─ GetTemporalAgent("TechSupportAgent") ┘
-    └─ GetTemporalAgent(agentName).RunAsync()              │
-         └─ specialist response               IReadOnlyList<AgentResponse>
-```
+## Run
 
-## OTel Span Hierarchy
-
-```
-agent.client.send          (TemporalAgentTelemetry — agent name, session ID)
-  UpdateWorkflow:RunAgent  (TracingInterceptor — workflow update span)
-    RunActivity:ExecuteAgent  (TracingInterceptor — activity span)
-      agent.turn            (TemporalAgentTelemetry — correlation parent)
-        invoke_agent        (MAF — canonical GenAI usage + matching correlation ID)
-```
-
-All five sources must be registered for the full trace to appear:
-
-```csharp
-Sdk.CreateTracerProviderBuilder()
-    .AddSource(TracingInterceptor.ClientSource.Name)
-    .AddSource(TracingInterceptor.WorkflowsSource.Name)
-    .AddSource(TracingInterceptor.ActivitiesSource.Name)
-    .AddSource(TemporalAgentTelemetry.ActivitySourceName)
-    .AddSource("MultiAgentRouting.Agent")
-    .AddConsoleExporter()
-    .Build();
-```
-
-The worker sets `DefaultConfigureAgentPipeline` to `UseOpenTelemetry("MultiAgentRouting.Agent")`.
-Each model step therefore retains its Temporal `agent.turn` correlation parent and emits a sampled
-MAF `invoke_agent` child carrying the same `temporal.agent.correlation_id`. MAF owns the canonical
-GenAI usage attributes; the Temporal parent omits duplicates.
-
-## Highlights
-
-- **Routing decision as activity.** `ClassifyRequest` runs in a `RoutingActivities` activity, not inline in the workflow. The result is cached in event history — a crash after classification won't re-invoke the classifier, and the decision is visible in the Temporal Web UI.
-- **Consistent fallback agent.** `ClassifyRequest` returns `TechSupportAgent` for both empty input and for input where no keywords match any specialist. This makes `TechSupportAgent` the single general-purpose fallback in all unresolved cases.
-- **`ExecuteAgentsInParallelAsync` for fan-out.** The workflow-safe equivalent of `Task.WhenAll` — dispatches multiple agent activities concurrently and returns results in input order. Each agent runs in its own session; results come back as `IReadOnlyList<AgentResponse>` in the same order the agents were passed in.
-- **`.ConfigureAwait(true)` on all workflow awaits.** All `await` calls inside `[Workflow]`-attributed classes use `.ConfigureAwait(true)`. This is required to keep the Temporal workflow task scheduler active — omitting it can cause the workflow context to be lost during replay.
-- **`TracingInterceptor` propagates context.** Registered on `ITemporalClient` via `opts.Interceptors`, it propagates OTel trace context across Temporal's RPC boundary so spans from client to workflow to activity form a single trace.
-- **Three registered specialists.** `WeatherAgent`, `BillingAgent`, and `TechSupportAgent` are all added via `AddTemporalAgents()` on the same worker, demonstrating multi-agent registration.
-
-## Getting Started
-
-### Prerequisites
-
-- [.NET 10 SDK](https://dot.net) or later
-- Temporal Service 1.31.0 or newer (local: `temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`)
-- An OpenAI-compatible API key
-
-### Configure API credentials
-
-`OPENAI_API_KEY` is required and validated first on startup. `OPENAI_API_BASE_URL` is also required.
-
-```bash
-dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MAF/MultiAgentRouting
-dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --project samples/MAF/MultiAgentRouting
-```
-
-### Run
+Start Temporal with the required search attributes and configure `OPENAI_API_KEY` and
+`OPENAI_API_BASE_URL`:
 
 ```bash
 dotnet run --project samples/MAF/MultiAgentRouting/MultiAgentRouting.csproj
-```
-
-### Expected Output
-
-```
-Worker started.
-
-── Demonstrating workflow-based routing ────────────────────
-
-User: Will it rain in Seattle tomorrow?
-Agent: <WeatherAgent response>
-
-User: Why was I charged twice on my last invoice?
-Agent: <BillingAgent response>
-
-User: My application keeps crashing with a null reference exception.
-Agent: <TechSupportAgent response>
-
-── Demonstrating parallel agent execution ──────────────────
-
-Fan-out query (sent to all 3 agents simultaneously): "Briefly introduce yourself..."
-
-Parallel responses:
-
-[WeatherAgent]: I'm a weather specialist...
-[BillingAgent]: I handle billing and payments...
-[TechSupportAgent]: I provide technical support...
-
-Done.
 ```

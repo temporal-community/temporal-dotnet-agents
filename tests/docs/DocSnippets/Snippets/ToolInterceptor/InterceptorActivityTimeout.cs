@@ -18,7 +18,6 @@ internal static class InterceptorActivityTimeout
             sp => AIFunctionFactory.Create(
                 sp.GetRequiredService<DataService>().WriteRecord, name: "write_record"),
             opts => opts
-                .NoRetry()
                 .WithInterceptorTimeout(TimeSpan.FromSeconds(10)));  // interceptor gets 10s
                 // tool's own StartToCloseTimeout still falls through agent.ActivityTimeout
                 // to opts.DefaultActivityTimeout

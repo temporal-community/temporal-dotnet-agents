@@ -46,8 +46,7 @@
     <Project Path="samples/MAF/PerToolActivities/PerToolActivities.csproj" />
     <Project Path="samples/MAF/ToolInterceptor/ToolInterceptor.csproj" />
     <Project Path="samples/MAF/ContextProviders/ContextProviders.csproj" />
-    <Project Path="samples/MAF/Skills/Skills.csproj" />
-    <Project Path="samples/MAF/ApprovalScopes/ApprovalScopes.csproj" />
+    <Project Path="samples/MAF/Middleware/Middleware.csproj" />
     <Project Path="samples/MAF/MixedActivities/MixedActivities.csproj" />
     <Project Path="samples/MAF/DurableContextProvider/DurableContextProvider.csproj" />
     <Project Path="samples/MAF/McpTools/McpTools.csproj" />

@@ -1,6 +1,6 @@
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Temporalio.Workflows;
+using TemporalCommunity.Extensions.Agents;
 using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace WorkflowRouting;
@@ -62,12 +62,14 @@ public class DynamicRoutingWorkflow
             $"User question: {userQuestion}\n\n" +
             $"Respond with the agent name only. No explanation, no punctuation.";
 
-        var classifier = GetTemporalAgent("Classifier");
-        var classifierSession = await classifier.CreateSessionAsync().ConfigureAwait(true);
-        var classifierResponse = await classifier.RunAsync(
-            [new ChatMessage(ChatRole.User, routingPrompt)], classifierSession).ConfigureAwait(true);
-
-        var chosenAgent = (classifierResponse.Text ?? string.Empty).Trim();
+        var classifierSessionId = WorkflowAgents.NewAgentSessionId("Classifier");
+        var chosenAgent = (await Workflow.ExecuteActivityAsync(
+            (RoutingActivities activities) => activities.RunAgentAsync(
+                "Classifier",
+                classifierSessionId.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                routingPrompt),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true)).Trim();
 
         // ── Step 3: Validate the LLM's choice via activity (cached on replay) ──
         // LLMs can hallucinate names. The activity confirms the agent exists,
@@ -86,10 +88,13 @@ public class DynamicRoutingWorkflow
 
     private async Task<string> CallAgent(string agentName, string userQuestion)
     {
-        var specialist = GetTemporalAgent(agentName);
-        var specialistSession = await specialist.CreateSessionAsync().ConfigureAwait(true);
-        var response = await specialist.RunAsync(
-            [new ChatMessage(ChatRole.User, userQuestion)], specialistSession).ConfigureAwait(true);
-        return response.Text ?? string.Empty;
+        var sessionId = WorkflowAgents.NewAgentSessionId(agentName);
+        return await Workflow.ExecuteActivityAsync(
+            (RoutingActivities activities) => activities.RunAgentAsync(
+                agentName,
+                sessionId.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                userQuestion),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
     }
 }

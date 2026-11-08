@@ -19,10 +19,6 @@
 //      file that touches the experimental MAF surface. Scattered but auditable, and the
 //      category stays LIVE in every other file (a new untouched experimental MAF API
 //      still fails the build). Files:
-//        - Skills/SkillResolver.cs           — AgentSkill, AgentSkillsSourceContext (+ skills surface)
-//        - Skills/SkillsBuilder.cs           — AgentSkillsSource, AgentFileSkillsSource,
-//                                              AgentFileSkillScriptRunner, AgentFileSkillsSourceOptions
-//        - Skills/SkillsContextProvider.cs   — AgentSkillsSourceContext (passed to EnsureLoadedAsync)
 //        - Workflows/AgentActivities.cs      — AIContextProvider.InvokingContext /
 //                                              AIContextProvider.InvokedContext ctors
 //

@@ -3,7 +3,6 @@ using Temporalio.Activities;
 using Microsoft.Extensions.DependencyInjection;
 using Temporalio.Client;
 using Temporalio.Exceptions;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI.Approvals;
 
@@ -76,26 +75,16 @@ public sealed class TemporalAgentContext
 
         return u.Reason switch
         {
-            ContextUnavailableReason.SubAgentPath =>
+            ContextUnavailableReason.NoAgentSession =>
                 $"TemporalAgentContext is not available to this tool{where}: the activity's workflow " +
-                "ID is not an agent session ID, so there is no agent session to attach. In a running " +
-                "application this means the workflow-local sub-agent path " +
-                "(WorkflowAgents.GetTemporalAgent) — the tool activity runs under your orchestrating " +
-                "workflow. (A test harness supplying an arbitrary workflow ID reaches this same " +
-                "state.) In-tool approval (RequestApprovalAsync) is not supported on the sub-agent " +
-                "path, and neither is workflow-parked approval: RequireApproval() and an " +
-                "interceptor's PauseForApproval() both degrade to Block there. Own the approval in " +
-                "the orchestrating workflow, or drive the agent through a managed session via " +
-                "TemporalAIAgentProxy.",
+                "ID is not an agent session ID, so there is no agent session to attach. Tools that " +
+                "require session context or approval must run through a registered managed agent " +
+                "session invoked via TemporalAIAgentProxy from an activity.",
 
-            ContextUnavailableReason.ScheduledJobPath =>
+            ContextUnavailableReason.AgentIdentityMismatch =>
                 $"TemporalAgentContext is not available to this tool{where}: the workflow ID parses " +
                 $"as an agent session but {u.Detail ?? "names a different agent than this tool's"}, " +
-                "so attaching that session would target the wrong workflow. A scheduled agent job " +
-                "has exactly this shape — its workflow ID is ta-{agent}-scheduled-{runId}, which " +
-                "parses to the agent name plus a '-scheduled' suffix. Scheduled jobs cannot park for " +
-                "external review at all: in-tool approval (RequestApprovalAsync) is unsupported, and " +
-                "RequireApproval() and an interceptor's PauseForApproval() both degrade to Block. " +
+                "so attaching that session would target the wrong workflow. " +
                 "Use a managed session via TemporalAIAgentProxy for work that needs human review.",
 
             _ => "No TemporalAgentContext is available in the current async context.",

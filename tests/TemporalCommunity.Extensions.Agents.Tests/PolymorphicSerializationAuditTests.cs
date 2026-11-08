@@ -217,6 +217,42 @@ public class PolymorphicSerializationAuditTests
     }
 
     [Fact]
+    public void Audit_AgentStepInput_MessageAttribution_RoundTrip()
+    {
+        var userMessage = new ChatMessage(ChatRole.User, "hi");
+        var providerMessage = new ChatMessage(ChatRole.System, "provider context")
+            .WithAgentRequestMessageSource(
+                AgentRequestMessageSourceType.AIContextProvider,
+                "provider");
+        Assert.Equal(
+            AgentRequestMessageSourceType.AIContextProvider,
+            providerMessage.GetAgentRequestMessageSourceType());
+        var input = new AgentStepInput
+        {
+            AgentName = "test-agent",
+            Request = new RunRequest("hi") { CorrelationId = "c-attribution" },
+            AccumulatedMessages = [userMessage, providerMessage],
+            AccumulatedMessageAttributions = PreparedMessageAttribution.Capture(
+                [userMessage, providerMessage]),
+        };
+
+        var roundTripped = RoundTrip(input);
+        Assert.NotNull(roundTripped.AccumulatedMessageAttributions);
+        var attribution = Assert.Single(roundTripped.AccumulatedMessageAttributions);
+        Assert.Equal(1, attribution.MessageIndex);
+        Assert.Equal(AgentRequestMessageSourceType.AIContextProvider.Value, attribution.SourceType);
+        Assert.Equal("provider", attribution.SourceId);
+        var restoredMessages = PreparedMessageAttribution.Restore(
+            roundTripped.AccumulatedMessages,
+            roundTripped.AccumulatedMessageAttributions);
+
+        Assert.Equal(
+            AgentRequestMessageSourceType.AIContextProvider,
+            restoredMessages[1].GetAgentRequestMessageSourceType());
+        Assert.Equal("provider", restoredMessages[1].GetAgentRequestMessageSourceId());
+    }
+
+    [Fact]
     public void Audit_AgentStepInput_SerializedStateBag_RoundTrip()
     {
         var bag = JsonDocument.Parse("""{"thread_id":"t-7","flags":[1,2,3]}""").RootElement;

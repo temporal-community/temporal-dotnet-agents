@@ -21,7 +21,6 @@ using Temporalio.Worker;
 using Temporalio.Worker.Interceptors;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
@@ -29,59 +28,6 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 [Trait("Category", "Integration")]
 public sealed class ChatHistoryMemoryIntegrationTests
 {
-    [Fact]
-    public async Task WorkflowLocalAgent_InitializesMemoryWithItsCarriedSessionId()
-    {
-        await using var environment = await TestEnvironmentHelper.StartLocalAsync();
-        environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
-
-        var initializerSessionIds = new List<string>();
-        var chatClient = new ScriptedChatClient(
-        [
-            new ChatResponse(new ChatMessage(ChatRole.Assistant, "First response.")),
-            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Second response.")),
-        ]);
-        Action<TemporalAgentOptions> options = temporal => temporal.UseChatHistoryMemory(memory =>
-        {
-            memory.UseVectorStore(_ => A.Fake<VectorStore>(), "workflow-local-memory", 32);
-            memory.WithRecall(recall =>
-            {
-                recall.SearchTime = ChatHistoryMemoryProviderOptions.SearchBehavior.OnDemandFunctionCalling;
-                recall.StorageInputRequestMessageFilter = _ => [];
-                recall.StorageInputResponseMessageFilter = _ => [];
-            });
-            memory.WithScopeInitializer((_, context, _) =>
-            {
-                initializerSessionIds.Add(context.SessionId);
-                var storage = new ChatHistoryMemoryProviderScope
-                {
-                    AgentId = context.AgentName,
-                    SessionId = context.SessionId,
-                };
-                return Task.FromResult(new ChatHistoryMemoryProvider.State(storage));
-            });
-        });
-
-        var queue = $"memory-workflow-local-{Guid.NewGuid():N}";
-        using var host = BuildHost(environment.Client, queue, chatClient, options);
-        await host.StartAsync();
-        try
-        {
-            var workflowId = $"memory-orchestrator-{Guid.NewGuid():N}";
-            var workflow = await environment.Client.ExecuteWorkflowAsync(
-                (MemoryWorkflowLocalWorkflow orchestrator) => orchestrator.RunAsync(),
-                new WorkflowOptions(workflowId, queue));
-
-            Assert.StartsWith("ta-MemoryAgent-", workflow, StringComparison.OrdinalIgnoreCase);
-            Assert.Equal(new[] { workflow }, initializerSessionIds);
-            Assert.Equal(2, chatClient.CallCount);
-        }
-        finally
-        {
-            await host.StopAsync();
-        }
-    }
-
     [Fact]
     public async Task BeforeAIInvoke_UsesSessionScopedVectorMemoryAcrossTurns()
     {
@@ -857,8 +803,7 @@ public sealed class ChatHistoryMemoryIntegrationTests
                     _ => chatClient,
                     new ChatClientAgentOptions(),
                     configureTemporalOptions);
-            })
-            .AddWorkflow<MemoryWorkflowLocalWorkflow>();
+            });
         return builder.Build();
     }
 
@@ -1074,17 +1019,4 @@ public sealed class ChatHistoryMemoryIntegrationTests
         }
     }
 
-    [Workflow("TemporalCommunity.Extensions.Agents.IntegrationTests.MemoryWorkflowLocalWorkflow")]
-    public sealed class MemoryWorkflowLocalWorkflow
-    {
-        [WorkflowRun]
-        public async Task<string> RunAsync()
-        {
-            var agent = GetTemporalAgent("MemoryAgent");
-            var session = (TemporalAgentSession)await agent.CreateSessionAsync();
-            await agent.RunAsync("First turn.", session);
-            await agent.RunAsync("Second turn.", session);
-            return session.SessionId.WorkflowId;
-        }
-    }
 }

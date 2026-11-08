@@ -42,7 +42,7 @@ The struct has two factory methods, and the choice between them is critical for 
 | Factory | Key Source | Used By | Why |
 |---------|-----------|---------|-----|
 | `WithRandomKey(agentName)` | `Guid.NewGuid()` | `TemporalAIAgentProxy` (external callers) | External callers run outside workflows — randomness is safe |
-| `WithDeterministicKey(agentName, guid)` | `Workflow.NewGuid()` | `TemporalAIAgent` (inside workflows) | Workflow code must be deterministic — `Workflow.NewGuid()` returns the same GUID on replay |
+| `WithDeterministicKey(agentName, guid)` | `Workflow.NewGuid()` | Regular workflows passing IDs to activities | Workflow code must be deterministic — `Workflow.NewGuid()` returns the same GUID on replay |
 
 This distinction exists because Temporal replays workflow code from history. If a workflow used `Guid.NewGuid()`, it would generate a *different* GUID on replay, breaking determinism and causing a non-determinism error. `Workflow.NewGuid()` is replay-safe.
 
@@ -79,10 +79,10 @@ public sealed class TemporalAgentSession : AgentSession
 Nothing conversational lives on the agent instance, so one agent can drive many sessions
 concurrently. Two consequences follow:
 
-- `TemporalAIAgent.RunAsync` **requires** a `TemporalAgentSession` whose `SessionId.AgentName`
-  matches the agent; a foreign `AgentSession` is rejected.
-- State survives continue-as-new only if the orchestrating workflow explicitly carries the
-  serialized session forward. The library does not guess.
+- `TemporalAIAgentProxy.RunAsync` requires a `TemporalAgentSession` whose `SessionId.AgentName`
+  matches the registered agent.
+- The registered `AgentWorkflow` owns durable history and StateBag and carries them across its
+  continue-as-new transitions.
 
 **Key behaviors:**
 
@@ -155,15 +155,12 @@ DurableChatWorkflowBase<TOutput>           ← in TemporalCommunity.Extensions.A
     ├─ protected abstract ExecuteTurnAsync(...)            ← MAF override below
     ├─ protected abstract CreateContinueAsNewException(...) ← MAF override below
     ├─ protected virtual UpsertCustomSearchAttributes()    ← MAF override below
-    ├─ protected virtual OnApprovalResolutionAccepted(...)  ← MAF override below
-    └─ protected virtual OnApprovalRequestResolved(...)     ← MAF override below
+    └─ approval updates resolve one pending request
 
 AgentWorkflow : DurableChatWorkflowBase<AgentResponse>     ← in TemporalCommunity.Extensions.Agents
     ├─ _currentStateBag: JsonElement?  (MAF-specific)
     ├─ _input: AgentWorkflowInput?     (MAF-specific)
     ├─ [WorkflowUpdate("Run")] + [WorkflowUpdateValidator]
-    ├─ [WorkflowUpdate("GrantSessionApprovalScope")]   ← opt-in scope administration
-    ├─ [WorkflowUpdate("RevokeSessionApprovalScope")]  ← opt-in scope administration
     ├─ [WorkflowUpdate("RunFireAndForget")] + [WorkflowUpdateValidator]
     ├─ IDurableTurnRollbackParticipant (StateBag capture/restore per turn)
     ├─ override BuildResponseEntry → AgentSessionResponse.FromAgentResponse(...)
@@ -172,17 +169,10 @@ AgentWorkflow : DurableChatWorkflowBase<AgentResponse>     ← in TemporalCommun
     └─ override UpsertCustomSearchAttributes → upserts AgentName
 ```
 
-Reusable approval **scopes** are a MAF addition, but they are not a separate wire update.
-`AgentWorkflow.ResolveAgentApprovalAsync` is `internal`: it is reached either from the privileged
-`GrantSessionApprovalScope` update, or from the inherited `ResolveApproval` update via the
-`OnApprovalResolutionAccepted` / `OnApprovalRequestResolved` hooks, which upgrade the base's
-scope-less decision into the full `DurableAgentApprovalDecision` identity before archiving it.
-
 `AgentWorkflowInput` itself inherits from `DurableChatWorkflowInput`, so the
 shared fields (`MaxEntryCount`, `HistoryReducerKey`, `EnableSearchAttributes`, `ActivityTimeout`,
 `HeartbeatTimeout`, `RetryPolicy`, `TimeToLive`) come from the base, while MAF-only fields
-(`AgentName`, `TaskQueue`, `CarriedStateBag`, `ResolvedWorkerConfig`,
-`AgentApprovalResolutionHistory`) live on the subclass.
+(`AgentName`, `TaskQueue`, `CarriedStateBag`, `ResolvedWorkerConfig`) live on the subclass.
 
 ### Lifecycle Overview
 
@@ -395,8 +385,7 @@ The overrides on `AgentWorkflow`:
 | `CreateContinueAsNewException(input)` | `with`-clones the retained `_input` (an `AgentWorkflowInput`), overwriting the base-owned CAN fields from the `input` argument and adding `CarriedStateBag` plus `AgentApprovalResolutionHistory`. Cloning rather than field-by-field reconstruction is what keeps a newly added setting from being silently dropped at the boundary. |
 | `UpsertCustomSearchAttributes()` | Upserts the `AgentName` typed search attribute. Called by the base after the standard `SessionCreatedAt` / `TurnCount` upserts. Default in the base is a no-op; `DurableChatWorkflow` (the MEAI sibling) does not override it because chat sessions are not named. |
 | `ApplyKeyedHistoryReducerAsync(reducerKey, history, activityOptions)` | Dispatches the `ReduceHistoryByKey` activity so the DI-resolved reducer delegate runs on the worker and its result lands in workflow history. |
-| `OnApprovalResolutionAccepted` / `OnApprovalRequestResolved` | Upgrade the base's scope-less `DurableApprovalDecision` into the full `DurableAgentApprovalDecision` (scope, pattern, grant ID, expiry) before it enters the MAF approval archive. |
-| `CaptureTurnRollbackState` / `RestoreTurnRollbackState` (`IDurableTurnRollbackParticipant`) | Snapshot and restore `_currentStateBag` inside the admitted turn transaction. Restoration retains reserved approval-scope records, which were committed by independent approval updates while the turn was parked. |
+| `CaptureTurnRollbackState` / `RestoreTurnRollbackState` (`IDurableTurnRollbackParticipant`) | Snapshot and restore `_currentStateBag` inside the admitted turn transaction. |
 
 The fire-and-forget path is unique to MAF and stays on the subclass:
 
@@ -450,7 +439,7 @@ Each entry contains:
 | `CreatedAt` | `DurableSessionEntry` (shared) | Timestamp for ordering (`Workflow.UtcNow`) |
 | `Messages` | `DurableSessionEntry` (shared) | `IReadOnlyList<ChatMessage>` — MEAI types stored directly (user text, assistant text, tool calls, tool results); polymorphism preserved by `DurableAIDataConverter` |
 | `Usage` (response only) | `DurableSessionResponse` (shared) | `Microsoft.Extensions.AI.UsageDetails` — token counts from the LLM, stored directly with no wrapper |
-| `OrchestrationId` (request only) | `AgentSessionRequest` (MAF-specific) | Workflow ID of the orchestrating workflow, if this was a sub-agent call |
+| `OrchestrationId` (request only) | `AgentSessionRequest` (MAF-specific) | Optional MAF request metadata; the supported activity-based workflow invocation does not require it |
 | `ResponseType` / `ResponseSchema` (request only) | `AgentSessionRequest` (MAF-specific) | Structured-output format hint preserved across replay |
 
 When a turn starts, `ExecuteDurableAgentTurnAsync` flattens the history into a working `accumulated` list of `ChatMessage` objects. That list is the seed for the per-step loop: each `RunDurableAgentStep` activity receives it as `AgentStepInput.AccumulatedMessages`, the LLM sees the full conversation on every iteration, and the workflow appends each step's assistant message (and any tool-result message) back onto the list before the next iteration. Because `entry.Messages` is already `IReadOnlyList<ChatMessage>`, no conversion step is needed:
@@ -841,14 +830,14 @@ aggregated instructions they return overwrite this value after the provider chai
 effective value is `"registered\nprovider-1\nprovider-2"` — a provider appends through the default
 path, it cannot replace.
 
-`TemporalAgentRunOptions.EnableToolCalls` and `EnableToolNames` are copied onto `RunRequest` by `TemporalAIAgentProxy` / `TemporalAIAgent` before dispatch. Session workflows freeze them on `AgentSessionRequest`, so they survive Temporal serialization and reconstruction; job and containing-workflow paths carry the same `RunRequest` directly. `EnableToolCalls = false` exposes no tools. `EnableToolNames = null` exposes all registered tools, an empty list exposes none, and a non-empty list exposes only case-insensitive registered matches.
+`TemporalAgentRunOptions.EnableToolCalls` and `EnableToolNames` are copied onto `RunRequest` by `TemporalAIAgentProxy` before dispatch. Session workflows freeze them on `AgentSessionRequest`, so they survive Temporal serialization and reconstruction. `EnableToolCalls = false` exposes no tools. `EnableToolNames = null` exposes all registered tools, an empty list exposes none, and a non-empty list exposes only case-insensitive registered matches.
 
 MAF durable tool names remain case-insensitive throughout selection and policy application.
 `RequireApproval`, `SkipInterceptor`, interceptor timeout, and per-tool activity retry/timeout
 lookups use ordinal case-insensitive matching explicitly after Temporal deserialization; they do
 not rely on a dictionary comparer surviving the JSON boundary.
 
-Provider filtering is not the security boundary. A model can still return a malformed, unknown, or previously visible function name. Immediately before interceptor fan-out, each of the three workflow loops (`AgentWorkflow`, `AgentJobWorkflow`, and `TemporalAIAgent`) applies the same deterministic policy against the frozen registered names. A blocked call schedules no interceptor, approval, or tool activity and receives the same tenant-visible synthetic result whether its name is unknown or merely excluded.
+Provider filtering is not the security boundary. A model can still return a malformed, unknown, or previously visible function name. Immediately before interceptor fan-out, `AgentWorkflow` applies a deterministic policy against the frozen registered names. A blocked call schedules no interceptor, approval, or tool activity and receives the same tenant-visible synthetic result whether its name is unknown or merely excluded.
 
 ### Discovering session context from inside a tool
 
@@ -939,7 +928,7 @@ The only implementable design within Temporal's public API is to put the dispatc
 │              ResolveDurableToolActivityOptions(tc.Name))))                 │
 │                                                                            │
 │     ⑤ Merge tool StateBag write-backs in TOOL-CALL INDEX order             │
-│        (later index wins; reserved approval-scope deny-list applied)       │
+│        (later index wins)                                                │
 │        accumulated.Add(toolResultMessage);  // FunctionResultContent items │
 │        // loop back to ①                                                   │
 │                                                                            │
@@ -969,7 +958,7 @@ fires only at continue-as-new.
 | Activity name | Role |
 |---|---|
 | `TemporalCommunity.Extensions.Agents.RunDurableAgentStep` | One non-streaming MAF `agent.RunAsync` call. Preserves every response message and returns actionable `FunctionCallContent[]`, plus the updated StateBag and usage. Runs the `AIContextProvider` chain explicitly around the call. On a proxy-started session's first step it also returns the resolved worker settings. |
-| `TemporalCommunity.Extensions.Agents.RunToolInterceptor` | One pre-tool decision (`Proceed` / `PauseForApproval` / `Skip` / `Block`). Dispatched only when an interceptor is configured and the tool did not opt out. Fails **closed** for `ScopeAware + RequiresApproval` tools when no interceptor resolves — a deliberate asymmetry with MEAI's fail-open equivalent. |
+| `TemporalCommunity.Extensions.Agents.RunToolInterceptor` | One pre-tool decision (`Proceed` / `PauseForApproval` / `Skip` / `Block`). Dispatched only when an interceptor is configured and the tool did not opt out. |
 | `TemporalCommunity.Extensions.Agents.InvokeAgentTool` | One tool dispatch. Resolves the tool from the blueprint's per-agent registry — names do not collide across agents. Throws when the name is unregistered. |
 | `TemporalCommunity.Extensions.Agents.ReduceHistoryByKey` | Applies the DI-resolved keyed history reducer at continue-as-new. Not part of a turn. |
 
@@ -1240,8 +1229,7 @@ StateBag snapshot from before the turn, so application-, provider-, interceptor-
 mutations from that failed turn do not leak forward. Snapshot capture and restoration occur inside
 the base workflow's admitted-turn transaction. A different request cannot start concurrently;
 matching retries join the active request. Rollback therefore cannot replace committed StateBag
-state with a pre-turn snapshot. Reserved approval-scope records are retained: their
-decisions were committed through independent approval updates while the turn was parked.
+state with a pre-turn snapshot.
 
 #### Scenario B: Worker Crashes Between Activities (Workflow Code Running)
 

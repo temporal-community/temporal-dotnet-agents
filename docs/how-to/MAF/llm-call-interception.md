@@ -18,18 +18,20 @@ There are two places to intercept, plus a third mechanism people often arrive he
 | I want to see… | Use | Covered |
 |---|---|---|
 | Raw model transport — request, complete response, tokens, finish reason, provider payload | Decorate the `IChatClient` returned from `agent.ChatClient` | [below](#the-chat-client-layer) |
-| One event wrapping the whole agent run for the step, with the durable session in hand | `agent.ConfigureAgentPipeline` with a `DelegatingAIAgent` | [below](#the-agent-middleware-layer) |
-| Tool names, arguments, or a gate before a tool runs | `IAgentToolInterceptor` | [tool-interceptor.md](./tool-interceptor.md) |
+| One event wrapping a model-step attempt, with the durable session in hand | `agent.ConfigureAgentPipeline` with a `DelegatingAIAgent` | [below](#the-agent-middleware-layer) |
+| Tool names, arguments, or policy before workflow dispatch and approval | `IAgentToolInterceptor` | [tool-interceptor.md](./tool-interceptor.md) |
+| Observe, short-circuit, or transform a tool result after required approval | `TemporalAgentOptions.ToolMiddleware` | [below](#tool-middleware) |
 
-**Both layers observe the same effective request values.** Context providers run, and the effective
-`ChatOptions` is built, *in the activity* — before the agent pipeline is invoked at all. Neither
-layer sees a pre-provider view:
+**Both layers observe the same effective request values.** Managed sessions prepare provider context
+once before the model/tool loop and record it as an activity result. Each model-step activity then
+uses that snapshot to build its effective `ChatOptions`. Neither layer sees a pre-provider view:
 
 ```
-RunDurableAgentStep activity
-├─ resolves the chat client and context providers from a per-attempt DI scope
-├─ invokes the context providers, chaining each one's output into the next
-├─ builds the augmented messages and the effective ChatOptions / ChatClientAgentRunOptions
+PrepareAgentTurn activity → recorded provider context and StateBag delta
+RunDurableAgentStep activity (one per model attempt)
+├─ resolves the chat client and tool declarations from a per-attempt DI scope
+├─ uses recorded provider context and the frozen tool manifest
+├─ builds effective ChatOptions / ChatClientAgentRunOptions
 └─ agent.RunAsync(augmentedMessages, session, runOptions, ct)
      └─ your ConfigureAgentPipeline middleware   ← outermost; receives the restored durable session
          └─ TemporalSessionBoundaryAgent         ← library-owned session boundary
@@ -39,14 +41,13 @@ RunDurableAgentStep activity
 ```
 
 `ChatClientAgent` does **not** run the providers in this library. It is deliberately constructed with
-`AIContextProviders = null`, because the activity has already executed them — it replicates what
-MAF's `PrepareSessionAndMessagesAsync` would otherwise do, so that provider output is captured in
-the durable step rather than hidden inside the agent.
+`AIContextProviders = null`, because the preparation activity already executed them. Provider
+output is recorded at the logical-turn boundary rather than recalled inside each model step.
 
 So the choice between layers is not "before or after providers." It is:
 
 - **Agent middleware** wraps the agent run for the step and has the restored `TemporalAgentSession`.
-  Use it for run-level spans, and for retry-safe StateBag work.
+  Use it for model-step spans and retry-safe StateBag work, not a once-per-logical-turn callback.
 - **Chat-client decorator** sits at the transport boundary. Use it for request/response telemetry,
   token usage, finish reason, or provider metadata.
 
@@ -207,7 +208,7 @@ agent.ChatClient = sp => sp.GetRequiredService<OpenAIClient>()
 
 ## The agent-middleware layer
 
-To wrap the whole agent run rather than the model call, set `ConfigureAgentPipeline`
+To wrap the MAF agent call inside each model-step attempt, set `ConfigureAgentPipeline`
 (`Action<AIAgentBuilder>`). Per-agent, or `DefaultConfigureAgentPipeline` on the options for every
 agent; the per-agent value wins when both are set.
 
@@ -259,7 +260,7 @@ The durable agent calls `RunAsync`, so `RunCoreAsync` is the override that fires
 **Stay transparent.** Do not return a separate agent from the factory, and do not hide `inner`
 inside a custom `AIAgent` subclass. Both are rejected, because the library cannot otherwise prove
 its `ChatClientAgent` is still the durable model-call leaf. Request-level short-circuiting inside a
-valid `DelegatingAIAgent` is supported.
+valid `DelegatingAIAgent` is supported for that step.
 
 **Do not implement `IDisposable` / `IAsyncDisposable`.** The pinned MAF 1.23.0 builder API does
 not expose whether a factory-created wrapper is owned by its factory or by DI, so the library
@@ -299,16 +300,56 @@ leaf-specific type is not supported.
 
 The pipeline callback runs **once during worker-startup validation** — so a broken pipeline fails at
 boot rather than at first request — and **once per `RunDurableAgentStep` activity attempt**,
-including retries. Both use a DI scope, so middleware factories may resolve scoped dependencies.
+including retries. Preparation and completion activities also construct a pipeline to supply the
+provider callback's agent; they do not call its `RunAsync`. Construction is therefore not evidence
+that model middleware ran. All these builds use a DI scope, so factories may resolve scoped dependencies.
 Treat wrapper fields as attempt-local, never session-local; durable state goes in the
 [StateBag](#where-state-belongs).
 
 ---
 
+## Tool middleware
+
+Set `ToolMiddleware` inside `.Agent(...)`'s per-agent Temporal configuration callback. It uses MAF's
+four-argument callback shape: agent, `FunctionInvocationContext`, `next`, cancellation token;
+the result is `ValueTask<object?>`. See the complete, runnable
+[Middleware sample](../../../samples/MAF/Middleware/) for registration and two turns without an API key.
+
+The callback runs inside each individual tool activity, after required workflow approval.
+`context.Arguments.Services` is that attempt's async-disposed DI scope. The workflow records the
+approved function name, call ID, and canonical argument fingerprint before waiting; the activity
+checks them before middleware and again before invoking the function. Argument changes or function
+replacement after approval fail non-retryably. Pre-approval argument transformation by this
+middleware is not supported.
+
+Await `next(context, cancellationToken)` at most once. Returning a serializable result without
+calling `next` is a supported short-circuit; transforming the result is also supported. Returning
+before an asynchronous `next` finishes or swallowing a rejected invocation does not bypass the
+guard. Result serialization and transport limits apply after middleware.
+
+Set `context.Terminate = true` to end the logical turn after its result: remaining tool calls get
+explicit skipped results and no further model round runs. Provider completion still runs.
+The function is a declaration view; invoking it directly is rejected. The agent exposes registration
+name/description, not an executable agent or proxy.
+
+`Messages`, `Iteration`, `FunctionCallIndex`, and `FunctionCount` describe the initiating managed
+session batch and must remain unchanged. `Options` is null; changing it, enabling streaming, or
+replacing the supplied context/services is unsupported.
+
+Callbacks and functions remain **at-least-once** on activity retry, including lost completion after
+a successful effect. A completed activity result is replayed without rerunning middleware; a
+same-RequestId turn retry also does not redispatch while its terminal outcome is retained.
+Use downstream idempotency or reconciliation for effectful tools.
+
+Do not install MAF's function-callback `AIAgentBuilder.Use(...)` on the model pipeline: it requires
+an in-process function loop. `ToolMiddleware` is the durable per-tool boundary instead.
+
+---
+
 ## Your code runs inside an activity, not the workflow
 
-The factory and everything it builds execute inside `RunDurableAgentStep`, once **per activity
-attempt**. Four consequences, all of which bite in production:
+Model middleware executes inside `RunDurableAgentStep`, once **per activity attempt**.
+Four consequences, all of which bite in production:
 
 - **Retries re-run your code.** A retried LLM step re-invokes the factory and the decorator. Any
   non-idempotent side effect — billing rows, audit writes, counters — will duplicate.
@@ -350,17 +391,17 @@ Each `RunDurableAgentStep` activity attempt then:
 
 1. Opens a fresh DI scope and resolves `agent.ChatClient` from it, so scoped dependencies are legal
    in your decorator.
-2. Resolves context providers from that same scope. (Tools resolve once per worker from the root
-   provider, not per attempt.)
+2. Restores recorded provider context for managed sessions and resolves registered tool declarations
+   from the attempt's scope. Tool implementations resolve again in their own tool-activity scopes.
 3. Builds a `ChatClientAgent` with `UseProvidedChatClientAsIs = true`, so MAF does **not** auto-inject
    `FunctionInvokingChatClient` — the workflow owns tool dispatch.
 4. Applies your `ConfigureAgentPipeline` middleware and the library's session boundary around it.
 5. Calls `agent.RunAsync(...)` with one freshly built `ChatOptions` for the step.
 6. Disposes the pipeline at the end of the attempt.
 
-Three loops drive this, and your decorator fires under all of them: `AgentWorkflow` (sessions),
-`TemporalAIAgent.RunTurnAsync` (sub-agents inside your own workflow), and `AgentJobWorkflow`
-(scheduled runs).
+The managed session workflow drives separate preparation, model, tool, and completion activities.
+Client-side MAF middleware can wrap the keyed proxy itself, but runs in the caller's process:
+its effects are not resumed after a client crash, and it is not worker-side model middleware.
 
 ### Composing with the library's per-step `ChatOptions`
 

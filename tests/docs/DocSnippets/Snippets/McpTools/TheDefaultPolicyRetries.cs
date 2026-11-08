@@ -1,5 +1,5 @@
-// HARNESS for docs/how-to/MAF/mcp-tools.md § "The default policy retries".
-using ModelContextProtocol.Client;
+// HARNESS for docs/how-to/MAF/mcp-tools.md § "Tool retries are opt-in".
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.Agents;
 
@@ -8,14 +8,20 @@ namespace DocSnippets.McpTools;
 internal static class TheDefaultPolicyRetries
 {
     internal static void Configure(
-        DurableAgentBuilder agent,
+        TemporalAgentsOptions agents,
         AIFunction[] reads,
-        IReadOnlyDictionary<string, McpClientTool> byName)
+        IReadOnlyDictionary<string, AIFunction> byName)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/mcp-tools.md#the-default-policy-retries (lines 99-103)
-        agent.AddTools(reads);                                  // lookups — retry is a feature
-        agent.AddTool(byName["delete_inventory"],
-            policy => policy.NoRetry().RequireApproval());      // effects — register individually
-        // END SNIPPET docs/how-to/MAF/mcp-tools.md#the-default-policy-retries
+        // BEGIN SNIPPET docs/how-to/MAF/mcp-tools.md#tool-retries-are-opt-in (lines 84-101)
+        agents.Agent(
+            "InventoryAgent",
+            new ChatClientAgentOptions
+            {
+                ChatOptions = new ChatOptions
+                {
+                    Tools = [.. reads, byName["delete_inventory"]],
+                },
+            });
+        // END SNIPPET docs/how-to/MAF/mcp-tools.md#tool-retries-are-opt-in
     }
 }

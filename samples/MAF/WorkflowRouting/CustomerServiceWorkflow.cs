@@ -1,7 +1,6 @@
-using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
+using TemporalCommunity.Extensions.Agents;
 
 namespace WorkflowRouting;
 
@@ -30,14 +29,15 @@ public class CustomerServiceWorkflow
     public async Task<string> RunAsync(string userQuestion)
     {
         // ── Step 1: Classify the user's intent ──────────────────────────────
-        var classifier = GetTemporalAgent("Classifier");
-        var classifierSession = await classifier.CreateSessionAsync().ConfigureAwait(true);
-
-        var classifierResponse = await classifier.RunAsync(
-            [new ChatMessage(ChatRole.User, userQuestion)],
-            classifierSession).ConfigureAwait(true);
-
-        var classification = (classifierResponse.Text ?? string.Empty).Trim().ToUpperInvariant();
+        var classifierSessionId = WorkflowAgents.NewAgentSessionId("Classifier");
+        var classificationText = await Workflow.ExecuteActivityAsync(
+            (RoutingActivities activities) => activities.RunAgentAsync(
+                "Classifier",
+                classifierSessionId.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                userQuestion),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+        var classification = classificationText.Trim().ToUpperInvariant();
 
         // ── Step 2: Route to the correct specialist ─────────────────────────
         var specialistName = classification switch
@@ -53,13 +53,13 @@ public class CustomerServiceWorkflow
             specialistName);
 
         // ── Step 3: Call the specialist agent ────────────────────────────────
-        var specialist = GetTemporalAgent(specialistName);
-        var specialistSession = await specialist.CreateSessionAsync().ConfigureAwait(true);
-
-        var specialistResponse = await specialist.RunAsync(
-            [new ChatMessage(ChatRole.User, userQuestion)],
-            specialistSession).ConfigureAwait(true);
-
-        return specialistResponse.Text ?? string.Empty;
+        var specialistSessionId = WorkflowAgents.NewAgentSessionId(specialistName);
+        return await Workflow.ExecuteActivityAsync(
+            (RoutingActivities activities) => activities.RunAgentAsync(
+                specialistName,
+                specialistSessionId.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                userQuestion),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
     }
 }

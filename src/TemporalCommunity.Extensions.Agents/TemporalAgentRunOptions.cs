@@ -34,7 +34,7 @@ public sealed class TemporalAgentRunOptions : AgentRunOptions
 
     /// <summary>
     /// Gets or sets whether to fire and forget the request.
-    /// When <c>true</c>, the proxy sends a signal and returns immediately with an empty response.
+    /// When <c>true</c>, the proxy sends a workflow Update and returns immediately with an empty response.
     /// </summary>
     public bool IsFireAndForget { get; set; }
 
@@ -44,8 +44,8 @@ public sealed class TemporalAgentRunOptions : AgentRunOptions
     /// <remarks>
     /// <para>
     /// When <see langword="null"/> or empty, the proxy auto-generates a fresh GUID
-    /// (<c>Guid.NewGuid().ToString("N")</c>). Workflow-context callers (<see cref="TemporalAIAgent"/>)
-    /// generate via <c>Workflow.NewGuid().ToString("N")</c> for replay determinism.
+    /// (<c>Guid.NewGuid().ToString("N")</c>). Workflow callers should generate correlation and
+    /// request IDs with <c>Workflow.NewGuid().ToString("N")</c> and pass them through an activity.
     /// </para>
     /// <para>
     /// This is per-turn (each <c>RunAsync</c> call), not per-session. Use it to thread upstream

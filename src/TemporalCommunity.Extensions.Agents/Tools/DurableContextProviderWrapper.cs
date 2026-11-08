@@ -8,7 +8,8 @@ namespace TemporalCommunity.Extensions.Agents.Tools;
 /// <summary>
 /// Wraps an <c>AIContextProvider</c> with explicit <see cref="DurableToolRegistrationSpec"/> entries,
 /// implementing <see cref="IDurableToolSource"/> so the framework registers the specs as durable
-/// activities and strips provider-contributed tools from the aggregated context per-iteration.
+/// activities. In managed session workflows, the provider may select those exact registered
+/// functions into a frozen per-turn manifest.
 /// </summary>
 /// <remarks>
 /// This type is internal. Callers use the
@@ -17,8 +18,8 @@ namespace TemporalCommunity.Extensions.Agents.Tools;
 /// The wrapper is fully transparent: both <c>InvokingCoreAsync</c> and <c>InvokedCoreAsync</c>
 /// delegate to the inner provider's <c>InvokingAsync</c> / <c>InvokedAsync</c> template-method
 /// entry points, which invoke the inner's own <c>InvokingCoreAsync</c> / <c>InvokedCoreAsync</c>
-/// without filtering or modifying their output. Stripping of <c>AIContext.Tools</c> happens in
-/// <c>AgentActivities</c> per-iteration after the <c>IDurableToolSource</c> check.
+/// without filtering or modifying their output. The managed session workflow validates returned
+/// tool references during preparation; other execution paths retain their existing step behavior.
 /// </remarks>
 #pragma warning disable TA001
 internal sealed class DurableContextProviderWrapper : AIContextProvider, IDurableToolSource

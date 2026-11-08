@@ -109,9 +109,9 @@ MEAI logical-operation identity example so invocation metadata, downstream idemp
 and per-tool idempotency declarations remain aligned with the tool-functions guide.
 Phase 4.3b adds a compiled history-summarizer budget example so the keyed client profile and
 independent input/output budget settings stay aligned with the MEAI usage guide.
-Phase 7 adds compiled MAF workflow-subagent and MEAI telemetry-source examples so concrete
-`TemporalAIAgent.RunAsync` overloads remain workflow-safe and the pinned MEAI inference source stays
-registered in the observability guide.
+Phase 7 adds compiled MAF activity-to-proxy invocation and MEAI telemetry-source examples so
+workflow-generated session/request identities remain aligned with proxy calls and the pinned MEAI
+inference source stays registered in the observability guide.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 

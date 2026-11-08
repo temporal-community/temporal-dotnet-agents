@@ -78,9 +78,9 @@ internal sealed class AgentStepInput
     /// <summary>
     /// When <see langword="true"/>, the activity resolves and returns the worker-side durable-agent
     /// settings bundle so the workflow can patch its input on the first turn of a proxy-started
-    /// session or sub-agent orchestration.
+    /// session.
     /// Only set on the first step of the first turn when <see cref="AgentWorkflowInput.WorkerSettingsResolved"/>
-    /// is <see langword="false"/>, or by <see cref="TemporalAIAgent"/> on every first iteration.
+    /// is <see langword="false"/>.
     /// Defaults to <see langword="false"/> for all existing callers.
     /// </summary>
     public bool NeedsWorkerSettingsResolution { get; init; }

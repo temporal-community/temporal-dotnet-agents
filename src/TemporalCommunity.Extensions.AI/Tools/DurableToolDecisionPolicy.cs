@@ -5,7 +5,7 @@ namespace TemporalCommunity.Extensions.AI.Tools;
 /// <summary>
 /// Shared policy helpers for the tool-interceptor dispatch loop.
 /// Used by both the MEAI path (<c>DurableChatWorkflow</c>) and the MAF paths
-/// (<c>AgentWorkflow</c>, <c>AgentJobWorkflow</c>, <c>TemporalAIAgent</c>).
+/// (<c>AgentWorkflow</c>).
 /// All methods are pure / allocation-minimal and safe to call from workflow context.
 /// </summary>
 internal static class DurableToolDecisionPolicy

@@ -101,9 +101,6 @@ library never dispatches — `TodoProvider`, `AgentModeProvider`, `FileMemoryPro
 [context-providers.md](./context-providers.md) for the supported pattern and
 the three ways to give a provider's tools durable execution.
 
-For skills specifically, this library ships its own durable equivalent: `agent.UseSkills(...)`
-registers skill tools as ordinary durable tools. See [skills.md](./skills.md).
-
 ### `BackgroundAgentsProvider` can never work
 
 It keeps in-flight work in `BackgroundAgentRuntimeState`, which MAF documents as holding
@@ -116,8 +113,9 @@ survivable in a long-lived process. It is not survivable here, because `AgentWor
 continues-as-new every time history reaches `MaxEntryCount` — so in a durable session the provider
 would quietly mark in-flight delegated work `Lost` at each transition, losing it without an error.
 
-Use `WorkflowAgents.ExecuteAgentsInParallelAsync` for fan-out. It reaches the same result through
-`Workflow.WhenAllAsync` and is replay-safe.
+For fan-out, schedule one activity per registered agent proxy and await the activity tasks with
+`Workflow.WhenAllAsync`. Generate a distinct session and request ID for each call in workflow code.
+See [Routing Patterns](./routing.md#retry-identity-and-parallel-calls).
 
 ### `ToolApprovalAgent` — use this library's approval instead
 

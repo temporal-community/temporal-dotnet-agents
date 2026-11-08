@@ -1,7 +1,5 @@
 using Microsoft.Agents.AI;
-using Temporalio.Client.Schedules;
 using TemporalCommunity.Extensions.Agents.Scheduling;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;
@@ -117,6 +115,9 @@ public class CancelPendingApprovalTests
         public Task<AgentResponse> SendAsync(TemporalAgentSessionId sessionId, RunRequest request, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
+        public Task<TemporalAgentTurnOutcome> GetTurnOutcomeAsync(TemporalAgentSessionId sessionId, string requestId, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
         public Task RunAgentFireAndForgetAsync(TemporalAgentSessionId sessionId, RunRequest request, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
@@ -130,15 +131,6 @@ public class CancelPendingApprovalTests
             throw new NotImplementedException();
 
         public Task<TemporalCommunity.Extensions.AI.DurableTurnCancellationResult> CancelTurnAsync(TemporalAgentSessionId sessionId, string requestId, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
-
-        public Task RunAgentDelayedAsync(TemporalAgentSessionId sessionId, RunRequest request, TimeSpan delay, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
-
-        public Task<ScheduleHandle> ScheduleAgentAsync(string agentName, string scheduleId, RunRequest request, ScheduleSpec spec, SchedulePolicy? policy = null, CancellationToken cancellationToken = default) =>
-            throw new NotImplementedException();
-
-        public ScheduleHandle GetAgentScheduleHandle(string scheduleId) =>
             throw new NotImplementedException();
 
         public Task ShutdownAsync(TemporalAgentSessionId sessionId, CancellationToken cancellationToken = default) =>

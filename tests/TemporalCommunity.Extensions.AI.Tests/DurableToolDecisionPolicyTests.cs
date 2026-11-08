@@ -7,8 +7,7 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 
 /// <summary>
 /// Unit tests for <see cref="DurableToolDecisionPolicy"/> — the shared policy helpers used by
-/// all four tool-interceptor dispatch-loop call sites (DurableChatWorkflow, AgentWorkflow,
-/// AgentJobWorkflow, TemporalAIAgent).
+/// both tool-interceptor dispatch-loop call sites (DurableChatWorkflow and AgentWorkflow).
 /// </summary>
 public class DurableToolDecisionPolicyTests
 {

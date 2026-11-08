@@ -797,8 +797,8 @@ _test-samples-maf: build _sample-preflight _sample-preflight-maf
         "ConfigurableAgent:samples/MAF/ConfigurableAgent:150:[TriageAgent]|[EscalationAgent]" \
         "PerToolActivities:samples/MAF/PerToolActivities:90:Scenario 4: Tool calls disabled" \
         "ContextProviders:samples/MAF/ContextProviders:90:[TurnCounter] LLM call #1|[TurnCounter] LLM call #2" \
+        "Middleware:samples/MAF/Middleware:90:[caller guard]|[model attempt]|[tool attempt]|First answer: Paris|Second answer: London|Middleware sample complete." \
         "ToolInterceptor:samples/MAF/ToolInterceptor:240:[Approval requested]" \
-        "Skills:samples/MAF/Skills:90:Shutdown update accepted by agent workflow.|Done." \
         "MixedActivities:samples/MAF/MixedActivities:120:FetchDocumentAsync|StoreAnalysisAsync" \
         "DurableContextProvider:samples/MAF/DurableContextProvider:90:=== Approach A: IDurableToolSource ===|=== Approach B: DurableToolRegistrationSpec ===" \
         "McpTools:samples/MAF/McpTools:90:SKU-123 has 12 units available." ; do
@@ -836,7 +836,6 @@ _test-samples-maf: build _sample-preflight _sample-preflight-maf
         fi
     done
     echo "Skipped (interactive):    MAF/HumanInTheLoop — run manually."
-    echo "Skipped (interactive):    MAF/ApprovalScopes — run manually."
     echo "Skipped (two-process):    MAF/SplitWorkerClient — run Worker then Client."
     if [ -n "$UNCHECKED" ]; then
         echo "Exit-code only (no output markers asserted):$UNCHECKED"
@@ -854,7 +853,6 @@ test-samples: _test-samples-meai _test-samples-maf
 # Intentional exclusions (interactive or multi-process — must run manually):
 #   - samples/MAF/HumanInTheLoop   (interactive Console.ReadLine)
 #   - samples/MAF/SplitWorkerClient (two-process — Worker + Client)
-#   - samples/MAF/ApprovalScopes   (interactive Console.ReadLine — scope selector)
 _verify-sample-coverage:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -873,7 +871,7 @@ _verify-sample-coverage:
         | grep -oE 'samples/MAF/[A-Za-z]+' | sort -u)
     actual_maf=$(find samples/MAF -mindepth 2 -type f -name '*.csproj' -exec dirname {} \; \
         | sed 's#^\(samples/MAF/[^/]*\).*#\1#' \
-        | grep -Ev '/(HumanInTheLoop|SplitWorkerClient|ApprovalScopes)$' | sort -u)
+        | grep -Ev '/(HumanInTheLoop|SplitWorkerClient)$' | sort -u)
     missing_maf=$(comm -23 <(echo "$actual_maf") <(echo "$declared_maf"))
     if [ -n "$missing_maf" ]; then
         echo "WARN: MAF samples missing from _test-samples-maf:"

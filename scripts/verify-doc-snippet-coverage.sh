@@ -4,7 +4,7 @@
 # WHY THIS EXISTS
 #   The harness compiles documented registration examples so the compiler — not a regex — decides
 #   whether they bind to real overloads. But a harness only proves something about the snippets it
-#   actually contains. Adding a new `AddTemporalAgent(` / `AddDurableAgent(` / `AddTool(` example
+#   actually contains. Adding a new `.Agent(` / `AddDurableAgent(` / `AddTool(` example
 #   to a MAF how-to doc is exactly the moment a fresh defect can land, and the harness would stay silent about it.
 #   Existence of a harness file is not usage of it; this check converts existence into coverage.
 #
@@ -63,7 +63,7 @@ fail() {
 }
 
 # Emits one `key` line per qualifying fenced block: a ```csharp block whose body contains
-# `AddTemporalAgent(`, `AddDurableAgent(`, or `AddTool(`, every MEAI usage/embeddings/scheduling/operations block, selected MEAI tool/HITL
+# `.Agent(`, `AddDurableAgent(`, or `AddTool(`, every MEAI usage/embeddings/scheduling/operations block, selected MEAI tool/HITL
 # examples, or phase harness examples.
 # Headings inside fences are skipped, matching the slugger in
 # verify-markdown-links.sh — `# comment` in a shell example is not a section heading.
@@ -89,7 +89,7 @@ scan_docs() {
                 next
             }
             infence = 0
-            if (lang ~ /^csharp/ && (body ~ /AddTemporalAgent\(/ ||
+            if (lang ~ /^csharp/ && (body ~ /\.Agent\(/ ||
                 body ~ /AddDurableAgent\(/ || body ~ /AddTool\(/ ||
                 FILENAME == "docs/how-to/MEAI/embeddings.md" ||
                 FILENAME == "docs/how-to/MEAI/usage.md" ||
@@ -111,7 +111,7 @@ scan_docs() {
                 (FILENAME == "docs/how-to/MAF/usage.md" &&
                  (heading == "request-id-recovery" || heading == "inspecting-workflow-history-budget" ||
                   heading == "cancel-an-active-turn" ||
-                  heading == "agent-orchestration-inside-workflows")) ||
+                  heading == "invoking-agents-from-a-workflow")) ||
                 (FILENAME == "docs/how-to/MEAI/custom-workflow-output.md" &&
                  heading == "package-managed-typed-turns" &&
                  body ~ /DurableToolWorkflowBase/) ||

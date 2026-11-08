@@ -4,7 +4,6 @@ using Microsoft.Extensions.Hosting;
 using Temporalio.Client;
 using Temporalio.Exceptions;
 using Temporalio.Testing;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.IntegrationTests.Helpers;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Tools;

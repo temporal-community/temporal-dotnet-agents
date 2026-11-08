@@ -19,7 +19,34 @@ This sample demonstrates:
 - **Tool calls are durable per-tool activities.** `get_weather` executes inside its own `InvokeAgentTool` activity. If the worker restarts between the tool call and the model response, the tool result is replayed from history.
 - **Scoped tool dependencies.** The sample tool receives `IServiceProvider` through `AIFunctionArguments.Services`; scoped services are resolved for each tool invocation rather than captured at registration time.
 - **Turn cancellation is explicit.** Resolve `ITemporalAgentClient` and call `CancelTurnAsync(session.SessionId, requestId)` with the ID supplied to `RunAsync`. Cancelling the caller's `RunAsync` RPC wait does not cancel the accepted turn. The workflow propagates cancellation to active model/tool activities and waits for their cancellation to complete before stopping. Activity code must cooperate, and cancellation never rolls back an external tool effect.
+- **Ambiguous sends are read-only to reconcile.** After a call with a persisted `RequestId`, use `ITemporalAgentClient.GetTurnOutcomeAsync(session.SessionId, requestId)` to inspect Pending, Succeeded, Failed, or Unavailable. Unavailable does not prove the request was never accepted; reconcile before deciding whether to retry.
 - **Single-process simplicity.** Worker, agent, and caller all live in the same `IHost` — the minimum viable setup before splitting into separate processes.
+
+## Recover an ambiguous dispatch
+
+`TurnRecoveryExample.cs` persists both IDs to a new receipt file **before** dispatch. The demo
+cancels only the caller's RPC wait after 200 ms, then queries the outcome; this illustrates an
+ambiguous acknowledgement, not actual lost transport completion:
+
+```bash
+dotnet run --project samples/MAF/BasicAgent -- --recovery-demo ./turn-receipt.json
+```
+
+To resume reconciliation in a fresh process, use the same server/namespace and receipt:
+
+```bash
+dotnet run --project samples/MAF/BasicAgent -- --recover ./turn-receipt.json
+```
+
+The dispatch demo refuses to overwrite an existing receipt. Recover with that receipt or choose a
+new path; do not discard a receipt while its turn may still be unresolved.
+
+Recovery never dispatches a turn. It polls `Pending` at most six times, with backoff from 250 ms
+to 2 s and a 5 s deadline per query. `Unavailable` requires authoritative reconciliation, not an
+automatic resend; query exceptions and an exhausted pending budget are reported separately.
+Failed outcomes expose retained tool-call summaries/counts. A retryable classification does not
+prove a tool effect is safe to repeat. Keep the receipt after an ambiguous result; the default
+conversation path is unchanged.
 
 ## Getting Started
 
@@ -51,6 +78,7 @@ Session workflow ID: ta-assistant-<guid>
 
 User : What is the capital of France?
 Agent: The capital of France is Paris.
+Retained turn outcome: Succeeded
 
 User : What is its population?
 Agent: Paris has a population of approximately 2.1 million in the city proper...

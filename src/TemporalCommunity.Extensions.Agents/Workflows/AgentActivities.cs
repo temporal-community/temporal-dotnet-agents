@@ -195,8 +195,8 @@ internal sealed class AgentActivities(
         var blueprint = ResolveBlueprint(input.AgentName);
         var registration = blueprint.Registration;
         var agentsOptions = blueprint.AgentsOptions;
-        // Every dispatch path reaches this boundary, including the first proxy/sub-agent step
-        // and jobs without a settings handshake. Frontend snapshots are not worker policy.
+        // Every dispatch path reaches this boundary, including the first proxy-started step and
+        // jobs without a settings handshake. Frontend snapshots are not worker policy.
         AgentModelContextBudget modelContextBudget;
         try
         {
@@ -1703,9 +1703,8 @@ internal sealed class AgentActivities(
 
         // Deserialize the state bag snapshot when present. Parsing the workflow ID is only
         // valid when this activity runs inside AgentWorkflow (ID = ta-{agent}-{key} format).
-        // For TemporalAIAgent sub-agent calls the workflow ID is the parent's, which may not
-        // parse as a TemporalAgentSessionId — and SerializedStateBag is always null on that
-        // path anyway. Skip the parse entirely when there is nothing to deserialize.
+        // Skip parsing when there is nothing to deserialize; non-session activity invocations
+        // do not have a managed agent session ID.
         AgentSessionStateBag? stateBag = null;
         if (input.SerializedStateBag.HasValue)
         {
@@ -1897,12 +1896,10 @@ internal sealed class AgentActivities(
         }
         catch (FormatException)
         {
-            // Workflow ID isn't an agent session ID. In production that means the workflow-local
-            // sub-agent path: the activity was scheduled by a customer orchestrating workflow, so
-            // there is no agent session to attach. (A test environment using an arbitrary workflow
-            // ID lands here too — the message describes the observable fact first for that reason.)
+            // Workflow ID isn't an agent session ID, so this activity cannot attach a managed
+            // agent session. This can occur in standalone activity tests or non-session dispatch.
             TemporalAgentContext.SetUnavailable(
-                ContextUnavailableReason.SubAgentPath, input.SessionId ?? ctx.Info.WorkflowId);
+                ContextUnavailableReason.NoAgentSession, input.SessionId ?? ctx.Info.WorkflowId);
         }
 
         // Snapshot the bag's serialized form before invocation so we can detect (and write back)

@@ -3,15 +3,17 @@
 `TemporalCommunity.Extensions.Agents` makes a Microsoft Agent Framework (`Microsoft.Agents.AI`)
 `AIAgent` durable with Temporal. It builds on `TemporalCommunity.Extensions.AI`, adding named
 agents, `AgentSessionStateBag`, `AIContextProvider` support, and Temporal Web UI search attributes.
-The preferred worker registration path is `AddTemporalAgent`, which accepts standard MAF
-`ChatClientAgentOptions` and a separate `TemporalAgentOptions` for Temporal concerns. The lower-level
+The preferred worker registration path is `Agent`, which accepts standard MAF
+`ChatClientAgentOptions` and an optional per-agent callback that configures `TemporalAgentOptions`.
+The lower-level
 `AddDurableAgent` builder remains available for advanced Temporal composition. There are two ways to
 interact with a registered agent:
 
 - **From outside a workflow** — external callers (ASP.NET, console, background service) resolve a
   `TemporalAIAgentProxy` via `GetTemporalAgentProxy`.
-- **From inside an orchestrating workflow** — use `WorkflowAgents.GetTemporalAgent` for
-  sub-agent orchestration.
+- **From a regular workflow** — schedule an activity that resolves and invokes the registered
+  `TemporalAIAgentProxy`; pass a workflow-generated session ID and request ID so activity retries
+  reuse the same agent turn.
 
 **New here? Start with the [Quickstart](./quickstart.md)** — one agent registered and called, in
 about thirty lines. This page is the full reference: every builder slot, option, and behaviour. To choose between it and
@@ -24,8 +26,11 @@ before calling a durable client.
 
 ## Registration
 
-`AddTemporalAgent` is the preferred worker-hosted registration path. It accepts a MAF
-`ChatClientAgentOptions` plus optional `TemporalAgentOptions`; the client-only counterpart is
+`Agent` is the preferred worker-hosted registration path. It accepts a MAF
+`ChatClientAgentOptions` plus an optional callback that configures per-agent Temporal settings.
+The callback receives a fresh `TemporalAgentOptions` and can set execution values, tool middleware,
+and memory configuration. When omitted, Temporal settings use their defaults. The client-only
+counterpart is
 `AddTemporalAgentProxies(taskQueue, agentNames...)`, which registers keyed `AIAgent` proxies without
 registering the worker or agent implementation. `AddAgentProxy` is still available for client-only
 registrations that need per-agent proxy settings.
@@ -55,7 +60,7 @@ builder.Services.AddTemporalClient("localhost:7233", "default");
 builder.Services
     .AddHostedTemporalWorker(taskQueue)
     .AddTemporalAgents(agents =>
-        agents.AddTemporalAgent(
+        agents.Agent(
             "WeatherAgent",
             new ChatClientAgentOptions
             {
@@ -66,7 +71,7 @@ builder.Services
                     Tools = [weatherTool],
                 },
             },
-            new TemporalAgentOptions { TimeToLive = TimeSpan.FromHours(24) }));
+            temporal => temporal.TimeToLive = TimeSpan.FromHours(24)));
 ```
 
 `IServiceProvider` parameters in `AIFunctionFactory` functions are bound from
@@ -85,7 +90,7 @@ For the common configuration, move the corresponding values as follows:
 | `AddTool(AIFunction)` | `ChatClientAgentOptions.ChatOptions.Tools` |
 | `AddContextProvider(provider)` | `ChatClientAgentOptions.AIContextProviders` |
 | `ChatClient = sp => sp.GetRequiredService<IChatClient>()` | `AddChatClient(...)` registration in DI |
-| `TimeToLive`, activity/approval timeouts, retry, history bounds | `TemporalAgentOptions` |
+| `TimeToLive`, activity/approval timeouts, retry, history bounds | `Action<TemporalAgentOptions>` callback |
 
 Use `AddDurableAgent` when you need builder-only integration points such as custom pipeline
 configuration or tool-interceptor factories. Both paths use workflow-owned history and the same
@@ -102,7 +107,7 @@ The compact registration path preserves these MAF inputs:
 | `ChatOptions` | Cloned and forwarded to model calls. `Instructions` becomes the registered agent instruction; the tool list is replaced by the durable tools below. |
 | `ChatOptions.Tools` | Only `AIFunction` instances are accepted. Each function is dispatched through a separate Temporal activity. |
 | `AIContextProviders` | Preserved in the configured order. |
-| `TemporalAgentOptions` | Carries per-agent TTL, activity/heartbeat/approval timeouts, retry policy, and history/context bounds. |
+| Temporal configuration callback | Configures per-agent TTL, activity/heartbeat/approval timeouts, retry policy, history/context bounds, tool middleware, and supported memory settings. |
 
 `ChatClientAgentOptions.Id` and a custom `ChatHistoryProvider` are rejected. The workflow owns the
 session identity and all conversation history. `ChatOptions.ConversationId`, a continuation token,
@@ -218,25 +223,105 @@ retry with backoff rather than expecting the workflow to queue it.
 
 ### Request ID Recovery
 
-For recovery after an ambiguous RPC result, supply a logical request ID and persist it before
-submitting the turn. Reuse it only for the same effect-bearing input; correlation IDs are for
-observability and do not provide deduplication.
+Persist **both the session workflow ID and request ID before dispatch**. A restarted caller needs
+both; correlation IDs do not deduplicate turns. This example writes an application-owned receipt
+file without overwriting an existing one:
 
 ```csharp
-var requestId = Guid.NewGuid().ToString("N"); // Persist this ID before submitting the turn.
+var session = (TemporalAgentSession)await agentProxy.CreateSessionAsync();
+var requestId = Guid.NewGuid().ToString("N");
+await using (var file = new FileStream(receiptPath, FileMode.CreateNew, FileAccess.Write))
+{
+    await JsonSerializer.SerializeAsync(file, new
+    {
+        SessionWorkflowId = session.SessionId.WorkflowId,
+        RequestId = requestId,
+    });
+    file.Flush(flushToDisk: true);
+}
 var response = await agentProxy.RunAsync(
     "What is the capital of France?",
     session,
     new TemporalAgentRunOptions { RequestId = requestId });
 ```
 
+After an ambiguous acknowledgement (for example, `WorkflowUpdateRpcTimeoutOrCanceledException`),
+reload the receipt instead of sending again. Poll only `Pending`, with backoff and a bounded RPC wait:
+
+```csharp
+using var receipt = JsonDocument.Parse(await File.ReadAllTextAsync(receiptPath));
+var sessionId = TemporalAgentSessionId.Parse(receipt.RootElement.GetProperty("SessionWorkflowId").GetString()!);
+var requestId = receipt.RootElement.GetProperty("RequestId").GetString()!;
+var temporalAgentClient = serviceProvider.GetRequiredService<ITemporalAgentClient>();
+var delay = TimeSpan.FromMilliseconds(250);
+for (var attempt = 0; attempt < 6; attempt++)
+{
+    TemporalAgentTurnOutcome outcome;
+    try
+    {
+        using var queryWait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        outcome = await temporalAgentClient.GetTurnOutcomeAsync(sessionId, requestId, queryWait.Token);
+    }
+    catch (Exception error) when (error is RpcException or WorkflowQueryFailedException
+        or WorkflowQueryRejectedException or OperationCanceledException)
+    {
+        Console.Error.WriteLine($"Query failed; no outcome established: {error.Message}");
+        throw;
+    }
+    if (outcome.Status != TemporalAgentTurnOutcomeStatus.Pending)
+    {
+        if (outcome.Status == TemporalAgentTurnOutcomeStatus.Unavailable)
+            Console.Error.WriteLine("No retained outcome; reconcile authoritative state. Do not resubmit.");
+        else
+            Console.WriteLine($"{outcome.Status}; tool counts: {outcome.ToolCallCounts}");
+        return;
+    }
+    if (attempt < 5)
+    {
+        await Task.Delay(delay);
+        delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 2000));
+    }
+}
+throw new TimeoutException("Still pending after six queries; retain both IDs for later recovery.");
+```
+
+The [BasicAgent recovery mode](../../../samples/MAF/BasicAgent/README.md#recover-an-ambiguous-dispatch)
+runs this flow. `Succeeded`/`Failed` records expose the retained committed revision and bounded
+tool-call summaries/counts. `DetailsOmitted` is true if response/failure details or tool identities
+were omitted; counts can still describe omitted calls. `FailureNonRetryable` is null when no
+classification is retained. A retryable classification does not prove an external tool effect is safe to repeat.
+
+`GetTurnOutcomeAsync` is a read-only query and never starts or resubmits a turn. Terminal outcomes
+are bounded by the workflow's record-count and byte limits; an evicted or never-recorded request is
+`Unavailable`, not `Pending`; it is not evidence the turn never ran. A query NotFound with the
+server's typed `NotFoundFailure` detail is also `Unavailable`. That generic detail does not name
+the missing resource, so this mapping relies on Temporal's workflow-query error contract;
+namespace-not-found and unknown or absent error details propagate. Use the same `RequestId` for a deliberate retry only after reconciliation;
+while the outcome remains retained, resubmitting the same input returns the recorded terminal result.
+
 Within one workflow run, a matching request ID and fingerprint joins an active turn or returns
 its recorded terminal outcome. A different request is rejected as `Busy`; reusing the ID with
 changed effect-bearing input is rejected as `Conflict`, before the update is accepted into history.
 Up to 128 terminal outcomes / 1 MiB of serialized outcomes are retained by default and carried
 through Continue-as-New, along with the opaque session epoch and cumulative completed-turn count.
-Evicted or oversized outcomes are outside the deduplication window. Request IDs do not make
-downstream tool effects exactly-once.
+An oversized outcome remains inside the deduplication window while its compact or minimal record
+is retained. Only evicted or never-recorded outcomes are outside that window. Request IDs do not
+make downstream tool effects exactly-once.
+
+Failed turns throw `DurableTurnFailedException` with the last committed revision and a bounded,
+result-free `ToolCallSummaries` list. A completed call means the function returned, a failed call
+means a classified failure or no dispatch, and an uncertain call means dispatch happened without
+an observed result (for example, a timeout). Uncertain does not mean no effect occurred.
+The summary retains the newest identities within 32 entries and 16 KiB; `ToolCallCounts` accounts
+for all calls, and `OmittedToolCallCounts` accounts for those whose identities were omitted.
+StateBag and provider/approval state roll back, but completed external effects do not. An
+interrupted-turn record remains in conversation history so the next turn sees that dispatch occurred.
+
+A retained **full outcome** replays the typed failure. A **compact record** replays
+`DurableTurnOutcomeTooLargeException` with retained identities/statuses and omitted counts; a
+**minimal record** returns counts only. No level reconstructs identities it did not retain, and none
+redispatches the turn while retained. Inspect the outcome and reconcile external effects before
+submitting a new request ID.
 
 The fingerprint covers messages, the configured model route and tool authority, tool selection,
 and structured-output settings. Correlation IDs and Temporal Update IDs remain separate from this
@@ -415,14 +500,9 @@ var report = await agentProxy.RunStructuredAsync<WeatherReport>(
     });
 ```
 
-Available on all three receivers:
+Available on the registered proxy:
 
 ```csharp
-// Inside a workflow
-var agent = WorkflowAgents.GetTemporalAgent("AnalystAgent");
-var session = await agent.CreateSessionAsync();
-var analysis = await agent.RunStructuredAsync<AnalysisResult>(messages, session);
-
 // Via the client
 var result = await client.RunStructuredAsync<WeatherReport>(sessionId, request);
 ```
@@ -484,82 +564,49 @@ in operator workflow logs, without arguments or registry contents.
 
 ---
 
-## Agent Orchestration (Inside Workflows)
+## Invoking Agents from a Workflow
 
-Use `WorkflowAgents.GetTemporalAgent` to interact with agents from within an orchestrating Temporal workflow. The
-agent's conversation history is stored in the workflow's event history and replayed automatically.
+Workflow code must not invoke an agent directly. Resolve the registered proxy inside an activity,
+and generate the session and request IDs in workflow code. Temporal replays those IDs unchanged, so
+an activity retry uses the same session and request identity. For example, see
+[`WorkflowOrchestration`](../../../samples/MAF/WorkflowOrchestration/README.md).
 
 ```csharp
-using Temporalio.Workflows;
-using TemporalCommunity.Extensions.Agents;
-
 [Workflow]
-public class ResearchWorkflow
+public sealed class ResearchWorkflow
 {
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
-        // Get a TemporalAIAgent — runs inference via activity, history tracked in workflow state
-        var researcher = WorkflowAgents.GetTemporalAgent("ResearcherAgent");
-        var session = await researcher.CreateSessionAsync();
-
-        var outline = await researcher.RunAsync($"Create an outline about: {topic}", session);
-
-        var writer = WorkflowAgents.GetTemporalAgent("WriterAgent");
-        var writerSession = await writer.CreateSessionAsync();
-
-        var draft = await writer.RunAsync(
-            $"Write a short article based on this outline:\n{outline.Messages[0].Text}",
-            writerSession);
-
-        return draft.Messages[0].Text ?? string.Empty;
+        var sessionId = WorkflowAgents.NewAgentSessionId("ResearcherAgent");
+        var requestId = Workflow.NewGuid().ToString("N");
+        return await Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                "ResearcherAgent", sessionId.WorkflowId, requestId, $"Research: {topic}"),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
     }
 }
 ```
 
-The session returned by `CreateSessionAsync` holds the conversation history, and it lives in workflow state. This means it
-survives worker restarts, supports retries, and is durable by design — all without any extra persistence code.
-
-Keep the value returned by `GetTemporalAgent` typed as `TemporalAIAgent` when calling `RunAsync`.
-Its overloads dispatch directly to the workflow-safe implementation so continuations remain on
-Temporal's deterministic scheduler. Upcasting it to MAF's `AIAgent` and calling the inherited
-`RunAsync` bypasses those overloads and is not supported inside workflow code.
-
-Reuse one session for the turns of one conversation; give each independent conversation its own. One `TemporalAIAgent`
-instance drives any number of sessions without their history or StateBag colliding. Two runs may not overlap on the same
-session, and a session may only be run by the agent that created it.
-
-Continue-as-new differs by path. A session driven through `TemporalAIAgentProxy` runs in the
-library's `AgentWorkflow`, which carries history and StateBag across its own continue-as-new
-automatically. A workflow-local sub-agent session is yours to carry: serialize it into your
-workflow's continue-as-new input, because the library cannot know your continue-as-new policy.
+The activity resolves the proxy from its scoped services, creates a
+`TemporalAgentSession` from the passed session ID, and supplies the stable request ID through
+`TemporalAgentRunOptions.RequestId`. The registered `AgentWorkflow` owns conversational history
+and carries it across its own Continue-as-New transitions.
 
 ---
 
 ## Invoking Agents from External Code (Proxy)
 
-Use `TemporalAIAgentProxy` to interact with a registered agent from outside a Temporal workflow — for example, from an
-ASP.NET handler, a background service, or a console application. The proxy communicates with the running `AgentWorkflow`
-via Temporal workflow updates and is the correct counterpart to `WorkflowAgents.GetTemporalAgent`, which is
-workflow-context only.
+Use `TemporalAIAgentProxy` to interact with a registered agent from outside a Temporal workflow —
+for example, from an ASP.NET handler, a background service, a console application, or an activity.
+The proxy communicates with the running `AgentWorkflow` via Temporal workflow updates.
 
 `TemporalAIAgentProxy` is `internal`; callers always reference it as `AIAgent` (MAF's base class). Resolution is always
 via `services.GetTemporalAgentProxy("Name")`.
 
-| | `TemporalAIAgent` | `TemporalAIAgentProxy` |
+| Receiver | Where to use it | History owner |
 |---|---|---|
-| Returned by | `WorkflowAgents.GetTemporalAgent("Name")` | `services.GetTemporalAgentProxy("Name")` |
-| Context | Inside a `[Workflow]` method | Outside a workflow (ASP.NET, console, background service) |
-| History | Stored in the calling workflow's event history | Stored in the target `AgentWorkflow`'s event history |
-| Session | New or existing `TemporalAgentSession` | Same |
-
-> **Misuse guard:** `WorkflowAgents.GetTemporalAgent` throws `InvalidOperationException` when called outside a
-> workflow context with the message: _"If you need to invoke an agent from external code, resolve a
-> TemporalAIAgentProxy from your service provider via GetTemporalAgentProxy(name) instead."_
-> Additionally, `TemporalAIAgent.RunAsync` (via `RunCoreAsync`) throws `InvalidOperationException` if invoked
-> outside a Temporal workflow context — for instance, if a `TemporalAIAgent` reference escapes the workflow
-> executor onto a non-workflow thread. In both cases the fix is the same: use `GetTemporalAgentProxy` for
-> external callers.
+| `AIAgent` resolved with `GetTemporalAgentProxy("Name")` | External code or activity code | The target `AgentWorkflow` |
 
 ### Same-Process Registration
 
@@ -630,7 +677,7 @@ provided it also registers an `ITemporalClient`. If the client is already regist
 
 ### Multi-Turn Conversations via Proxy
 
-The proxy's `CreateSessionAsync` and `RunAsync` signatures are identical to those of `TemporalAIAgent`. Retain the
+The proxy's `CreateSessionAsync` and `RunAsync` signatures follow MAF's `AIAgent` API. Retain the
 session across calls to preserve conversation history:
 
 ```csharp
@@ -645,7 +692,8 @@ var r2 = await agentProxy.RunAsync("The order number is 12345.", session);
 Console.WriteLine(r2.Messages[0].Text);  // Context from r1 is preserved
 ```
 
-For the in-workflow counterpart, see [Agent Orchestration (Inside Workflows)](#agent-orchestration-inside-workflows).
+For regular workflows, schedule an activity that resolves and invokes the registered proxy, as
+described in [Invoking Agents from a Workflow](#invoking-agents-from-a-workflow).
 
 ---
 
@@ -729,27 +777,6 @@ builder.Services
     });
 ```
 
-### Activity Timeouts for In-Workflow Agents
-
-When using `WorkflowAgents.GetTemporalAgent` inside an orchestrating workflow, pass `ActivityOptions` directly at
-the call site. **Set `RetryPolicy` when you do.** The library only applies its bounded backstop to
-the `ActivityOptions` it builds itself; anything you pass is used as-is, so omitting `RetryPolicy`
-here opts *out* of the backstop rather than inheriting it:
-
-```csharp
-var researcher = WorkflowAgents.GetTemporalAgent(
-    "ResearcherAgent",
-    activityOptions: new ActivityOptions
-    {
-        StartToCloseTimeout = TimeSpan.FromMinutes(5),
-        HeartbeatTimeout    = TimeSpan.FromMinutes(1),
-        // REQUIRED. A caller-supplied ActivityOptions is used verbatim, so a null RetryPolicy
-        // reaches the server as its default — MaximumAttempts = 0, i.e. UNLIMITED retries — and a
-        // deterministically failing LLM step would hang the orchestrating workflow forever.
-        RetryPolicy = new RetryPolicy { MaximumAttempts = 5, MaximumInterval = TimeSpan.FromSeconds(2) },
-    });
-```
-
 ---
 
 ## Accessing Temporal from Agent Tools
@@ -786,7 +813,7 @@ Console.WriteLine($"Processing request for session: {sessionId.WorkflowId}");
 
 ## Streaming Limitation
 
-`TemporalAIAgent` and `TemporalAIAgentProxy` do not support `RunStreamingAsync`; both throw
+The registered proxy does not support `RunStreamingAsync`; it throws
 `NotSupportedException`. The durable model-step activity uses MAF's non-streaming `RunAsync` and
 returns the completed response. Use `RunAsync` and deliver that response from your application
 boundary.
@@ -806,8 +833,9 @@ Both patterns are covered in detail in [Routing Patterns](./routing.md), with co
 
 ## Parallel Agent Execution
 
-`WorkflowAgents.ExecuteAgentsInParallelAsync` dispatches multiple agent calls concurrently inside a workflow
-using `Workflow.WhenAllAsync` — the workflow-safe equivalent of `Task.WhenAll`.
+For parallel fan-out, schedule one activity per agent and await them with
+`Workflow.WhenAllAsync`. Each activity resolves its registered proxy. Generate a distinct stable
+session ID and request ID for each call in workflow code.
 
 ```csharp
 using Temporalio.Workflows;
@@ -819,31 +847,24 @@ public class ResearchAndSummarizeWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
-        var researchAgent  = WorkflowAgents.GetTemporalAgent("ResearchAgent");
-        var summaryAgent   = WorkflowAgents.GetTemporalAgent("SummaryAgent");
-
         var researchSession = WorkflowAgents.NewAgentSessionId("ResearchAgent");
         var summarySession  = WorkflowAgents.NewAgentSessionId("SummaryAgent");
-
-        var researchMessages = new List<ChatMessage>
-            { new(ChatRole.User, $"Research the topic: {topic}") };
-        var summaryMessages  = new List<ChatMessage>
-            { new(ChatRole.User, $"Summarize the latest findings on: {topic}") };
-
-        IReadOnlyList<AgentResponse> results =
-            await WorkflowAgents.ExecuteAgentsInParallelAsync(new[]
-            {
-                (researchAgent, (IList<ChatMessage>)researchMessages, (AgentSession)new TemporalAgentSession(researchSession)),
-                (summaryAgent,  (IList<ChatMessage>)summaryMessages,  (AgentSession)new TemporalAgentSession(summarySession)),
-            });
-
-        return $"Research: {results[0].Messages[0].Text}\n\nSummary: {results[1].Messages[0].Text}";
+        var research = Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                researchSession.WorkflowId, Workflow.NewGuid().ToString("N"), $"Research: {topic}"),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+        var summary = Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                summarySession.WorkflowId, Workflow.NewGuid().ToString("N"), $"Summarize: {topic}"),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+        var results = await Workflow.WhenAllAsync([research, summary]);
+        return $"Research: {results[0]}\n\nSummary: {results[1]}";
     }
 }
 ```
 
-Results are returned in the same order as the input tuples. Each agent runs inside its own activity and the workflow
-waits for all of them before continuing.
+Each proxy call starts or reuses its own registered `AgentWorkflow`; activity retry identity is
+preserved by reusing the workflow-generated session and request IDs.
 
 ---
 
@@ -994,27 +1015,6 @@ See [HITL Patterns](./hitl-patterns.md) for the full guide including the two-fla
 
 ---
 
-## Scheduling
-
-Choose the scheduling primitive by recurrence and whether the run needs session state:
-
-| Primitive | Use it for |
-|---|---|
-| `AddScheduledAgentRun` | Recurring stateless work declared with the worker |
-| `ScheduleAgentAsync` | Recurring stateless work created by the process that hosts the durable agent |
-| `ScheduleOneTimeAgentRunAsync` | One-time stateless work created inside another workflow |
-| `RunAgentDelayedAsync` | A delayed conversation with history, StateBag, and approval support |
-
-The first three run `AgentJobWorkflow`, which has no session state or typed result. Persist useful
-output through an idempotent durable tool. `RunAgentDelayedAsync` creates a full `AgentWorkflow` but
-returns when Temporal accepts the request, not when the initial response is ready.
-
-See [Scheduling Agent Runs](./scheduling.md) for the canonical worker setup, time-zone and catchup
-semantics, one-time idempotency, schedule updates, output capture, approval behavior, and lifecycle
-management.
-
----
-
 ## MCP Tool Integration
 
 [Model Context Protocol](https://modelcontextprotocol.io/) servers expose `McpClientTool` objects,
@@ -1062,20 +1062,22 @@ authenticate the server or prove the remote implementation is compatible. See th
 
 ## Context Providers and External Memory
 
-`AIContextProvider` instances run before each LLM call inside `AgentActivities`. Compatible providers
-contribute retry-safe instructions or messages and store compact per-session state in
-`AgentSessionStateBag`; see [Context Providers](context-providers.md) and
-the [bounded compatibility contract](../../architecture/MAF/bounded-durable-agent-compatibility.md).
+Managed session workflows run `AIContextProvider.InvokingAsync` once in a context-preparation
+activity before the model/tool loop, then reuse the recorded instructions/messages on each LLM
+step. `InvokedAsync` runs at terminal turn completion. Compatible providers store compact
+per-session state in `AgentSessionStateBag`; see [Context Providers](context-providers.md) and the
+[bounded compatibility contract](../../architecture/MAF/bounded-durable-agent-compatibility.md).
 
 Provider-owned history and external writes, including direct Mem0-style registrations, are not
-supported durable registrations. Their lifecycle hooks run in retryable LLM-step activities and
-the library has no atomic idempotent provider-history contract. Do not use `AddContextProvider` as
-a durable external-memory adapter.
+supported durable registrations. Provider hooks can retry before their activity results are
+recorded, and the library has no atomic idempotent provider-history contract. Do not use
+`AddContextProvider` as a durable external-memory adapter.
 
 `AddContextProvider` accepts either a concrete instance or an activity-scoped DI factory. Neither
-form is session storage. The factory may run on every LLM-step activity attempt, including retries;
-the instance object is likewise not a durable session object. Declare provider tools statically
-with `IDurableToolSource` or the `durableTools` overload.
+form is session storage. The factory may run for preparation and completion activity attempts,
+including retries. The instance object is
+likewise not a durable session object. Declare provider tools statically with `IDurableToolSource`
+or the `durableTools` overload.
 
 ---
 
@@ -1088,32 +1090,30 @@ the agent-level retry policy and apply uniformly to that agent's tools; only ena
 registered tools are safe to retry. See [Durable Agents](./durable-agents.md#retry-policy-hierarchy)
 for the activity policy details.
 
-`agent.MaxToolCallsPerTurn` (default `20` when not set) caps step-loop iterations per single agent turn. The value propagates from the agent's registration into session-based workflows, scheduled jobs, and sub-agent calls via `GetTemporalAgent()` — you configure it once on the builder and it takes effect everywhere. When exceeded, the workflow returns a structured "iteration cap exceeded" assistant message rather than letting workflow history grow unbounded.
+`agent.MaxToolCallsPerTurn` (default `20` when not set) caps step-loop iterations per single managed agent turn. Configure it on the registered agent builder. When exceeded, the workflow returns a structured "iteration cap exceeded" assistant message rather than letting workflow history grow unbounded.
 
 ```csharp
 builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
     .AddHostedTemporalWorker("agents")
-    .AddTemporalAgents(opts =>
-    {
-        opts.AddDurableAgent("SupportAgent", agent =>
-        {
-            agent.Instructions = "You help customers with support requests.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-
-            // Tool activities get one attempt by default.
-            agent.AddTool(lookupOrderTool);
-
-            // Tool timeouts remain configurable per tool. Retry policy is agent-level only.
-            agent.AddTool(sendEmailTool, opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
-
-            agent.MaxToolCallsPerTurn = 10;
-        });
-    });
+    .AddTemporalAgents(agents =>
+        agents.Agent(
+            "SupportAgent",
+            new ChatClientAgentOptions
+            {
+                ChatOptions = new ChatOptions
+                {
+                    Instructions = "You help customers with support requests.",
+                    Tools = [lookupOrderTool, sendEmailTool],
+                },
+        },
+        _ => { }));
 ```
 
-For serial tool dispatch, one-attempt defaults, and agent-level retry opt-in, see [Durable Agents](./durable-agents.md).
+Tool retries are agent-wide on this registration path. If these tools have different retry
+requirements, register them on separate agents rather than applying a retry policy to only one
+tool. For serial dispatch and retry/idempotency guidance, see [Durable Agents](./durable-agents.md).
 
 To add a pre-dispatch lifecycle hook — for risk scoring, PII scrubbing, argument enrichment, or dynamic approval gates — register an `IAgentToolInterceptor`. See [Tool Interceptor](./tool-interceptor.md) for the full guide.
 
@@ -1245,13 +1245,13 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 | `AddTool(AIFunction tool, Action<DurableToolOptions>? configure = null)` | Registers a concrete `AIFunction`. Per-tool timeout and interceptor/approval settings via `configure`. |
 | `AddTool(string name, Func<IServiceProvider, AIFunction> factory, Action<DurableToolOptions>? configure = null)` | DI-resolving tool factory. |
 | `AddTools(params AIFunction[] tools)` | Bulk registration of concrete tools. |
-| `AddContextProvider(AIContextProvider provider, IEnumerable<DurableToolRegistrationSpec>? durableTools = null)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the chat pipeline. `Invoking/InvokedAsync` fire once per LLM call. Concrete providers can also contribute durable tools through specs or `IDurableToolSource`. |
+| `AddContextProvider(AIContextProvider provider, IEnumerable<DurableToolRegistrationSpec>? durableTools = null)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the managed session pipeline. `InvokingAsync` prepares context once per logical turn and `InvokedAsync` runs at turn completion; activity retries may repeat either hook. See [Context Providers](context-providers.md) for tool limits. |
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
 | `RetryPolicy` | Agent-level retry policy. Applies to the `RunDurableAgentStep` activity and all tool and interceptor activities for the agent; this is the only supported retry opt-in for tools. |
 | `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
 | `ContextReducerKey` | Per-agent MEAI context reducer key. Inherits `opts.DefaultContextReducerKey`; affects only the model request, not retained history. |
 | `MaxModelContextTokens`, `ModelOutputTokenReserve` | Optional per-agent estimated model-context limit and output reserve. Inherit worker defaults when unset. |
-| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per agent turn (default `20` when not set). Applies across all three execution paths: session-based workflows, scheduled jobs, and sub-agent orchestration via `GetTemporalAgent()`. No worker-level fallback. **Resolution timing:** The value is resolved from the agent registration on the first LLM step of the first turn and cached on the `TemporalAIAgent` instance for its lifetime — it describes the agent, not the conversation, so every session that instance drives shares the resolved value. Changes to the builder value after worker startup do not affect agents already resolved. |
+| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per managed agent turn (default `20` when not set). No worker-level fallback. The value is resolved from the agent registration when the worker resolves the agent configuration. |
 | `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
 
 ### `DurableToolOptions` reference
@@ -1281,7 +1281,7 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.ModelOutputTokenReserve` | `opts.DefaultModelOutputTokenReserve` |
 | `agent.HistoryReducerKey` | `opts.DefaultHistoryReducerKey` |
 | `agent.ContextReducerKey` | `opts.DefaultContextReducerKey` |
-| `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`; propagates to scheduled jobs and sub-agent orchestration* |
+| `agent.MaxToolCallsPerTurn` | *no worker fallback — defaults to `20`* |
 | `agent.AddToolInterceptor(...)` | `opts.DefaultToolInterceptor` — worker-level fallback; overridden per agent via `AddToolInterceptor` |
 
 Retry policy resolution for agent activities:
@@ -1299,7 +1299,7 @@ idempotent. Full table in
 
 ### Custom agent middleware
 
-To wrap the whole agent run — timing, tracing, request-level short-circuiting — set
+To wrap each model-step attempt — timing, tracing, step-level short-circuiting — set
 `agent.ConfigureAgentPipeline` (`Action<AIAgentBuilder>`), or `opts.DefaultConfigureAgentPipeline`
 for every agent; the per-agent value wins when both are set.
 
@@ -1314,11 +1314,17 @@ exact supplied session through. Full guidance, worked examples, and the rules th
 live in **[Intercepting LLM Calls](./llm-call-interception.md)** — which also covers the other
 interception layer, decorating the `IChatClient` your `agent.ChatClient` factory returns.
 
+For per-tool MAF-shaped middleware, set `TemporalAgentOptions.ToolMiddleware` in the existing
+`.Agent(...)` registration. It runs after required approval inside each scoped tool attempt,
+supports serializable short-circuit/results, and cannot alter the approved call.
+See [Tool middleware](llm-call-interception.md#tool-middleware) and the complete
+[Middleware sample](../../../samples/MAF/Middleware/).
+
 ### Factory lifetimes
 
-Tool factories run once when the worker first builds its immutable agent blueprint, and their
-`AIFunction` values are cached for that worker. The chat-client, context-provider, and interceptor
-factories run from a fresh DI scope for **every activity attempt**. Do not use factory or wrapper
+Tool factories resolve from the activity scope on each preparation/model/tool attempt; the worker
+blueprint caches registration metadata, not scoped implementations. The chat-client,
+context-provider, and interceptor factories also use the corresponding attempt's DI scope. Do not use factory or wrapper
 fields as session storage: an attempt can retry, run on another worker, or overlap another session.
 Use `AgentSession.StateBag` instead.
 
@@ -1329,10 +1335,11 @@ a `FunctionInvokingChatClient` anywhere in the chat client your factory returns 
 non-retryably, before the model is called. See
 [Intercepting LLM Calls](./llm-call-interception.md#the-chat-client-layer).
 
-`AIContextProvider.InvokingAsync` and `InvokedAsync` fire **once per LLM call** (per
-`RunDurableAgentStep` activity). A turn that takes 3 LLM-step iterations to converge will see 3
-invocation pairs. Make these hooks idempotent and cheap, or cache results via `StateBag` to skip
-redundant work within a turn.
+For managed session workflows, `AIContextProvider.InvokingAsync` runs once before the model/tool
+loop and `InvokedAsync` runs once when that logical turn reaches a terminal result. Their activities
+can retry, so hook effects remain at-least-once; completed preparation output is replayed rather
+than recalled. The registered agent workflow invokes per-step callbacks. See
+[Context Providers](context-providers.md) for failure, cancellation, StateBag, and tool semantics.
 
 For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).
 For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md).
@@ -1346,10 +1353,10 @@ For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientA
 
 - [Durable Agents](durable-agents.md) — the canonical write-vs-read tool example and per-agent retry policy
 - [Context Providers](context-providers.md) — writing and registering an `AIContextProvider`
+- [Agent Memory](memory.md) — how workflow history and provider-backed memory differ
 - [HITL Patterns](hitl-patterns.md) — the two approval flavors, full guide and testing patterns
 - [Routing Patterns](routing.md) — static and dynamic agent routing
 - [Tool Interceptor](tool-interceptor.md) — pre-dispatch lifecycle hooks
-- [Scheduling](scheduling.md) — recurring and deferred agent runs
 - [MCP Tools](mcp-tools.md) — remote MCP client tool registration
 - [Testing Agents](testing-agents.md) — unit vs. integration testing durable agents
 - [Observability](observability.md) — the full OTel span hierarchy

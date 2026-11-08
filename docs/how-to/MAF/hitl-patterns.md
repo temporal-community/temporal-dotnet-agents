@@ -76,7 +76,6 @@ already keeps the heartbeat pump active; change it only when you need a differen
 | More than one approval per turn | Queued in call order | Processed one at a time |
 | Realistic review window | Hours to days | Minutes |
 | Extra configuration | None — defaults suit it | Activity and approval budgets must align; heartbeat cadence is optional |
-| Reusable session grants (`ScopeAware()`) | Available | Not available |
 | Who owns the `RequestId` | The workflow, after the interceptor returns | The tool, before it asks |
 | Declared by | `RequireApproval()`, or an interceptor's `PauseForApproval(...)` | `RequestApprovalAsync` in the tool body |
 
@@ -94,9 +93,7 @@ arguments, not the tool, so `RequireApproval()` would gate the $12 refunds too. 
 the weekend, and the 7-day default covers it with no configuration.
 
 **A coding agent must ask before force-pushing.** → **Workflow-parked, via `RequireApproval()`.**
-Every force-push needs review, so the gate belongs on the tool and no interceptor is needed. If a
-developer is watching and approving many similar writes, add `ScopeAware()` so one decision can
-cover a shape of call.
+Every force-push needs its own review, so the gate belongs on the tool and no interceptor is needed.
 
 **Support escalations sit in a queue overnight.** → **Workflow-parked** — and note that turns within
 one session are serialized. While an escalation waits, that session accepts no other turns. Scope
@@ -106,10 +103,6 @@ your session to the *case*, not the user, or the user cannot keep chatting.
 approval-relevant fact does not exist until the tool has done the analysis; neither the tool
 registration nor the interceptor can show a number nobody has computed yet. Budget minutes, make it
 the only approval in the turn, and accept that a deploy ends the review.
-
-**A nightly compliance sweep wants to quarantine accounts.** → **Neither.** Scheduled jobs cannot
-park for review at all — see [Where approval does not work](#where-approval-does-not-work). Have the
-job *propose* into your own store and drive the quarantine through a managed session.
 
 **Not sure yet.** → **Workflow-parked.** It is the cheaper mistake: worst case you restructure a
 tool later, instead of shipping a stranded approval.
@@ -304,9 +297,7 @@ non-retryable `DurableApprovalReviewProjectionTooLarge` error before the workflo
 including requests made through the in-tool `RequestApprovalAsync` API.
 
 Raw model arguments are never copied into `ReviewData` automatically — that is a deliberate
-injection-surface decision. **This hygiene does not extend to `Description`:** the built-in
-interceptor installed by `UseApprovalScopes()` formats the raw tool arguments into the description
-string. Treat `Description` as model-influenced and scrub it in your own interceptor if that matters.
+injection-surface decision. Treat `Description` as model-influenced and sanitize it for the reviewer.
 
 ### What the model sees when a call does not run
 
@@ -355,57 +346,11 @@ catch (RpcException ex) when (ex.Code == RpcException.StatusCode.NotFound)
 
 ---
 
-## Reusable session grants
+## Approval in regular workflow orchestration
 
-By default one decision covers one call. With grants a reviewer approves a *shape* of call —
-`write_file` under `/tmp/*` — and matching calls later in the **same session** proceed without
-another prompt until the grant expires.
-
-```csharp
-agent.AddTool(writeFile, tool => tool.RequireApproval().ScopeAware());
-agent.UseApprovalScopes();   // installs the built-in scope-aware interceptor
-```
-
-Three things to know first:
-
-**`UseApprovalScopes()` and `AddToolInterceptor()` are mutually exclusive.** Calling both throws
-`InvalidOperationException` in either order. Approval scopes install their own interceptor and remove
-scope-aware tools from the unconditional `RequireApproval` floor, so replacing that interceptor would
-silently bypass their gate. Pick one per agent.
-
-**Granting a scope also approves the call in front of you.** `GrantSessionScopeAsync` resolves the
-pending request as approved *and* records the grant — call it **instead of** `ResolveApprovalAsync`.
-
-**Grants are workflow-parked only.** In-tool approval never reaches the code that records one. They
-are also bounded — 256 records / 32 KiB per session by default, tunable through `UseApprovalScopes`.
-
-Everything else about grants is contract, not choice: the administrative service registration, the
-`SessionApprovalScopeGrantRequest` shape, expiry and revocation semantics, and the rule that
-permanent and cross-session grants are unsupported are all specified in
-[Durable approvals](../../concepts/durable-approvals.md#maf-reusable-session-grants). The separate
-registration is deliberate — keep it behind an authenticated backend.
-
-**Approval is not effect-time authorization.** A tool that changes an external system must re-read
-current tenant, ownership, and authorization state immediately before performing the effect,
-especially after a long wait. The normative rules for reviewer identity and untrusted request data
-are in the [security boundary](../../security.md).
-
----
-
-## Where approval does not work
-
-Two execution paths cannot park for external review, because neither host workflow carries the
-approval state machine:
-
-- **Workflow-local sub-agents** — `WorkflowAgents.GetTemporalAgent(...)` inside your own workflow.
-- **Scheduled jobs** — runs hosted by `AgentJobWorkflow`.
-
-On both, `RequireApproval()` and `PauseForApproval()` **degrade to Block**: the tool does not run and
-the model receives a synthetic blocked result. In-tool `TemporalAgentContext.Current` throws, naming
-which path you are on.
-
-If work on those paths needs review, own the approval in your orchestrating workflow, or drive the
-agent through a managed session via `TemporalAIAgentProxy`.
+Approval state is owned by the registered `AgentWorkflow`. A regular workflow that needs an
+approval-capable agent turn should invoke the registered proxy through an activity, passing
+workflow-generated session and request IDs. There is no workflow-local agent execution API.
 
 ---
 
@@ -427,7 +372,6 @@ agent through a managed session via `TemporalAIAgentProxy`.
 |---|---|
 | `samples/MAF/HumanInTheLoop` | In-tool approval with a sized timeout budget — interactive, excluded from the sample canary |
 | `samples/MAF/ToolInterceptor` | Workflow-parked policy, reviewer-safe metadata, and the poll-while-running pattern |
-| `samples/MAF/ApprovalScopes` | One-call decisions plus expiring session grants — interactive |
 
 See also [Durable approvals](../../concepts/durable-approvals.md),
 [Tool interceptor](tool-interceptor.md), and the MEAI equivalent,

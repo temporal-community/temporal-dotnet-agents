@@ -13,7 +13,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using TemporalCommunity.Extensions.Agents;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;

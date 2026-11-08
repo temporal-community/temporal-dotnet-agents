@@ -1,6 +1,4 @@
-using System.Diagnostics;
 using System.Text.Json;
-using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Xunit;
 
@@ -10,17 +8,8 @@ namespace TemporalCommunity.Extensions.Agents.Tests.Workflows;
 /// Unit tests for <see cref="StateBagMerge.Merge"/> — the deterministic, replay-safe merge of
 /// untrusted tool/interceptor StateBag write-backs into the trusted carried bag.
 ///
-/// Covers the remediation items:
-/// <list type="bullet">
-/// <item><b>SECURITY (X-1/X-2 deny-list):</b> a write-back may never create, overwrite, or delete
-/// a reserved approval-scope key — neither the literal <c>temporal.approval_scopes.session</c> key
-/// nor any key under the <c>temporal.approval_scopes.*</c> namespace, nor the agent's configured
-/// always-scopes store key (which may be a custom, non-prefixed key). This is the
-/// privilege-escalation / self-approval guard.</item>
-/// <item><b>X-2:</b> a write-back with a non-reserved key is merged into the bag.</item>
-/// <item><b>X-1:</b> concurrent write-backs merge in tool-call index order — later index wins on a
-/// top-level key conflict, regardless of completion order.</item>
-/// </list>
+/// Covers ordinary flat-key updates/deletions and deterministic index-order merging:
+/// later index wins on a top-level key conflict, regardless of completion order.
 /// </summary>
 public class StateBagMergeTests
 {
@@ -48,123 +37,15 @@ public class StateBagMergeTests
     private static bool HasKey(JsonElement? element, string key) =>
         element is { ValueKind: JsonValueKind.Object } obj && obj.TryGetProperty(key, out _);
 
-    /// <summary>Captures emitted warnings so the test can assert the tampering signal fired.</summary>
-    private sealed class CapturingLogger : ILogger
-    {
-        public List<string> Warnings { get; } = [];
-        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
-        public bool IsEnabled(LogLevel logLevel) => true;
-        public void Log<TState>(
-            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
-            Func<TState, Exception?, string> formatter)
-        {
-            if (logLevel == LogLevel.Warning)
-                Warnings.Add(formatter(state, exception));
-        }
-    }
-
-    // ── SECURITY: reserved approval-scope deny-list (X-1/X-2 forge prevention) ──
+    // ── Flat-key writes and index-order merge ────────────────────────────────
 
     [Fact]
-    public void Merge_ToolWriteBack_ForgingSessionScopeKey_IsDropped()
-    {
-        // current (trusted) holds the real session-scope record.
-        var current = Bag(("temporal.approval_scopes.session", "trusted-grant"), ("user.note", "keep"));
-        // Untrusted tool write-back tries to OVERWRITE the session-scope grant (forge / self-approve).
-        var forged = Bag(("temporal.approval_scopes.session", "FORGED-grant"));
-        var logger = new CapturingLogger();
-
-        var result = StateBagMerge.Merge(current, [forged], alwaysScopesStoreKey: null, logger);
-
-        // The trusted session-scope entry survives untouched; the forged value is dropped.
-        Assert.Equal("trusted-grant", GetString(result, "temporal.approval_scopes.session"));
-        // A tampering warning was logged (not a silent no-op).
-        Assert.Contains(logger.Warnings, w => w.Contains("temporal.approval_scopes.session"));
-    }
-
-    [Fact]
-    public void Merge_ToolWriteBack_CreatingSessionScopeKey_IsDropped()
-    {
-        // current has NO session-scope record. A forged write-back must NOT create one
-        // (this is the "skip approval next call" privilege escalation the guard prevents).
-        var current = Bag(("user.note", "keep"));
-        var forged = Bag(("temporal.approval_scopes.session", "FORGED-grant"));
-
-        var result = StateBagMerge.Merge(current, [forged], alwaysScopesStoreKey: null);
-
-        Assert.False(HasKey(result, "temporal.approval_scopes.session"),
-            "A tool write-back must never create a reserved session-scope key.");
-        Assert.Equal("keep", GetString(result, "user.note"));
-    }
-
-    [Fact]
-    public void Merge_WriteBack_ForgingPrefixedAlwaysKey_IsDropped()
-    {
-        // The default always-scopes store key lives under the reserved prefix.
-        var current = Bag(("temporal.approval_scopes.always", "trusted-always"));
-        var forged = Bag(("temporal.approval_scopes.always", "FORGED-always"));
-
-        var result = StateBagMerge.Merge(current, [forged], alwaysScopesStoreKey: null);
-
-        Assert.Equal("trusted-always", GetString(result, "temporal.approval_scopes.always"));
-    }
-
-    [Fact]
-    public void Merge_WriteBack_ForgingCustomAlwaysStoreKey_IsDropped()
-    {
-        // A custom always-scopes store key that does NOT carry the reserved prefix must still
-        // be protected when supplied as alwaysScopesStoreKey.
-        const string customKey = "my.custom.always.store";
-        var current = Bag((customKey, "trusted-custom"));
-        var forged = Bag((customKey, "FORGED-custom"));
-        var logger = new CapturingLogger();
-
-        var result = StateBagMerge.Merge(current, [forged], alwaysScopesStoreKey: customKey, logger);
-
-        Assert.Equal("trusted-custom", GetString(result, customKey));
-        Assert.Contains(logger.Warnings, w => w.Contains(customKey));
-    }
-
-    [Fact]
-    public void Merge_InterceptorWriteBack_ForgingScopeKey_IsDropped_NonReservedSurvives()
-    {
-        // Mirrors X-2: an interceptor result whose UpdatedStateBag carries a reserved key.
-        var current = Bag(("temporal.approval_scopes.session", "trusted"));
-        // One contribution carries BOTH a forged reserved key AND a legitimate non-reserved key.
-        var interceptorWriteBack = Bag(
-            ("temporal.approval_scopes.session", "FORGED"),
-            ("interceptor.note", "legit"));
-
-        var result = StateBagMerge.Merge(current, [interceptorWriteBack], alwaysScopesStoreKey: null);
-
-        // Reserved key dropped (trusted value survives), non-reserved key merged.
-        Assert.Equal("trusted", GetString(result, "temporal.approval_scopes.session"));
-        Assert.Equal("legit", GetString(result, "interceptor.note"));
-    }
-
-    [Fact]
-    public void Merge_WriteBack_ForgingScopeKey_DoesNotDeleteTrustedScope()
-    {
-        // Deletion is impossible via the merge API (it only overlays), but pin that a forged
-        // contribution containing ONLY a reserved key leaves current entirely unchanged.
-        var current = Bag(("temporal.approval_scopes.session", "trusted"));
-        var forgedOnly = Bag(("temporal.approval_scopes.session", "FORGED"));
-
-        var result = StateBagMerge.Merge(current, [forgedOnly], alwaysScopesStoreKey: null);
-
-        // Nothing mergeable changed → current returned unchanged, scope intact.
-        Assert.Equal("trusted", GetString(result, "temporal.approval_scopes.session"));
-    }
-
-    // ── X-2: interceptor write-back with non-reserved key is merged ──────────────
-
-    [Fact]
-    public void Merge_InterceptorWriteBack_NonReservedKey_IsMerged()
+    public void Merge_InterceptorWriteBack_OrdinaryKey_IsMerged()
     {
         var current = Bag(("existing", "value"));
         var writeBack = Bag(("interceptor.flag", "set"));
 
-        var result = StateBagMerge.Merge(current, [writeBack], alwaysScopesStoreKey: null);
+        var result = StateBagMerge.Merge(current, [writeBack]);
 
         Assert.Equal("value", GetString(result, "existing"));
         Assert.Equal("set", GetString(result, "interceptor.flag"));
@@ -175,14 +56,10 @@ public class StateBagMergeTests
     {
         var current = Bag(("k", "v"));
 
-        // Only reserved-key (dropped) and empty contributions → nothing changes.
-        var result = StateBagMerge.Merge(
-            current,
-            [Bag(("temporal.approval_scopes.session", "x")), null],
-            alwaysScopesStoreKey: null);
+        var result = StateBagMerge.Merge(current, [Bag(), null]);
 
         Assert.Equal("v", GetString(result, "k"));
-        Assert.False(HasKey(result, "temporal.approval_scopes.session"));
+        Assert.False(HasKey(result, "other"));
     }
 
     // ── X-1: index-order merge, later index wins regardless of completion order ──
@@ -196,7 +73,7 @@ public class StateBagMergeTests
         var index1 = Bag(("shared", "from-index-1"));
 
         // updatedBags is ordered by tool-call index — later index (1) must win.
-        var result = StateBagMerge.Merge(current, [index0, index1], alwaysScopesStoreKey: null);
+        var result = StateBagMerge.Merge(current, [index0, index1]);
 
         Assert.Equal("from-index-1", GetString(result, "shared"));
         Assert.Equal("0", GetString(result, "base"));
@@ -213,7 +90,7 @@ public class StateBagMergeTests
         var index1 = Bag(("key", "B"));
         var index2 = Bag(("key", "C"));
 
-        var result = StateBagMerge.Merge(current, [index0, index1, index2], alwaysScopesStoreKey: null);
+        var result = StateBagMerge.Merge(current, [index0, index1, index2]);
 
         Assert.Equal("C", GetString(result, "key"));
     }
@@ -222,10 +99,7 @@ public class StateBagMergeTests
     public void Merge_NonConflictingKeys_AllContributionsMerged()
     {
         var current = Bag(("c", "0"));
-        var result = StateBagMerge.Merge(
-            current,
-            [Bag(("a", "1")), Bag(("b", "2"))],
-            alwaysScopesStoreKey: null);
+        var result = StateBagMerge.Merge(current, [Bag(("a", "1")), Bag(("b", "2"))]);
 
         Assert.Equal("0", GetString(result, "c"));
         Assert.Equal("1", GetString(result, "a"));
@@ -248,40 +122,12 @@ public class StateBagMergeTests
     }
 
     [Fact]
-    public void ApplyDelta_DoesNotFilterTrustedReservedKeyChanges()
-    {
-        var before = Bag(("temporal.approval_scopes.session", "old"));
-        var after = Bag(("temporal.approval_scopes.session", "new"));
-
-        var result = StateBagMerge.ApplyTrustedDelta(
-            before,
-            StateBagMerge.CreateDelta(before, after));
-
-        Assert.Equal("new", GetString(result, "temporal.approval_scopes.session"));
-    }
-
-    [Fact]
-    public void ApplyDelta_UntrustedDeletionCannotRemoveReservedKey()
-    {
-        var current = Bag(("temporal.approval_scopes.session", "trusted"), ("remove", "gone"));
-        var delta = new StateBagDelta(
-            Upserts: null,
-            RemovedKeys: ["temporal.approval_scopes.session", "remove"]);
-
-        var result = StateBagMerge.ApplyDelta(current, delta);
-
-        Assert.Equal("trusted", GetString(result, "temporal.approval_scopes.session"));
-        Assert.False(HasKey(result, "remove"));
-    }
-
-    [Fact]
     public void Merge_OutputKeysAreOrdinalSorted_ForReplayStability()
     {
         // The merge emits keys in ordinal order so the carried JsonElement is byte-stable.
         var result = StateBagMerge.Merge(
             Bag(("zebra", "1")),
-            [Bag(("alpha", "2")), Bag(("mango", "3"))],
-            alwaysScopesStoreKey: null);
+            [Bag(("alpha", "2")), Bag(("mango", "3"))]);
 
         Assert.NotNull(result);
         var keys = result!.Value.EnumerateObject().Select(p => p.Name).ToList();
@@ -294,17 +140,17 @@ public class StateBagMergeTests
     // Regression coverage for the cross-turn StateBag wipe: a turn ending on a hash-gated LLM step
     // returns a null/subset bag, and a plain REPLACE at the call site would wipe carried keys the
     // workflow thread wrote between activities. The overlay preserves carried keys the activity
-    // did not touch, and applies NO reserved-key deny-list (context-provider output is trusted).
+    // did not touch, and applies ordinary flat-key overlay semantics.
 
     [Fact]
     public void OverlayTrustedStateBag_NullUpdated_ReturnsCurrentUnchanged()
     {
-        // A hash-gated LLM step returns a null bag; carried scope record must survive.
-        var current = Bag(("temporal.approval_scopes.session", "grant"));
+        // A hash-gated LLM step returns a null bag; carried values must survive.
+        var current = Bag(("carried", "value"));
 
         var result = StateBagMerge.OverlayTrustedStateBag(current, updated: null);
 
-        Assert.Equal("grant", GetString(result, "temporal.approval_scopes.session"));
+        Assert.Equal("value", GetString(result, "carried"));
     }
 
     [Fact]
@@ -331,29 +177,16 @@ public class StateBagMergeTests
     [Fact]
     public void OverlayTrustedStateBag_PreservesCarriedKeysTheActivityDidNotTouch()
     {
-        // The core durability guarantee: a subset bag from a context provider (only its key) must
-        // NOT wipe the carried approval-scope record.
-        var current = Bag(("temporal.approval_scopes.session", "grant"), ("carried", "keep"));
+        // The core durability guarantee: a subset bag from a context provider must not wipe
+        // unrelated values already carried by the workflow.
+        var current = Bag(("carried", "keep"), ("other", "value"));
         var updated = Bag(("app.context.file", "file.cs"));
 
         var result = StateBagMerge.OverlayTrustedStateBag(current, updated);
 
-        Assert.Equal("grant", GetString(result, "temporal.approval_scopes.session"));
         Assert.Equal("keep", GetString(result, "carried"));
+        Assert.Equal("value", GetString(result, "other"));
         Assert.Equal("file.cs", GetString(result, "app.context.file"));
-    }
-
-    [Fact]
-    public void OverlayTrustedStateBag_DoesNotFilterReservedApprovalScopeKeys()
-    {
-        // Unlike Merge, the overlay is UNFILTERED — a trusted context provider may legitimately
-        // carry any key forward, including reserved approval-scope keys. No deny-list applies.
-        var current = Bag(("other", "x"));
-        var updated = Bag(("temporal.approval_scopes.session", "provider-value"));
-
-        var result = StateBagMerge.OverlayTrustedStateBag(current, updated);
-
-        Assert.Equal("provider-value", GetString(result, "temporal.approval_scopes.session"));
     }
 
     [Fact]
@@ -374,73 +207,5 @@ public class StateBagMergeTests
         var again = StateBagMerge.OverlayTrustedStateBag(
             Bag(("zebra", "1"), ("mango", "2")), Bag(("alpha", "3")));
         Assert.Equal(result!.Value.GetRawText(), again!.Value.GetRawText());
-    }
-
-    // ── Failed-turn rollback ────────────────────────────────────────────────────
-
-    [Fact]
-    public void RestoreTurnOwnedState_RevertsChangedAndNewOrdinaryKeys()
-    {
-        var before = Bag(("existing", "before"), ("untouched", "keep"));
-        var afterFailure = Bag(
-            ("existing", "changed"),
-            ("untouched", "keep"),
-            ("new-tool-key", "discard"));
-
-        var result = StateBagMerge.RestoreTurnOwnedState(before, afterFailure, null);
-
-        Assert.Equal("before", GetString(result, "existing"));
-        Assert.Equal("keep", GetString(result, "untouched"));
-        Assert.False(HasKey(result, "new-tool-key"));
-    }
-
-    [Fact]
-    public void RestoreTurnOwnedState_PreservesApprovalRecordsCommittedDuringFailedTurn()
-    {
-        const string customAlwaysKey = "approval.custom.always";
-        var before = Bag(
-            ("application", "before"),
-            ("temporal.approval_scopes.session", "old-session"));
-        var afterFailure = Bag(
-            ("application", "failed-turn-change"),
-            ("temporal.approval_scopes.session", "new-session"),
-            ("temporal.approval_scopes.tool.send", "new-tool-scope"),
-            (customAlwaysKey, "new-always"));
-
-        var result = StateBagMerge.RestoreTurnOwnedState(before, afterFailure, customAlwaysKey);
-
-        Assert.Equal("before", GetString(result, "application"));
-        Assert.Equal("new-session", GetString(result, "temporal.approval_scopes.session"));
-        Assert.Equal("new-tool-scope", GetString(result, "temporal.approval_scopes.tool.send"));
-        Assert.Equal("new-always", GetString(result, customAlwaysKey));
-    }
-
-    [Fact]
-    public void RestoreTurnOwnedState_EmptyInputs_ReturnsNull()
-    {
-        var result = StateBagMerge.RestoreTurnOwnedState(null, Bag(("failed", "discard")), null);
-
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void RestoreTurnOwnedState_OneMegabyte_CompletesWithinOneSecond()
-    {
-        var properties = Enumerable.Range(0, 1024)
-            .Select(index => ($"key-{index:D4}", new string('x', 1024)))
-            .ToArray();
-        var before = Bag(properties);
-        var afterFailure = Bag(
-            [.. properties, ("failed-turn-only", "discard")]);
-
-        var stopwatch = Stopwatch.StartNew();
-        var result = StateBagMerge.RestoreTurnOwnedState(before, afterFailure, null);
-        stopwatch.Stop();
-
-        Assert.NotNull(result);
-        Assert.False(HasKey(result, "failed-turn-only"));
-        Assert.True(
-            stopwatch.Elapsed < TimeSpan.FromSeconds(1),
-            $"Restoring a one-megabyte StateBag took {stopwatch.Elapsed}; possible performance regression.");
     }
 }

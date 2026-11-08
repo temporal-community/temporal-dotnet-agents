@@ -54,7 +54,6 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private const int MaximumHistoryRecoveryRetriesPerIncident = 9;
     protected const int MaximumRequestIdLength = 256;
     internal const int MinimumTerminalOutcomeBytes = Internal.DurableTerminalTurnOutcomeLimits.MinimumBytes;
-    private const int MaximumRetainedToolCallSummaries = 32;
     private const int MaximumTerminalErrorTypeLength = 128;
 
     private sealed class TurnExecutionRecord
@@ -132,6 +131,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         public bool Dispatched { get; set; }
 
         public bool HasResult { get; set; }
+
+        public bool Failed { get; set; }
 
         public object? Result { get; set; }
     }
@@ -248,7 +249,14 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
     private Internal.DurableTerminalTurnOutcome CreateCompactTerminalTurnOutcome(
         TurnExecutionRecord record)
     {
-        var (summaries, truncated, counts) = CreateToolCallOutcomeSummary();
+        var summaries = record.ToolCallSummaries;
+        var truncated = record.ToolCallSummariesTruncated;
+        var counts = record.ToolCallCounts;
+        if (summaries is null && counts is null)
+        {
+            (summaries, truncated, counts) = CreateToolCallOutcomeSummary();
+        }
+
         return new Internal.DurableTerminalTurnOutcome
         {
             RequestId = record.RequestId,
@@ -266,7 +274,7 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 : null,
             OutcomeOmitted = true,
             Status = record.OutcomeStatus ?? (record.Failure is null ? "completed" : "failed"),
-            CommittedRevision = GetCommittedTurnRevision(record.Output),
+            CommittedRevision = record.CommittedRevision,
             ToolCallSummaries = summaries,
             ToolCallSummariesTruncated = truncated,
             ToolCallCounts = counts,
@@ -279,52 +287,40 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         DurableToolCallOutcomeCounts Counts)
         CreateToolCallOutcomeSummary()
     {
-        var summaries = new List<DurableToolCallOutcomeSummary>(MaximumRetainedToolCallSummaries);
-        var completed = 0;
-        var failed = 0;
-        var uncertain = 0;
-
-        foreach (var call in _interruptedToolBatches.SelectMany(batch => batch.Calls))
-        {
-            var status = call.Dispatched
-                ? call.HasResult
-                    ? DurableToolCallOutcomeStatus.Completed
-                    : DurableToolCallOutcomeStatus.OutcomeUncertain
-                : DurableToolCallOutcomeStatus.Failed;
-            switch (status)
-            {
-                case DurableToolCallOutcomeStatus.Completed:
-                    completed++;
-                    break;
-                case DurableToolCallOutcomeStatus.Failed:
-                    failed++;
-                    break;
-                case DurableToolCallOutcomeStatus.OutcomeUncertain:
-                    uncertain++;
-                    break;
-            }
-
-            if (summaries.Count < MaximumRetainedToolCallSummaries)
-            {
-                var callId = call.Call.CallId;
-                var functionName = call.Call.Name;
-                summaries.Add(new DurableToolCallOutcomeSummary(
-                    callId is { Length: > MaximumRequestIdLength }
+        return Internal.DurableToolCallSummaryBudget.Create(
+            _interruptedToolBatches.SelectMany(batch => batch.Calls).Select(call =>
+                new DurableToolCallOutcomeSummary(
+                    call.Call.CallId is { Length: > MaximumRequestIdLength } callId
                         ? callId[..MaximumRequestIdLength]
-                        : callId,
-                    functionName.Length > MaximumRequestIdLength
-                        ? functionName[..MaximumRequestIdLength]
-                        : functionName,
-                    status));
-            }
-        }
-
-        var callCount = _interruptedToolBatches.Sum(batch => batch.Calls.Count);
-        return (
-            summaries,
-            callCount > MaximumRetainedToolCallSummaries,
-            new DurableToolCallOutcomeCounts(completed, failed, uncertain));
+                        : call.Call.CallId,
+                    call.Call.Name.Length > MaximumRequestIdLength
+                        ? call.Call.Name[..MaximumRequestIdLength]
+                        : call.Call.Name,
+                    !call.Dispatched || call.Failed
+                        ? DurableToolCallOutcomeStatus.Failed
+                        : call.HasResult
+                            ? DurableToolCallOutcomeStatus.Completed
+                            : DurableToolCallOutcomeStatus.OutcomeUncertain)));
     }
+
+    internal virtual Exception ReportTurnFailure(
+        Exception exception,
+        Internal.DurableTurnFailureDetails details) => exception;
+
+    private Internal.DurableTurnFailureDetails CreateTurnFailureDetails(
+        TurnExecutionRecord record,
+        string errorType,
+        string message) =>
+        new()
+        {
+            RequestId = record.RequestId,
+            ErrorType = errorType[..Math.Min(errorType.Length, MaximumTerminalErrorTypeLength)],
+            Message = message[..Math.Min(message.Length, 2048)],
+            CommittedRevision = record.CommittedRevision,
+            ToolCallSummaries = record.ToolCallSummaries,
+            ToolCallSummariesTruncated = record.ToolCallSummariesTruncated,
+            ToolCallCounts = record.ToolCallCounts,
+        };
 
     /// <summary>
     /// Initializes start-input state synchronously before a workflow run method first yields.
@@ -1948,10 +1944,11 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
 
             if (record.Failure is { } failure)
             {
-                throw new ApplicationFailureException(
+                throw ReportTurnFailure(new ApplicationFailureException(
                     failure.Message,
                     errorType: failure.ErrorType,
-                    nonRetryable: failure.NonRetryable);
+                    nonRetryable: failure.NonRetryable),
+                    CreateTurnFailureDetails(record, failure.ErrorType, failure.Message));
             }
 
             return (record.Output!, record.ResponseEntry!);
@@ -2243,33 +2240,37 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 continue;
             }
 
-            outcomes.Add(new Internal.DurableTerminalTurnOutcome
-            {
-                RequestId = record.RequestId,
-                AdmissionFingerprint = record.AdmissionFingerprint,
-                TurnInputFingerprint = record.TurnInputFingerprint,
-                Output = record.SerializedOutput,
-                ResponseEntry = record.SerializedResponseEntry,
-                Failure = record.Failure is { } failure
-                    ? new Internal.DurableTerminalTurnFailure
-                    {
-                        ErrorType = failure.ErrorType,
-                        Message = failure.Message,
-                        NonRetryable = failure.NonRetryable,
-                    }
-                    : null,
-                OutcomeOmitted = record.OutcomeOmitted,
-                IsMinimal = record.IsMinimalOutcome,
-                Status = record.OutcomeStatus,
-                CommittedRevision = record.CommittedRevision,
-                ToolCallSummaries = record.ToolCallSummaries,
-                ToolCallSummariesTruncated = record.ToolCallSummariesTruncated,
-                ToolCallCounts = record.ToolCallCounts,
-            });
+            outcomes.Add(SnapshotTerminalTurnOutcome(record));
         }
 
         return outcomes;
     }
+
+    private static Internal.DurableTerminalTurnOutcome SnapshotTerminalTurnOutcome(
+        TurnExecutionRecord record) =>
+        new()
+        {
+            RequestId = record.RequestId,
+            AdmissionFingerprint = record.AdmissionFingerprint,
+            TurnInputFingerprint = record.TurnInputFingerprint,
+            Output = record.SerializedOutput,
+            ResponseEntry = record.SerializedResponseEntry,
+            Failure = record.Failure is { } failure
+                ? new Internal.DurableTerminalTurnFailure
+                {
+                    ErrorType = failure.ErrorType,
+                    Message = failure.Message,
+                    NonRetryable = failure.NonRetryable,
+                }
+                : null,
+            OutcomeOmitted = record.OutcomeOmitted,
+            IsMinimal = record.IsMinimalOutcome,
+            Status = record.OutcomeStatus,
+            CommittedRevision = record.CommittedRevision,
+            ToolCallSummaries = record.ToolCallSummaries,
+            ToolCallSummariesTruncated = record.ToolCallSummariesTruncated,
+            ToolCallCounts = record.ToolCallCounts,
+        };
 
     private void AddTerminalTurnRecord(
         TurnExecutionRecord record,
@@ -2287,7 +2288,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                 Failure = null,
                 IsMinimal = true,
                 ToolCallSummaries = null,
-                ToolCallSummariesTruncated = false,
+                ToolCallSummariesTruncated = compactOutcome.ToolCallCounts is { } counts
+                    && (counts.Completed > 0 || counts.Failed > 0 || counts.OutcomeUncertain > 0),
             };
         var fit = Internal.DurableTerminalTurnOutcomeBudget.Fit(
             fullOutcome,
@@ -2354,6 +2356,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         record.ResponseEntry = responseEntry;
         record.OutcomeStatus = "completed";
         record.CommittedRevision = GetCommittedTurnRevision(output);
+        (record.ToolCallSummaries, record.ToolCallSummariesTruncated, record.ToolCallCounts)
+            = CreateToolCallOutcomeSummary();
         record.IsTerminal = true;
         AddTerminalTurnRecord(record);
         if (ReferenceEquals(_activeTurn, record))
@@ -2378,6 +2382,8 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         record.Failure = new TurnFailure(errorType, message, nonRetryable);
         record.OutcomeStatus = "failed";
         record.CommittedRevision = GetCommittedTurnRevision(record.Output);
+        (record.ToolCallSummaries, record.ToolCallSummariesTruncated, record.ToolCallCounts)
+            = CreateToolCallOutcomeSummary();
         record.IsTerminal = true;
         AddTerminalTurnRecord(record);
         if (ReferenceEquals(_activeTurn, record))
@@ -2564,15 +2570,30 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
                     : interruptedResponse);
             }
 
+            var (summaries, truncated, counts) = CreateToolCallOutcomeSummary();
+            var errorType = terminalException is ApplicationFailureException failure
+                ? failure.ErrorType ?? "DurableTurnFailure"
+                : terminalException.GetType().FullName ?? terminalException.GetType().Name;
+            var failureDetails = new Internal.DurableTurnFailureDetails
+            {
+                RequestId = turnRecord.RequestId,
+                ErrorType = errorType[..Math.Min(errorType.Length, MaximumTerminalErrorTypeLength)],
+                Message = terminalException.Message[..Math.Min(terminalException.Message.Length, 2048)],
+                CommittedRevision = GetCommittedTurnRevision(default),
+                ToolCallSummaries = summaries,
+                ToolCallSummariesTruncated = truncated,
+                ToolCallCounts = counts,
+            };
             CompleteTurnFailure(turnRecord, terminalException);
             if ((!wasCancelled || !Workflow.Patched("meai-cancel-preserve-idle-deadline-v1"))
                 && !IsCurrentTurnCancellationRequested())
             {
                 RenewSessionIdleDeadline();
             }
-            if (!ReferenceEquals(terminalException, exception))
+            var reportedException = ReportTurnFailure(terminalException, failureDetails);
+            if (!ReferenceEquals(reportedException, exception))
             {
-                throw terminalException;
+                throw reportedException;
             }
 
             throw;
@@ -2630,11 +2651,13 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         int batchIndex,
         int callIndex,
         object? result,
-        bool wasDispatched)
+        bool wasDispatched,
+        bool failed = false)
     {
         var call = GetInterruptedToolCall(batchIndex, callIndex);
         call.Dispatched |= wasDispatched;
         call.HasResult = true;
+        call.Failed = failed;
         call.Result = result;
     }
 
@@ -2794,10 +2817,26 @@ public abstract partial class DurableChatWorkflowBase<TOutput>
         {
             RequestId = record.RequestId,
             Response = record.ResponseEntry,
-            FailureErrorType = record.Failure?.ErrorType,
+            FailureErrorType = record.Failure?.ErrorType ?? record.OutcomeErrorType,
             FailureMessage = record.Failure?.Message,
-            FailureNonRetryable = record.Failure?.NonRetryable ?? false,
+            FailureNonRetryable = record.Failure?.NonRetryable,
         };
+    }
+
+    /// <summary>
+    /// Gets the active or retained terminal outcome for a request without changing workflow state.
+    /// </summary>
+    internal Internal.DurableTerminalTurnOutcome? GetTurnOutcome(string requestId, out bool isPending)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestId);
+        isPending = _activeTurn is { IsTerminal: false } active
+            && string.Equals(active.RequestId, requestId, StringComparison.Ordinal);
+        if (isPending || !_terminalTurns.TryGetValue(requestId, out var record))
+        {
+            return null;
+        }
+
+        return SnapshotTerminalTurnOutcome(record);
     }
 
     /// <summary>Returns the opaque epoch identifying this session lineage.</summary>

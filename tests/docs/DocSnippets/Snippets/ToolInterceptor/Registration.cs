@@ -41,7 +41,7 @@ internal static class Registration
                         "cancel_order",
                         sp => AIFunctionFactory.Create(
                             sp.GetRequiredService<OrderService>().CancelOrder, name: "cancel_order"),
-                        opts => opts.NoRetry());
+                        opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
                 });
             });
         // END SNIPPET docs/how-to/MAF/tool-interceptor.md#registration

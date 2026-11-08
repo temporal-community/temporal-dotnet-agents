@@ -1234,17 +1234,17 @@ public class DurableChatLifecycleRegressionTests
     }
 
     [Fact]
-    public async Task TerminalOutcomeLedger_DoesNotRetainAnEntryLargerThanByteLimit()
+    public async Task TerminalOutcomeLedger_RetainsCompactRecordWithoutRedispatchWhenOutcomeExceedsByteLimit()
     {
         await using var env = await TemporalServiceTestEnvironment.StartLocalAsync();
         env.Client.Options.DataConverter = DurableAIDataConverter.Instance;
-        var model = new TestChatClient();
+        var model = new LargeOutputChatClient(16 * 1024);
         var taskQueue = $"turn-ledger-bytes-{Guid.NewGuid():N}";
         using var host = BuildHost(
             env.Client,
             taskQueue,
             model,
-            maxTerminalOutcomeBytes: 1);
+            maxTerminalOutcomeBytes: 4096);
         await host.StartAsync();
         var session = host.Services.GetRequiredService<DurableChatSessionClient>();
         var conversationId = $"turn-ledger-bytes-{Guid.NewGuid():N}";
@@ -1254,10 +1254,12 @@ public class DurableChatLifecycleRegressionTests
         {
             await session.SendAsync(conversationId, messages, requestId: "oversized-request")
                 .WaitAsync(Deadline);
-            await session.SendAsync(conversationId, messages, requestId: "oversized-request")
-                .WaitAsync(Deadline);
+            var replay = await Assert.ThrowsAsync<DurableTurnOutcomeTooLargeException>(() =>
+                session.SendAsync(conversationId, messages, requestId: "oversized-request"));
 
-            Assert.Equal(2, model.CallCount);
+            Assert.False(replay.IsMinimal);
+            Assert.Equal("completed", replay.Status);
+            Assert.Equal(1, model.Calls);
         }
         finally
         {

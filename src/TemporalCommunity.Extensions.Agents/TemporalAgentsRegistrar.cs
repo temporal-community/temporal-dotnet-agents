@@ -97,26 +97,6 @@ internal static class TemporalAgentsRegistrar
             builder.AddWorkflow<AgentWorkflow>();
             builder.AddSingletonActivities<AgentActivities>();
 
-            // AgentJobWorkflow: simple fire-and-forget workflow for scheduled/deferred runs.
-            builder.AddWorkflow<AgentJobWorkflow>();
-
-            // ScheduleActivities: enables one-time deferred runs from orchestrating workflows.
-            services.AddSingleton(sp => new ScheduleActivities(
-                sp.GetRequiredService<ITemporalClient>(),
-                taskQueue,
-                agentsOptions,
-                sp.GetService<ILogger<ScheduleActivities>>()));
-            builder.AddSingletonActivities<ScheduleActivities>();
-
-            // ScheduleRegistrationService: creates configured schedules at worker startup.
-            if (agentsOptions.GetScheduledRuns().Count > 0)
-            {
-                services.AddHostedService<ScheduleRegistrationService>(sp =>
-                    new ScheduleRegistrationService(
-                        sp.GetRequiredService<ITemporalAgentClient>(),
-                        agentsOptions,
-                        sp.GetService<ILogger<ScheduleRegistrationService>>()));
-            }
         }
 
         // Auto-wire TemporalAgentDataConverter. Mirrors what AddDurableAI() does for the AI

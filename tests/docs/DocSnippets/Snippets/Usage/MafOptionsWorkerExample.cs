@@ -34,7 +34,7 @@ internal static class MafOptionsWorkerExample
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
             .AddTemporalAgents(agents =>
-                agents.AddTemporalAgent(
+                agents.Agent(
                     "WeatherAgent",
                     new ChatClientAgentOptions
                     {
@@ -45,7 +45,7 @@ internal static class MafOptionsWorkerExample
                             Tools = [weatherTool],
                         },
                     },
-                    new TemporalAgentOptions { TimeToLive = TimeSpan.FromHours(24) }));
+                    temporal => temporal.TimeToLive = TimeSpan.FromHours(24)));
         // END SNIPPET docs/how-to/MAF/usage.md#maf-options-worker-example
     }
 }

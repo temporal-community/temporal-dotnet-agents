@@ -110,7 +110,8 @@ builder.Services
                 opts => opts.WithTimeout(TimeSpan.FromSeconds(30)));
         });
     })
-    .AddWorkflow<RefundWorkflow>();
+    .AddWorkflow<RefundWorkflow>()
+    .AddScopedActivities<RefundAgentActivities>();
 
 // ── Step 6: Start the host ───────────────────────────────────────────────────
 var host = builder.Build();

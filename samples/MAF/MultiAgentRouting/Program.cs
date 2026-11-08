@@ -1,5 +1,5 @@
 // MultiAgentRouting — demonstrates workflow-based routing (durable routing decision via
-// activity) and parallel agent fan-out via ExecuteAgentsInParallelAsync, with OTel tracing.
+// activity) and parallel agent fan-out through proxy-invoking activities, with OTel tracing.
 //
 // Run:  dotnet run --project samples/MAF/MultiAgentRouting/MultiAgentRouting.csproj
 
@@ -114,7 +114,7 @@ builder.Services
     .AddWorkflow<ParallelAgentWorkflow>()
     // Singleton: RoutingActivities is stateless (keyword scoring only), so one shared
     // instance is safe and avoids unnecessary allocations on every activity execution.
-    .AddSingletonActivities<RoutingActivities>();
+    .AddScopedActivities<RoutingActivities>();
 
 // ── Step 7: Start the host ───────────────────────────────────────────────────
 var host = builder.Build();

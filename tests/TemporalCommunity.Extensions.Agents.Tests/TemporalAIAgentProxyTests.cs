@@ -407,26 +407,6 @@ public class TemporalAIAgentProxyTests
     }
 
     [Fact]
-    public async Task RunDelayedAsync_WithSessionOwnedByAnotherAgent_ThrowsAndDoesNotDispatch()
-    {
-        var fakeClient = A.Fake<ITemporalAgentClient>();
-        var proxy = new TemporalAIAgentProxy("AgentA", fakeClient);
-        var otherProxy = new TemporalAIAgentProxy("AgentB", fakeClient);
-        var otherSession = (TemporalAgentSession)await otherProxy.CreateSessionAsync();
-
-        var exception = await Assert.ThrowsAsync<ArgumentException>(() =>
-            proxy.RunDelayedAsync([new ChatMessage(ChatRole.User, "Hello")], otherSession, TimeSpan.FromMinutes(1)));
-
-        Assert.Equal("session", exception.ParamName);
-        A.CallTo(() => fakeClient.RunAgentDelayedAsync(
-                A<TemporalAgentSessionId>._,
-                A<RunRequest>._,
-                A<TimeSpan>._,
-                A<CancellationToken>._))
-            .MustNotHaveHappened();
-    }
-
-    [Fact]
     public async Task RunStreamingAsync_ThrowsNotSupportedException()
     {
         var proxy = CreateProxy("TestAgent");

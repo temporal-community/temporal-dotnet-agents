@@ -3,7 +3,6 @@ using Microsoft.Extensions.Hosting;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using Temporalio.Exceptions;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.AI;

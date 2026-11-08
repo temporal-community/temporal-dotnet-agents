@@ -8,6 +8,63 @@ internal static class DurableTerminalTurnOutcomeLimits
     internal const int MinimumBytes = 4 * 1024;
 }
 
+internal static class DurableToolCallSummaryBudget
+{
+    internal const int MaximumBytes = 16 * 1024;
+    internal const int MaximumCount = 32;
+
+    internal static (
+        IReadOnlyList<DurableToolCallOutcomeSummary> Summaries,
+        bool Truncated,
+        DurableToolCallOutcomeCounts Counts) Create(IEnumerable<DurableToolCallOutcomeSummary> calls)
+    {
+        var retained = new List<DurableToolCallOutcomeSummary>();
+        var completed = 0;
+        var failed = 0;
+        var uncertain = 0;
+        foreach (var call in calls)
+        {
+            switch (call.Status)
+            {
+                case DurableToolCallOutcomeStatus.Completed: completed++; break;
+                case DurableToolCallOutcomeStatus.Failed: failed++; break;
+                case DurableToolCallOutcomeStatus.OutcomeUncertain: uncertain++; break;
+            }
+
+            retained.Add(call);
+            while (retained.Count > MaximumCount
+                || JsonSerializer.SerializeToUtf8Bytes(
+                    retained,
+                    DurableAIJsonUtilities.DefaultOptions).Length > MaximumBytes)
+            {
+                retained.RemoveAt(0);
+            }
+        }
+
+        return (retained, retained.Count < completed + failed + uncertain,
+            new DurableToolCallOutcomeCounts(completed, failed, uncertain));
+    }
+
+    internal static DurableToolCallOutcomeCounts GetOmittedCounts(
+        DurableToolCallOutcomeCounts counts,
+        IReadOnlyList<DurableToolCallOutcomeSummary> summaries) =>
+        new(
+            counts.Completed - summaries.Count(call => call.Status == DurableToolCallOutcomeStatus.Completed),
+            counts.Failed - summaries.Count(call => call.Status == DurableToolCallOutcomeStatus.Failed),
+            counts.OutcomeUncertain - summaries.Count(call => call.Status == DurableToolCallOutcomeStatus.OutcomeUncertain));
+}
+
+internal sealed record DurableTurnFailureDetails
+{
+    public required string RequestId { get; init; }
+    public required string ErrorType { get; init; }
+    public required string Message { get; init; }
+    public long? CommittedRevision { get; init; }
+    public IReadOnlyList<DurableToolCallOutcomeSummary>? ToolCallSummaries { get; init; }
+    public bool ToolCallSummariesTruncated { get; init; }
+    public DurableToolCallOutcomeCounts? ToolCallCounts { get; init; }
+}
+
 internal readonly record struct DurableTerminalTurnOutcomeFit(
     DurableTerminalTurnOutcome Outcome,
     int SerializedSizeBytes);

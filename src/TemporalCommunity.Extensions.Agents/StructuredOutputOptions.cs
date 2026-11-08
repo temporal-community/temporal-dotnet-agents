@@ -4,8 +4,8 @@ namespace TemporalCommunity.Extensions.Agents;
 
 /// <summary>
 /// Options for controlling structured output deserialization when using
-/// <see cref="StructuredOutputExtensions.RunStructuredAsync{T}(TemporalAIAgent, System.Collections.Generic.IList{Microsoft.Extensions.AI.ChatMessage}, Microsoft.Agents.AI.AgentSession, StructuredOutputOptions, string, System.Threading.CancellationToken)"/>
-/// and its <see cref="Microsoft.Agents.AI.AIAgent"/> and <see cref="ITemporalAgentClient"/> overloads.
+/// <see cref="StructuredOutputExtensions.RunStructuredAsync{T}(Microsoft.Agents.AI.AIAgent, System.Collections.Generic.IList{Microsoft.Extensions.AI.ChatMessage}, Microsoft.Agents.AI.AgentSession, StructuredOutputOptions, string, System.Threading.CancellationToken)"/>
+/// and the <see cref="ITemporalAgentClient"/> overload.
 /// </summary>
 public sealed class StructuredOutputOptions
 {

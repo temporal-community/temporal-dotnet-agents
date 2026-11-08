@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Temporalio.Api.Enums.V1;
 using Temporalio.Client;
 using Temporalio.Exceptions;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Xunit;
@@ -105,14 +106,15 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
             .ToArray();
 
         var responses = new List<Microsoft.Agents.AI.AgentResponse>();
-        var failures = new List<WorkflowUpdateFailedException>();
+        var failures = new List<Exception>();
         foreach (var task in tasks)
         {
             try
             {
                 responses.Add(await task);
             }
-            catch (WorkflowUpdateFailedException exception)
+            catch (Exception exception) when (
+                exception is WorkflowUpdateFailedException or DurableSessionBusyException)
             {
                 failures.Add(exception);
             }
@@ -123,7 +125,15 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
         Assert.Equal(concurrentRequests, responses.Count + failures.Count);
         foreach (var failure in failures)
         {
-            var applicationFailure = Assert.IsType<ApplicationFailureException>(failure.InnerException);
+            var updateFailure = failure is DurableSessionBusyException busy
+                ? Assert.IsType<WorkflowUpdateFailedException>(busy.InnerException)
+                : Assert.IsType<WorkflowUpdateFailedException>(failure);
+            if (failure is DurableSessionBusyException busyFailure)
+            {
+                Assert.True(busyFailure.IsRetryable);
+            }
+
+            var applicationFailure = Assert.IsType<ApplicationFailureException>(updateFailure.InnerException);
             Assert.Equal("DurableTurnBusy", applicationFailure.ErrorType);
         }
 
@@ -205,25 +215,6 @@ public class WorkflowLifecycleTests : IClassFixture<IntegrationTestFixture>
 
         var followUp = await _fixture.AgentProxy.RunAsync("After fire-and-forget", session);
         Assert.Contains("Echo [2]: After fire-and-forget", followUp.Messages[0].Text);
-        await AssertNoWorkflowTaskFailuresAsync(handle);
-    }
-
-    [Fact]
-    public async Task DelayedWorkflowStart_FirstFireAndForgetTurnInitializesBeforeProcessing()
-    {
-        var session = (TemporalAgentSession)await _fixture.AgentProxy.CreateSessionAsync();
-        var proxy = Assert.IsType<TemporalAIAgentProxy>(_fixture.AgentProxy);
-
-        await proxy.RunDelayedAsync(
-            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "Delayed first update")],
-            session,
-            TimeSpan.FromMilliseconds(100));
-
-        var handle = _fixture.Client.GetWorkflowHandle<AgentWorkflow>(session.SessionId.WorkflowId);
-        await WaitForHistoryEntriesAsync(handle, expectedCount: 2);
-
-        var followUp = await _fixture.AgentProxy.RunAsync("After delayed update", session);
-        Assert.Contains("Echo [2]: After delayed update", followUp.Messages[0].Text);
         await AssertNoWorkflowTaskFailuresAsync(handle);
     }
 

@@ -26,7 +26,7 @@ internal static class ConnectAndRegister
             agent.AddTool(byName["lookup_inventory"]);
             agent.AddTool(
                 byName["delete_inventory"],
-                policy => policy.NoRetry().RequireApproval());
+                policy => policy.RequireApproval());
         });
         // END SNIPPET docs/how-to/MAF/mcp-tools.md#connect-and-register
     }

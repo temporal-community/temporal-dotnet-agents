@@ -38,25 +38,24 @@ internal static class CanonicalExample
                     agent.Instructions = "You are a refund specialist...";
                     agent.MaxToolCallsPerTurn = 10;  // caps the per-turn LLM↔tool loop; default 20 — see usage.md
 
-                    // Read tool — retries on transient failure, bounded at five attempts by default.
+                    // Read tool — one activity attempt by default.
                     agent.AddTool("lookup_order", sp => AIFunctionFactory.Create(
                         sp.GetRequiredService<OrderService>().LookupOrder,
                         name: "lookup_order"));
 
-                    // Write tools — never retry, never re-fire on activity-level retry.
+                    // Write tools — one activity attempt by default; use downstream idempotency
+                    // and reconcile if a failed activity leaves the effect's outcome uncertain.
                     agent.AddTool(
                         "apply_refund",
                         sp => AIFunctionFactory.Create(
                             sp.GetRequiredService<RefundService>().ApplyRefund,
-                            name: "apply_refund"),
-                        opts => opts.NoRetry());
+                            name: "apply_refund"));
 
                     agent.AddTool(
                         "send_email",
                         sp => AIFunctionFactory.Create(
                             sp.GetRequiredService<EmailService>().SendEmail,
-                            name: "send_email"),
-                        opts => opts.NoRetry());
+                            name: "send_email"));
                 });
             });
         // END SNIPPET docs/how-to/MAF/durable-agents.md#canonical-example

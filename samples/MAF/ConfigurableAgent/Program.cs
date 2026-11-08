@@ -16,6 +16,7 @@
 using System.ClientModel;
 using System.Collections.Frozen;
 using System.ComponentModel;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,10 +24,11 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenAI;
 using Temporalio.Client;
+using Temporalio.Activities;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
 var builder = Host.CreateApplicationBuilder(args);
@@ -113,7 +115,8 @@ builder.Services
                 description: "Returns Acme Store's return and refund policy."));
         });
     })
-    .AddWorkflow<SupportWorkflow>();
+    .AddWorkflow<SupportWorkflow>()
+    .AddScopedActivities<AgentInvocationActivities>();
 
 // ── Step 6: Start the host ───────────────────────────────────────────────────
 var host = builder.Build();
@@ -196,12 +199,14 @@ public class SupportWorkflow
         Workflow.Logger.LogInformation(
             "[TriageAgent] Handling: \"{Message}\"", customerMessage);
 
-        var triage = GetTemporalAgent("TriageAgent");
-        var triageSession = await triage.CreateSessionAsync().ConfigureAwait(true);
-        var triageResponse = await triage.RunAsync(
-            [new ChatMessage(ChatRole.User, customerMessage)], triageSession).ConfigureAwait(true);
-
-        var responseText = triageResponse.Text ?? string.Empty;
+        var triageSessionId = WorkflowAgents.NewAgentSessionId("TriageAgent");
+        var responseText = await Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                "TriageAgent",
+                triageSessionId.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                customerMessage),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
 
         // ── Escalation detection ──────────────────────────────────────────────
         const string escalationMarker = "[ESCALATE:";
@@ -232,18 +237,36 @@ public class SupportWorkflow
         Workflow.Logger.LogInformation(
             "[EscalationAgent] Taking over with triage context.");
 
-        var escalation = GetTemporalAgent("EscalationAgent");
-        var escalationSession = await escalation.CreateSessionAsync().ConfigureAwait(true);
-
         var handoffMessage =
             $"[Triage summary: {caseSummary}]\n\nCustomer's original message: {customerMessage}";
 
-        var escalationResponse = await escalation.RunAsync(
-            [new ChatMessage(ChatRole.User, handoffMessage)], escalationSession).ConfigureAwait(true);
+        var escalationSessionId = WorkflowAgents.NewAgentSessionId("EscalationAgent");
+        var escalationResponse = await Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                "EscalationAgent",
+                escalationSessionId.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                handoffMessage),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
 
         Workflow.Logger.LogInformation("[EscalationAgent] Responded.");
 
-        return escalationResponse.Text ?? string.Empty;
+        return escalationResponse;
+    }
+}
+
+public sealed class AgentInvocationActivities(IServiceProvider services)
+{
+    [Activity]
+    public async Task<string> RunAsync(string agentName, string sessionWorkflowId, string requestId, string message)
+    {
+        var sessionId = TemporalAgentSessionId.Parse(sessionWorkflowId);
+        AIAgent agent = services.GetTemporalAgentProxy(agentName);
+        var response = await agent.RunAsync(
+            message,
+            new TemporalAgentSession(sessionId),
+            new TemporalAgentRunOptions { RequestId = requestId }).ConfigureAwait(false);
+        return response.Text ?? string.Empty;
     }
 }
 

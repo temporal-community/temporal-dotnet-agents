@@ -13,15 +13,13 @@ namespace TemporalCommunity.Extensions.Agents.Session;
 internal enum ContextUnavailableReason
 {
     /// <summary>
-    /// The activity's workflow ID is not an agent session ID — the tool was invoked by a
-    /// workflow-local sub-agent, so the activity runs under the orchestrating workflow.
+    /// The activity's workflow ID is not an agent session ID, so no agent session can be attached.
     /// </summary>
-    SubAgentPath,
+    NoAgentSession,
 
     /// <summary>
-    /// The workflow ID parsed but names a different agent identity, as a scheduled job's
-    /// <c>ta-{agent}-scheduled-{runId}</c> does. Attaching a session would target the wrong
-    /// workflow.
+    /// The workflow ID parsed but names a different agent identity. Attaching a session
+    /// would target the wrong workflow.
     /// </summary>
-    ScheduledJobPath,
+    AgentIdentityMismatch,
 }

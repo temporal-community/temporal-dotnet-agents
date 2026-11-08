@@ -1,5 +1,7 @@
 using Temporalio.Activities;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
+using Microsoft.Agents.AI;
 
 namespace WorkflowRouting;
 
@@ -8,7 +10,7 @@ namespace WorkflowRouting;
 /// Activities are NOT replayed — their results are cached in workflow history.
 /// This makes registry lookups safe even if the agent set changes between deployments.
 /// </summary>
-public class RoutingActivities(TemporalAgentsOptions options)
+public class RoutingActivities(TemporalAgentsOptions options, IServiceProvider services)
 {
     /// <summary>
     /// Returns descriptors for all registered agents that have a description.
@@ -40,6 +42,18 @@ public class RoutingActivities(TemporalAgentsOptions options)
     public string ValidateAgent(string agentName, string fallback)
     {
         return options.IsAgentRegistered(agentName) ? agentName : fallback;
+    }
+
+    [Activity("WorkflowRouting.RunAgent")]
+    public async Task<string> RunAgentAsync(string agentName, string sessionWorkflowId, string requestId, string message)
+    {
+        var sessionId = TemporalAgentSessionId.Parse(sessionWorkflowId);
+        AIAgent agent = services.GetTemporalAgentProxy(agentName);
+        var response = await agent.RunAsync(
+            message,
+            new TemporalAgentSession(sessionId),
+            new TemporalAgentRunOptions { RequestId = requestId }).ConfigureAwait(false);
+        return response.Text ?? string.Empty;
     }
 }
 

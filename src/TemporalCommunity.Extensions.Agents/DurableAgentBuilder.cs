@@ -384,7 +384,7 @@ public sealed class DurableAgentBuilder
     /// <para>
     /// In managed session workflows, <c>InvokingAsync</c> prepares context once before the
     /// model/tool loop and <c>InvokedAsync</c> runs at terminal turn completion. Activity retries
-    /// may repeat either hook. Workflow-local <c>TemporalAIAgent</c> calls retain per-step hooks.
+    /// may repeat either hook.
     /// </para>
     /// <para>
     /// Registered tools are seeded into provider context. Providers may select or filter only
@@ -452,8 +452,7 @@ public sealed class DurableAgentBuilder
     /// <summary>
     /// Registers an <see cref="AIContextProvider"/> via a factory. The factory is invoked from a
     /// scoped service provider for provider preparation and terminal completion activity attempts
-    /// in managed session workflows; workflow-local <c>TemporalAIAgent</c> calls resolve it per
-    /// model-step attempt.
+    /// in managed session workflows.
     /// </summary>
     /// <param name="factory">Factory that produces the <see cref="AIContextProvider"/>.</param>
     /// <returns>This builder, for fluent chaining.</returns>
@@ -462,7 +461,7 @@ public sealed class DurableAgentBuilder
     /// <para>
     /// Managed session workflows prepare provider context once per logical turn and record the
     /// result; the completion hook runs at the terminal outcome. Activity retries can repeat
-    /// either callback, and workflow-local <c>TemporalAIAgent</c> calls retain per-step callbacks.
+    /// either callback.
     /// A provider may be constructed again for an activity retry or on another worker; per-session
     /// state must live in the <c>StateBag</c>, and external effects must tolerate activity retry.
     /// </para>

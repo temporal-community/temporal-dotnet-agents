@@ -14,7 +14,6 @@ A consolidated reference of common mistakes and best practices when building wit
 6. [Testing](#testing)
 7. [Security and Configuration](#security-and-configuration)
 8. [Tool Activity Ordering and Retries](#tool-activity-ordering-and-retries)
-9. [Scheduling](#scheduling)
 
 ---
 
@@ -74,7 +73,7 @@ var names = await Workflow.ExecuteActivityAsync(
     new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(10) });
 ```
 
-**Why:** If agents are added or removed between the original execution and a replay, the registry returns different results, causing a non-determinism error. Activity results are cached in history and replayed deterministically. See [Routing Patterns — Dynamic Routing via Activity](./routing.md#pattern-2-dynamic-routing-via-activity) for the full pattern.
+**Why:** If agents are added or removed between the original execution and a replay, the registry returns different results, causing a non-determinism error. Activity results are cached in history and replayed deterministically. See [Routing Patterns — Dynamic Routing via Activity](./routing.md#dynamic-routing-through-a-registry-activity) for the full pattern.
 
 ### Don't use `Task.WhenAll` in workflow code — use `Workflow.WhenAllAsync`
 
@@ -86,7 +85,7 @@ var results = await Task.WhenAll(toolTasks);
 var results = await Workflow.WhenAllAsync(toolTasks);
 ```
 
-**Why:** `Workflow.WhenAllAsync` is the SDK-provided workflow-safe combinator and the project convention. The XML doc on `WorkflowAgents.ExecuteAgentsInParallelAsync` (`src/TemporalCommunity.Extensions.Agents/WorkflowAgents.cs:112`) describes it as "the workflow-safe equivalent of `Task.WhenAll`." `Task.WhenAll` is technically safe when every task comes from `Workflow.ExecuteActivityAsync` (those schedule on `TaskScheduler.Current`), but using the SDK method makes intent clear and stays consistent with the rest of the codebase.
+**Why:** `Workflow.WhenAllAsync` is the SDK-provided workflow-safe combinator and the project convention. Use it to await activity tasks scheduled by workflow code.
 
 ### Don't use `ConfigureAwait(false)` in workflow code
 
@@ -101,18 +100,19 @@ await Workflow.ExecuteActivityAsync(...).ConfigureAwait(true);
 
 **Why:** `ConfigureAwait(false)` opts the continuation out of the current Temporal workflow `TaskScheduler`. Subsequent workflow commands no longer execute through the active workflow context and the workflow may stop making progress. This is a `[Workflow]`-only rule — `AgentActivities.cs` and `DefaultTemporalAgentClient.cs` correctly use `ConfigureAwait(false)` because they are not workflow code. The same rule applies to the workflow paths in `DurableChatClient` and `DurableAIFunction`.
 
-### Do use GetTemporalAgent() with string constants or activity results
+### Do invoke registered agents through activities
 
 ```csharp
-// GOOD — string literal, deterministic
-var agent = WorkflowAgents.GetTemporalAgent("WeatherAgent");
-
-// GOOD — agent name from a cached activity result
-var agentName = await Workflow.ExecuteActivityAsync(
-    (RoutingActivities a) => a.ValidateAgent(chosenName, "FallbackAgent"),
-    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromSeconds(10) });
-var agent = WorkflowAgents.GetTemporalAgent(agentName);
+var sessionId = WorkflowAgents.NewAgentSessionId("WeatherAgent");
+var requestId = Workflow.NewGuid().ToString("N");
+var result = await Workflow.ExecuteActivityAsync(
+    (AgentInvocationActivities activities) => activities.RunAsync(
+        "WeatherAgent", sessionId.WorkflowId, requestId, prompt),
+    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
 ```
+
+Workflow code must not invoke a registered proxy directly. The activity resolves it from scoped DI;
+workflow-generated session and request IDs make retries target the same logical agent turn.
 
 ---
 
@@ -206,25 +206,17 @@ agent.AddTool("do_thing", sp =>
 
 This works on every execution path, which matters more than it looks.
 
-### Don't reach for `TemporalAgentContext.Current` on every path
+### Use `TemporalAgentContext.Current` inside registered agent tool activities
 
 `TemporalAgentContext.Current` (namespace `TemporalCommunity.Extensions.Agents.Session`) exposes
-`GetService<T>()` against the tool activity's scope, and on a **managed session workflow** that is a
-fine way to resolve a scoped service. But `Current` throws `InvalidOperationException` when no
-context is set, and the library deliberately sets none on two other supported paths:
+`GetService<T>()` against the tool activity's scope. It is established for tool calls dispatched by
+the registered `AgentWorkflow`:
 
 | Path | Context | Why |
 |---|---|---|
 | Managed session (`AgentWorkflow`) | available | the workflow ID is the agent session ID |
-| Workflow-local sub-agent (`GetTemporalAgent`) | **unavailable** | the activity runs under *your* orchestrating workflow, so there is no agent session to attach |
-| Scheduled / one-time job | **unavailable** | the workflow ID names `{agent}-scheduled`, and attaching a session would target the wrong workflow |
 
-**Why:** a tool registered once is reachable from all three. A tool body that calls
-`TemporalAgentContext.Current` works in a session test and then throws the first time the same tool
-is invoked from an orchestrating workflow or a schedule. The `IServiceScopeFactory` pattern above
-has no such dependency. Reserve `Current` for the things only it can do — `RequestApprovalAsync`,
-`CurrentSession`, `StartWorkflowAsync` — and expect it to throw off the session path. The exception
-message names which path you are on.
+Use it for current-session access, approvals, or Temporal client operations from that activity.
 
 ---
 
@@ -232,17 +224,19 @@ message names which path you are on.
 
 ### Do give each independent conversation its own session
 
+The proxy examples in this section are for external callers or activity code, not workflow code.
+
 ```csharp
-// CORRECT — one agent, two sessions, two independent conversations
-var agent = WorkflowAgents.GetTemporalAgent("Analyst");
+// External caller: keep one proxy session for each conversation.
+var agent = services.GetTemporalAgentProxy("Analyst");
 var s1 = await agent.CreateSessionAsync();
 var s2 = await agent.CreateSessionAsync();
 await agent.RunAsync("Question A", s1);
 await agent.RunAsync("Question B", s2); // does not see Question A
 ```
 
-**Why:** the *session* owns the conversation history and StateBag, so one agent instance drives any
-number of independent conversations without their state colliding.
+**Why:** each session targets its own registered `AgentWorkflow`, so conversation history and
+StateBag remain isolated.
 
 Reuse the same session object for the turns that belong to one conversation — a fresh session per
 call accumulates nothing.
@@ -250,29 +244,28 @@ call accumulates nothing.
 ### Don't run two turns over the same session at once
 
 ```csharp
-// WRONG — throws InvalidOperationException
+// WRONG — concurrent updates target the same session and are serialized by its workflow
 var session = await agent.CreateSessionAsync();
-await Workflow.WhenAllAsync([
+await Task.WhenAll(
     agent.RunAsync("Question A", session),
-    agent.RunAsync("Question B", session)]);
+    agent.RunAsync("Question B", session));
 
 // CORRECT — parallel conversations get a session each
 var a = await agent.CreateSessionAsync();
 var b = await agent.CreateSessionAsync();
-await Workflow.WhenAllAsync([
+await Task.WhenAll(
     agent.RunAsync("Question A", a),
-    agent.RunAsync("Question B", b)]);
+    agent.RunAsync("Question B", b));
 ```
 
-**Why:** two interleaved runs would append to one history and merge into one StateBag with no
-defined ordering, which is not replay-safe. The guard rejects the second run before it schedules
-any activity. Sequential turns on one session are unaffected.
+**Why:** concurrent turns for one session have no application-defined ordering. Use a distinct
+session for independent conversations and sequence turns that belong to one conversation.
 
 ### Do pass a TemporalAgentSession, not any AgentSession
 
-`TemporalAIAgent.RunAsync` rejects a foreign `AgentSession` with `InvalidOperationException`: the
-session is where history and StateBag live, so a foreign one has nowhere to keep them. Obtain
-sessions from `CreateSessionAsync()` or construct a `TemporalAgentSession` directly.
+The registered proxy requires a `TemporalAgentSession` so it can resolve the workflow ID and
+preserve session StateBag data. Obtain sessions from `CreateSessionAsync()` or construct one with an
+application-owned `TemporalAgentSessionId`.
 
 ### Do use explicit session keys for deterministic routing
 
@@ -313,24 +306,9 @@ cannot round-trip history.
 > framework itself (in `AgentActivities`). It is not part of the public API. User code should call
 > `session.StateBag.Serialize()` directly when only StateBag persistence is required.
 
-### Do carry a sub-agent session across continue-as-new yourself
-
-This applies to **workflow-local sub-agents only** — a `TemporalAIAgent` obtained from
-`WorkflowAgents.GetTemporalAgent(...)` inside your own workflow:
-
-```csharp
-var serialized = await agent.SerializeSessionAsync(session);
-throw Workflow.CreateContinueAsNewException((MyWorkflow wf) => wf.RunAsync(
-    new MyInput { CarriedSession = serialized }));
-```
-
-**Why:** your workflow owns its own continue-as-new policy, so the library cannot guess when a
-sub-agent conversation should survive the boundary. A sub-agent session that is not carried forward
-starts empty on the next run.
-
-**Proxy-backed sessions need none of this.** A session driven through `TemporalAIAgentProxy` runs in
-the library's own `AgentWorkflow`, which carries its history and StateBag across its own
-continue-as-new automatically.
+The registered `AgentWorkflow` carries its history and StateBag across its own Continue-as-New
+transition. A regular workflow passes stable session and request IDs to its invocation activities;
+it does not serialize the agent session into its own input.
 
 ---
 
@@ -359,28 +337,23 @@ opts.DefaultHeartbeatTimeout   = TimeSpan.FromMinutes(30);
 
 **Why:** `HeartbeatTimeout` detects stuck activities by checking for periodic progress signals. If it exceeds `ActivityTimeout`, the activity times out before a heartbeat check can trigger.
 
-### Do pass ActivityOptions when using GetTemporalAgent() for workflow sub-agents
+### Do configure the activity that invokes the registered agent
 
 ```csharp
-var agent = WorkflowAgents.GetTemporalAgent(
-    "ResearcherAgent",
-    activityOptions: new ActivityOptions
+await Workflow.ExecuteActivityAsync(
+    (AgentInvocationActivities activities) => activities.RunAsync(
+        "ResearcherAgent", sessionId.WorkflowId, requestId, prompt),
+    new ActivityOptions
     {
         StartToCloseTimeout = TimeSpan.FromMinutes(5),
         HeartbeatTimeout    = TimeSpan.FromMinutes(1),
-        // REQUIRED. A caller-supplied ActivityOptions is used verbatim, so a null RetryPolicy
-        // reaches the server as its default — MaximumAttempts = 0, i.e. UNLIMITED retries — and a
-        // deterministically failing LLM step would hang the orchestrating workflow forever.
         RetryPolicy = new RetryPolicy { MaximumAttempts = 5, MaximumInterval = TimeSpan.FromSeconds(2) },
     });
 ```
 
-**Why:** the global `TemporalAgentsOptions` timeouts only apply to `AgentWorkflow`-based sessions;
-workflow sub-agents use their own `ActivityOptions`. That independence cuts both ways — the
-`ActivityOptions` you pass is used verbatim, including a null `RetryPolicy`, which the server reads
-as `MaximumAttempts = 0` (unlimited). The library's bounded backstop is applied only to the options
-it constructs for you, so passing your own without a `RetryPolicy` opts out of it and lets a
-deterministically failing LLM step retry forever.
+**Why:** these options govern the parent workflow's invocation activity. The registered agent's
+model and tool activities use the agent worker configuration. Generate the session and request IDs
+in workflow code before scheduling the invocation activity.
 
 ---
 
@@ -544,49 +517,30 @@ All samples load secrets from `dotnet user-secrets`, which stores values in `~/.
 ### Do rely on the one-attempt default for effectful tools
 
 ```csharp
-opts.AddDurableAgent("SupportAgent", agent =>
-{
-    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-
-    // Both tools use one activity attempt by default.
-    agent.AddTool(sendEmailTool);
-    agent.AddTool(lookupOrderTool);
-});
+agents.Agent(
+    "SupportAgent",
+    new ChatClientAgentOptions
+    {
+        ChatOptions = new ChatOptions
+        {
+            Tools = [sendEmailTool, lookupOrderTool],
+        },
+    });
 ```
 
 **Why:** Tool calls are separate `InvokeAgentTool` activities and execute serially in model order. Each activity gets one attempt by default. A failed write can still have an uncertain external outcome, so do not blindly retry it; use an idempotency key and reconcile with the system of record. Setting `agent.RetryPolicy` opts every tool on that agent into the same retry policy, so only do that when all of them are retry-safe. See [Durable Agents](./durable-agents.md).
+
+With the MAF-options registration surface, set `RetryPolicy` in the per-agent Temporal options
+callback only when every tool on that agent is safe to repeat. It opts all of that agent's tools into
+retries; there is no
+per-tool retry override on this registration path.
 
 ### Do not fan out calls from one model response
 
 The durable-agent loop invokes one tool activity at a time, applying its result and StateBag
 write-back before dispatching the next call. Keep calls in model order; do not replace this with
-`Workflow.WhenAllAsync`. Use `WorkflowAgents.ExecuteAgentsInParallelAsync` only for independent
-agent conversations, each with its own session.
-
----
-
-## Scheduling
-
-### Do delete schedules before decommissioning agents
-
-```csharp
-var handle = client.GetAgentScheduleHandle("daily-summary");
-await handle.DeleteAsync();
-```
-
-**Why:** Temporal Schedules are independent of workers. Removing an agent from `TemporalAgentsOptions` does **not** delete its schedule — it continues firing and fails with `AgentNotRegisteredException`.
-
-### Don't assume config-time schedule changes take effect on restart
-
-```csharp
-// This change is not applied if the schedule already exists
-opts.AddScheduledAgentRun("Agent", "my-schedule", request, updatedSpec);
-```
-
-**Why:** config-time registration is create-only. `ScheduleRegistrationService` catches
-`ScheduleAlreadyRunningException`, logs a warning, and leaves the existing schedule unchanged.
-Use `ScheduleHandle.UpdateAsync`, or delete the schedule and restart the worker. See
-[Scheduling](./scheduling.md#update-an-existing-schedule) for details.
+`Workflow.WhenAllAsync`. For independent agents, schedule one proxy-invocation activity per
+agent with its own session and request ID, then await the activities with `Workflow.WhenAllAsync`.
 
 ---
 
@@ -603,8 +557,7 @@ Use `ScheduleHandle.UpdateAsync`, or delete the schedule and restart the worker.
 | Leave tool retry unset for effectful tools | One attempt by default | Uncertain external-effect outcomes |
 | Register all 4 OTel sources | Observability | Silent data loss |
 | Set `ActivityTimeout` for HITL | Timeouts | Activity failure |
-| Don't reuse `TemporalAIAgent` instances | Sessions | Incorrect behavior |
-| Delete schedules before removing agents | Scheduling | Orphaned schedules |
+| Don't invoke a registered agent proxy from workflow code | Activity invocation | Workflow code must use an activity that resolves the proxy |
 | Use `dotnet user-secrets` for secrets | Security | Credential leak |
 | Use exact exception types in xUnit | Testing | Test failures |
 
@@ -617,7 +570,6 @@ Use `ScheduleHandle.UpdateAsync`, or delete the schedule and restart the worker.
 - [Observability](./observability.md) — OTel setup and span hierarchy
 - [Intercepting LLM Calls](./llm-call-interception.md) — chat-client decorators via `agent.ChatClient`, and agent middleware via `ConfigureAgentPipeline`
 - [Testing Agents](./testing-agents.md) — test patterns and fixtures
-- [Scheduling](./scheduling.md) — schedule lifecycle and pitfalls
 - [Durable Agents](./durable-agents.md) — serial tool dispatch, one-attempt default, agent-level retry opt-in, iteration cap
 
 ---

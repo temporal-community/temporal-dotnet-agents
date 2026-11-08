@@ -10,8 +10,8 @@ namespace TemporalCommunity.Extensions.Agents.Tests.Session;
 /// </summary>
 /// <remarks>
 /// These cover the guard's own state machine. The end-to-end proof — that
-/// <c>TemporalAIAgent.RunCoreAsync</c> enters before scheduling an activity and exits on every
-/// completion path — lives in the integration suite, since the agent only runs inside a workflow.
+/// <c>TemporalAIAgentProxy.RunAsync</c> enters before scheduling an activity and exits on every
+/// completion path — lives in the integration suite.
 /// </remarks>
 public class TemporalAgentSessionRunGuardTests
 {

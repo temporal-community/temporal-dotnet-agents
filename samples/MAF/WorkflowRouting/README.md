@@ -1,192 +1,21 @@
-# Workflow Routing: Customer Service Router
+# Workflow Routing
 
-## Overview
+This sample demonstrates static and dynamic routing in regular Temporal workflows:
 
-This sample demonstrates **routing entirely inside a Temporal workflow** — the workflow itself is the router, with full programmatic control over classification and dispatch.
+- `CustomerServiceWorkflow` calls a registered classifier through an activity, selects a
+  specialist from its result, then calls that specialist through another activity.
+- `DynamicRoutingWorkflow` first queries registered agent descriptors in an activity, uses a
+  classifier proxy to select an agent, validates the selected registration in an activity, and
+  invokes the specialist through an activity.
 
-A `CustomerServiceWorkflow` receives a customer question and:
+Each agent call uses a workflow-generated session ID and request ID. The activity resolves the
+registered proxy; workflow code never invokes an agent directly.
 
-1. Calls a lightweight **Classifier** agent to determine the intent category (`ORDERS`, `TECH_SUPPORT`, or `GENERAL`)
-2. Uses a `switch` expression to select the correct specialist agent
-3. Calls the specialist and returns its response
+## Run
 
-```
-User Question
-    │
-    ▼
-CustomerServiceWorkflow
-    │
-    ├─ GetTemporalAgent("Classifier")  →  "ORDERS" / "TECH_SUPPORT" / "GENERAL"
-    │
-    ├─ switch (classification)
-    │     "ORDERS"       → GetTemporalAgent("OrdersAgent")
-    │     "TECH_SUPPORT" → GetTemporalAgent("TechSupportAgent")
-    │     _              → GetTemporalAgent("GeneralAgent")
-    │
-    └─ Return specialist response
-```
-
-Every agent call runs as a durable Temporal activity. If the worker crashes after classification but before the specialist call, replay skips the classifier LLM call entirely — no duplicate work, no duplicate billing.
-
-## How This Differs from MultiAgentRouting
-
-| | MultiAgentRouting | WorkflowRouting (this sample) |
-|---|---|---|
-| **Routing mechanism** | `RoutingActivities.ClassifyRequest` activity (keyword scoring, no LLM) | LLM `Classifier` agent inside the workflow, result drives a `switch` |
-| **Control flow** | Activity returns agent name → workflow dispatches | Workflow classifies + dispatches in one place |
-| **Also demonstrates** | Parallel fan-out via `ExecuteAgentsInParallelAsync` + OTel tracing | Dynamic agent discovery via activity + runtime-built classifier prompt |
-| **Agent discovery** | Hardcoded keyword map inside the activity | Static `switch` (static routing) or live registry query via activity (dynamic routing) |
-
-## Highlights
-
-1. **Workflow as router.** All routing logic lives in `CustomerServiceWorkflow.RunAsync` as a plain `switch` expression. No framework abstractions to learn or configure.
-
-2. **Graceful default.** Unrecognized classifications fall through to `GeneralAgent` via the `_` discard pattern, so unexpected LLM output doesn't crash the workflow. The specialist response uses a null-safe access (`?? string.Empty`) to guard against edge cases where the LLM returns no text.
-
-3. **`.ConfigureAwait(true)` on all workflow awaits.** All `await` calls inside `[Workflow]`-attributed classes use `.ConfigureAwait(true)`. This is required to keep the Temporal workflow task scheduler active — omitting it can cause the workflow context to be lost during replay.
-
-4. **Live agent list, descriptor-driven.** The dynamic routing workflow asks an activity for the live agent descriptors via `TemporalAgentsOptions.GetAgentDescriptors()`, which surfaces each registered agent's `Description`. The result drives a context-aware prompt for the Classifier. Routing metadata lives on the agent registration itself, not in a separate map.
-
-5. **Independent sessions per agent.** Each agent call gets its own session (`CreateSessionAsync`), keeping conversation histories isolated between the classifier and specialist.
-
-## Getting Started
-
-### Prerequisites
-
-- [.NET 10 SDK](https://dot.net) or later
-- Temporal Service 1.31.0 or newer
-- An OpenAI-compatible API key
-
-### 1. Start Temporal
-
-```bash
-temporal server start-dev --namespace default --search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int
-```
-
-### 2. Configure API credentials
-
-`OPENAI_API_KEY` is required and validated first on startup. `OPENAI_API_BASE_URL` is also required (used to point at the OpenAI-compatible endpoint).
-
-```bash
-dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MAF/WorkflowRouting
-dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --project samples/MAF/WorkflowRouting
-```
-
-To use a non-default Temporal address, add it to `appsettings.json`:
-
-```json
-{
-    "TEMPORAL_ADDRESS": "your-temporal-host:7233"
-}
-```
-
-### 3. Run the sample
+Start Temporal with the required search attributes and configure `OPENAI_API_KEY` and
+`OPENAI_API_BASE_URL`:
 
 ```bash
 dotnet run --project samples/MAF/WorkflowRouting/WorkflowRouting.csproj
 ```
-
-### Expected Output
-
-Three workflows are submitted with different customer questions:
-
-```
-Worker started. Submitting customer service workflows...
-
-Starting workflow cs-orders-<guid>
-
-── Question: Where is my order #12345?
-   Workflow: cs-orders-<guid>
-   Response: <OrdersAgent response>
-
-Starting workflow cs-tech-support-<guid>
-
-── Question: My app keeps crashing on startup
-   Workflow: cs-tech-support-<guid>
-   Response: <TechSupportAgent response>
-
-Starting workflow cs-general-<guid>
-
-── Question: What services do you offer?
-   Workflow: cs-general-<guid>
-   Response: <GeneralAgent response>
-
-── Dynamic Routing ─────────────────────────────────────
-
-Starting dynamic workflow cs-dynamic-<guid>
-
-── Question: I need to return a defective product
-   Workflow: cs-dynamic-<guid>
-   Response: <OrdersAgent response — discovered via descriptors>
-
-Done.
-```
-
-Each question is classified by the Classifier agent, then routed to the appropriate specialist. You can inspect the workflow event history in the Temporal UI at [http://localhost:8233](http://localhost:8233) to see both the classification and specialist activities for each workflow.
-
-## Agents
-
-| Agent | Role | System Prompt Summary |
-|-------|------|----------------------|
-| **Classifier** | Intent classification | Returns exactly one keyword: `ORDERS`, `TECH_SUPPORT`, or `GENERAL` |
-| **OrdersAgent** | Order specialist | Order tracking, returns, shipping, delivery estimates |
-| **TechSupportAgent** | Tech specialist | Software issues, crashes, error messages, troubleshooting |
-| **GeneralAgent** | Catch-all | Greetings, general inquiries, company information |
-
-## Dynamic Routing via Activity
-
-The sample also includes `DynamicRoutingWorkflow`, which demonstrates **truly dynamic agent discovery** — the workflow has zero hardcoded agent names in its routing logic.
-
-### The Problem
-
-`CustomerServiceWorkflow` uses hardcoded agent names in a `switch` expression. If you add a new agent or rename one, you must recompile. And calling `TemporalAgentsOptions.GetRegisteredAgentNames()` directly in workflow code is **unsafe**:
-
-- Workflow code must produce identical results during replay
-- If the agent set changes between the original execution and a replay, the routing decision would differ
-- This breaks Temporal's determinism guarantee — the same reason `DateTime.UtcNow` is forbidden in workflows
-
-### The Safe Pattern: Registry + Activity
-
-`DynamicRoutingWorkflow` discovers agents at runtime without hardcoding any names in the routing workflow:
-
-1. **An activity** calls `options.GetAgentDescriptors()` to get the registered agent names and their `Description` values — the result is cached in workflow event history
-2. **The Classifier agent** receives the descriptor list as context and picks the best match from whatever agents are currently registered
-3. **A validation activity** confirms the LLM's choice is actually registered, with a fallback
-
-```
-DynamicRoutingWorkflow
-    │
-    ├─ Activity: GetAvailableAgents()
-    │    └─ calls options.GetAgentDescriptors() for the registered agent list + descriptions
-    │    └─ returns: [("OrdersAgent", "Handles orders..."), ("TechSupportAgent", "..."), ...]
-    │    └─ result cached in event history (replay-safe)
-    │
-    ├─ GetTemporalAgent("Classifier") with dynamic prompt:
-    │    "Available agents:\n  OrdersAgent — Handles orders...\n  ..."
-    │    └─ LLM picks: "OrdersAgent"
-    │
-    ├─ Activity: ValidateAgent("OrdersAgent", fallback: "GeneralAgent")
-    │    └─ confirms agent exists in registry
-    │    └─ result cached in event history (replay-safe)
-    │
-    └─ GetTemporalAgent("OrdersAgent") → specialist response
-```
-
-### Why This is Truly Dynamic
-
-- **No hardcoded agent names** in the routing workflow — it discovers what's available at runtime
-- **Add a new agent** via `AddDurableAgent` and it's automatically picked up by `GetRegisteredAgentNames()` / `GetAgentDescriptors()`
-- **Remove an agent** and the validation activity falls back gracefully
-- **The Classifier adapts** — its prompt is built from the live agent list, not a static enum
-- **Replay-safe** — both activity results (agent list + validation) are recorded in history
-
-### Auto-Extracted Descriptions
-
-Agents registered with `agent.Description = "..."` on their `AddDurableAgent` builder appear in `opts.GetAgentDescriptors()` for routing prompts. The dynamic-routing activity calls `GetAgentDescriptors()` directly to discover specialists at runtime — agents without a description (e.g. the Classifier) are excluded automatically. This keeps the agent definitions focused on their AI behavior and the routing logic self-contained in `RoutingActivities`.
-
-### Files
-
-| File | Purpose |
-|------|---------|
-| `RoutingActivities.cs` | Activities that query `TemporalAgentsOptions` — `GetAvailableAgents()` returns descriptors, `ValidateAgent()` confirms a name exists |
-| `DynamicRoutingWorkflow.cs` | Workflow that discovers agents via activity, builds a dynamic classifier prompt, validates the choice, and dispatches |

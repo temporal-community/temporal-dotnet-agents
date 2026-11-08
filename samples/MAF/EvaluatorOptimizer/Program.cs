@@ -64,7 +64,8 @@ builder.Services
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
         });
     })
-    .AddWorkflow<EvaluatorOptimizerWorkflow>();
+    .AddWorkflow<EvaluatorOptimizerWorkflow>()
+    .AddScopedActivities<AgentInvocationActivities>();
 
 // ── Step 5: Start the host ───────────────────────────────────────────────────
 var host = builder.Build();

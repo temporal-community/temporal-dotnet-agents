@@ -66,15 +66,6 @@ public static class TemporalAgentTelemetry
     /// <summary>Span emitted by <c>DefaultTemporalAgentClient.SendAsync</c> when sending an update.</summary>
     public const string AgentClientSendSpanName = "agent.client.send";
 
-    /// <summary>Span emitted by <c>DefaultTemporalAgentClient.ScheduleAgentAsync</c> when creating a recurring schedule.</summary>
-    public const string AgentScheduleCreateSpanName = "temporal.agent.schedule.create";
-
-    /// <summary>Span emitted by <c>DefaultTemporalAgentClient.RunAgentDelayedAsync</c> when starting a delayed workflow.</summary>
-    public const string AgentScheduleDelayedSpanName = "temporal.agent.schedule.delayed";
-
-    /// <summary>Span emitted by <c>ScheduleActivities.ScheduleOneTimeAgentRunAsync</c> when scheduling a one-time run.</summary>
-    public const string AgentScheduleOneTimeSpanName = "temporal.agent.schedule.one_time";
-
     // ── Attribute names ────────────────────────────────────────────────────────
     // Aligned with OpenTelemetry GenAI semantic conventions (Development tier).
     // See <remarks> on the type for the rationale behind the two non-canonical names.
@@ -103,12 +94,4 @@ public static class TemporalAgentTelemetry
     /// </summary>
     public const string TotalTokensAttribute = "gen_ai.usage.total_tokens";
 
-    /// <summary>The ID of the recurring schedule being created.</summary>
-    public const string ScheduleIdAttribute = "schedule.id";
-
-    /// <summary>The delay before a deferred run starts, as <see cref="TimeSpan.ToString()"/>.</summary>
-    public const string ScheduleDelayAttribute = "schedule.delay";
-
-    /// <summary>The run ID of a one-time scheduled job.</summary>
-    public const string ScheduleJobIdAttribute = "schedule.job_id";
 }

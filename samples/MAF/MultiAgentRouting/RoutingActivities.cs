@@ -1,3 +1,6 @@
+using Microsoft.Agents.AI;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
 using Temporalio.Activities;
 
 namespace MultiAgentRouting;
@@ -12,7 +15,7 @@ namespace MultiAgentRouting;
 ///   • The decision is visible and auditable in the Temporal Web UI.
 ///   • The activity is retried automatically on transient failures.
 /// </summary>
-public class RoutingActivities
+public class RoutingActivities(IServiceProvider services)
 {
     private static readonly Dictionary<string, string[]> AgentKeywords = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -49,5 +52,21 @@ public class RoutingActivities
         // If no keywords matched (all scores are 0), default to TechSupportAgent
         // as a general-purpose fallback.
         return best.Value > 0 ? best.Key : "TechSupportAgent";
+    }
+
+    [Activity]
+    public async Task<string> RunAgentAsync(
+        string agentName,
+        string sessionWorkflowId,
+        string requestId,
+        string message)
+    {
+        var sessionId = TemporalAgentSessionId.Parse(sessionWorkflowId);
+        AIAgent agent = services.GetTemporalAgentProxy(agentName);
+        var response = await agent.RunAsync(
+            message,
+            new TemporalAgentSession(sessionId),
+            new TemporalAgentRunOptions { RequestId = requestId }).ConfigureAwait(false);
+        return response.Text ?? string.Empty;
     }
 }

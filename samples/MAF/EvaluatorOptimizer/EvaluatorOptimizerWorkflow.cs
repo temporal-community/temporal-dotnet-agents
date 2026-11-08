@@ -1,6 +1,5 @@
-using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace EvaluatorOptimizer;
 
@@ -34,11 +33,8 @@ public class EvaluatorOptimizerWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string task, int maxIterations = 3)
     {
-        var generator = GetTemporalAgent("Generator");
-        var evaluator = GetTemporalAgent("Evaluator");
-
-        var genSession = await generator.CreateSessionAsync().ConfigureAwait(true);
-        var evalSession = await evaluator.CreateSessionAsync().ConfigureAwait(true);
+        var genSession = WorkflowAgents.NewAgentSessionId("Generator");
+        var evalSession = WorkflowAgents.NewAgentSessionId("Evaluator");
 
         var draft = string.Empty;
         var feedback = string.Empty;
@@ -55,21 +51,19 @@ public class EvaluatorOptimizerWorkflow
                 ? task
                 : $"Revise your previous draft based on this feedback:\n\n{feedback}\n\nPrevious draft:\n{draft}";
 
-            var genResponse = await generator.RunAsync(
-                [new ChatMessage(ChatRole.User, genPrompt)],
-                genSession).ConfigureAwait(true);
-
-            draft = genResponse.Text ?? string.Empty;
+            draft = await Workflow.ExecuteActivityAsync(
+                (AgentInvocationActivities activities) => activities.RunAsync(
+                    "Generator", genSession.WorkflowId, Workflow.NewGuid().ToString("N"), genPrompt),
+                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
 
             // ── Evaluation turn ────────────────────────────────────────────
-            var evalResponse = await evaluator.RunAsync(
-                [new ChatMessage(ChatRole.User,
-                    $"Evaluate the following draft. " +
-                    $"Reply with '{ApprovalToken}' if it is ready, " +
-                    $"or give concise, specific feedback for improvement.\n\n{draft}")],
-                evalSession).ConfigureAwait(true);
-
-            feedback = evalResponse.Text ?? string.Empty;
+            var evaluationPrompt =
+                $"Evaluate the following draft. Reply with '{ApprovalToken}' if it is ready, " +
+                $"or give concise, specific feedback for improvement.\n\n{draft}";
+            feedback = await Workflow.ExecuteActivityAsync(
+                (AgentInvocationActivities activities) => activities.RunAsync(
+                    "Evaluator", evalSession.WorkflowId, Workflow.NewGuid().ToString("N"), evaluationPrompt),
+                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
 
             if (feedback.Contains(ApprovalToken, StringComparison.OrdinalIgnoreCase))
             {

@@ -13,7 +13,7 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 public sealed class TemporalAgentRegistrationIntegrationTests
 {
     [Fact]
-    public async Task AddTemporalAgent_KeyedProxyRunsTwoTurnsAndDispatchesMafTool()
+    public async Task Agent_KeyedProxyRunsTwoTurnsAndDispatchesMafTool()
     {
         await using var environment = await TestEnvironmentHelper.StartLocalAsync();
         var tool = AIFunctionFactory.Create(GetWeather, name: "get_weather");
@@ -34,7 +34,7 @@ public sealed class TemporalAgentRegistrationIntegrationTests
         builder.Services
             .AddHostedTemporalWorker(taskQueue)
             .AddTemporalAgents(agents =>
-                agents.AddTemporalAgent(
+                agents.Agent(
                     "weather",
                     new ChatClientAgentOptions
                     {

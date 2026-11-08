@@ -63,6 +63,10 @@ public sealed class DurableModelStepFailureIntegrationTests
             {
                 Assert.Equal("completed", (await session.SendAsync(
                     conversationId, "prior request", requestId: "prior").WaitAsync(Deadline)).Text);
+                var priorOutcome = await session.GetTerminalTurnOutcomeAsync(
+                    conversationId, "prior").WaitAsync(Deadline);
+                Assert.NotNull(priorOutcome);
+                Assert.Null(priorOutcome.FailureNonRetryable);
                 Assert.Empty(reducer.Calls);
             }
 
@@ -78,6 +82,7 @@ public sealed class DurableModelStepFailureIntegrationTests
                 conversationId, "failed").WaitAsync(Deadline);
             Assert.NotNull(terminal);
             Assert.Equal(expectedErrorType, terminal.FailureErrorType);
+            Assert.Equal(true, terminal.FailureNonRetryable);
 
             Assert.Equal(needsPriorTurn ? 1 : 0, model.Calls.Count);
             Assert.Equal(needsPriorTurn ? 1 : 0, reducer.Calls.Count);

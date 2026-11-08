@@ -100,11 +100,15 @@ The `StateBag` is **not a memory store** — it is a persistent address book tha
 
 ## External-memory providers need a dedicated durable adapter
 
-`Mem0Provider`, `ChatHistoryMemoryProvider`, and similar providers perform external reads and writes from their lifecycle hooks. Those hooks run in retryable LLM-step activities, and this library does not provide an atomic idempotent provider-history contract. They are therefore **not supported as direct durable registrations**.
+`Mem0Provider` and similar providers perform external reads and writes from their lifecycle hooks.
+Those hooks run in retryable LLM-step activities, and this library does not provide an atomic
+idempotent provider-history contract. They are therefore **not supported as direct durable
+registrations**. The stock MAF `ChatHistoryMemoryProvider` is supported only through the dedicated
+opt-in adapter documented in [Agent memory](../../how-to/MAF/memory.md); generic
+`AddContextProvider` registration remains rejected.
 
 The historical `Mem0Provider` material below explains StateBag mechanics only. It is not a durable
-recipe. No direct `AddContextProvider` registration is supported until a dedicated durable adapter
-defines retry, idempotency, and recovery behavior.
+recipe. No direct `AddContextProvider` registration for external-memory providers is supported.
 
 ### Historical Mem0Provider StateBag Walkthrough
 
@@ -228,9 +232,7 @@ StateBag persistence is committed at the **turn** boundary. If a model, provider
 tool, response projection, or workflow update fails the turn after its activity retries are
 exhausted, the workflow restores application-, provider-, interceptor-, and tool-owned StateBag
 entries to their pre-turn values. A later turn therefore never observes partial state from the
-failed turn. Approval-scope records are the exception: an approval is resolved by a separate
-workflow update, so its reserved `temporal.approval_scopes.*` record (and a configured custom
-always-scope store key) remains committed even if the agent turn that requested it later fails.
+failed turn.
 The workflow captures and restores the StateBag snapshot while holding the same serialized-turn
 gate that protects conversation history. A second Update may be accepted while the first turn is
 waiting on an activity, but it cannot capture its rollback snapshot until the first turn has
@@ -305,19 +307,18 @@ Workflow stores          Workflow stores
 serializes the resulting `StateBag`; the library does not hand provider lifecycle ownership to
 `ChatClientAgent`.
 
-### Scope limits
+### Approval limits
 
-`TemporalAIAgent` carries this provider StateBag across its LLM steps and turns, but it has no
-approval mixin. It cannot persist or consume StateBag-backed approval scopes; an interceptor's
-`PauseForApproval` decision becomes `Block`. `AgentJobWorkflow` has neither a carried StateBag
-nor workflow-parked approval, so it has the same `PauseForApproval` → `Block` behavior. Use a
-session-backed `TemporalAIAgentProxy` when an approval scope must survive a turn.
+Workflow-parked approvals are owned by the registered `AgentWorkflow` and are available through a
+managed session invoked with `TemporalAIAgentProxy`. Regular workflows should invoke that proxy
+from an activity; there is no workflow-local agent execution path.
 
-The following registration is intentionally absent: direct registration of `Mem0Provider`,
-`ChatHistoryMemoryProvider`, or another provider that persists history or writes to an external
-store. Calling those hooks from retryable activities can duplicate or lose external effects. The
-supported example, [ContextProviders](../../../samples/MAF/ContextProviders/), carries its
-session state in `StateBag` without becoming the conversation-history owner.
+Direct registration of `Mem0Provider` or another provider that persists history or writes to an
+external store is intentionally unsupported: calling those hooks from retryable activities can
+duplicate or lose external effects. `ChatHistoryMemoryProvider` has a separate supported opt-in
+adapter with explicit scope validation and retry semantics; see [Agent memory](../../how-to/MAF/memory.md).
+The [ContextProviders sample](../../../samples/MAF/ContextProviders/) carries custom provider state
+in `StateBag` without becoming the conversation-history owner.
 
 ---
 
@@ -380,65 +381,18 @@ stateInitializer: session => new Mem0Provider.State(
 
 Choosing between shared vs. isolated memory scopes is a product decision: shared memories let one session "remember" facts learned in another (good for a single user across multiple conversations), while isolated memories give each session a clean slate.
 
-#### `TemporalAIAgent` — history and StateBag are on the session
+#### The registered proxy — history and StateBag are workflow-owned
 
-`TemporalAIAgent.RunCoreAsync` keeps nothing conversational on the agent instance. The session it
-is handed owns both the conversation history and the StateBag, so one agent instance drives any
-number of isolated conversations:
+The supported agent receiver is the registered `TemporalAIAgentProxy`. It targets the
+`AgentWorkflow` identified by `TemporalAgentSessionId.WorkflowId`; the workflow owns both
+conversation history and the session StateBag. Tool activities run with the managed session
+context, so `TemporalAgentContext.Current` identifies the same session while the activity is
+executing.
 
-```csharp
-// TemporalAIAgent.RunCoreAsync (simplified)
-session ??= await CreateSessionAsync(cancellationToken);
-
-if (session is not TemporalAgentSession temporalSession) throw ...;   // type required
-if (temporalSession.SessionId.AgentName != _agentName) throw ...;     // and bound to this agent
-
-temporalSession.EnterRun();                          // rejects an overlapping run on this session
-temporalSession.AppendHistoryEntry(request);         // ← session, not an instance field
-// The per-step loop flattens temporalSession.History into AgentStepInput.AccumulatedMessages
-```
-
-Two sessions from the same instance are therefore fully isolated:
-
-```csharp
-var agent = GetTemporalAgent("WeatherAgent");   // one TemporalAIAgent instance
-var s1 = await agent.CreateSessionAsync();
-var s2 = await agent.CreateSessionAsync();
-
-await agent.RunAsync("Question A", s1);   // s1.History: [A_req, A_resp]
-await agent.RunAsync("Question B", s2);   // s2.History: [B_req, B_resp] — no Question A
-```
-
-Three rules follow from session ownership:
-
-- **The session must be a `TemporalAgentSession`.** A foreign `AgentSession` has nowhere to hold
-  history or StateBag, so it is rejected rather than silently dropping every mutation.
-- **The session is bound to its agent, by name.** Passing a `Researcher` session to a `Summarizer`
-  agent throws — the session carries a transcript, and replaying it into another agent's prompt and
-  event history would be a cross-agent disclosure. Two instances resolved from the same
-  registration stay interchangeable.
-- **One run at a time per session.** Overlapping `RunAsync` calls on the same session throw
-  `InvalidOperationException`; they would otherwise append to one history and merge into one
-  StateBag with no defined ordering. Distinct sessions run in parallel freely.
-
-Continue-as-new differs by path. The library's own `AgentWorkflow` — what a `TemporalAIAgentProxy`
-session runs in — carries its history and StateBag forward automatically. A workflow-local
-sub-agent session survives only if the orchestrating workflow serializes it into its own
-continue-as-new input; the library cannot guess that policy.
-
-#### Sub-agent tools cannot reach the session StateBag
-
-A tool invoked by a `TemporalAIAgent` sub-agent gets no `TemporalAgentContext`, so it can neither
-read nor write the session StateBag — its write-back always comes back empty.
-
-`InvokeAgentToolInput` carries no session ID, so `InvokeAgentToolAsync` derives the session from the
-activity's workflow ID. For a sub-agent that is the *orchestrating* workflow's ID, not a
-`ta-{agent}-{key}` session ID, so the parse fails and no context is established.
-
-Context providers are unaffected: `AgentStepInput` does carry a session ID and the LLM-step activity
-prefers it over the workflow ID, which is why provider state threads correctly while tool
-write-backs do not. Tools running under the long-lived `AgentWorkflow` path are also unaffected —
-there the activity's workflow ID *is* the session ID.
+For regular workflow orchestration, resolve the proxy from the activity's scoped service provider.
+The calling workflow passes a stable session workflow ID and request ID so activity retries target
+the same logical turn. Agent history and StateBag continue across the registered workflow's own
+continue-as-new transition.
 
 #### A serialized session contains the conversation
 
@@ -455,11 +409,8 @@ separate from the 64 KB `CarriedStateBag` size guard, which does not cover sessi
 
 | Scenario | Conversation history | External memory (e.g. Mem0) |
 |---|---|---|
-| `TemporalAIAgentProxy`, two sessions | Fully isolated (separate workflows) | Depends on `stateInitializer` scoping |
-| `TemporalAIAgentProxy`, same session reused | Shared (same workflow) | Shared |
-| `TemporalAIAgent`, two sessions, **same instance** | Fully isolated (history is per session) | Depends on `stateInitializer` scoping |
-| `TemporalAIAgent`, two sessions, **two instances** | Fully isolated (history is per session) | Depends on `stateInitializer` scoping |
-| `TemporalAIAgent`, same session reused | Shared — this is how a multi-turn conversation accumulates | Depends on `stateInitializer` scoping |
+| Registered proxy, two sessions | Fully isolated (separate workflows) | Depends on provider scope initialization |
+| Registered proxy, same session reused | Shared (same workflow) | Shared |
 
 ---
 

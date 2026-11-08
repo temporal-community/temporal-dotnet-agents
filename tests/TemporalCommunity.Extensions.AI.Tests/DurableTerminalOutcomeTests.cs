@@ -9,6 +9,72 @@ namespace TemporalCommunity.Extensions.AI.Tests;
 public sealed class DurableTerminalOutcomeTests
 {
     [Fact]
+    public void SummaryBudgetKeepsNewestCallsAndAccountsForEveryOmittedStatus()
+    {
+        var calls = Enumerable.Range(0, 60).Select(index =>
+            new DurableToolCallOutcomeSummary(
+                $"call-{index}", "tool", (DurableToolCallOutcomeStatus)(index % 3))).ToArray();
+
+        var (summaries, truncated, counts) = DurableToolCallSummaryBudget.Create(calls);
+
+        Assert.True(truncated);
+        Assert.Equal(calls[^32..], summaries);
+        Assert.Equal(new DurableToolCallOutcomeCounts(20, 20, 20), counts);
+        Assert.Equal(new DurableToolCallOutcomeCounts(10, 9, 9),
+            DurableToolCallSummaryBudget.GetOmittedCounts(counts, summaries));
+    }
+
+    [Fact]
+    public void SummaryBudgetBoundsEscapedIdentitiesBySerializedBytes()
+    {
+        var calls = Enumerable.Range(0, 32).Select(index =>
+            new DurableToolCallOutcomeSummary(
+                $"{index}{new string('\0', 250)}",
+                new string('\0', 256),
+                DurableToolCallOutcomeStatus.Completed)).ToArray();
+
+        var (summaries, truncated, counts) = DurableToolCallSummaryBudget.Create(calls);
+
+        Assert.True(truncated);
+        Assert.Equal(calls[^summaries.Count..], summaries);
+        Assert.True(JsonSerializer.SerializeToUtf8Bytes(
+            summaries, DurableAIJsonUtilities.DefaultOptions).Length <= DurableToolCallSummaryBudget.MaximumBytes);
+        Assert.Equal(32 - summaries.Count,
+            DurableToolCallSummaryBudget.GetOmittedCounts(counts, summaries).Completed);
+    }
+
+    [Fact]
+    public void FailureMapperRestoresTypedFailureWithOriginalCauseAndOmittedCounts()
+    {
+        var details = new DurableTurnFailureDetails
+        {
+            RequestId = "failed-request",
+            Message = "The model failed after a tool completed.",
+            ErrorType = "ModelError",
+            CommittedRevision = 3,
+            ToolCallSummaries =
+            [
+                new("last-call", "write", DurableToolCallOutcomeStatus.OutcomeUncertain),
+            ],
+            ToolCallSummariesTruncated = true,
+            ToolCallCounts = new(2, 1, 1),
+        };
+        var cause = new ApplicationFailureException(
+            JsonSerializer.Serialize(details, DurableAIJsonUtilities.DefaultOptions),
+            errorType: DurableTurnFailureMapper.TurnFailedErrorType,
+            nonRetryable: true);
+
+        var failure = Assert.IsType<DurableTurnFailedException>(
+            DurableTurnFailureMapper.Map(cause, details.RequestId));
+
+        Assert.Same(cause, failure.InnerException);
+        Assert.Equal(3, failure.CommittedRevision);
+        Assert.Equal("ModelError", failure.ErrorType);
+        Assert.Equal(details.ToolCallSummaries, failure.ToolCallSummaries);
+        Assert.Equal(new DurableToolCallOutcomeCounts(2, 1, 0), failure.OmittedToolCallCounts);
+    }
+
+    [Fact]
     public void MinimalOutcomeWithMaximumRequestIdFitsMinimumLedgerBudget()
     {
         var outcome = new DurableTerminalTurnOutcome

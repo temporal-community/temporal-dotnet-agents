@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TemporalCommunity.Extensions.Agents.Workflows;
 using TemporalCommunity.Extensions.Agents.Session;
 using Xunit;
 
@@ -117,38 +118,38 @@ public class TemporalAgentSessionStateBagTests
         Assert.Equal("keep-me", Read(session, "carried"));
     }
 
-    // SECURITY: approval-scope records are written only by the trusted workflow thread. A tool
-    // write-back that names a reserved key must be dropped, not merged — otherwise a tool could
-    // forge its own approval grant.
     [Fact]
-    public void MergeToolStateBagWriteBacks_DropsReservedApprovalScopeKeys()
+    public void ApplyToolStateBagDeltas_AppliesFlatKeyUpdatesAndDeletions()
     {
         var session = NewSession();
-        session.StateBag.SetValue("temporal.approval_scopes.session", "trusted-grant");
+        session.StateBag.SetValue("keep", "before");
+        session.StateBag.SetValue("remove", "before");
 
-        session.MergeToolStateBagWriteBacks(
+        session.ApplyToolStateBagDeltas(
         [
-            Bag(("temporal.approval_scopes.session", "forged"),
-                ("temporal.approval_scopes.always", "forged-too"),
-                ("legit", "ok")),
+            new StateBagDelta(
+                Upserts: Bag(("keep", "after"), ("added", "value")),
+                RemovedKeys: ["remove"]),
         ]);
 
-        Assert.Equal("trusted-grant", Read(session, "temporal.approval_scopes.session"));
-        Assert.Null(Read(session, "temporal.approval_scopes.always"));
-        Assert.Equal("ok", Read(session, "legit"));
+        Assert.Equal("after", Read(session, "keep"));
+        Assert.Equal("value", Read(session, "added"));
+        Assert.Null(Read(session, "remove"));
     }
 
     [Fact]
-    public void MergeToolStateBagWriteBacks_DropsCustomAlwaysScopeStoreKey()
+    public void MergeToolStateBagWriteBacks_UpdatesAndAddsOrdinaryKeys()
     {
         var session = NewSession();
-        session.StateBag.SetValue("my.custom.scopes", "trusted-grant");
+        session.StateBag.SetValue("existing", "before");
 
         session.MergeToolStateBagWriteBacks(
-            [Bag(("my.custom.scopes", "forged"))],
-            alwaysScopesStoreKey: "my.custom.scopes");
+        [
+            Bag(("existing", "after"), ("added", "value")),
+        ]);
 
-        Assert.Equal("trusted-grant", Read(session, "my.custom.scopes"));
+        Assert.Equal("after", Read(session, "existing"));
+        Assert.Equal("value", Read(session, "added"));
     }
 
     [Fact]
@@ -209,50 +210,6 @@ public class TemporalAgentSessionStateBagTests
 
         Assert.Equal("new", Read(restored, "revision"));
         Assert.Equal(4, restored.StateBagRevision);
-    }
-
-    // The reserved-key deny-list compares Ordinal, so a case variant is NOT dropped — it is merged
-    // as a distinct key. That is safe only because the read side is Ordinal too: readers look up
-    // the literal reserved key, and AgentSessionStateBag is backed by an ordinal-comparer
-    // dictionary. This test pins that symmetry. If the bag ever moves to OrdinalIgnoreCase, a tool
-    // could forge a grant by writing "TEMPORAL.APPROVAL_SCOPES.SESSION" — and this test is what
-    // catches it.
-    [Theory]
-    [InlineData("TEMPORAL.APPROVAL_SCOPES.SESSION")]
-    [InlineData("Temporal.Approval_Scopes.Session")]
-    public void MergeToolStateBagWriteBacks_CaseVariantOfReservedKey_LandsInert(string variantKey)
-    {
-        const string reserved = "temporal.approval_scopes.session";
-
-        var session = NewSession();
-        session.StateBag.SetValue(reserved, "trusted-grant");
-
-        session.MergeToolStateBagWriteBacks([Bag((variantKey, "forged"))]);
-
-        // The genuine reserved key — the one readers actually look up — is untouched.
-        Assert.Equal("trusted-grant", Read(session, reserved));
-
-        // The variant landed, but as a separate key that no reader consults.
-        Assert.Equal("forged", Read(session, variantKey));
-        Assert.NotEqual(reserved, variantKey);
-    }
-
-    [Fact]
-    public void MergeToolStateBagWriteBacks_UnicodeEscapedReservedKey_IsStillDropped()
-    {
-        // JSON \u escapes are decoded before the deny-list sees the name, so escaping the key in
-        // the payload does not smuggle it past the Ordinal prefix check.
-        const string reserved = "temporal.approval_scopes.session";
-        var escaped = JsonDocument.Parse(
-            """{"\u0074emporal.approval_scopes.session":"forged"}""").RootElement;
-
-        var session = NewSession();
-        session.StateBag.SetValue(reserved, "trusted-grant");
-
-        session.MergeToolStateBagWriteBacks([escaped]);
-
-        Assert.Equal("trusted-grant", Read(session, reserved));
-        Assert.Equal(1, session.StateBag.Count);
     }
 
     [Theory]

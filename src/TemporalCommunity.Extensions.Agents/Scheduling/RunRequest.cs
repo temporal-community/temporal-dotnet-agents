@@ -70,7 +70,7 @@ public record RunRequest
     {
         // System.Text.Json supplies null for an omitted constructor parameter. Preserve the
         // non-null collection contract so workflow validation reports an empty request rather
-        // than the scheduler failing later while enumerating a null list.
+        // than dispatch failing later while enumerating a null list.
         this.Messages = messages ?? [];
         this.ResponseFormat = responseFormat;
         this.EnableToolCalls = enableToolCalls;

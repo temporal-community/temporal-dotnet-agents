@@ -35,29 +35,13 @@ internal sealed class DurableToolInterceptorInput
 
     /// <summary>
     /// When <see langword="true"/>, the tool was registered with
-    /// <see cref="DurableToolOptions.ScopeAware()"/> and the interceptor should consult
-    /// session and always-scope records before deciding.
-    /// </summary>
-    /// <remarks>JSON property name must remain stable for replay.</remarks>
-    [System.Text.Json.Serialization.JsonIgnore(
-        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
-    public bool ScopeAware { get; init; }
-
-    /// <summary>
-    /// When <see langword="true"/>, the tool was registered with
-    /// <see cref="DurableToolOptions.RequireApproval()"/>. This is true for both scope-aware
-    /// and non-scope-aware required tools.
+    /// <see cref="DurableToolOptions.RequireApproval()"/>.
     /// </summary>
     /// <remarks>
-    /// This is intentionally broader than <c>ProxyResolvedWorkerConfig.RequiresApprovalTools</c>,
-    /// which excludes scope-aware tools. The interceptor needs this flag so it can return
-    /// <c>PauseForApproval</c> when no matching scope record is found.
     /// JSON property name must remain stable for replay.
     /// </remarks>
     [System.Text.Json.Serialization.JsonIgnore(
         Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public bool RequiresApproval { get; init; }
 
-    /// <summary>Replay-safe workflow time used to evaluate expiring session grants.</summary>
-    public DateTimeOffset? ApprovalEvaluationTime { get; init; }
 }

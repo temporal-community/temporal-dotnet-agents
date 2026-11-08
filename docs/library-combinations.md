@@ -146,13 +146,20 @@ public class ResearchWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
-        var researcher = WorkflowAgents.GetTemporalAgent("ResearchAgent");
-        var session    = await researcher.CreateSessionAsync();
-        var result     = await researcher.RunAsync($"Research: {topic}", session);
-        return result.Messages[0].Text;
+        var session = WorkflowAgents.NewAgentSessionId("ResearchAgent");
+        return await Workflow.ExecuteActivityAsync(
+            (AgentInvocationActivities activities) => activities.RunAsync(
+                "ResearchAgent",
+                session.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                $"Research: {topic}"),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
     }
 }
 ```
+
+The activity resolves the registered proxy and invokes it with the supplied session and request
+IDs. See the [workflow orchestration sample](../samples/MAF/WorkflowOrchestration/README.md).
 
 ### What you get
 
@@ -170,7 +177,8 @@ On top of everything in Combination 1:
 
 - Requires `Microsoft.Agents.AI`.
 - Search attribute upserts are enabled by default. `AgentName`, `SessionCreatedAt`, and `TurnCount` must be pre-registered before the worker starts. Start a local dev server with `--search-attribute AgentName=Keyword --search-attribute SessionCreatedAt=Datetime --search-attribute TurnCount=Int`; production clusters require the equivalent one-time CLI commands. Set `EnableSearchAttributes = false` to opt out. Standard Agents integration tests should use `TestEnvironmentHelper.StartLocalAsync()` to handle pre-registration.
-- Two proxy types exist for the same agent: `TemporalAIAgentProxy` for external callers and `TemporalAIAgent` (via `GetTemporalAgent()`) for workflow code. Using the wrong one in the wrong context raises an exception.
+- Regular workflows invoke registered agents through activities that resolve
+  `TemporalAIAgentProxy`; workflow code must not invoke agent proxies directly.
 - Custom `[Workflow]` classes must follow Temporal determinism rules (`Workflow.UtcNow`, `Workflow.NewGuid()`, no `ActivitySource.StartActivity()` inside workflow code).
 
 ---

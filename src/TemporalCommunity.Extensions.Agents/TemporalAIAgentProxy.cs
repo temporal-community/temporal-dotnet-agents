@@ -17,9 +17,8 @@ namespace TemporalCommunity.Extensions.Agents;
 /// via Temporal workflow updates — no polling needed.
 /// </summary>
 /// <remarks>
-/// Use from external/host code (API servers, CLIs, console apps) to interact with
-/// a Temporal-hosted agent. For workflow-internal sub-agent calls, use
-/// <see cref="TemporalAIAgent"/> via <see cref="WorkflowAgents.GetTemporalAgent"/>.
+/// Use from external/host code or from a Temporal activity to interact with a
+/// Temporal-hosted agent. Workflow code must invoke it through an activity.
 /// </remarks>
 internal class TemporalAIAgentProxy(
     string name,
@@ -73,7 +72,8 @@ internal class TemporalAIAgentProxy(
         {
             throw new InvalidOperationException(
                 "TemporalAIAgentProxy cannot be invoked from inside a Temporal workflow. " +
-                $"Use Workflow.GetTemporalAgent(\"{Name}\") to execute a sub-agent deterministically.");
+                "Invoke the registered agent from an activity and pass deterministic session/request IDs " +
+                "from the workflow when retries must address the same turn.");
         }
 
         session ??= await CreateSessionAsync(cancellationToken).ConfigureAwait(false);
@@ -230,35 +230,6 @@ internal class TemporalAIAgentProxy(
                 $"Temporal agent '{Name}' supports only AgentRunOptions.ResponseFormat from the base run options. " +
                 $"Unsupported settings: {string.Join(", ", unsupported)}.");
         }
-    }
-
-    /// <summary>
-    /// Sends a deferred request to the agent session, applying <paramref name="delay"/> before
-    /// the workflow begins executing. Delegates to
-    /// <see cref="ITemporalAgentClient.RunAgentDelayedAsync"/>.
-    /// </summary>
-    /// <remarks>
-    /// The delay is only applied when starting a <em>new</em> session. If a workflow with the
-    /// same session ID is already running, it is reused immediately regardless of the delay.
-    /// </remarks>
-    internal Task RunDelayedAsync(
-        IEnumerable<ChatMessage> messages,
-        TemporalAgentSession session,
-        TimeSpan delay,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(session);
-        ValidateSessionOwnership(session, nameof(session));
-
-        var request = new RunRequest([.. messages])
-        {
-            CorrelationId = Guid.NewGuid().ToString("N"),
-            RequestId = Guid.NewGuid().ToString("N"),
-        };
-        var sessionId = session.SessionId;
-
-        _logger.LogProxyDispatchingDelayedRequest(sessionId.AgentName, sessionId.WorkflowId, delay);
-        return _agentClient.RunAgentDelayedAsync(sessionId, request, delay, cancellationToken);
     }
 
     private void ValidateSessionOwnership(TemporalAgentSession session, string parameterName)

@@ -98,12 +98,22 @@ When an MCP catalog mixes reads and writes, keep the default one-attempt policy 
 across agents with appropriate policies:
 
 ```csharp
-agent.AddTools(reads);
-agent.AddTool(byName["delete_inventory"], tool => tool.RequireApproval());
+agents.Agent(
+    "InventoryAgent",
+    new ChatClientAgentOptions
+    {
+        ChatOptions = new ChatOptions
+        {
+            Tools = [.. reads, byName["delete_inventory"]],
+        },
+    });
 ```
 
-There is no way to tell from an MCP catalog which tools have effects. The server does not say, and
-the library cannot guess, so this is a judgement you have to make per tool.
+The MAF-options registration path applies retry policy at the agent level, not per tool. Keep the
+one-attempt default for a mixed catalog, or split retry-safe tools and effectful tools across
+different agents. There is no way to tell from an MCP catalog which tools have effects; the server
+does not say, and the library cannot guess. Configure approval separately for operations that
+require it.
 
 ---
 
@@ -137,7 +147,7 @@ freely. If nothing ever resolves the request, the turn waits until `DefaultAppro
 (7 days) expires.
 
 Approval mechanics — what the reviewer is shown, what the model sees when a call is denied, how
-this interacts with activity timeouts, and reusable session grants — belong to
+this interacts with activity timeouts — belong to
 [hitl-patterns.md](./hitl-patterns.md). Nothing about them is MCP-specific.
 
 ---

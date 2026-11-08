@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
-using TemporalCommunity.Extensions.Agents.Approvals;
 using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.AI.Approvals;
 using Xunit;
@@ -9,7 +8,7 @@ namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
 /// Tests that the HITL approval types serialize/deserialize correctly.
-/// Requests use the shared MEAI type; scoped agent decisions use the MAF-owned type.
+/// Requests and per-call decisions use the shared MEAI approval types.
 /// </summary>
 public class HITLTypesTests
 {
@@ -84,71 +83,4 @@ public class HITLTypesTests
         Assert.Null(deserialized.Description);
     }
 
-    // ── Feature B: scope-specific round-trip cases ──────────────────────────
-
-    /// <summary>
-    /// DurableAgentApprovalDecision with Scope = Session round-trips via agent JSON options.
-    /// </summary>
-    [Fact]
-    public void DurableAgentApprovalDecision_SessionScope_RoundTrips()
-    {
-        var decision = new DurableAgentApprovalDecision
-        {
-            RequestId = "req-scope-session",
-            Approved = true,
-            Scope = ApprovalScope.Session,
-        };
-
-        var json = JsonSerializer.Serialize(decision, TemporalAgentJsonUtilities.DefaultOptions);
-        var restored = JsonSerializer.Deserialize<DurableAgentApprovalDecision>(json, TemporalAgentJsonUtilities.DefaultOptions);
-
-        Assert.NotNull(restored);
-        Assert.Equal(ApprovalScope.Session, restored.Scope);
-        Assert.Null(restored.ScopePattern);
-    }
-
-    /// <summary>
-    /// DurableAgentApprovalDecision with ScopePattern containing PatternMatchType serialized as string.
-    /// </summary>
-    [Fact]
-    public void DurableAgentApprovalDecision_ScopePattern_TypeIsStringInJson()
-    {
-        var decision = new DurableAgentApprovalDecision
-        {
-            RequestId = "req-scope-pattern",
-            Approved = true,
-            Scope = ApprovalScope.Session,
-            GrantId = "grant-1",
-            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1),
-            ScopePattern = new ApprovalScopePattern
-            {
-                Type = PatternMatchType.Glob,
-                Pattern = "/tmp/*",
-                Parameter = "path",
-            },
-        };
-
-        var json = JsonSerializer.Serialize(decision, TemporalAgentJsonUtilities.DefaultOptions);
-
-        // Type must serialize as string "Glob", not integer 1.
-        Assert.Contains("\"Glob\"", json);
-
-        var restored = JsonSerializer.Deserialize<DurableAgentApprovalDecision>(json, TemporalAgentJsonUtilities.DefaultOptions);
-        Assert.NotNull(restored);
-        Assert.Equal(PatternMatchType.Glob, restored.ScopePattern?.Type);
-        Assert.Equal("/tmp/*", restored.ScopePattern?.Pattern);
-    }
-
-    /// <summary>
-    /// DurableAgentApprovalDecision with default Scope (ThisCallOnly) omits both Scope and ScopePattern from JSON.
-    /// </summary>
-    [Fact]
-    public void DurableAgentApprovalDecision_DefaultScope_FieldsOmittedFromJson()
-    {
-        var decision = new DurableAgentApprovalDecision { RequestId = "req-def", Approved = true };
-        var json = JsonSerializer.Serialize(decision, TemporalAgentJsonUtilities.DefaultOptions);
-
-        Assert.DoesNotContain("\"Scope\"", json, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("\"ScopePattern\"", json, StringComparison.OrdinalIgnoreCase);
-    }
 }

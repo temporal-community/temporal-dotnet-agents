@@ -2,7 +2,6 @@ using System.Text.Json;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Exporters.Json;
 using BenchmarkDotNet.Jobs;
-using TemporalCommunity.Extensions.Agents.Workflows;
 
 namespace TemporalCommunity.Extensions.Agents.Benchmarks;
 
@@ -15,7 +14,7 @@ namespace TemporalCommunity.Extensions.Agents.Benchmarks;
 public class StateBagRollbackBenchmarks
 {
     private JsonElement? _beforeTurn;
-    private JsonElement? _afterFailure;
+    private JsonElement? _currentStateBag;
 
     /// <summary>Gets or sets the approximate ordinary StateBag payload size.</summary>
     [Params(0, 64 * 1024, 1024 * 1024)]
@@ -32,16 +31,18 @@ public class StateBagRollbackBenchmarks
         var before = CreateOrdinaryEntries("before");
         var after = CreateOrdinaryEntries("failed");
         after["failed-turn-only"] = "discard";
-        after["temporal.approval_scopes.session"] = "retain";
 
         _beforeTurn = JsonSerializer.SerializeToElement(before);
-        _afterFailure = JsonSerializer.SerializeToElement(after);
+        _currentStateBag = JsonSerializer.SerializeToElement(after);
     }
 
-    /// <summary>Restores ordinary state while retaining the approval record.</summary>
+    /// <summary>Restores the immutable pre-turn snapshot, matching workflow rollback.</summary>
     [Benchmark]
-    public JsonElement? RestoreTurnOwnedState() =>
-        StateBagMerge.RestoreTurnOwnedState(_beforeTurn, _afterFailure, alwaysScopesStoreKey: null);
+    public JsonElement? RestoreTurnOwnedState()
+    {
+        _currentStateBag = _beforeTurn;
+        return _currentStateBag;
+    }
 
     private Dictionary<string, string> CreateOrdinaryEntries(string prefix)
     {

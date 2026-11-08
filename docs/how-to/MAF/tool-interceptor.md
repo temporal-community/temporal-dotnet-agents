@@ -13,13 +13,12 @@ A pre-tool lifecycle hook that runs as a Temporal activity before each `InvokeAg
 3. [AgentToolContext](#agenttoolcontext)
 4. [The four decision outcomes](#the-four-decision-outcomes)
 5. [RequireApproval — the configuration-time floor](#requireapproval--the-configuration-time-floor)
-6. [Approval scope records](#approval-scope-records)
-7. [Registration](#registration)
-8. [Per-tool opt-out](#per-tool-opt-out)
-9. [Interceptor activity timeout](#interceptor-activity-timeout)
-10. [Batch fan-out and approval behavior](#batch-fan-out-and-approval-behavior)
-11. [PauseForApproval on scheduled and sub-agent paths](#pauseforapproval-on-scheduled-and-sub-agent-paths)
-12. [Implementation examples](#implementation-examples)
+6. [Registration](#registration)
+7. [Per-tool opt-out](#per-tool-opt-out)
+8. [Interceptor activity timeout](#interceptor-activity-timeout)
+9. [Batch fan-out and approval behavior](#batch-fan-out-and-approval-behavior)
+10. [Approval ownership](#approval-ownership)
+11. [Implementation examples](#implementation-examples)
 
 ---
 
@@ -53,7 +52,11 @@ public interface IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContex
 > defined in `TemporalCommunity.Extensions.AI.Tools`. `IAgentToolInterceptor` and `AgentToolContext` live in
 > `TemporalCommunity.Extensions.Agents.Tools`. Implementors need `using TemporalCommunity.Extensions.AI.Tools;` for the decision type.
 
-The interface has exactly one method, `BeforeToolCallAsync`. Interception is a pre-dispatch gate: there is no post-tool hook, so a tool's *result* cannot be inspected or rewritten here. To act on a result, wrap the `AIFunction` itself before registering it.
+The interface has exactly one method, `BeforeToolCallAsync`. Interception is a pre-dispatch gate:
+a tool's result cannot be inspected or rewritten here. Use
+[`TemporalAgentOptions.ToolMiddleware`](llm-call-interception.md#tool-middleware) for a MAF-shaped
+callback inside the tool activity, after required approval, including short-circuit and result
+transformation. It cannot change the approved call. Both activities can retry their own effects.
 
 ---
 
@@ -176,113 +179,6 @@ When both `RequireApproval()` and an interceptor are active, the interceptor's `
 
 ---
 
-## Approval scope records
-
-When an agent is configured with `UseApprovalScopes()`, a trusted backend may use `ITemporalAgentApprovalScopeAdministration` to approve one pending call and create an expiring, constrained grant for later matching calls in the same workflow session.
-
-### Where scope records live
-
-Session-grant records are serialized into session StateBag under `"temporal.approval_scopes.session"`. They survive Continue-As-New, expire by workflow time, and never cross sessions. Permanent and cross-session grants are unsupported.
-
-### ApprovalScopeRecord
-
-```csharp
-// Namespace: TemporalCommunity.Extensions.Agents.Approvals
-public sealed class ApprovalScopeRecord
-{
-    public required string GrantId { get; init; }
-    public required string ToolName { get; init; }
-    public ApprovalScopePattern? Pattern { get; init; }
-    public bool MatchAllArguments { get; init; }
-    public required DateTimeOffset GrantedAt { get; init; }
-    public required DateTimeOffset ExpiresAt { get; init; }
-    public required string OriginatingRequestId { get; init; }
-}
-```
-
-Exactly one of `Pattern` or `MatchAllArguments` is set. `TryMatchScope` evaluates the constraint and rejects expired records. These records help decide whether to skip another human prompt; they do not replace effect-time authorization.
-
-### Reading scope records from a custom interceptor
-
-`ApprovalScopeHelpers.TryMatchScope` is the safe, public API for consulting scope records from inside an interceptor. It deserializes the list from StateBag, evaluates tool name (case-insensitive) and optional argument patterns, and returns the first matching record:
-
-```csharp
-using TemporalCommunity.Extensions.AI.Tools;     // DurableToolDecision
-using TemporalCommunity.Extensions.Agents.Tools; // IAgentToolInterceptor, AgentToolContext
-using TemporalCommunity.Extensions.Agents.Approvals; // ApprovalScopeHelpers
-
-public class PolicyInterceptor : IAgentToolInterceptor
-{
-    public Task<DurableToolDecision> BeforeToolCallAsync(
-        AgentToolContext ctx, CancellationToken ct)
-    {
-        // Check whether a session-scope record already covers this call.
-        // Use the wall clock here — BeforeToolCallAsync runs inside the RunToolInterceptor
-        // *activity*, not workflow code, so non-determinism is fine. The built-in
-        // ScopedApprovalInterceptor instead threads a workflow-time snapshot through an
-        // internal AgentToolContext member not visible outside this assembly.
-        if (ApprovalScopeHelpers.TryMatchScope(
-                ctx.ToolName,
-                ctx.Arguments,
-                ctx.StateBag,
-                "temporal.approval_scopes.session",
-                DateTimeOffset.UtcNow,
-                out var match))
-        {
-            return Task.FromResult(DurableToolDecision.Proceed(
-                enrichedDescription: $"Auto-approved by scope record {match!.OriginatingRequestId}."));
-        }
-
-        // No scope match — apply your policy.
-        return Task.FromResult(DurableToolDecision.PauseForApproval(
-            $"Tool '{ctx.ToolName}' requires approval."));
-    }
-}
-```
-
-`TryMatchScope` is safe to call when `StateBag` is `null` (returns `false` immediately). It catches deserialization errors and treats them as no-match rather than throwing — a malformed scope cache never blocks a tool.
-
-Signature:
-
-```csharp
-public static bool TryMatchScope(
-    string toolName,
-    IReadOnlyDictionary<string, object?> arguments,
-    AgentSessionStateBag? bag,
-    string storeKey,
-    DateTimeOffset evaluationTime,
-    out ApprovalScopeRecord? match);
-```
-
-### Pattern matching
-
-When `ApprovalScopeRecord.Pattern` is set, `TryMatchScope` evaluates the argument value against the pattern:
-
-| `PatternMatchType` | Behavior |
-|---|---|
-| `Exact` | Exact string comparison (`StringComparison.Ordinal`) |
-| `Glob` | Glob match: `*` matches any sequence except `/`; `**` matches including `/` |
-| `Regex` | .NET `Regex.IsMatch` with a 100 ms timeout (ReDoS protection) |
-
-When `ApprovalScopePattern.Parameter` is set, the pattern is matched against the value of that single argument. When `Parameter` is `null`, the pattern is matched against the canonical JSON of the entire arguments dictionary.
-
-### One-turn lag
-
-> **Scope records written in the same turn are NOT visible to that turn's interceptors.**
->
-> The turn loop runs in two phases:
->
-> 1. **Phase 1 (fan-out):** All `RunToolInterceptor` activities for the current turn are dispatched in parallel and their results are frozen in workflow history.
-> 2. **Phase 2 (sequential dispatch):** Each interceptor result is evaluated. If `PauseForApproval` was returned, the workflow blocks for human input; when an authorized backend grants an expiring session scope, the record is written to StateBag.
->
-> Because Phase 1 completes before any approval is processed in Phase 2, a scope record written when Call A is approved during turn N does **not** retroactively satisfy Call B's already-recorded Phase 1 result in the same turn. Call B still requires its own approval in turn N.
->
-> The scope IS visible starting from turn N+1, where a fresh Phase 1 snapshot consults the updated StateBag.
->
-> **Practical rule:** If two tool calls for the same scope-aware tool appear in one LLM response, both will pause for human approval in turn N. In turn N+1 and beyond, only one human review is needed per tool per scope lifetime.
-
----
-
 ## Registration
 
 Register an interceptor per agent or set a worker-level default.
@@ -368,12 +264,11 @@ the difference from approval requested inside a running tool, see
 
 ---
 
-## PauseForApproval on scheduled and sub-agent paths
+## Approval ownership
 
-Scheduled jobs and workflow-local sub-agents cannot park for external review. On those paths,
-`PauseForApproval` degrades to `Block`; use `Skip` or `Block` for policy enforcement instead. See
-[Where approval does not work](./hitl-patterns.md#where-approval-does-not-work) for the supported
-alternative and the behavior of `RequireApproval()` and in-tool approval on the same paths.
+Workflow-parked approval state belongs to the registered `AgentWorkflow`. A regular workflow that
+needs approval-capable agent execution invokes its registered proxy through an activity; it does not
+run the agent locally. See [HITL patterns](./hitl-patterns.md).
 
 ---
 

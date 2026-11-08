@@ -1,7 +1,6 @@
 using System.Reflection;
 using Microsoft.Agents.AI;
 using TemporalCommunity.Extensions.Agents.Internal;
-using TemporalCommunity.Extensions.Agents.Skills;
 using Xunit;
 
 namespace TemporalCommunity.Extensions.Agents.Tests.Internal;

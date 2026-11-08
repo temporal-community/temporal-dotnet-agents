@@ -5,11 +5,10 @@
 //
 // ParallelAgentWorkflow — parallel fan-out:
 //   Sends the same query to all three specialists simultaneously via
-//   ExecuteAgentsInParallelAsync.
+//   separate activities that invoke their registered agent proxies.
 
-using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.Agents;
 using Temporalio.Workflows;
-using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace MultiAgentRouting;
 
@@ -42,20 +41,20 @@ public class RoutingWorkflow
             ClassifyActivityOptions).ConfigureAwait(true);
 
         // ── Step 2: Dispatch to the chosen specialist ────────────────────────
-        var specialist = GetTemporalAgent(agentName);
-        var session = await specialist.CreateSessionAsync().ConfigureAwait(true);
-        var response = await specialist.RunAsync(
-            [new ChatMessage(ChatRole.User, userQuestion)],
-            session).ConfigureAwait(true);
-
-        return response.Text ?? string.Empty;
+        var sessionId = WorkflowAgents.NewAgentSessionId(agentName);
+        return await Workflow.ExecuteActivityAsync(
+            (RoutingActivities activities) => activities.RunAgentAsync(
+                agentName,
+                sessionId.WorkflowId,
+                Workflow.NewGuid().ToString("N"),
+                userQuestion),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
     }
 }
 
 /// <summary>
 /// Fans out the same query to all three specialist agents in parallel and returns
-/// all of their responses. Uses <c>ExecuteAgentsInParallelAsync</c>, the
-/// workflow-safe equivalent of <c>Task.WhenAll</c>.
+/// all of their responses. Agent proxies are invoked by independent activities.
 /// </summary>
 [Workflow("MultiAgentRouting.ParallelAgentWorkflow")]
 public class ParallelAgentWorkflow
@@ -67,23 +66,23 @@ public class ParallelAgentWorkflow
     [WorkflowRun]
     public async Task<string[]> RunAsync(string userQuery)
     {
-        var weather     = GetTemporalAgent("WeatherAgent");
-        var billing     = GetTemporalAgent("BillingAgent");
-        var techSupport = GetTemporalAgent("TechSupportAgent");
+        var weatherSession = WorkflowAgents.NewAgentSessionId("WeatherAgent");
+        var billingSession = WorkflowAgents.NewAgentSessionId("BillingAgent");
+        var techSupportSession = WorkflowAgents.NewAgentSessionId("TechSupportAgent");
 
-        var wSession = await weather.CreateSessionAsync().ConfigureAwait(true);
-        var bSession = await billing.CreateSessionAsync().ConfigureAwait(true);
-        var tSession = await techSupport.CreateSessionAsync().ConfigureAwait(true);
+        var weather = Workflow.ExecuteActivityAsync(
+            (RoutingActivities activities) => activities.RunAgentAsync(
+                "WeatherAgent", weatherSession.WorkflowId, Workflow.NewGuid().ToString("N"), userQuery),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+        var billing = Workflow.ExecuteActivityAsync(
+            (RoutingActivities activities) => activities.RunAgentAsync(
+                "BillingAgent", billingSession.WorkflowId, Workflow.NewGuid().ToString("N"), userQuery),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+        var techSupport = Workflow.ExecuteActivityAsync(
+            (RoutingActivities activities) => activities.RunAgentAsync(
+                "TechSupportAgent", techSupportSession.WorkflowId, Workflow.NewGuid().ToString("N"), userQuery),
+            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
 
-        IList<ChatMessage> messages = [new ChatMessage(ChatRole.User, userQuery)];
-
-        var results = await ExecuteAgentsInParallelAsync(
-        [
-            (weather,     messages, wSession),
-            (billing,     messages, bSession),
-            (techSupport, messages, tSession)
-        ]).ConfigureAwait(true);
-
-        return results.Select(r => r.Text ?? string.Empty).ToArray();
+        return await Workflow.WhenAllAsync([weather, billing, techSupport]).ConfigureAwait(true);
     }
 }

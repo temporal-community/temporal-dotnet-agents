@@ -105,6 +105,32 @@ public class ToolInterceptorRegistrationTests
         Assert.True(toolReg.Options.RequireApprovalFlag);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RequireApproval_RemainsConfiguredWhenInterceptorIsSkipped(bool registerInterceptor)
+    {
+        var options = new TemporalAgentsOptions();
+        options.AddDurableAgent("ApprovalFloorAgent", agent =>
+        {
+            agent.ChatClient = _ => new StubChatClient();
+            if (registerInterceptor)
+                agent.AddToolInterceptor(_ => new StubInterceptor());
+            agent.AddTool(
+                AIFunctionFactory.Create(() => "protected", "protectedTool"),
+                toolOptions => toolOptions.RequireApproval().SkipInterceptor());
+        });
+
+        var config = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore(
+            "ApprovalFloorAgent", options, "test-queue").ResolvedWorkerConfig!;
+
+        Assert.Contains("protectedTool", config.RequiresApprovalTools!);
+        if (registerInterceptor)
+            Assert.Contains("protectedTool", config.InterceptorSkippedTools!);
+        else
+            Assert.Null(config.InterceptorSkippedTools);
+    }
+
     [Fact]
     public void SkipInterceptor_IsCarried_ThroughToolRegistration()
     {

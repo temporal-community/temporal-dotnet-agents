@@ -106,6 +106,9 @@ while IFS= read -r match; do
 done < <(
     cd "$repo_root"
     { git ls-files '*.md'; git ls-files --others --exclude-standard '*.md'; } | sort -u | while IFS= read -r file; do
+        if [[ ! -f "$file" ]]; then
+            continue
+        fi
         # Per file, `grep -H -E -o` emits exactly what the previous `rg -o` did: one
         # `<file>:<match>` line per link. `-I` skips binary files, the way `--no-messages` did,
         # and `|| true` absorbs the exit 1 that grep uses to mean "no links in this file".

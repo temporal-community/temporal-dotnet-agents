@@ -534,11 +534,10 @@ public class InvokeAgentToolActivityTests
     // agent-name mismatch) and have different remedies.
 
     /// <summary>
-    /// Workflow-local sub-agent: the activity runs under the customer's orchestrating workflow, so
-    /// its workflow ID is not an agent session ID at all.
+    /// A tool activity without an agent-session workflow ID cannot establish session context.
     /// </summary>
     [Fact]
-    public async Task InvokeAgentTool_SubAgentPath_ErrorNamesPathAndAlternative()
+    public async Task InvokeAgentTool_OutsideAgentWorkflow_ErrorNamesRequiredContext()
     {
         var probe = new ContextProbeFunction("probe");
         var (activities, _, _) = BuildHarness(opts =>
@@ -565,22 +564,15 @@ public class InvokeAgentToolActivityTests
 
         var message = Assert.IsType<InvalidOperationException>(probe.Captured).Message;
 
-        Assert.Contains("sub-agent", message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("WorkflowAgents.GetTemporalAgent", message, StringComparison.Ordinal);
+        Assert.Contains("workflow ID is not an agent session ID", message, StringComparison.Ordinal);
+        Assert.Contains("registered managed agent session", message, StringComparison.Ordinal);
         // The offending ID is named, so the reader can see why it did not parse.
         Assert.Contains("order-orchestrator-42", message, StringComparison.Ordinal);
-        // The alternative must be accurate: workflow-parked approval is unsupported here too.
-        Assert.Contains("RequireApproval()", message, StringComparison.Ordinal);
         Assert.Contains("TemporalAIAgentProxy", message, StringComparison.Ordinal);
-        Assert.DoesNotContain("scheduled", message, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// Scheduled job: <c>ta-{agent}-scheduled-{runId}</c> parses, but to a different agent identity
-    /// — so attaching a session would target the wrong workflow.
-    /// </summary>
     [Fact]
-    public async Task InvokeAgentTool_ScheduledJobPath_ErrorNamesPathAndAlternative()
+    public async Task InvokeAgentTool_MismatchedAgentIdentity_UsesGenericDiagnostic()
     {
         var probe = new ContextProbeFunction("probe");
         var (activities, _, _) = BuildHarness(opts =>
@@ -592,10 +584,10 @@ public class InvokeAgentToolActivityTests
             });
         });
 
-        // Parses to agent "WidgetAgent-scheduled", key "run7" — deliberately not "WidgetAgent".
+        // The workflow ID parses as another agent session, not the agent owning this tool.
         var env = new ActivityEnvironment
         {
-            Info = ActivityEnvironment.DefaultInfo with { WorkflowId = "ta-WidgetAgent-scheduled-run7" },
+            Info = ActivityEnvironment.DefaultInfo with { WorkflowId = "ta-OtherAgent-run7" },
         };
 
         await env.RunAsync(() => activities.InvokeAgentToolAsync(new InvokeAgentToolInput
@@ -607,15 +599,11 @@ public class InvokeAgentToolActivityTests
 
         var message = Assert.IsType<InvalidOperationException>(probe.Captured).Message;
 
-        Assert.Contains("scheduled", message, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("ta-WidgetAgent-scheduled-run7", message, StringComparison.Ordinal);
-        // Name both sides of the mismatch — the parsed identity and the tool's own agent.
-        Assert.Contains("WidgetAgent-scheduled", message, StringComparison.Ordinal);
-        Assert.Contains("'WidgetAgent'", message, StringComparison.Ordinal);
-        Assert.Contains("RequireApproval()", message, StringComparison.Ordinal);
+        Assert.Contains("ta-OtherAgent-run7", message, StringComparison.Ordinal);
+        Assert.Contains("names agent 'OtherAgent', not 'WidgetAgent'", message, StringComparison.Ordinal);
+        Assert.Contains("target the wrong workflow", message, StringComparison.Ordinal);
         Assert.Contains("TemporalAIAgentProxy", message, StringComparison.Ordinal);
-        // Must not be mislabelled as the sub-agent path — different cause, different remedy.
-        Assert.DoesNotContain("WorkflowAgents.GetTemporalAgent", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("scheduled", message, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -648,12 +636,12 @@ public class InvokeAgentToolActivityTests
             CallId = "call-1",
         }));
 
-        Assert.Contains("sub-agent", probe.Captured!.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("agent session", probe.Captured!.Message, StringComparison.OrdinalIgnoreCase);
 
         // Same async context, outside any tool activity: back to the generic message.
         var leaked = Assert.Throws<InvalidOperationException>(() => TemporalAgentContext.Current);
 
-        Assert.DoesNotContain("sub-agent", leaked.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("agent session", leaked.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("order-orchestrator-42", leaked.Message, StringComparison.Ordinal);
     }
 

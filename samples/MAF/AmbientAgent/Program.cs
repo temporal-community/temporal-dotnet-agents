@@ -79,7 +79,8 @@ builder.Services
     })
     .AddWorkflow<MonitorWorkflow>()
     .AddWorkflow<AlertWorkflow>()
-    .AddSingletonActivities<AlertActivities>();
+    .AddSingletonActivities<AlertActivities>()
+    .AddScopedActivities<AgentInvocationActivities>();
 
 // ── Step 6: Start the host ───────────────────────────────────────────────────
 var host = builder.Build();

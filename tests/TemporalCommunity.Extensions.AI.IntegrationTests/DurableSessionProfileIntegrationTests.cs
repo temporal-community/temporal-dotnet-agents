@@ -79,7 +79,7 @@ public class DurableSessionProfileIntegrationTests
 
         // A different request cannot start while Turn 1 is active, even on the pinned route.
         var turn2Options = new ChatOptions().WithChatClientKey("key-1");
-        await Assert.ThrowsAsync<DurableChatRequestException>(() =>
+        await Assert.ThrowsAsync<DurableSessionBusyException>(() =>
             sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-2")],
@@ -148,7 +148,7 @@ public class DurableSessionProfileIntegrationTests
 
         // A different request while Turn 0 is blocking is rejected, not queued.
         var turn1Options = new ChatOptions().WithChatClientKey("key-0");
-        await Assert.ThrowsAsync<DurableChatRequestException>(() =>
+        await Assert.ThrowsAsync<DurableSessionBusyException>(() =>
             sessionClient.SendAsync(
                 conversationId,
                 [new ChatMessage(ChatRole.User, "turn-1")],

@@ -196,8 +196,8 @@ For managed session workflows, `InvokingAsync` runs in a preparation activity be
 loop. Its filtered messages, instructions, and StateBag delta are returned to workflow code and
 recorded in Temporal history. Every model step in that turn reuses the same prepared context, even
 when the turn contains several tool-call iterations. `InvokedAsync` runs once after the turn reaches
-a successful result, failure, or cancellation. Workflow-local `TemporalAIAgent` calls retain their
-existing per-step provider behavior; they are not covered by the managed session lifecycle yet.
+a successful result, failure, or cancellation. Regular workflows invoke managed agents from an
+activity; there is no separate workflow-local provider lifecycle.
 
 An activity can be retried before its result is recorded, so either hook can physically execute
 more than once for one logical turn. Do not treat the callback count as exactly-once. A completed
@@ -270,10 +270,9 @@ sandbox; do not capture and invoke separate executable tools or bypass this path
 Provider-created closures, wrappers, same-name/schema substitutes, and other
 untraceable tools fail non-retryably before model dispatch. The worker validates the frozen
 declaration on each activity attempt, and a missing registered route fails as an unregistered tool.
-Approval-required registration remains a floor even when a provider selects that tool.
-For workflow-local `TemporalAIAgent` calls, that floor fails closed: the tool activity is not
-scheduled and the model receives a synthetic blocked result because this path cannot park for
-workflow approval. Use a session-backed agent workflow when the call needs reviewer approval.
+Approval-required registration remains a floor even when a provider selects that tool. The
+registered `AgentWorkflow` owns workflow-parked approval; regular workflows should invoke it via
+the proxy from an activity.
 
 ```csharp
 agent.AddTool(searchTool);
@@ -300,9 +299,9 @@ tools or specialized state and are not drop-ins. See
 The `StateBag` is the only durable slot a provider has.
 
 - `AgentWorkflow` carries it across its own continue-as-new automatically.
-- A **custom orchestrating workflow** using `TemporalAIAgent` must serialize and carry its
-  `TemporalAgentSession` when it continues as new. The `StateBag` does not cross an arbitrary
-  workflow's boundary by itself.
+- A **custom orchestrating workflow** invokes the registered agent proxy through an activity. The
+  registered `AgentWorkflow` owns and carries its `StateBag` across its own continue-as-new; the
+  calling workflow does not manage that agent state.
 - It is serialized into activity and workflow payloads. Above 64 KiB the managed workflow logs a
   warning — it does not trim or reject. Measure with
   `stateBag.GetDurableSerializedUtf8ByteCount()`.
