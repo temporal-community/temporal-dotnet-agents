@@ -393,7 +393,9 @@ public class StateBagWriteBackMergeTests : IClassFixture<StateBagWriteBackMergeT
             {
                 DataConverter = TemporalAgentDataConverter.Instance,
             };
-            replayOptions.AddWorkflow<AgentWorkflow>();
+            replayOptions.AddWorkflow(AgentWorkflowWorkerFactory.CreateDefinition(
+                host.Services.GetRequiredService<TemporalAgentsOptions>(),
+                taskQueue));
             var replay = await new WorkflowReplayer(replayOptions)
                 .ReplayWorkflowAsync(history, throwOnReplayFailure: false);
             Assert.Null(replay.ReplayFailure);

@@ -366,7 +366,9 @@ finally
 }
 ```
 
-If two Updates arrive simultaneously, the second one **blocks** on `WaitConditionAsync(() => !_isProcessing)` until the first completes. This ensures:
+Different requests do not queue behind an active turn: admission rejects them as `Busy`.
+A matching request ID and fingerprint joins the active turn; changed input under that ID is
+`Conflict`. This ensures:
 
 - Conversation history is appended in order
 - The activity receives a consistent snapshot of prior messages
@@ -381,7 +383,7 @@ The overrides on `AgentWorkflow`:
 | Hook | Purpose |
 |---|---|
 | `BuildResponseEntry(correlationId, requestId, AgentResponse output, createdAt)` | Returns `AgentSessionResponse.FromAgentResponse(...)` so the entry on the wire is the MAF subclass with request identity and `OrchestrationId`/`ResponseType`/`ResponseSchema` discrimination preserved. |
-| `ExecuteTurnAsync(activityOptions, requestEntry, chatOptions)` | Discards the base's `activityOptions` and builds its own from the frozen `AgentWorkflowInput`, then drives the per-step durable loop in `ExecuteDurableAgentTurnAsync`: each iteration dispatches `AgentActivities.RunDurableAgentStepAsync` (one LLM call) and, if the step returns pending tool calls, fans out one `AgentActivities.InvokeAgentToolAsync` activity per call via `Workflow.WhenAllAsync`. Overlays the updated StateBag onto `_currentStateBag` after each step. |
+| `ExecuteTurnAsync(activityOptions, requestEntry, chatOptions)` | Builds activity options from the frozen `AgentWorkflowInput`. Prepares provider context once, then dispatches one `RunDurableAgentStepAsync` per model call and one `InvokeAgentToolAsync` per tool call, serially in model order. Merges key-level StateBag write-backs before the next activity and sends terminal provider notification. |
 | `CreateContinueAsNewException(input)` | `with`-clones the retained `_input` (an `AgentWorkflowInput`), overwriting the base-owned CAN fields from the `input` argument and adding `CarriedStateBag` plus `AgentApprovalResolutionHistory`. Cloning rather than field-by-field reconstruction is what keeps a newly added setting from being silently dropped at the boundary. |
 | `UpsertCustomSearchAttributes()` | Upserts the `AgentName` typed search attribute. Called by the base after the standard `SessionCreatedAt` / `TurnCount` upserts. Default in the base is a no-op; `DurableChatWorkflow` (the MEAI sibling) does not override it because chat sessions are not named. |
 | `ApplyKeyedHistoryReducerAsync(reducerKey, history, activityOptions)` | Dispatches the `ReduceHistoryByKey` activity so the DI-resolved reducer delegate runs on the worker and its result lands in workflow history. |
@@ -555,7 +557,9 @@ Here is the complete path a message takes from an external caller to the LLM and
 │   AgentWorkflow.RunAgentAsync                                │
 │   [WorkflowUpdate("Run")]      ← wire name is "Run"          │
 │                                                              │
-│   5. await WaitForAgentInputAsync()                          │
+│   5. Reserve admission before the first await:               │
+│      matching ID/input joins; different ID is Busy;          │
+│      changed input is Conflict. Then await readiness.       │
 │      ← deterministic readiness barrier. Update-With-Start     │
 │        can admit this handler before the run method has       │
 │        assigned _input. Completes synchronously for an        │
@@ -565,8 +569,7 @@ Here is the complete path a message takes from an external caller to the LLM and
 │        AgentSessionRequest.FromRunRequest(request, ...)      │
 │   7. await base.RunTurnAsync(requestEntry, admission, null)   │
 │        Inside the inherited base helper:                     │
-│          await WaitConditionAsync(() => !_isProcessing)      │  ← Serialize
-│          _isProcessing = true                                │
+│          execute only for the admitted request owner         │
 │          snapshot _history.Count, _turnCount, StateBag       │  ← Rollback point
 │          _history.Add(requestEntry)                          │  ← Record request
 │          _turnCount++                                        │
@@ -583,21 +586,20 @@ Here is the complete path a message takes from an external caller to the LLM and
 │      (List<ChatMessage> seeded from history, which already    │
 │       contains this turn's request entry)                    │
 │                                                              │
-│   9. Drive the durable loop:                                 │
+│   9. PrepareAgentTurn: run providers once, record context.    │
+│      Drive the durable loop using that recorded context:     │
 │      for (iteration = 0; iteration < MaxToolCallsPerTurn; ++):│
 │        stepInput = new AgentStepInput {                      │
 │          AgentName, Request = runRequest,                    │
 │          AccumulatedMessages = accumulated,                  │
-│          SerializedStateBag = bagForStep,                    │
-│          NeedsWorkerSettingsResolution = needsResolution }   │
+│          SerializedStateBag = bagForStep }                   │
 │                                                              │
 │        stepResult = await Workflow.ExecuteActivityAsync(     │
 │          (AgentActivities a) =>                              │
 │             a.RunDurableAgentStepAsync(stepInput))           │
 │                                                              │
-│        _currentStateBag = StateBagMerge.OverlayTrustedStateBag│
-│          (_currentStateBag, stepResult.UpdatedStateBag)      │
-│        accumulated.Add(stepResult.AssistantMessage)          │
+│        Merge stepResult.StateBagDelta into current state    │
+│        accumulated.AddRange(stepResult.AssistantMessages)    │
 │                                                              │
 │        if (stepResult.IsFinal || no tool calls)              │
 │          → return AgentResponse                              │
@@ -605,14 +607,12 @@ Here is the complete path a message takes from an external caller to the LLM and
 │        // Policy-check each call against the frozen           │
 │        // registered names; blocked calls get a synthetic     │
 │        // result and schedule nothing.                        │
-│        // Then (when configured) run interceptors in parallel;  │
-│        // dispatch InvokeAgentTool calls serially in model order│
-│        toolResults = await Workflow.WhenAllAsync(            │
-│          dispatched.Select(d =>                              │
-│            Workflow.ExecuteActivityAsync(                    │
-│              (AgentActivities a) =>                          │
-│                a.InvokeAgentToolAsync(d.Input),              │
-│              d.Options)))                                    │
+│        // Intercept and dispatch serially in model order.    │
+│        foreach call:                                         │
+│          run interceptor, merge its StateBag write-back      │
+│          park for approval when required                     │
+│          await InvokeAgentTool activity                      │
+│          merge its StateBag delta before the next call       │
 │                                                              │
 │        accumulated.Add(new ChatMessage(ChatRole.Tool,        │
 │          functionResultContents))                            │
@@ -648,8 +648,8 @@ Here is the complete path a message takes from an external caller to the LLM and
 │         sessionId, input.SerializedStateBag)                 │
 │   14. Clone registration.ChatOptions; stamp Instructions,    │
 │       the filtered durable Tools, and ResponseFormat         │
-│   15. Run the AIContextProvider.InvokingAsync chain, folding │
-│       each provider's aggregate into the next                │
+│   15. Reuse prepared provider messages/instructions/tools.   │
+│       Do not rerun hooks in the managed model-step loop.     │
 │   16. Set TemporalAgentContext.Current (for tools)           │
 │                                                              │
 │   17. agent.RunAsync(augmentedMessages, session,              │
@@ -660,15 +660,15 @@ Here is the complete path a message takes from an external caller to the LLM and
 │       ← UseProvidedChatClientAsIs = true, so the model       │
 │         returns FunctionCallContent instead of auto-invoking.│
 │                                                              │
-│   18. foreach update: collected.Add(update);                 │
-│         ctx.Heartbeat(update.Text)                           │  ← Heartbeat (always)
-│       response = collected.ToAgentResponse()                 │
+│   18. Await non-streaming response; background heartbeat     │
+│       pump sends liveness only, without model text.          │
 │                                                              │
-│   19. Run AIContextProvider.InvokedAsync (faults contained)  │
+│   19. Terminal provider hooks run in CompleteAgentTurn,      │
+│       after the workflow model/tool loop, not here.          │
 │                                                              │
 │   20. Return AgentStepResult {                               │
-│         IsFinal, AssistantMessage, ToolCalls,                │
-│         UpdatedStateBag, Usage, ResponseId,                  │
+│         IsFinal, AssistantMessages, ToolCalls,               │
+│         StateBagDelta, Usage, ResponseId,                    │
 │         ResolvedWorkerConfig? }                              │
 └───────────┬──────────────────────────────────────────────────┘
             │
@@ -676,7 +676,8 @@ Here is the complete path a message takes from an external caller to the LLM and
 ┌──────────────────────────────────────────────────────────────┐
 │   AgentWorkflow.ExecuteTurnAsync (after loop completes)      │
 │                                                              │
-│   21. return AgentResponse {                                 │
+│   21. CompleteAgentTurn notifies terminal provider hooks.    │
+│       return AgentResponse {                                 │
 │         Messages  = allTurnMessages,                         │
 │         Usage     = totalUsage,                              │
 │         CreatedAt = Workflow.UtcNow }                        │
@@ -716,7 +717,7 @@ Client → Update-With-Start(RunFireAndForget) → Workflow validates and accept
 ```
 
 The update handler starts a detached task inside the workflow that crosses the same input-readiness
-barrier and then calls the same `RunTurnAsync` helper (serialize via `_isProcessing`, dispatch the
+barrier and then calls the same `RunTurnAsync` helper (one admitted request, dispatch the
 durable loop, record history) with no return value. Because there is no caller to surface a failure
 to, `ProcessFireAndForgetAsync` logs and **swallows** any exception so one failed background turn
 cannot kill the session. The base's turn rollback still applies, so a failed fire-and-forget turn
@@ -957,7 +958,7 @@ fires only at continue-as-new.
 
 | Activity name | Role |
 |---|---|
-| `TemporalCommunity.Extensions.Agents.RunDurableAgentStep` | One non-streaming MAF `agent.RunAsync` call. Preserves every response message and returns actionable `FunctionCallContent[]`, plus the updated StateBag and usage. Runs the `AIContextProvider` chain explicitly around the call. On a proxy-started session's first step it also returns the resolved worker settings. |
+| `TemporalCommunity.Extensions.Agents.RunDurableAgentStep` | One non-streaming MAF `agent.RunAsync` call. Preserves every response message and returns actionable `FunctionCallContent[]`, plus the updated StateBag and usage. Runs the `AIContextProvider` chain explicitly around the call. |
 | `TemporalCommunity.Extensions.Agents.RunToolInterceptor` | One pre-tool decision (`Proceed` / `PauseForApproval` / `Skip` / `Block`). Dispatched only when an interceptor is configured and the tool did not opt out. |
 | `TemporalCommunity.Extensions.Agents.InvokeAgentTool` | One tool dispatch. Resolves the tool from the blueprint's per-agent registry — names do not collide across agents. Throws when the name is unregistered. |
 | `TemporalCommunity.Extensions.Agents.ReduceHistoryByKey` | Applies the DI-resolved keyed history reducer at continue-as-new. Not part of a turn. |
@@ -1040,22 +1041,17 @@ workflow is always the authority.
 ### Continue-as-new across durable mode
 
 `AgentWorkflowInput.DurableAgentToolActivityOptions` is not a stored field — it forwards to
-`ResolvedWorkerConfig.ToolActivityOptions`. That bundle is frozen at one of two points, depending
-on how the session started:
+`ResolvedWorkerConfig.ToolActivityOptions`. The client supplies only agent identity and task queue.
+The worker's custom workflow instance factory resolves the matching `DurableAgentRegistration`
+and builds the complete worker-owned configuration before workflow initialization, including the
+model and preparation activity policy, TTL, approval timeout, history bounds, and tool policy.
+There is no settings activity or first-step handshake. The complete configuration is carried
+through `CreateContinueAsNewException` unchanged rather than refreshed each turn.
 
-- **Worker-started session** (this process holds the `AddDurableAgent` registration):
-  `DefaultTemporalAgentClient` builds `ResolvedWorkerConfig` at workflow start, from the agent's
-  retry policy and per-tool timeout settings.
-- **Proxy-started session** (this process only declared `AddAgentProxy`, so it has no registration):
-  `ResolvedWorkerConfig` starts `null`. `WorkerSettingsResolved` is therefore `false`, and the
-  workflow sets `NeedsWorkerSettingsResolution` on the **first step of the first turn**. The worker
-  resolves the bundle from its own `DurableAgentRegistration`, returns it on `AgentStepResult`, and
-  the workflow patches `_input` mid-loop. This is why `MaxToolCallsPerTurn` is re-read on every
-  iteration rather than snapshotted before the loop.
-
-Once resolved, the bundle is carried through `CreateContinueAsNewException` unchanged. Tool
-activities use one attempt by default; an explicit agent retry policy is carried forward and
-applies uniformly to all tools. Continue-as-new is settings-frozen.
+Tool activities use one attempt by default; an explicit per-agent retry policy is carried forward
+and applies uniformly to that agent's tools and interceptors. Worker `DefaultRetryPolicy` applies
+to model steps and preparation only; it never enables tool retries. Worker settings used by
+in-flight histories must remain compatible for deterministic replay.
 
 For the user-facing how-to, see [the durable-agents how-to](../../how-to/MAF/durable-agents.md).
 
@@ -1153,10 +1149,9 @@ var response = await RunWithHeartbeatsAsync(
     () => agent.RunAsync(augmentedMessages, session, runOptions, ct));
 ```
 
-`InvokeAgentToolAsync` heartbeats once, on entry (`ctx.Heartbeat($"invoking tool '{name}'")`). A
-long-running tool that never heartbeats again will trip `HeartbeatTimeout` — give such tools a
-per-tool `HeartbeatTimeout` via `DurableToolOptions`, or heartbeat from inside the tool through
-`ActivityExecutionContext.Current`.
+`InvokeAgentToolAsync` also uses a background heartbeat pump while invoking the tool. Pass its
+cancellation token to downstream operations; heartbeats allow cancellation delivery but cannot
+forcibly stop a tool that ignores cancellation.
 
 **What happens on heartbeat timeout**: Temporal cancels the activity's `CancellationToken` and marks it as timed out. This is the primary mechanism for detecting a dead worker during long LLM calls. Caller-visible `RunStreamingAsync` is intentionally unsupported.
 
@@ -1206,8 +1201,8 @@ AgentWorkflow → ExecuteActivityAsync → AgentActivities running → [WORKER D
 1. Activity is executing (LLM call in progress)
 2. Worker process crashes (OOM, hardware failure, deployment)
 3. Temporal detects the failure via one of:
-   - **HeartbeatTimeout**: Because heartbeats are sent while the model-step activity consumes provider updates, Temporal notices when the window passes with no heartbeat
-   - **Worker disconnect**: Temporal detects the worker's gRPC connection dropped
+   - **HeartbeatTimeout**: The background pump stops, and the heartbeat deadline expires.
+   - **StartToCloseTimeout**: The activity attempt exceeds its execution deadline.
 4. Temporal marks the activity **attempt** as failed
 5. The workflow is still blocked on `ExecuteActivityAsync`, waiting for a result
 6. A new worker picks up the workflow task from the task queue
@@ -1264,7 +1259,13 @@ Client waiting on the Update result → AgentWorkflow.RunAgentAsync running → 
 
 **Client experience**: The update call blocks until the handler completes (even across worker failures). The client does not need retry logic — Temporal handles the handoff transparently.
 
-**Important caveat**: If the client's own connection to Temporal drops during the wait, the client will need to re-send the update. Since `_isProcessing` serializes updates, this is safe — a duplicate update will simply queue behind the in-progress one.
+**Important caveat**: A lost client response is ambiguous. Persist the session ID and logical
+`RequestId` before dispatch. Query `GetTurnOutcomeAsync` without dispatching more work; retry with
+the same request ID and identical input only within the retained deduplication contract. Matching
+requests join active work or return retained terminal outcomes; a distinct request is `Busy`.
+An unavailable outcome is not proof of non-acceptance, and an evicted outcome can execute again.
+Cancelling the RPC wait does not cancel the accepted turn: use `CancelTurnAsync` explicitly and
+reconcile any uncertain external tool effects.
 
 #### Scenario D: Temporal Server Restarts
 
@@ -1277,16 +1278,15 @@ If the Temporal server itself restarts:
 
 ### Heartbeat Detail: What Gets Sent
 
-On every provider update, the update text is sent as the heartbeat detail:
+The model and tool heartbeat pumps send liveness only:
 
 ```csharp
-ctx.Heartbeat(update.Text);
+ctx.Heartbeat();
 ```
 
-This has two benefits:
-
-1. **Liveness**: Temporal knows the activity is still alive
-2. **Progress visibility**: The heartbeat detail is visible in the Temporal UI and via `DescribeWorkflowExecution`, so operators can see the LLM's partial output in real time
+Heartbeat details do not contain streamed model text or partial output. The model path is
+non-streaming, and the proxy rejects `RunStreamingAsync`. Heartbeats do not checkpoint the
+activity's stack: an allowed activity retry starts its body again.
 
 ### Timeout Interaction Diagram
 
@@ -1307,8 +1307,8 @@ This has two benefits:
                     │ (14 days)                                    │
 Activity start ─────┘                                              └── Workflow ends
 
-• HeartbeatTimeout: Dead-worker detection while the model-step activity consumes provider updates
-• StartToCloseTimeout: Hard limit on any single agent turn
+• HeartbeatTimeout: Dead-worker detection during model or tool work
+• StartToCloseTimeout: Hard limit on one activity attempt, not a whole turn
 • Workflow TTL: How long the session stays alive between messages
 ```
 
@@ -1316,15 +1316,15 @@ Activity start ─────┘                                              �
 
 | Timeout | Default | Scope | Detection | Configurable Via |
 |---------|---------|-------|-----------|------------------|
-| `HeartbeatTimeout` | 2 min | Single activity | Worker death during model updates | `TemporalAgentsOptions.DefaultHeartbeatTimeout` |
+| `HeartbeatTimeout` | 2 min | Single activity | Missing background heartbeat | `TemporalAgentsOptions.DefaultHeartbeatTimeout` |
 | `StartToCloseTimeout` | 5 min | Single activity **attempt** | Stuck/slow LLM call | `TemporalAgentsOptions.DefaultActivityTimeout` |
-| `RetryPolicy` | 5 attempts (2s max interval for model steps, 30s for tools) | All attempts of one activity | Permanently failing LLM or tool call | `TemporalAgentsOptions.DefaultRetryPolicy`, per-agent `RetryPolicy`, or per-tool `DurableToolOptions` |
+| `RetryPolicy` | Model: 5 attempts, 2s max backoff; tools/interceptors: 1 attempt | All attempts of one activity | Permanently failing model or tool | Per-agent policy for tools; per-agent then worker default for model steps |
 | `ApprovalTimeout` | 7 days | One HITL approval wait | Reviewer never responds | `TemporalAgentsOptions.DefaultApprovalTimeout` |
 | `TimeToLive` | 14 days | Entire workflow | Session inactivity | `TemporalAgentsOptions.DefaultTimeToLive` or per-agent |
 
 | Crash Scenario | Data Loss | Recovery | Automatic? |
 |---------------|-----------|----------|------------|
-| Worker dies during activity | None | Attempt retried on new worker, under the bounded retry policy | Yes |
+| Worker dies during activity | Recorded results retained; unrecorded external effect may be uncertain | Retry only if the effective policy permits it; tools default to one attempt | Policy-dependent |
 | Activity retry budget exhausted | Turn discarded, not partially recorded | Base rolls back the request entry, turn count and StateBag; Update surfaces the failure; session stays alive | Yes |
 | Worker dies between activities | None | Workflow replayed, cached results returned | Yes |
 | Worker dies during update | None | Update re-executes on new worker, client blocks until done | Yes |

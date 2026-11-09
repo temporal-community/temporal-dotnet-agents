@@ -4,38 +4,26 @@
 // Run:  dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj
 
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI;
 using TemporalCommunity.Extensions.Agents.Session;
+using Temporalio.Extensions.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 var temporalAddress = builder.Configuration.GetValue<string>("TEMPORAL_ADDRESS") ?? "localhost:7233";
 
 // ── Step 1: Register client-side Temporal infrastructure only ────────────────
-// AddTemporalAgentProxies wires up:
-//   • ITemporalClient        — connection to the Temporal server
-//   • ITemporalAgentClient   — sends messages via WorkflowUpdate (no polling)
-//   • Keyed AIAgent proxy    — the surface your code calls
+// AddTemporalAgentProxies wires up the ITemporalAgentClient and keyed AIAgent proxies.
+// The Temporal client connection is registered separately.
 //
 // Crucially, NO worker, NO AgentWorkflow, NO AgentActivities, and NO IChatClient
 // are registered here. All of that lives in the Worker process.
-builder.Services.AddTemporalAgentProxies(
-    configure: options =>
-    {
-        // Declare which agents you want to send messages to.
-        // AddAgentProxy registers only the name + optional TTL — no factory needed.
-        // The TTL here must match (or be compatible with) what the Worker registers,
-        // since it is used when this client starts a brand-new session workflow.
-        // TimeToLive here must match the worker's agent.TimeToLive registration.
-        // The client-side TTL wins when starting a new session workflow; the worker-side
-        // TTL applies on continue-as-new. Keep them in sync to avoid split lifetimes.
-        options.AddAgentProxy("Assistant", timeToLive: TimeSpan.FromHours(1));
-    },
-    taskQueue: "agents",           // must match the Worker's task queue
-    targetHost: temporalAddress,
-    @namespace: "default");
+builder.Services.AddTemporalClient(temporalAddress, "default");
+builder.Services.AddTemporalAgentProxies("agents", "Assistant");
 
 var host = builder.Build();
 await host.StartAsync();

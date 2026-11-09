@@ -93,7 +93,7 @@ public sealed class AgentToolContext : DurableToolContext
 | `ToolName` | The tool name as registered on the agent. |
 | `Arguments` | The argument dictionary the LLM emitted in its `FunctionCallContent`. |
 | `CallId` | LLM-assigned call identifier. `null` for models that do not emit call IDs. |
-| `StateBag` | Snapshot of session state after the most recent LLM step completed, immediately before tool dispatch. Deserialized in the interceptor activity from the same source as `TemporalAgentSession.FromStateBag`. Treat as read-only — mutations to the object are not persisted back to the workflow; only the LLM-step activity's `UpdatedStateBag` flows back. `null` when no state has accumulated. |
+| `StateBag` | Snapshot immediately before tool dispatch. Successful interceptor write-backs are merged into workflow-owned state before the next activity. Keep mutations retry-safe; a failed or cancelled turn restores the pre-turn StateBag, but cannot undo external effects. `null` when no state has accumulated. |
 
 ---
 

@@ -29,6 +29,92 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 public sealed class ChatHistoryMemoryIntegrationTests
 {
     [Fact]
+    public async Task MemoryInitialization_UsesDedicatedPolicyWhilePreparationUsesModelPolicy()
+    {
+        await using var environment = await TestEnvironmentHelper.StartLocalAsync();
+        environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+
+        var chatClient = new ScriptedChatClient(
+        [
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, "Done.")),
+        ]);
+        Action<TemporalAgentOptions> options = temporal =>
+        {
+            temporal.ActivityTimeout = TimeSpan.FromMinutes(8);
+            temporal.HeartbeatTimeout = TimeSpan.FromMinutes(3);
+            temporal.RetryPolicy = new RetryPolicy { MaximumAttempts = 4 };
+            temporal.UseChatHistoryMemory(memory =>
+            {
+                memory.UseVectorStore(
+                    services => services.GetRequiredService<VectorStore>(),
+                    "memory-initialization-policy",
+                    32);
+                memory.WithScopeInitializer((_, context, _) =>
+                {
+                    var scope = new ChatHistoryMemoryProviderScope
+                    {
+                        AgentId = context.AgentName,
+                        SessionId = context.SessionId,
+                    };
+                    return Task.FromResult(new ChatHistoryMemoryProvider.State(scope, scope));
+                });
+            });
+        };
+
+        var queue = $"memory-initialization-policy-{Guid.NewGuid():N}";
+        using var host = BuildHost(
+            environment.Client,
+            queue,
+            chatClient,
+            options,
+            vectorStore: new InMemoryVectorStore(new InMemoryVectorStoreOptions
+            {
+                EmbeddingGenerator = new DeterministicEmbeddingGenerator(),
+            }));
+        await host.StartAsync();
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("MemoryAgent");
+            var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
+            await proxy.RunAsync("Hello", session);
+
+            var foundInitializer = false;
+            var foundPreparation = false;
+            await foreach (var historyEvent in environment.Client
+                               .GetWorkflowHandle(session.SessionId.WorkflowId)
+                               .FetchHistoryEventsAsync())
+            {
+                if (historyEvent.ActivityTaskScheduledEventAttributes is { } scheduled
+                    && scheduled.ActivityType.Name ==
+                        "TemporalCommunity.Extensions.Agents.InitializeChatHistoryMemory")
+                {
+                    foundInitializer = true;
+                    Assert.Equal(TimeSpan.FromSeconds(30), scheduled.StartToCloseTimeout.ToTimeSpan());
+                    Assert.Equal(2, scheduled.RetryPolicy.MaximumAttempts);
+                    Assert.Equal(TimeSpan.FromSeconds(1), scheduled.RetryPolicy.InitialInterval.ToTimeSpan());
+                    Assert.Equal(TimeSpan.Zero, scheduled.HeartbeatTimeout.ToTimeSpan());
+                }
+                else if (historyEvent.ActivityTaskScheduledEventAttributes is { } preparation
+                         && preparation.ActivityType.Name ==
+                             "TemporalCommunity.Extensions.Agents.PrepareAgentTurn")
+                {
+                    foundPreparation = true;
+                    Assert.Equal(TimeSpan.FromMinutes(8), preparation.StartToCloseTimeout.ToTimeSpan());
+                    Assert.Equal(TimeSpan.FromMinutes(3), preparation.HeartbeatTimeout.ToTimeSpan());
+                    Assert.Equal(4, preparation.RetryPolicy.MaximumAttempts);
+                }
+            }
+
+            Assert.True(foundInitializer, "Expected memory initialization to be scheduled.");
+            Assert.True(foundPreparation, "Expected context preparation to be scheduled.");
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task BeforeAIInvoke_UsesSessionScopedVectorMemoryAcrossTurns()
     {
         await using var environment = await TestEnvironmentHelper.StartLocalAsync();
@@ -740,7 +826,9 @@ public sealed class ChatHistoryMemoryIntegrationTests
             {
                 DataConverter = TemporalAgentDataConverter.Instance,
             };
-            replayOptions.AddWorkflow<AgentWorkflow>();
+            replayOptions.AddWorkflow(AgentWorkflowWorkerFactory.CreateDefinition(
+                host.Services.GetRequiredService<TemporalAgentsOptions>(),
+                queue));
             var replayer = new WorkflowReplayer(replayOptions);
             var originalRun = environment.Client.GetWorkflowHandle<AgentWorkflow>(
                 sessionId.WorkflowId,

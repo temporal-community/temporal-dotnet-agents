@@ -883,7 +883,7 @@ public sealed class AgentTurnFailureOutcomeTests
             MaxTerminalOutcomeBytes = ledgerBytes,
             ActivityTimeout = TimeSpan.FromSeconds(15),
             RetryPolicy = new RetryPolicy { MaximumAttempts = 1 },
-            ResolvedWorkerConfig = new ProxyResolvedWorkerConfig
+            ResolvedWorkerConfig = new AgentWorkerToolConfig
             {
                 MaxToolCallsPerTurn = 20,
                 ToolActivityOptions = new Dictionary<string, ActivityOptions>

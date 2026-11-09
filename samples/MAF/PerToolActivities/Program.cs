@@ -2,7 +2,7 @@
 //
 // Each LLM call is a RunDurableAgentStep activity; each tool call is an
 // InvokeAgentTool:<tool_name> activity, serially in model order. Tool activities
-// use one attempt by default; retries are an explicit per-agent opt-in.
+// use one attempt by default; the per-agent policy opts all tools into retries.
 //
 // Run:  dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj
 //
@@ -26,7 +26,7 @@ using TemporalCommunity.Extensions.Agents;
 using Temporalio.Extensions.Hosting;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddFilter("TemporalCommunity.Extensions.Agents", LogLevel.Information);
 
@@ -67,7 +67,7 @@ builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient()
 // ── Step 5: Register Temporal client + worker pipeline ───────────────────────
 // AddDurableAgent is the single registration entry point:
 //   • agent.AddTool(...) — every tool gets one activity attempt by default.
-// Tool retries are an explicit per-agent opt-in and apply uniformly.
+// An explicit per-agent retry policy applies uniformly to tools; worker defaults do not.
 builder.Services.AddTemporalClient(temporalAddress, "default");
 
 builder.Services

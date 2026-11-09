@@ -9,6 +9,18 @@ Durable AI code has two distinct testing concerns, and they call for different t
 | **Application logic** | Code that depends on `IDurableChatSessionClient` — controllers, services, background jobs | xUnit unit tests with a stub implementation |
 | **Library integration** | The workflow, activities, and middleware together — that the full pipeline produces correct results | xUnit integration tests using `TemporalServiceTestEnvironment.StartLocalAsync()` |
 
+Start with the [copyable session-client stub](#stub-idurablechatsessionclient) for application
+logic, or the [integration fixture](#fixture-pattern) for worker behavior. From the repository root:
+
+```bash
+just test-unit
+just test-integration
+```
+
+Integration tests use isolated embedded servers; provider calls should use deterministic doubles,
+not live API keys. The regression coverage below describes current contracts, not proof of
+exactly-once external effects.
+
 ## Inference telemetry verification
 
 `DurableChatActivitiesTelemetryTests` uses an in-memory `ActivityListener` to assert that the
@@ -23,7 +35,7 @@ activity heartbeats without streamed text or other details, and a heartbeat-time
 test verifies it remains alive across multiple chunks. These tests do not infer global exactly-once
 telemetry across Temporal activity retries.
 
-## Phase 2.2 turn-admission verification
+## Turn-admission verification
 
 The managed-session regression
 `DurableChatLifecycleRegressionTests.TurnAdmission_RejectsBusyAndConflictBeforeAccepting_AndJoinsMatchingRequest`
@@ -38,9 +50,10 @@ holds the model activity open, then verifies:
 `TurnAdmission_ReplaysTerminalFailureWithoutRedispatchingModelActivity` exercises rollback and
 terminal failure replay: the failed turn leaves no partial history, and retrying the same ID does
 not start another turn. Activity retry attempts within the original turn are still governed by the
-configured Temporal retry policy. Turn cancellation is a later Phase 3.5 capability.
+configured Temporal retry policy. Turn cancellation is explicit through `CancelTurnAsync`; cancelling
+the caller's RPC wait does not cancel an accepted turn or undo an external effect.
 
-## Phase 2.3 bounded-ledger and continue-as-new verification
+## Bounded-ledger and continue-as-new verification
 
 `DurableChatLifecycleRegressionTests.KeyedReducer_ContinueAsNew_RetainsLaterSuccessfullyCompletedTurn`
 also retries the completed request after Continue-as-New and verifies the model is not called again.
@@ -50,7 +63,7 @@ It checks that the session epoch and cumulative completed-turn count survive the
 bounds and confirm that eviction ends the deduplication window. Unit tests cover option validation,
 workflow-input serialization, and preservation of the ledger settings and epoch in Continue-as-New.
 
-## Phase 2.5 transport-budget verification
+## Transport-budget verification
 
 `DurableTransportPayloadGuardTests` measures the complete payload produced by the configured
 payload converter and verifies that the declared codec-expansion reserve is applied at the exact
@@ -58,18 +71,19 @@ boundary. `DurableExecutionOptionsTests` rejects invalid budgets and unbounded e
 policies; `ContinueAsNewInputTests` checks that both budget values survive Continue-as-New.
 Workflow integration coverage exercises the client-side workflow/update-input preflight, activity
 input checks before dispatch, update-result/query guards, and the final carried CAN input. These
-limits are per payload: Phase 3.7 adds activity-result/failure bounds, while Phase 2.6 separately
-budgets event-history growth.
+limits apply to individual payloads, including activity results and bounded failures. Event-history
+growth has a separate budget.
 
 Custom workflows based on `DurableToolWorkflowBase<TRequestData, TTurnState>` must call
 `ValidateDurableTurnAdmission` from the validator paired with each turn Update. Handler-side checks
 remain defensive, but only a validator can reject a request before the Update is recorded. The
 `ExtensibleDurableTurns` sample and its compiled usage-guide snippet demonstrate this pairing.
 
-## Phase 0 research and harness
+<a id="phase-0-research-and-harness"></a>
 
-The [redesign target contracts](usage.md#durable-chat-redesign-target-contracts) are not production
-acceptance claims. Phase 0 executes package contracts against MEAI 10.10.0 and Temporalio 1.21.1:
+## Pinned dependency contracts
+
+`PinnedReducerContractTests` executes the pinned MEAI and Temporal SDK contracts:
 
 ```bash
 dotnet test tests/TemporalCommunity.Extensions.AI.Tests --no-restore \
@@ -82,11 +96,7 @@ exclusion of function and approval content from summarizer input. It also checks
 integer history-count/byte-size properties and validator attribute. Runtime validation of the
 event-budget assumptions belongs to the isolated harness below, not to reflection alone.
 
-Evidence sources: read-only MEAI `ChatReduction` sources and Temporal SDK `Workflow`/validator
-sources, plus executed pinned NuGet assemblies. The MEAI source checkout HEAD was
-`4332a6910796b2496f9cc35c06fa362671ee1b2f`, not the earlier spike's
-`02107c65bab30aad9e35b5133ed643eaa77bccd8`; package execution is authoritative.
-Neither reference checkout is built or modified.
+Package execution, rather than a source checkout at a different version, is authoritative.
 
 ## Context-only reducer verification
 
@@ -121,40 +131,10 @@ the blocked session. These are local-server tests, so they exercise update valid
 history events, activities, and Continue-as-New together. Event/byte reserve estimates remain
 deployment-dependent and do not guarantee that the server will accept every later command.
 
-**Unavailable prerequisite experiment:** the assumption that the pinned summarizer returns a
-persistent incremental marker is false. This blocks adopting that marker as a compaction wire
-contract, not Phase 0 or the library-selected-prefix summarizer design. The history-counter APIs
-are available; their values reflect the current workflow task and may be stale in queries.
-
-### Spike findings and deferred acceptance
-
-The earlier uncommitted reducer spike reported **23 passing research tests**; the synthetic
-session-core spike reported **4 passing research tests**. Those counts are historical evidence,
-not checked-in production acceptance or a claim that their source was recovered.
-Phase 0 replaces the faulty persistent-summary-marker assumption with
-`PinnedReducerContractTests`, rather than importing that prototype. No prototype implementation
-is promoted to the library.
-
-`SessionCoreResearchTests` recreates the initialization race with an explicit workflow-state
-barrier, not a wall-clock sleep: the run waits for an update to enter before initializing state.
-The unsafe handler reads uninitialized state; an asynchronous handler that waits for initialization
-sees initialized state. Both executions replay. This is a controlled scheduling counterexample,
-not proof that the current stock session or every update-with-start always has this ordering.
-Current custom workflows already have `InitializeInput`/`WaitForInputAsync`; the new session core
-still needs its own authoritative initialization/admission design. Validators cannot await.
-
-```bash
-dotnet test tests/TemporalCommunity.Extensions.AI.IntegrationTests --no-restore \
-  --filter "FullyQualifiedName~SessionCoreResearchTests"
-```
-
-The skipped `RedesignedSessionCore_UpdateWithStart_CannotReadUninitializedState` names **unit 2.2**
-as its owner. Its counterexample deliberately fails if unskipped without replacing the synthetic
-unsafe path with the production redesigned core. It is intentionally unimplemented acceptance,
-not an unavailable pinned API and not a Phase 0 failure. Absolute idle-deadline renewal and
-expected-epoch restart behavior are covered by the Phase 2.4 lifecycle tests. Approval waits (3.3)
-and complete MEAI dispatch (1.4/3.2) remain later-unit acceptance work; Phase 0 does not add
-placeholder passing tests for them.
+The pinned summarizer does not supply a durable incremental marker; the library owns its summary
+wire contract. History counters reflect the current workflow task and may be stale in queries.
+Custom Update handlers must cross the input-readiness barrier, while synchronous validators
+cannot await initialization. Lifecycle tests cover idle deadlines and epoch checks.
 
 Session shutdown and queued fire-and-forget turns use validated updates. Session workflows declare
 no signal handlers, and tests cover update validation and shutdown draining without relying on
@@ -346,14 +326,16 @@ public class ConversationService(IDurableChatSessionClient client)
 ```
 
 ```csharp
-// Test
-// Stub for unit tests. Signatures match IDurableChatSessionClient post-0.2.0:
-// SendAsync returns DurableSessionResponse (carries per-turn Usage / CorrelationId);
-// GetHistoryAsync returns IReadOnlyList<DurableSessionEntry>.
+using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.AI;
+using TemporalCommunity.Extensions.AI.Approvals;
+using TemporalCommunity.Extensions.AI.Session;
+
+// Configure only the operation this test exercises; unexpected calls fail loudly.
 public class StubChatSessionClient : IDurableChatSessionClient
 {
-    public Func<string, IEnumerable<ChatMessage>, ChatOptions?, string?, CancellationToken, Task<DurableSessionResponse>>
-        SendAsyncHandler { get; set; } = (_, _, _, _, _) =>
+    public Func<string, IEnumerable<ChatMessage>, ChatOptions?, string?, string?, string?, CancellationToken, Task<DurableSessionResponse>>
+        SendAsyncHandler { get; set; } = (_, _, _, _, _, _, _) =>
             Task.FromResult(new DurableSessionResponse
             {
                 CorrelationId = "stub",
@@ -363,24 +345,52 @@ public class StubChatSessionClient : IDurableChatSessionClient
 
     public Task<DurableSessionResponse> SendAsync(string conversationId, IEnumerable<ChatMessage> messages,
         ChatOptions? options = null, string? correlationId = null,
+        string? requestId = null, string? expectedSessionEpoch = null,
         CancellationToken cancellationToken = default)
-        => SendAsyncHandler(conversationId, messages, options, correlationId, cancellationToken);
+        => SendAsyncHandler(conversationId, messages, options, correlationId, requestId, expectedSessionEpoch, cancellationToken);
+
+    public Task<DurableSessionResponse> SendAsync(string conversationId, string message,
+        ChatOptions? options = null, string? correlationId = null,
+        string? requestId = null, string? expectedSessionEpoch = null,
+        CancellationToken cancellationToken = default)
+        => SendAsync(conversationId, [new ChatMessage(ChatRole.User, message)], options,
+            correlationId, requestId, expectedSessionEpoch, cancellationToken);
+
+    public Task<string> GetSessionEpochAsync(string conversationId, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
 
     public Task<IReadOnlyList<DurableSessionEntry>> GetHistoryAsync(string conversationId,
         CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<DurableSessionEntry>>([]);
+        => throw new NotSupportedException();
+
+    public Task<DurableChatTerminalOutcome?> GetTerminalTurnOutcomeAsync(string conversationId,
+        string requestId, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
 
     public Task<DurableApprovalRequest?> GetPendingApprovalAsync(string conversationId,
         CancellationToken cancellationToken = default)
-        => Task.FromResult<DurableApprovalRequest?>(null);
+        => throw new NotSupportedException();
 
     public Task<DurableApprovalResolutionResult> ResolveApprovalAsync(string conversationId,
         DurableApprovalDecision decision, CancellationToken cancellationToken = default)
-        => Task.FromResult(new DurableApprovalResolutionResult
-        {
-            RequestId = decision.RequestId,
-            Status = DurableApprovalResolutionStatus.Accepted,
-        });
+        => throw new NotSupportedException();
+
+    public Task<DurableChatHistoryBudgetStatus> GetHistoryBudgetAsync(string conversationId,
+        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+    public Task<DurableHistoryRecoveryResult> RetryHistoryCompactionAsync(string conversationId,
+        string operationId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+    public Task<DurableHistoryRecoveryResult> TrimBlockedHistoryAsync(string conversationId,
+        string operationId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+    public Task<DurableTurnCancellationResult> CancelTurnAsync(string conversationId,
+        string requestId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+    public Task ShutdownAsync(string conversationId, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+
+    public string GetWorkflowId(string conversationId) => throw new NotSupportedException();
 }
 ```
 
@@ -390,7 +400,7 @@ public class StubChatSessionClient : IDurableChatSessionClient
 public async Task AskAsync_Returns_AssistantText()
 {
     var stub = new StubChatSessionClient();
-    stub.SendAsyncHandler = (_, _, _, _, _) =>
+    stub.SendAsyncHandler = (_, _, _, _, _, _, _) =>
         Task.FromResult(new DurableSessionResponse
         {
             CorrelationId = "test-1",

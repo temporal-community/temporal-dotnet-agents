@@ -106,13 +106,14 @@ public class DefaultTemporalAgentClientTests
     public async Task RunAgentFireAndForgetAsync_UsesValidatedUpdateWithStart()
     {
         _options.AddAgentProxy("Agent");
+        var updateHandle = new CompletedUpdateHandle(_fakeClient);
         WorkflowStartUpdateWithStartOptions? capturedOptions = null;
         A.CallTo(() => _fakeClient.StartUpdateWithStartWorkflowAsync<AgentWorkflow>(
                 A<Expression<Func<AgentWorkflow, Task>>>._,
                 A<WorkflowStartUpdateWithStartOptions>._))
             .Invokes((Expression<Func<AgentWorkflow, Task>> _, WorkflowStartUpdateWithStartOptions options) =>
                 capturedOptions = options)
-            .Returns(Task.FromResult<WorkflowUpdateHandle>(null!));
+            .Returns(Task.FromResult<WorkflowUpdateHandle>(updateHandle));
         var client = CreateClient();
         var sessionId = TemporalAgentSessionId.WithRandomKey("Agent");
         var request = new RunRequest("hello");
@@ -120,7 +121,8 @@ public class DefaultTemporalAgentClientTests
         await client.RunAgentFireAndForgetAsync(sessionId, request);
 
         Assert.NotNull(capturedOptions);
-        Assert.Equal(WorkflowUpdateStage.Accepted, capturedOptions!.WaitForStage);
+        Assert.Equal(WorkflowUpdateStage.Completed, capturedOptions!.WaitForStage);
+        Assert.True(updateHandle.ResultObserved);
         Assert.NotNull(capturedOptions.StartWorkflowOperation);
         Assert.Equal(sessionId.WorkflowId, capturedOptions.StartWorkflowOperation!.Options.Id);
         A.CallTo(() => _fakeClient.GetWorkflowHandle<AgentWorkflow>(
@@ -128,6 +130,18 @@ public class DefaultTemporalAgentClientTests
                 A<string?>._,
                 A<string?>._))
             .MustNotHaveHappened();
+    }
+
+    private sealed record CompletedUpdateHandle(ITemporalClient TemporalClient)
+        : WorkflowUpdateHandle(TemporalClient, "update", "workflow")
+    {
+        public bool ResultObserved { get; private set; }
+
+        public override Task<TResult> GetResultAsync<TResult>(RpcOptions? rpcOptions = null)
+        {
+            ResultObserved = true;
+            return Task.FromResult(default(TResult)!);
+        }
     }
 
     // ─── ResolveApprovalAsync ────────────────────────────────────────────────

@@ -8,9 +8,28 @@ The program demonstrates the concise co-hosted `AddDurableAI()` registration. Se
 worker deployments use `AddDurableAIClient(taskQueue)` and `AddDurableAIWorker()` respectively;
 see [split client and worker hosting](../../../docs/how-to/MEAI/usage.md#split-client-and-worker-hosting).
 
-This sample demonstrates the implemented
-[durable-chat redesign contracts](../../../docs/how-to/MEAI/usage.md#durable-chat-redesign-target-contracts)
-using the current API.
+## Run
+
+Start Temporal Service 1.31.0 or newer in a separate terminal:
+
+```bash
+temporal server start-dev
+```
+
+From the repository root, configure the sample and run in Development so Generic Host loads its
+user secrets. Settings are loaded from the application output directory, independently of the
+shell's working directory:
+
+```bash
+dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MEAI/DurableChat
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MEAI/DurableChat/DurableChat.csproj
+```
+
+The committed settings use `https://api.openai.com/v1`; override `OPENAI_API_BASE_URL` when using
+another compatible endpoint.
+
+## Session and recovery contract
+
 The string overload accepts one user message directly, while the message overload accepts MEAI
 `ChatMessage` history. Its application conversation ID is the durable identity; provider
 `ChatOptions.ConversationId`, `RawRepresentationFactory`, and `ContinuationToken` are rejected
@@ -18,16 +37,15 @@ because they cannot safely resume across durable activity boundaries. Responses 
 finish reason, provider response/model IDs, and serializable provider metadata. Its correlation ID
 is not a deduplication key. The first demo turn supplies a caller-known request ID separately from
 correlation metadata; persist that ID before submission when the caller must retry an ambiguous
-RPC. Phase 2.1 records the ID and canonical input fingerprint. Phase 2.2 lets a matching ID and
+RPC. The workflow records the ID and canonical input fingerprint. A matching ID and
 fingerprint join an active turn or return its terminal outcome; different IDs are `Busy`, and
 changed input under the same ID is `Conflict`. The bounded terminal ledger (128 outcomes / 1 MiB by
 default) and the session epoch are carried through Continue-as-New. An evicted or oversized outcome
 is outside the deduplication window, so a later retry can execute again; the ledger does not make
 external tool effects exactly-once. If `SendAsync` fails after generating a request ID, its
 `DurableChatRequestException.RequestId` exposes that ID; callers needing recovery across process
-failure should persist their own ID before submission. Phase 0 documented pinned reducer and replay
-prerequisites. Phase 1.0 removed the durable embedding wrapper, and Phase 3.6 retains bounded,
-protocol-valid interrupted-turn history after a tool effect may have occurred. Retained
+failure should persist their own ID before submission. Bounded, protocol-valid interrupted-turn
+history records tool effects that may have occurred. Retained
 request/response entries also carry distinct stable `EntryId` values and a shared `TurnId`, which
 survive Continue-as-New; those identities are not deduplication or authorization tokens.
 

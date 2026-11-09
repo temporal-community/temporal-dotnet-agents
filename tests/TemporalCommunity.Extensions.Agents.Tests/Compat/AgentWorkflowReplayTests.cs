@@ -1,6 +1,9 @@
 using System.Text.Json;
+using FakeItEasy;
+using Microsoft.Extensions.AI;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Temporalio.Common;
+using Temporalio.Converters;
 using Temporalio.Worker;
 using Xunit;
 
@@ -18,9 +21,9 @@ public class AgentWorkflowReplayTests
         {
             DataConverter = TemporalAgentDataConverter.Instance,
         };
-        options.AddWorkflow<AgentWorkflow>();
-        var replayer = new WorkflowReplayer(options);
         var history = LoadHistory("failed-turn-statebag-rollback.json");
+        await AddWorkerWorkflowAsync(options, history, "queued_failing_tool");
+        var replayer = new WorkflowReplayer(options);
 
         var result = await replayer.ReplayWorkflowAsync(
             history,
@@ -30,24 +33,54 @@ public class AgentWorkflowReplayTests
     }
 
     [Theory]
-    [InlineData("first-update-with-start-agent-workflow.json", typeof(AgentWorkflow))]
-    [InlineData("tool-selection-agent-workflow.json", typeof(AgentWorkflow))]
-    public async Task CorrectedToolSelectionHistory_ReplaysWithoutError(
-        string filename,
-        Type workflowType)
+    [InlineData("first-update-with-start-agent-workflow.json")]
+    [InlineData("tool-selection-agent-workflow.json")]
+    public async Task CorrectedToolSelectionHistory_ReplaysWithoutError(string filename)
     {
         var options = new WorkflowReplayerOptions
         {
             DataConverter = TemporalAgentDataConverter.Instance,
         };
-        options.AddWorkflow(workflowType);
+        var history = LoadHistory(filename);
+        await AddWorkerWorkflowAsync(
+            options,
+            history,
+            filename == "tool-selection-agent-workflow.json" ? "replay_tool" : null);
         var replayer = new WorkflowReplayer(options);
 
         var result = await replayer.ReplayWorkflowAsync(
-            LoadHistory(filename),
+            history,
             throwOnReplayFailure: false);
 
         Assert.Null(result.ReplayFailure);
+    }
+
+    private static async Task AddWorkerWorkflowAsync(
+        WorkflowReplayerOptions options,
+        WorkflowHistory history,
+        string? toolName)
+    {
+        var started = Assert.Single(
+            history.Events,
+            e => e.WorkflowExecutionStartedEventAttributes is not null);
+        var startAttributes = started.WorkflowExecutionStartedEventAttributes!;
+        var input = await TemporalAgentDataConverter.Instance.ToValueAsync<AgentWorkflowInput>(
+            Assert.Single(startAttributes.Input.Payloads_));
+        var workerOptions = new TemporalAgentsOptions();
+        workerOptions.AddDurableAgent(input.AgentName, agent =>
+        {
+            agent.ChatClient = _ => A.Fake<IChatClient>();
+            if (toolName is not null)
+            {
+                agent.AddTool(
+                    AIFunctionFactory.Create(() => "replay", toolName),
+                    toolOptions => toolOptions.NoRetry());
+            }
+        });
+
+        options.AddWorkflow(AgentWorkflowWorkerFactory.CreateDefinition(
+            workerOptions,
+            startAttributes.TaskQueue.Name));
     }
 
     private static WorkflowHistory LoadHistory(string filename)

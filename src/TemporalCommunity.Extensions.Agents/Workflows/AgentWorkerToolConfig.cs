@@ -4,11 +4,8 @@ using Temporalio.Workflows;
 namespace TemporalCommunity.Extensions.Agents.Workflows;
 
 /// <summary>
-/// Bundle of worker-side settings that are either baked into <see cref="AgentWorkflowInput"/>
-/// up front (when the workflow is started by a process that hosts the full
-/// <c>DurableAgentRegistration</c>) or resolved lazily on the first step of the first turn
-/// (when the workflow is started by a proxy-only client that does not know the worker-side
-/// registration).
+/// Bundle of worker-side tool-dispatch settings supplied by the workflow instance factory and
+/// carried in workflow input across continue-as-new transitions.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -17,20 +14,11 @@ namespace TemporalCommunity.Extensions.Agents.Workflows;
 /// trio) so that:
 /// </para>
 /// <list type="bullet">
-/// <item>
-/// On <see cref="AgentWorkflowInput.ResolvedWorkerConfig"/>, a non-null value means the
-/// workflow already has worker-side settings to use (no resolution handshake needed).
-/// A null value signals the workflow is proxy-started and must ask the worker via
-/// <see cref="AgentStepInput.NeedsWorkerSettingsResolution"/>.
-/// </item>
-/// <item>
-/// On <see cref="AgentStepResult.ResolvedWorkerConfig"/>, a non-null value is the worker's
-/// response to a resolution request. The workflow patches this onto its <c>_input</c> for
-/// subsequent iterations (and carries it forward across continue-as-new).
-/// </item>
+/// The client supplies only session identity; this configuration is built from the worker's
+/// registrations before workflow initialization.
 /// </list>
 /// </remarks>
-internal sealed record ProxyResolvedWorkerConfig
+internal sealed record AgentWorkerToolConfig
 {
     /// <summary>
     /// Maximum number of LLM-step iterations within a single agent turn (resolved from the

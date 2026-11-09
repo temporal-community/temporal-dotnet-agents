@@ -27,7 +27,7 @@ using Temporalio.Extensions.OpenTelemetry;
 AppContext.SetSwitch("OpenAI.Experimental.EnableOpenTelemetry", true);
 
 // ── Setup: Build the application host ────────────────────────────────────────
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 // Quiet down the host lifetime/info categories so the console exporter's span
 // output isn't interleaved with "Application started." / "Hosting environment:"
@@ -191,13 +191,13 @@ Console.WriteLine("Done.");
 // exporter output above (or below) this block for the span hierarchy. Each call
 // to SendAsync produces:
 //
-//   durable_chat.send (conversation.id = <id>)
+//   durable_chat.send (gen_ai.conversation.id = <id>)
 //     UpdateWorkflow:Chat
 //       RunActivity:GetChatStep
 //         chat {model} (MEAI OpenTelemetryChatClient, gen_ai.usage.*)
 //
-// The conversation.id attribute is the same on both the send and leaf spans,
-// making it easy to filter all traces for a single session in your backend.
+// Filter send spans by gen_ai.conversation.id, then follow their Temporal trace
+// to inference spans; the inference client does not guarantee a session-ID tag.
 // ═════════════════════════════════════════════════════════════════════════════
 static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionClient sessionClient)
 {
@@ -207,7 +207,7 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
 
     // Each conversation maps to a Temporal workflow. Reusing the same ID across
     // SendAsync calls routes all turns to the same workflow instance and keeps
-    // the conversation.id attribute consistent across all related spans.
+    // the gen_ai.conversation.id attribute consistent across send spans.
     var conversationId = $"otel-demo-{Guid.NewGuid():N}";
     Console.WriteLine($" Conversation ID: {conversationId}");
     Console.WriteLine($" (Search for this ID in the span output below)\n");
@@ -232,7 +232,7 @@ static async Task<IEnumerable<string>> RunMultiTurnDemoAsync(DurableChatSessionC
     Console.WriteLine("       RunActivity:GetChatStep");
     Console.WriteLine("         chat {model} (MEAI OpenTelemetryChatClient)");
     Console.WriteLine();
-    Console.WriteLine($" Filter by tag conversation.id = {conversationId}");
+    Console.WriteLine($" Filter send spans by gen_ai.conversation.id = {conversationId}, then follow the trace.");
     Console.WriteLine("════════════════════════════════════════════════════════\n");
 
     return new[] { conversationId };

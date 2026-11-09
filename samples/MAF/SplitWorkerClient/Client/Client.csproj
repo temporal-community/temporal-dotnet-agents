@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Temporalio.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 

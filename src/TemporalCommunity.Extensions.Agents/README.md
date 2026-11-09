@@ -198,7 +198,7 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 | `DefaultMaxEntryCount` | `int` | `1000` | Cap on `DurableSessionEntry` records (request + response pairs) before triggering continue-as-new |
 | `DefaultHistoryReducerKey` | `string?` | `null` | Key of a history reducer registered in DI and executed as an activity at continue-as-new boundaries |
 | `DefaultContextReducerKey` | `string?` | `null` | Key of an MEAI `IChatReducer` that shapes isolated prior-turn model context without changing retained history |
-| `DefaultRetryPolicy` | `RetryPolicy?` | `null` | Override the default retry policy for agent activities |
+| `DefaultRetryPolicy` | `RetryPolicy?` | `null` | Override the default retry policy for model and context-preparation activities; memory-scope initialization uses a fixed policy |
 | `DefaultActivityTimeout` | `TimeSpan` | `5 min` | Default start-to-close timeout for agent activities |
 | `DefaultApprovalTimeout` | `TimeSpan` | `7 days` | How long a HITL gate waits before auto-rejecting |
 

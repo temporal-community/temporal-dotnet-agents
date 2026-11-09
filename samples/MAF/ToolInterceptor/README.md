@@ -56,7 +56,7 @@ dotnet user-secrets set "TEMPORAL_ADDRESS" "your-server:7233" --project samples/
 ## Run
 
 ```bash
-dotnet run --project samples/MAF/ToolInterceptor/ToolInterceptor.csproj
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/ToolInterceptor/ToolInterceptor.csproj
 ```
 
 ## Expected output

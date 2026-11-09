@@ -9,6 +9,7 @@ using TemporalCommunity.Extensions.Agents.Internal;
 using TemporalCommunity.Extensions.Agents.Scheduling;
 using TemporalCommunity.Extensions.Agents.Workflows;
 using Temporalio.Extensions.Hosting;
+using Temporalio.Workflows;
 
 namespace TemporalCommunity.Extensions.Agents;
 
@@ -94,7 +95,10 @@ internal static class TemporalAgentsRegistrar
         if (builder is not null)
         {
             // Register the durable session workflow and activity implementations on this worker.
-            builder.AddWorkflow<AgentWorkflow>();
+            var workflowDefinition = AgentWorkflowWorkerFactory.CreateDefinition(
+                agentsOptions,
+                taskQueue);
+            builder.ConfigureOptions(options => options.AddWorkflow(workflowDefinition));
             builder.AddSingletonActivities<AgentActivities>();
 
         }

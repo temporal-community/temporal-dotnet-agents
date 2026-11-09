@@ -36,7 +36,8 @@ public interface ITemporalAgentClient
     /// <summary>
     /// Runs an agent by submitting a validated fire-and-forget update.
     /// Starts the workflow if it is not already running.
-    /// Returns immediately without waiting for the agent response.
+    /// Returns after observing the queueing update's outcome, without waiting for the agent
+    /// response. Admission failures are propagated to the caller.
     /// </summary>
     Task RunAgentFireAndForgetAsync(
         TemporalAgentSessionId sessionId,

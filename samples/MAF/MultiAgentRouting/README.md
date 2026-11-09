@@ -21,5 +21,5 @@ Start Temporal with the required search attributes and configure `OPENAI_API_KEY
 `OPENAI_API_BASE_URL`:
 
 ```bash
-dotnet run --project samples/MAF/MultiAgentRouting/MultiAgentRouting.csproj
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/MultiAgentRouting/MultiAgentRouting.csproj
 ```

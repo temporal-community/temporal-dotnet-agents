@@ -75,16 +75,6 @@ internal sealed class AgentStepInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TemporalAgentSessionId? SessionId { get; init; }
 
-    /// <summary>
-    /// When <see langword="true"/>, the activity resolves and returns the worker-side durable-agent
-    /// settings bundle so the workflow can patch its input on the first turn of a proxy-started
-    /// session.
-    /// Only set on the first step of the first turn when <see cref="AgentWorkflowInput.WorkerSettingsResolved"/>
-    /// is <see langword="false"/>.
-    /// Defaults to <see langword="false"/> for all existing callers.
-    /// </summary>
-    public bool NeedsWorkerSettingsResolution { get; init; }
-
     /// <summary>Maximum serialized activity payload size, including codec expansion allowance.</summary>
     public int MaximumTransportPayloadSizeBytes { get; init; } = 1024 * 1024;
 

@@ -22,7 +22,7 @@ var useOnDemandRecall = args.Contains("--on-demand", StringComparer.OrdinalIgnor
 var hostArgs = args.Where(argument =>
     !string.Equals(argument, "--on-demand", StringComparison.OrdinalIgnoreCase)).ToArray();
 
-var builder = Host.CreateApplicationBuilder(hostArgs);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = hostArgs, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 var apiKey = builder.Configuration.GetValue<string>("OPENAI_API_KEY");

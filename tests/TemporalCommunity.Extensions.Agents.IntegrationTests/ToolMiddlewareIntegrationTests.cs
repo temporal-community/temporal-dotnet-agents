@@ -134,7 +134,9 @@ public class ToolMiddlewareIntegrationTests
             var callbackCount = callbackIds.Count;
             var modelCount = model.CallCount;
             var replayOptions = new WorkflowReplayerOptions { DataConverter = TemporalAgentDataConverter.Instance };
-            replayOptions.AddWorkflow<AgentWorkflow>();
+            replayOptions.AddWorkflow(AgentWorkflowWorkerFactory.CreateDefinition(
+                host.Services.GetRequiredService<TemporalAgentsOptions>(),
+                taskQueue));
             var replay = await new WorkflowReplayer(replayOptions).ReplayWorkflowAsync(
                 await workflow.FetchHistoryAsync(), throwOnReplayFailure: false);
             Assert.Null(replay.ReplayFailure);

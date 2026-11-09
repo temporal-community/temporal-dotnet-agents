@@ -137,7 +137,9 @@ public class ContinueAsNewTests : IAsyncLifetime
         {
             DataConverter = TemporalAgentDataConverter.Instance,
         };
-        options.AddWorkflow<AgentWorkflow>();
+        options.AddWorkflow(AgentWorkflowWorkerFactory.CreateDefinition(
+            _host.Services.GetRequiredService<TemporalAgentsOptions>(),
+            _taskQueue));
         var replayer = new WorkflowReplayer(options);
         foreach (var history in new[] { originalHistory, resumedHistory })
         {

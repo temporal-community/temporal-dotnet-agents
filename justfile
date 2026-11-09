@@ -303,6 +303,7 @@ _verify-doc-snippets:
     bash scripts/verify-doc-snippet-coverage.sh
     @quiet() { out=$(bash "$1" 2>&1) || { printf '%s\n' "$out"; exit 1; }; }; quiet scripts/verify-doc-snippet-fidelity.selftest.sh
     bash scripts/verify-doc-snippet-fidelity.sh
+    python3 scripts/verify-copyable-doc-examples.py
 
 # Local build/unit/repository-check/package pipeline; excludes integration tests and credentialed sample canaries.
 ci: clean build test-unit _verify-sample-catalog _verify-doc-links _verify-doc-snippets pack
@@ -615,9 +616,11 @@ _sample-preflight:
         exit 127; \
     fi
     @if [ -z "$${OPENAI_API_KEY:-}" ]; then \
-        echo "ERROR: OPENAI_API_KEY is not set."; \
-        echo "  Set in your shell, or:  dotnet user-secrets set OPENAI_API_KEY sk-... --project samples/MEAI/DurableChat"; \
-        exit 2; \
+        if ! dotnet user-secrets list --project samples/MEAI/DurableChat 2>/dev/null | grep -q '^OPENAI_API_KEY = .'; then \
+            echo "ERROR: OPENAI_API_KEY is not set."; \
+            echo "  Set in your shell, or:  dotnet user-secrets set OPENAI_API_KEY sk-... --project samples/MEAI/DurableChat"; \
+            exit 2; \
+        fi; \
     fi
     @if ! nc -z localhost 7233 2>/dev/null; then \
         echo "ERROR: No Temporal server listening on localhost:7233."; \
@@ -871,7 +874,7 @@ _verify-sample-coverage:
         | grep -oE 'samples/MAF/[A-Za-z]+' | sort -u)
     actual_maf=$(find samples/MAF -mindepth 2 -type f -name '*.csproj' -exec dirname {} \; \
         | sed 's#^\(samples/MAF/[^/]*\).*#\1#' \
-        | grep -Ev '/(HumanInTheLoop|SplitWorkerClient)$' | sort -u)
+        | grep -Ev '/(ChatHistoryMemory|HumanInTheLoop|SplitWorkerClient)$' | sort -u)
     missing_maf=$(comm -23 <(echo "$actual_maf") <(echo "$declared_maf"))
     if [ -n "$missing_maf" ]; then
         echo "WARN: MAF samples missing from _test-samples-maf:"

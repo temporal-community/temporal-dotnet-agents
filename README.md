@@ -92,6 +92,9 @@ dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MEAI/Durable
 
 
 Non-sensitive settings (`OPENAI_API_BASE_URL`, `OPENAI_MODEL`, `TEMPORAL_ADDRESS`) have working defaults in each sample's committed `appsettings.json` where applicable, or directly in its code. They do not need user-secrets unless you want to override them.
+Provider-backed samples load their copied settings from the application output directory, so the
+repository-root commands below do not depend on the shell's working directory. Select Development
+to load user secrets (`$env:DOTNET_ENVIRONMENT = "Development"` in PowerShell).
 
 Alternatively, set `OPENAI_API_KEY` as an environment variable — the samples pick it up automatically via `IConfiguration`.
 
@@ -103,8 +106,8 @@ temporal server start-dev --namespace default \
   --search-attribute TurnCount=Int
 
 # Run a sample
-dotnet run --project samples/MEAI/DurableChat
-dotnet run --project samples/MAF/BasicAgent
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MEAI/DurableChat
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/BasicAgent
 ```
 
 ## Building

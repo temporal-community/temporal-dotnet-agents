@@ -20,9 +20,11 @@ dotnet run --project samples/MEAI/McpTools -- --dynamic
 Pinned `Protocol.Tool` definitions are model-schema authority, not server authentication or proof
 that an implementation remains compatible. Refresh them through review, authenticate the MCP
 transport, require exact ordinal names for sensitive tools, and apply explicit durable policy.
-Here `delete_inventory` is `NoRetry` and requires workflow-parked approval; the unexpected
-`server_admin` tool is not exposed in pinned mode. Dynamic discovery deliberately exposes the
-trusted catalog and is therefore intended for development or controlled servers.
+Both modes explicitly register only `lookup_inventory` and `delete_inventory`; the unexpected
+`server_admin` tool is not exposed in either mode. Dynamic mode obtains live schemas from the
+trusted server, while pinned mode uses reviewed, checked-in schemas. Here `delete_inventory` is
+`NoRetry` and requires workflow-parked approval, but this run requests only the lookup, not deletion
+or approval. Discovery alone does not register every advertised tool.
 
 ## Prerequisites
 

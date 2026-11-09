@@ -25,7 +25,7 @@ using TemporalCommunity.Extensions.AI.Approvals;
 using Temporalio.Exceptions;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning); // suppress Temporal SDK noise in the sample
 
 // ── Step 2: Load configuration ───────────────────────────────────────────────

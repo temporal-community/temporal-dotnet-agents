@@ -17,24 +17,22 @@ using Xunit.Abstractions;
 namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 
 /// <summary>
-/// C-5 (Wave 4) — proxy / split-deployment worker-settings resolution must survive a transient
-/// first-step failure. The first <c>RunDurableAgentStep</c> activity (which carries the resolution
-/// handshake on the proxy-started path) fails transiently; Temporal retries the activity, and the
-/// resolved config (e.g. <c>MaxToolCallsPerTurn</c>) is applied correctly on a later step — not
-/// lost or reset to the hard-coded default.
+/// A split-deployment session must retain worker-owned settings through transient model-step
+/// retries and continue-as-new. The workflow instance factory supplies these settings before the
+/// first turn, without a settings lookup activity.
 ///
 /// <para>
-/// We assert the resolved cap is honored on turn 2: a wrapping chat client throws on its very first
+/// We assert the worker-owned cap is honored on turn 2: a wrapping chat client throws on its very first
 /// call (failing the first activity attempt) then returns scripted responses. The agent is
 /// registered with <c>MaxToolCallsPerTurn = 2</c>; turn 2 scripts a loop tool. If resolution were
 /// lost the cap would reset to 20 and the scripted client would be over-consumed.
 /// </para>
 /// </summary>
 [Trait("Category", "Integration")]
-public class ProxyResolutionFailureTests
+public class WorkerSettingsRetryTests
 {
     [Fact]
-    public async Task FirstStepTransientFailure_ResolutionAppliedOnLaterStep()
+    public async Task FirstStepTransientFailure_WorkerSettingsRemainApplied()
     {
         await using var env = await TestEnvironmentHelper.StartLocalAsync();
         env.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
@@ -45,7 +43,7 @@ public class ProxyResolutionFailureTests
 
         var scripted = new ScriptedChatClient(
         [
-            // Turn 1: final answer (resolves settings; cap = resolvedCap).
+            // Turn 1: final answer; worker settings are present before this model step.
             new ChatResponse(new ChatMessage(ChatRole.Assistant, "Turn1Done")),
             // Turn 2: resolvedCap loop iterations, then a sentinel that must NOT be reached.
             new ChatResponse(new ChatMessage(ChatRole.Assistant, [loopTool])),
@@ -80,13 +78,13 @@ public class ProxyResolutionFailureTests
             var session = (TemporalAgentSession)await proxy.CreateSessionAsync();
 
             // Turn 1: the first step's activity fails once (transient), Temporal retries, then the
-            // resolution + chat succeed. The turn completes despite the transient failure.
+            // chat call succeed. The turn completes despite the transient failure.
             var r1 = await proxy.RunAsync("turn 1", session);
             Assert.Contains("Turn1Done", r1.Messages[^1].Text);
             Assert.True(transient.FailuresTriggered >= 1, "Expected a transient first-call failure.");
 
-            // Turn 2: loop tool. If the resolved cap (2) was correctly applied despite the
-            // first-step failure, the loop stops at 2 dispatches and the "ShouldNotBeReached"
+            // Turn 2: loop tool. If the worker-owned cap (2) was correctly applied despite the
+            // transient failure, the loop stops at 2 dispatches and the "ShouldNotBeReached"
             // response is never consumed. If resolution were lost (reset to 20), the scripted
             // client would throw on over-consumption and this call would fail.
             var r2 = await proxy.RunAsync("turn 2", session);

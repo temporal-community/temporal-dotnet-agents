@@ -8,14 +8,14 @@ namespace TemporalCommunity.Extensions.Agents.Tools;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Each property is independent of the others — leave a field <see langword="null"/> to inherit the
-/// worker-level default from <see cref="TemporalAgentsOptions"/> (<c>DefaultActivityTimeout</c>,
-/// <c>DefaultHeartbeatTimeout</c>, <c>DefaultRetryPolicy</c>).
+/// Unset timeouts inherit the agent setting, then the worker default. Tools use one attempt unless
+/// the agent's <see cref="DurableAgentBuilder.RetryPolicy"/> opts every tool into retries;
+/// <see cref="TemporalAgentsOptions.DefaultRetryPolicy"/> does not enable tool retries.
 /// </para>
 /// <para>
-/// Use <see cref="NoRetry"/> on write-style tools (send email, persist a record, charge a card) so
-/// non-idempotent re-execution does not occur on activity retry. Read-style tools generally inherit
-/// the default retry policy.
+/// Independent per-tool retry overrides are unsupported. <see cref="NoRetry"/> is accepted only
+/// when the agent policy uses one attempt; it cannot protect one tool from an agent-wide retry
+/// opt-in. Use downstream idempotency and reconcile uncertain external effects.
 /// </para>
 /// </remarks>
 public sealed class DurableToolOptions
@@ -33,8 +33,8 @@ public sealed class DurableToolOptions
     public TimeSpan? HeartbeatTimeout { get; set; }
 
     /// <summary>
-    /// Gets or sets the retry policy applied to this tool's activity dispatch.
-    /// When <see langword="null"/>, the worker-level default is used.
+    /// Gets or sets a compatibility retry setting. Only a one-attempt policy consistent with
+    /// the agent policy is accepted. Leave null to use the agent-level policy or one-attempt default.
     /// </summary>
     public RetryPolicy? RetryPolicy { get; set; }
 
@@ -62,13 +62,13 @@ public sealed class DurableToolOptions
     public bool RequireApprovalFlag { get; private set; }
 
     /// <summary>
-    /// Disables retries for this tool by setting <see cref="RetryPolicy"/> to a policy with
+    /// Declares one attempt for this tool by setting <see cref="RetryPolicy"/> to a policy with
     /// <see cref="RetryPolicy.MaximumAttempts"/> equal to <c>1</c>.
     /// </summary>
     /// <returns>This instance, for fluent chaining.</returns>
     /// <remarks>
-    /// Use for non-idempotent / write-style tools so a transient activity failure does not cause
-    /// double-execution (e.g. sending the same email twice).
+    /// Rejected when the explicit agent policy enables retries. A worker-level model policy does
+    /// not affect this tool setting.
     /// </remarks>
     public DurableToolOptions NoRetry()
     {
@@ -80,6 +80,10 @@ public sealed class DurableToolOptions
     /// Sets <see cref="RetryPolicy"/> to a policy with <see cref="RetryPolicy.MaximumAttempts"/>
     /// equal to <paramref name="maxAttempts"/>.
     /// </summary>
+    /// <remarks>
+    /// Values above one are rejected during durable dispatch configuration. Configure retries
+    /// through the agent policy instead; it applies to every tool on the agent.
+    /// </remarks>
     /// <param name="maxAttempts">Maximum number of attempts; must be greater than zero.</param>
     /// <returns>This instance, for fluent chaining.</returns>
     /// <exception cref="ArgumentOutOfRangeException">

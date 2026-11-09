@@ -47,27 +47,23 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 
     public bool MemoryInitializationChecked { get; init; }
 
-    // RetryPolicy is inherited from DurableChatWorkflowInput. It applies to the model step;
-    // tool activities use one attempt unless the agent explicitly opts all tools into this policy.
+    // RetryPolicy is inherited from DurableChatWorkflowInput and applies to the model step;
+    // tools use one attempt unless an explicit per-agent policy opts all tools into retries.
 
     /// <summary>
-    /// Gets the bundle of worker-side settings resolved either eagerly at workflow start
-    /// (when <c>AddDurableAgent</c> registered this worker) or lazily on the first step of the
-    /// first turn (proxy-started workflows). <see langword="null"/> means proxy-started and not
-    /// yet resolved — the workflow must request resolution via
-    /// <see cref="AgentStepInput.NeedsWorkerSettingsResolution"/>.
+    /// Gets the worker-owned execution settings supplied by the workflow instance factory and
+    /// carried in continue-as-new input.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public ProxyResolvedWorkerConfig? ResolvedWorkerConfig { get; init; }
+    public AgentWorkerToolConfig? ResolvedWorkerConfig { get; init; }
 
-    // ── Workflow accessors for the resolved worker settings bundle ───────────
+    // ── Workflow accessors for the worker-owned execution settings ───────────
 
     /// <summary>
     /// Maximum number of LLM-step iterations within a single agent turn. Each iteration may
     /// dispatch a serial batch of tool activities. When the cap is exceeded the workflow
     /// returns a structured error response. Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.MaxToolCallsPerTurn"/>;
-    /// defaults to <c>20</c> when the config has not yet been resolved (proxy-started, pre-handshake).
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="AgentWorkerToolConfig.MaxToolCallsPerTurn"/>.
     /// </summary>
     /// <remarks>
     /// Shadows <see cref="DurableChatWorkflowInput.MaxToolCallsPerTurn"/>. The base property
@@ -80,41 +76,22 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 
     /// <summary>
     /// Pre-computed per-tool <see cref="ActivityOptions"/> indexed by tool name (case-insensitive).
-    /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.ToolActivityOptions"/>;
-    /// <see langword="null"/> when the config has not yet been resolved.
+    /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="AgentWorkerToolConfig.ToolActivityOptions"/>;
+    /// <see langword="null"/> when no durable tools are registered.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Where the dictionary is built depends on how the session started. A worker-started session
-    /// gets it from <c>DefaultTemporalAgentClient</c> at workflow start. A proxy-started session
-    /// has no registration on the client, so <see cref="ResolvedWorkerConfig"/> begins
-    /// <see langword="null"/> and the worker resolves the bundle on the first activity dispatch of
-    /// the first turn via the <c>NeedsWorkerSettingsResolution</c> handshake.
-    /// </para>
-    /// <para>
-    /// Either way the bundle is pinned once and never re-read from the registration afterwards, so
-    /// retry constraints — especially <c>MaximumAttempts = 1</c> on write tools — cannot drift
-    /// while a session is running. Continue-as-new carries the same dictionary forward so retry
-    /// semantics survive across CAN transitions.
-    /// </para>
+    /// The worker instance factory builds this map before workflow initialization. Continue-as-new
+    /// carries the same values forward so retry semantics survive across transitions.
     /// </remarks>
     [JsonIgnore]
     public IReadOnlyDictionary<string, ActivityOptions>? DurableAgentToolActivityOptions =>
         ResolvedWorkerConfig?.ToolActivityOptions;
 
-    /// <summary>
-    /// <see langword="true"/> when worker-side settings are already baked into this input (i.e.,
-    /// <see cref="ResolvedWorkerConfig"/> is non-<see langword="null"/>). <see langword="false"/>
-    /// for proxy-started workflows that must resolve settings via the first-step handshake.
-    /// </summary>
-    [JsonIgnore]
-    public bool WorkerSettingsResolved => ResolvedWorkerConfig is not null;
-
     // ── Feature L forwarding properties ──
 
     /// <summary>
     /// Pre-computed <see cref="ActivityOptions"/> for <c>RunToolInterceptor</c> dispatches.
-    /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.InterceptorActivityOptions"/>;
+    /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="AgentWorkerToolConfig.InterceptorActivityOptions"/>;
     /// <see langword="null"/> when no interceptor is configured or config is not yet resolved.
     /// </summary>
     [JsonIgnore]
@@ -123,7 +100,7 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 
     /// <summary>
     /// Per-tool <see cref="ActivityOptions"/> for interceptor dispatches with custom timeouts.
-    /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.InterceptorToolActivityOptions"/>.
+    /// Forwards to <see cref="ResolvedWorkerConfig"/>.<see cref="AgentWorkerToolConfig.InterceptorToolActivityOptions"/>.
     /// </summary>
     [JsonIgnore]
     public new IReadOnlyDictionary<string, ActivityOptions>? InterceptorToolActivityOptions =>
@@ -131,7 +108,7 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 
     /// <summary>
     /// Names of tools that skip the interceptor. Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.InterceptorSkippedTools"/>.
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="AgentWorkerToolConfig.InterceptorSkippedTools"/>.
     /// </summary>
     [JsonIgnore]
     public new IReadOnlyList<string>? InterceptorSkippedTools =>
@@ -139,7 +116,7 @@ internal sealed record class AgentWorkflowInput : DurableChatWorkflowInput
 
     /// <summary>
     /// Names of tools that always require human approval (Rule 2). Forwards to
-    /// <see cref="ResolvedWorkerConfig"/>.<see cref="ProxyResolvedWorkerConfig.RequiresApprovalTools"/>.
+    /// <see cref="ResolvedWorkerConfig"/>.<see cref="AgentWorkerToolConfig.RequiresApprovalTools"/>.
     /// </summary>
     [JsonIgnore]
     public new IReadOnlyList<string>? RequiresApprovalTools =>

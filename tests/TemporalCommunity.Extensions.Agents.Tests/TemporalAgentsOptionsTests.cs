@@ -77,16 +77,17 @@ public class TemporalAgentsOptionsTests
     }
 
     [Fact]
-    public void GetTimeToLive_NoPerAgentTtl_FallsBackToDefault()
+    public void TimeToLive_NoPerAgentTtl_UsesWorkerDefault()
     {
         var options = new TemporalAgentsOptions { DefaultTimeToLive = TimeSpan.FromDays(7) };
         options.AddDurableAgent("Agent", agent => agent.ChatClient = NewChatClient());
 
-        Assert.Equal(TimeSpan.FromDays(7), options.GetTimeToLive("Agent"));
+        Assert.Null(options.DurableAgentRegistrations["Agent"].TimeToLive);
+        Assert.Equal(TimeSpan.FromDays(7), options.DefaultTimeToLive);
     }
 
     [Fact]
-    public void GetTimeToLive_PerAgentTtl_OverridesDefault()
+    public void TimeToLive_PerAgentOverride_IsStoredOnRegistration()
     {
         var options = new TemporalAgentsOptions { DefaultTimeToLive = TimeSpan.FromDays(14) };
         var perAgentTtl = TimeSpan.FromHours(1);
@@ -97,14 +98,7 @@ public class TemporalAgentsOptionsTests
             agent.TimeToLive = perAgentTtl;
         });
 
-        Assert.Equal(perAgentTtl, options.GetTimeToLive("FastAgent"));
-    }
-
-    [Fact]
-    public void GetTimeToLive_UnknownAgent_ReturnsDefault()
-    {
-        var options = new TemporalAgentsOptions { DefaultTimeToLive = TimeSpan.FromDays(3) };
-        Assert.Equal(TimeSpan.FromDays(3), options.GetTimeToLive("NonExistentAgent"));
+        Assert.Equal(perAgentTtl, options.DurableAgentRegistrations["FastAgent"].TimeToLive);
     }
 
     [Fact]
@@ -324,7 +318,7 @@ public class TemporalAgentsOptionsTests
 
         var registration = options.DurableAgentRegistrations["Weather"];
 
-        Assert.Equal(TimeSpan.FromDays(14), options.GetTimeToLive("Weather"));
+        Assert.Equal(TimeSpan.FromDays(14), options.DefaultTimeToLive);
         Assert.Null(registration.ActivityTimeout);
         Assert.Null(registration.HeartbeatTimeout);
         Assert.Null(registration.ToolMiddleware);
@@ -343,7 +337,7 @@ public class TemporalAgentsOptionsTests
         var registration = options.DurableAgentRegistrations["Weather"];
 
         Assert.Same(chatClient, registration.ChatClient(new ServiceCollection().BuildServiceProvider()));
-        Assert.Equal(TimeSpan.FromDays(14), options.GetTimeToLive("Weather"));
+        Assert.Equal(TimeSpan.FromDays(14), options.DefaultTimeToLive);
         Assert.Null(registration.ActivityTimeout);
         Assert.Null(registration.ToolMiddleware);
         Assert.Empty(registration.ContextProviderFactories);

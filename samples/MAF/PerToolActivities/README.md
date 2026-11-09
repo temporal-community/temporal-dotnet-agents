@@ -4,8 +4,8 @@ This sample demonstrates **per-tool Temporal activities** in
 `TemporalCommunity.Extensions.Agents`. Every LLM call is its own
 `RunDurableAgentStep` activity, and every model-requested tool call is its own
 `InvokeAgentTool` activity. Calls in one model response execute serially in model
-order. Tool activities get one attempt by default; retries are an explicit
-per-agent opt-in that applies to all tools.
+order. Tool activities get one attempt by default; the per-agent retry policy opts
+all tools on that agent into retries. The worker-level retry policy applies to model steps only.
 
 For the conceptual background, see
 [`docs/how-to/MAF/durable-agents.md`](../../../docs/how-to/MAF/durable-agents.md).
@@ -19,7 +19,7 @@ calls to resolve it:
 
 | Tool | Type | Default activity attempts | Why |
 |---|---|---:|---|
-| `lookup_order` | Read | **1** | Retries require an explicit agent-level policy |
+| `lookup_order` | Read | **1** | Retries require an explicit agent policy |
 | `apply_refund` | Write | **1** | Avoids automatic duplicate refunds after uncertain completion |
 | `send_email` | Write | **1** | Avoids automatic duplicate delivery after uncertain completion |
 
@@ -64,7 +64,7 @@ of record before manually retrying.
 ## Run
 
 ```bash
-dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/PerToolActivities/PerToolActivities.csproj
 ```
 
 After the scenarios complete, open the Temporal Web UI at

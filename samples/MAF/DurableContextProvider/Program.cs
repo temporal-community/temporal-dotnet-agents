@@ -28,7 +28,7 @@ using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.Tools;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddFilter("TemporalCommunity.Extensions.Agents", LogLevel.Information);
 

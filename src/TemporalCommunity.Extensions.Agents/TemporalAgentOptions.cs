@@ -22,9 +22,10 @@ public sealed class TemporalAgentOptions
     /// <returns>This options instance.</returns>
     /// <remarks>
     /// The provider's state is initialized in a dedicated activity before the first model call and
-    /// is retained in the workflow-owned session StateBag. The initializer has a 30-second
-    /// start-to-close timeout and two maximum attempts (one retry after one second), with no
-    /// heartbeat timeout. If no initializer is supplied, storage and search are scoped to the
+    /// is retained in the workflow-owned session StateBag. Initialization uses a fixed 30-second
+    /// start-to-close timeout, two maximum attempts, and a one-second initial retry interval; it
+    /// does not heartbeat. The initializer may run more than once after an activity failure and
+    /// must be safe to repeat. If no initializer is supplied, storage and search are scoped to the
     /// current agent and Temporal session.
     /// </remarks>
     public TemporalAgentOptions UseChatHistoryMemory(
@@ -45,16 +46,23 @@ public sealed class TemporalAgentOptions
     /// <summary>Gets or sets the session workflow time-to-live.</summary>
     public TimeSpan? TimeToLive { get; set; }
 
-    /// <summary>Gets or sets the activity start-to-close timeout for model-step activities.</summary>
+    /// <summary>Gets or sets the per-attempt model/preparation timeout and the default tool/interceptor timeout.</summary>
     public TimeSpan? ActivityTimeout { get; set; }
 
-    /// <summary>Gets or sets the activity heartbeat timeout for model-step activities.</summary>
+    /// <summary>Gets or sets the model/preparation heartbeat timeout and the default tool/interceptor heartbeat timeout.</summary>
     public TimeSpan? HeartbeatTimeout { get; set; }
 
     /// <summary>Gets or sets the timeout for a pending per-call approval.</summary>
     public TimeSpan? ApprovalTimeout { get; set; }
 
-    /// <summary>Gets or sets the retry policy for model-step activities.</summary>
+    /// <summary>
+    /// Gets or sets the per-agent retry policy. It overrides the worker default for model-step
+    /// and context-preparation activities and opts every tool and interceptor on this agent into
+    /// the same policy. Memory-scope initialization uses its dedicated fixed policy. When null,
+    /// model and context-preparation activities inherit
+    /// <see cref="TemporalAgentsOptions.DefaultRetryPolicy"/>, while tools and interceptors use one
+    /// attempt. Enable retries only when every tool is safe to repeat.
+    /// </summary>
     public RetryPolicy? RetryPolicy { get; set; }
 
     /// <summary>Gets or sets the retained conversation-history entry limit.</summary>

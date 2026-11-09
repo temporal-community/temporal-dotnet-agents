@@ -88,8 +88,10 @@ catalogs fails loudly rather than silently shadowing a tool.
 This is the part worth reading before `AddTools(discovered)`.
 
 Every tool activity gets **one attempt by default**, including tools added through `AddTools`.
-Retries are opted into through `agent.RetryPolicy` and apply to every tool on that agent; there is
-no per-tool retry override. This protects effectful tools from automatic re-execution after an
+Retries are opted into through `agent.RetryPolicy` and apply to every tool on that agent; the
+worker-level `opts.DefaultRetryPolicy` applies to model steps and context preparation only;
+memory-scope initialization uses a separate fixed policy.
+There is no per-tool retry override. This protects effectful tools from automatic re-execution after an
 ambiguous activity failure.
 
 An explicit agent retry policy also retries write-style tools. Only use it when all of the agent's

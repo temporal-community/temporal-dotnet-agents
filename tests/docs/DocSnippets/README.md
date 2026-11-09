@@ -83,6 +83,13 @@ exists.
 | `just build` | every snippet compiles |
 | `just _verify-doc-snippets` | two self-tests, then: every qualifying doc block has a compiled counterpart, and every snippet still matches the doc block it quotes |
 
+The same recipe also runs `scripts/verify-copyable-doc-examples.py`. It extracts the complete MAF
+quickstart (including its application-defined weather service), split client, MAF agent/spy
+doubles, and MEAI session-client stub directly from their Markdown fences into temporary projects.
+Those builds use the repository's pinned dependency versions; quickstart provider packages come
+from its documented installation commands. This catches missing abstract/interface members and
+missing provider dependencies that a partial registration snippet cannot prove.
+
 `just _verify-doc-snippets` runs `scripts/verify-doc-snippets.selftest.sh` first. That self-test
 copies this project, drops the name argument from a real `AddTool` call, and **requires the build to
 fail**. Without it, a harness whose files silently stopped being compiled would report success

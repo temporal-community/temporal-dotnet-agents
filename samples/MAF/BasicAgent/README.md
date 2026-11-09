@@ -29,13 +29,13 @@ cancels only the caller's RPC wait after 200 ms, then queries the outcome; this 
 ambiguous acknowledgement, not actual lost transport completion:
 
 ```bash
-dotnet run --project samples/MAF/BasicAgent -- --recovery-demo ./turn-receipt.json
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/BasicAgent -- --recovery-demo ./turn-receipt.json
 ```
 
 To resume reconciliation in a fresh process, use the same server/namespace and receipt:
 
 ```bash
-dotnet run --project samples/MAF/BasicAgent -- --recover ./turn-receipt.json
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/BasicAgent -- --recover ./turn-receipt.json
 ```
 
 The dispatch demo refuses to overwrite an existing receipt. Recover with that receipt or choose a
@@ -65,8 +65,10 @@ dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --proj
 
 ### Run
 
+From the repository root, select Development so Generic Host loads the configured user secrets:
+
 ```bash
-dotnet run --project samples/MAF/BasicAgent/BasicAgent.csproj
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/BasicAgent/BasicAgent.csproj
 ```
 
 ### Expected Output

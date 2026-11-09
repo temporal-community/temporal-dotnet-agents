@@ -18,7 +18,7 @@ internal static class ActivityTimeouts
             .AddHostedTemporalWorker("agents")
             .AddTemporalAgents(opts =>
             {
-                // Increase for slow models or long tool-call chains
+                // Increase for a slow model or tool activity attempt
                 opts.DefaultActivityTimeout = TimeSpan.FromMinutes(10);
 
                 // Increase for long-running model calls

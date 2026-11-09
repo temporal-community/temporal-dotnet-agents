@@ -20,18 +20,15 @@ public class WorkerModelContextBudgetTests
     private const string AgentName = "BudgetAgent";
 
     [Theory]
-    [InlineData(null, 1024, true)]
-    [InlineData(100000, 0, true)]
-    [InlineData(null, 1024, false)]
-    [InlineData(100000, 0, false)]
+    [InlineData(null, 1024)]
+    [InlineData(100000, 0)]
     public async Task Step_EnforcesWorkerBudget_WithMissingOrConflictingFrontendSettings(
         int? frontendLimit,
-        int frontendReserve,
-        bool needsResolution)
+        int frontendReserve)
     {
         var client = new RecordingChatClient();
         using var services = BuildServices(client);
-        var input = MakeInput(new string('x', 70), frontendLimit, frontendReserve, needsResolution);
+        var input = MakeInput(new string('x', 70), frontendLimit, frontendReserve);
 
         var failure = await Assert.ThrowsAsync<ApplicationFailureException>(
             () => RunAsync(services, input));
@@ -41,16 +38,14 @@ public class WorkerModelContextBudgetTests
         Assert.Equal(0, client.CallCount);
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Step_IgnoresStricterFrontendBudget_AndUsesWorkerReserve(bool needsResolution)
+    [Fact]
+    public async Task Step_IgnoresStricterFrontendBudget_AndUsesWorkerReserve()
     {
         var client = new RecordingChatClient();
         using var services = BuildServices(client);
         var result = await RunAsync(
             services,
-            MakeInput(new string('x', 60), frontendLimit: 1, frontendReserve: 0, needsResolution));
+            MakeInput(new string('x', 60), frontendLimit: 1, frontendReserve: 0));
 
         Assert.True(result.IsFinal);
         Assert.Equal(1, client.CallCount);
@@ -112,7 +107,6 @@ public class WorkerModelContextBudgetTests
             CurrentTurnStartIndex = 2,
             PreviousTurnRanges = [new DurableChatTurnRange(0, 2, IsProtected: false)],
             SessionId = TemporalAgentSessionId.WithRandomKey(AgentName),
-            NeedsWorkerSettingsResolution = true,
         };
 
         await RunAsync(services, input);
@@ -184,7 +178,7 @@ public class WorkerModelContextBudgetTests
         });
 
         var failure = Assert.Throws<InvalidOperationException>(() =>
-            DefaultTemporalAgentClient.BuildAgentWorkflowInputCore(AgentName, options, "worker"));
+            DefaultTemporalAgentClient.BuildWorkerAgentWorkflowInputCore(AgentName, options, "worker"));
 
         Assert.Contains("effective model-context token budget", failure.Message);
     }
@@ -192,8 +186,7 @@ public class WorkerModelContextBudgetTests
     private static AgentStepInput MakeInput(
         string text,
         int? frontendLimit = null,
-        int frontendReserve = 1024,
-        bool needsResolution = false) => new()
+        int frontendReserve = 1024) => new()
         {
             AgentName = AgentName,
             Request = new RunRequest(text),
@@ -201,7 +194,6 @@ public class WorkerModelContextBudgetTests
             SessionId = TemporalAgentSessionId.WithRandomKey(AgentName),
             MaxModelContextTokens = frontendLimit,
             ModelOutputTokenReserve = frontendReserve,
-            NeedsWorkerSettingsResolution = needsResolution,
         };
 
     private static ServiceProvider BuildServices(

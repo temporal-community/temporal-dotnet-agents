@@ -34,7 +34,8 @@ public sealed class TemporalAgentRunOptions : AgentRunOptions
 
     /// <summary>
     /// Gets or sets whether to fire and forget the request.
-    /// When <c>true</c>, the proxy sends a workflow Update and returns immediately with an empty response.
+    /// When <c>true</c>, the proxy observes the queueing Update's outcome and returns an empty
+    /// response without waiting for the turn to finish. Admission failures are propagated.
     /// </summary>
     public bool IsFireAndForget { get; set; }
 

@@ -14,7 +14,7 @@ IReadOnlyList<McpClientTool> tools;
 
 if (useDynamicDiscovery)
 {
-    // Development/trusted-catalog mode: every currently advertised tool is exposed.
+    // Development/trusted-catalog mode: discover live schemas, then select the two sample tools.
     tools = [.. await mcp.Client.ListToolsAsync()];
 }
 else

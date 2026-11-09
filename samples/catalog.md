@@ -31,10 +31,10 @@ Intermediate samples covering tool interceptors, context providers, approvals, a
 | Sample | Stack | Intent | Execution Mode | Current run status |
 | --- | --- | --- | --- | --- |
 | [AmbientAgent](MAF/AmbientAgent/) | MAF | Signal-driven ambient monitoring agent | Unattended Script | Automated: `just test-samples` |
-| [ChatHistoryMemory](MAF/ChatHistoryMemory/) | MAF | Session-scoped episodic memory with an in-memory vector store | Unattended Script | Manual |
+| [ChatHistoryMemory](MAF/ChatHistoryMemory/) | MAF | Session-scoped episodic memory with an in-memory vector store | Interactive Console | Manual |
 | [ContextProviders](MAF/ContextProviders/) | MAF | Retry-safe custom `AIContextProvider` implementations | Unattended Script | Automated: `just test-samples` |
 | [CustomWorkflow](MEAI/CustomWorkflow/) | MEAI | Extend the managed durable workflow with domain output | Unattended Script | Automated: `just test-samples` |
-| [DirectAdapters](MEAI/DirectAdapters/) | MEAI | Hand-written Activity + `AsDurable()` for low-level custom workflows | Unattended Script | Manual |
+| [DirectAdapters](MEAI/DirectAdapters/) | MEAI | Hand-written Activity + `AsDurable()` for low-level custom workflows | Unattended Script | Automated: `just test-samples` |
 | [DurableContextProvider](MAF/DurableContextProvider/) | MAF | Context-provided tools declared as durable activities | Unattended Script | Automated: `just test-samples` |
 | [EvaluatorOptimizer](MAF/EvaluatorOptimizer/) | MAF | Generator and evaluator loop | Unattended Script | Automated: `just test-samples` |
 | [ExtensibleDurableTurns](MEAI/ExtensibleDurableTurns/) | MEAI | Typed turn input/state with package-managed activities | Unattended Script | Automated: `just test-samples` |
@@ -42,7 +42,7 @@ Intermediate samples covering tool interceptors, context providers, approvals, a
 | [HumanInTheLoop](MEAI/HumanInTheLoop/) | MEAI | Workflow-owned approval gates | Interactive Console | Automated: `just test-samples` |
 | [MixedActivities](MAF/MixedActivities/) | MAF | Ordinary and AI activities in one workflow | Unattended Script | Automated: `just test-samples` |
 | [Middleware](MAF/Middleware/) | MAF | Caller guard, model transport and scoped tool middleware | Unattended Script | Automated: `just test-samples` |
-| [PerToolActivities](MAF/PerToolActivities/) | MAF | Per-tool retry, timeout, and no-retry write policies | Unattended Script | Automated: `just test-samples` |
+| [PerToolActivities](MAF/PerToolActivities/) | MAF | Serial tool activities, tool selection, and one-attempt failure behavior | Unattended Script | Automated: `just test-samples` |
 | [ScheduledChat](MEAI/ScheduledChat/) | MEAI | Native schedules start trigger workflows that submit occurrence-deduplicated chat turns | Unattended Script | Automated: `just test-samples` |
 | [ToolInterceptor](MAF/ToolInterceptor/) | MAF | Proceed, pause, skip, or block before a tool executes | Unattended Script | Automated: `just test-samples` |
 | [ToolInterceptor](MEAI/ToolInterceptor/) | MEAI | Intercept, pause, skip, or block tool calls | Unattended Script | Automated: `just test-samples` |
@@ -55,11 +55,11 @@ Multi-process architectures, MCP tool servers, telemetry, and advanced security.
 
 | Sample | Stack | Intent | Execution Mode | Current run status |
 | --- | --- | --- | --- | --- |
-| [McpTools](MAF/McpTools/) | MAF | Pinned or trusted MCP tools dispatched as durable activities | Unattended Script | Manual |
-| [McpTools](MEAI/McpTools/) | MEAI | Pinned or trusted MCP tools as durable functions | Unattended Script | Manual |
+| [McpTools](MAF/McpTools/) | MAF | Pinned or trusted MCP tools dispatched as durable activities | Unattended Script | Automated: `just test-samples` |
+| [McpTools](MEAI/McpTools/) | MEAI | Pinned or trusted MCP tools as durable functions | Unattended Script | Automated: `just test-samples` |
 | [MultiAgentRouting](MAF/MultiAgentRouting/) | MAF | Routing, parallel agent execution, and OpenTelemetry | Unattended Script | Automated: `just test-samples` |
 | [OpenTelemetry](MEAI/OpenTelemetry/) | MEAI | OpenTelemetry traces, metrics, and usage ownership | Unattended Script | Automated: `just test-samples` |
-| [PayloadCodec](MEAI/PayloadCodec/) | MEAI | Opt-in bounded gzip payload compression | Unattended Script | Manual |
+| [PayloadCodec](MEAI/PayloadCodec/) | MEAI | Opt-in bounded gzip payload compression | Unattended Script | Automated: `just test-samples` |
 | [SplitWorkerClient](MAF/SplitWorkerClient/) | MAF | Worker and client hosted in separate processes | Multi-Process | Manual |
 | [WorkflowOrchestration](MAF/WorkflowOrchestration/) | MAF | Invoke registered agent proxies from workflow activities | Unattended Script | Automated: `just test-samples` |
 | [WorkflowRouting](MAF/WorkflowRouting/) | MAF | Static and dynamic durable routing | Unattended Script | Automated: `just test-samples` |

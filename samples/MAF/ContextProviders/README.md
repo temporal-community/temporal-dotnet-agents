@@ -38,7 +38,7 @@ dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --proj
 ### Run
 
 ```bash
-dotnet run --project samples/MAF/ContextProviders/ContextProviders.csproj
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/ContextProviders/ContextProviders.csproj
 ```
 
 ### Expected Output

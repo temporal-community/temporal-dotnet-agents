@@ -8,7 +8,7 @@ namespace TemporalCommunity.Extensions.Agents.Tests;
 
 /// <summary>
 /// coverage for the per-agent settings-inheritance rule applied by
-/// <c>DefaultTemporalAgentClient.BuildAgentWorkflowInputCore</c>. For every settable scalar on
+/// <c>DefaultTemporalAgentClient.BuildWorkerAgentWorkflowInputCore</c>. For every settable scalar on
 /// <see cref="DurableAgentBuilder"/>, the rule is
 /// <c>effective = registration.X ?? options.X</c> — when the agent overrides a setting it wins;
 /// when the agent leaves it null the worker-level default applies.
@@ -22,7 +22,7 @@ public class DurableAgentSettingsInheritanceTests
     private static AgentWorkflowInput Build(
         TemporalAgentsOptions options,
         string agentName = "DurableAgent") =>
-        DefaultTemporalAgentClient.BuildAgentWorkflowInputCore(agentName, options, TaskQueue);
+        DefaultTemporalAgentClient.BuildWorkerAgentWorkflowInputCore(agentName, options, TaskQueue);
 
     private static TemporalAgentsOptions OptionsWithDurableAgent(
         Action<DurableAgentBuilder>? configureAgent = null,
@@ -261,9 +261,7 @@ public class DurableAgentSettingsInheritanceTests
     [Fact]
     public void WhenDurableAgentToolHasNoOverride_PerToolInheritsAgentRetryPolicy()
     {
-        // Agent-level RetryPolicy applies to the LLM step but ALSO acts as the tool default
-        // when the per-tool DurableToolOptions doesn't override RetryPolicy. This matches the
-        // hierarchy described in Q11a (worker default → agent default → per-tool override).
+        // The agent policy applies uniformly to model and tool activities.
         var agentPolicy = new RetryPolicy { MaximumAttempts = 7 };
         var options = OptionsWithDurableAgent(configureAgent: a =>
         {

@@ -10,7 +10,7 @@ This document explains how these three collaborating concepts fit together, why 
 |---|---|---|
 | `TemporalAgentSession` | TemporalAgents | Temporal-specific `AgentSession`; carries `SessionId` and `StateBag`; created fresh per activity |
 | `AgentSessionStateBag` | Microsoft Agent Framework | Thread-safe key-value store; holds per-session state across activity attempts and workers |
-| `AIContextProvider` | Microsoft Agent Framework | Pluggable component that enriches (or stores) context before/after each LLM call |
+| `AIContextProvider` | Microsoft Agent Framework | Prepares context once per logical turn and observes terminal turn completion |
 
 They are not a chain — they are **three roles** inside a single execution pipeline. The `TemporalAgentSession` *contains* the `StateBag`; the `AIContextProvider` *reads from and writes to* that `StateBag`.
 
@@ -18,7 +18,10 @@ They are not a chain — they are **three roles** inside a single execution pipe
 
 ## Why the StateBag Exists
 
-Provider identity depends on how it is registered: an instance overload can deliberately reuse an instance, while a factory is invoked from a fresh activity scope for every LLM-step activity attempt. Neither lifetime is a session-lifetime guarantee: an activity can retry, run on a different worker, or overlap another session. A provider must not store per-session data in its own fields.
+Provider identity depends on registration: an instance overload can reuse an instance, while a
+factory resolves from fresh preparation and terminal-notification activity scopes. Neither is a
+session-lifetime guarantee: activities can retry, move workers, or overlap sessions. Do not retain
+per-session data in provider fields.
 
 The `AgentSessionStateBag` is the solution: each `AgentSession` owns its own bag, and each provider uses a unique string key to store its slice of data there.
 
@@ -37,33 +40,29 @@ The provider reads the right state by keying into the session's bag — it never
 
 ## The AIContextProvider Two-Phase Lifecycle
 
-Every `AIContextProvider` participates in two named hooks, called by `ChatClientAgent` during `RunAsync`:
+The managed workflow owns the two hooks; it does not let `ChatClientAgent` run them around every
+model step. Hook invocations can repeat on an activity retry, but completed activity results replay
+from history.
 
-### Phase 1 — `InvokingAsync` (before the LLM call)
+### Phase 1 — `InvokingAsync` (logical-turn preparation)
 
-The provider reads state from the `StateBag`, contacts any external service if needed, and **returns additional context** (messages, instructions, tools) that gets merged into the prompt before it's sent to the model.
+`PrepareAgentTurn` restores the session StateBag and seeds registered tools, messages, and
+instructions. Providers enrich or filter that context. The activity records the final selection
+and key-level StateBag delta; every model step in the turn reuses that prepared context.
 
-### Phase 2 — `InvokedAsync` (after the LLM call)
+### Phase 2 — `InvokedAsync` (terminal turn notification)
 
-The provider receives the full request + response messages, does any post-processing (store new memories, update state), and writes updated state back into the `StateBag`.
+`CompleteAgentTurn` notifies providers after success, failure, or cancellation, with the terminal
+messages and exception as applicable. Factories may return a different provider instance than
+preparation did. Session state must travel through the StateBag, not instance fields. Generic
+provider-owned external history/writes are unsupported without a dedicated durable adapter.
 
 ```
-agent.RunAsync("What's the weather?", session)
-│
-├── ChatHistoryProvider.InvokingAsync   ← inject prior conversation
-│
-├── AIContextProvider.InvokingAsync     ← enrich with external memory/context
-│     ├── read StateBag["Mem0Provider"] → get scoping params
-│     ├── search external Mem0 service  → get relevant memories
-│     └── return injected ChatMessages  → merged into prompt
-│
-├── IChatClient.GetResponseAsync()      ← LLM call (enriched prompt)
-│
-├── AIContextProvider.InvokedAsync      ← store results
-│     ├── read StateBag["Mem0Provider"] → get scoping params
-│     └── POST messages to Mem0 service → store new memories
-│
-└── return AgentResponse
+AgentWorkflow logical turn
+  PrepareAgentTurn: InvokingAsync -> recorded context and StateBag delta
+  RunDurableAgentStep -> serial tool activities -> next model step
+  CompleteAgentTurn: InvokedAsync -> terminal StateBag delta
+  Commit success, or restore pre-turn StateBag on failure/cancellation
 ```
 
 ### How `AIContext` output is applied (Wave C behaviour)
@@ -74,9 +73,8 @@ The three fields on the `AIContext` returned by `InvokingAsync` are handled diff
 >
 > **`AIContext.Messages`** — applied. The final aggregated `Messages` list becomes the conversation context passed to the LLM. Same chaining semantics as `Instructions`.
 >
-> **`AIContext.Tools`** — not used directly. A provider that merely returns tools from
-> `InvokingAsync` is ignored and logged once per turn because those tools have no durable
-> registration. To supply provider-owned durable tools, either implement `IDurableToolSource` on
+> **`AIContext.Tools`** — selects registered durable tools for the turn. New untraceable
+> functions fail before model dispatch. To supply provider-owned durable tools, implement `IDurableToolSource` on
 > the provider or pass `DurableToolRegistrationSpec` values to
 > `AddContextProvider(provider, durableTools)`. The builder registers those functions through
 > the same per-tool activity path as `agent.AddTool()`.
@@ -101,7 +99,7 @@ The `StateBag` is **not a memory store** — it is a persistent address book tha
 ## External-memory providers need a dedicated durable adapter
 
 `Mem0Provider` and similar providers perform external reads and writes from their lifecycle hooks.
-Those hooks run in retryable LLM-step activities, and this library does not provide an atomic
+Those hooks run in retryable preparation/terminal activities, and this library does not provide an atomic
 idempotent provider-history contract. They are therefore **not supported as direct durable
 registrations**. The stock MAF `ChatHistoryMemoryProvider` is supported only through the dedicated
 opt-in adapter documented in [Agent memory](../../how-to/MAF/memory.md); generic
@@ -247,8 +245,8 @@ boundary never receives that transient session. It must forward the exact suppli
 StateBag could not be persisted unambiguously. Session lifecycle APIs on this internal activity
 pipeline are unsupported because Temporal, not the MAF leaf, owns durable session serialization.
 The boundary restores the durable run context to surrounding middleware after success, provider
-exceptions, and cancellation. Public durable-agent streaming is unsupported, and the activity
-fully enumerates its internal stream, so caller-abandoned enumeration is not part of this
+exceptions, and cancellation. Public durable-agent streaming is unsupported; the model-step
+activity calls non-streaming `RunAsync`, so caller-abandoned enumeration is not part of this
 package's session-context contract.
 
 ### Across Continue-as-New
@@ -290,12 +288,12 @@ Provider runs            Provider runs
   State written to bag     no initializer call      bag still intact      no initializer call
 
 Activity ends            Activity ends
-  bag serialized           bag serialized
-  → AgentStepResult        → AgentStepResult
+  key delta recorded       key delta recorded
+  → activity result        → activity result
 
 Workflow stores          Workflow stores
-  _currentStateBag =       _currentStateBag =
-  stepResult.UpdatedStateBag stepResult.UpdatedStateBag
+  merges key delta         merges key delta
+  into _currentStateBag    into _currentStateBag
 ```
 
 ---
@@ -303,9 +301,9 @@ Workflow stores          Workflow stores
 ## Durable Registration Boundary
 
 `AIContextProvider` instances are registered on `DurableAgentBuilder` through `AddContextProvider`.
-`AgentActivities.RunDurableAgentStepAsync` invokes compatible providers around each LLM call and
-serializes the resulting `StateBag`; the library does not hand provider lifecycle ownership to
-`ChatClientAgent`.
+`PrepareAgentTurnAsync` and `CompleteAgentTurnAsync` own the logical-turn provider lifecycle and
+return key-level StateBag deltas. Model, interceptor, and serial tool activities also write back
+state. The library does not hand provider lifecycle ownership to `ChatClientAgent`.
 
 ### Approval limits
 
@@ -454,7 +452,10 @@ Each provider reads only its own key — they are fully independent.
 
 4. **The bag survives continue-as-new.** `AgentWorkflowInput.CarriedStateBag` carries it across workflow history resets — providers never need to reinitialize after a long-running session triggers continue-as-new.
 
-5. **Providers run in the activity, not in the workflow.** `IChatClient.GetResponseAsync` is called inside `AgentActivities.RunDurableAgentStepAsync`, and `AIContextProvider.InvokingAsync` runs immediately before it. LLM calls and retry-safe provider work belong there; provider-owned external history or writes remain unsupported without a dedicated adapter. Never call `RunAsync` directly inside a `[Workflow]` class.
+5. **Providers run in activities, not workflow code.** Preparation runs before the model/tool loop;
+   terminal notification runs afterward. Model calls execute in `RunDurableAgentStepAsync`.
+   Provider-owned external history or writes require a dedicated adapter. Never call `RunAsync`
+   directly inside a `[Workflow]` class.
 
 ---
 

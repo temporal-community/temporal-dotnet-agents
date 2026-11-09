@@ -43,6 +43,30 @@ internal class AgentWorkflow :
 
     // MAF-specific input (typed view of the base's Input). Set in RunAsync.
     private AgentWorkflowInput? _input;
+    private readonly AgentWorkflowInput? _workerSettings;
+    private readonly AgentNotRegisteredException? _startupFailure;
+    internal AgentWorkflowInput? WorkerSettings => _workerSettings;
+
+    public AgentWorkflow()
+    {
+    }
+
+    internal AgentWorkflow(AgentWorkflowInput workerSettings) =>
+        _workerSettings = workerSettings ?? throw new ArgumentNullException(nameof(workerSettings));
+
+    internal AgentWorkflow(AgentNotRegisteredException startupFailure) =>
+        _startupFailure = startupFailure ?? throw new ArgumentNullException(nameof(startupFailure));
+
+    private void ThrowIfStartupFailed()
+    {
+        if (_startupFailure is { } failure)
+        {
+            throw new ApplicationFailureException(
+                failure.Message,
+                errorType: nameof(AgentNotRegisteredException),
+                nonRetryable: true);
+        }
+    }
 
     // GAP 6: StateBag persisted across turns so AIContextProvider state survives replay.
     private JsonElement? _currentStateBag;
@@ -59,6 +83,25 @@ internal class AgentWorkflow :
     public async Task RunAsync(AgentWorkflowInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        ThrowIfStartupFailed();
+        if (_workerSettings is not null)
+        {
+            if (!string.Equals(input.AgentName, _workerSettings.AgentName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Workflow input agent '{input.AgentName}' does not match worker settings for '{_workerSettings.AgentName}'.");
+            }
+
+            // The initial start input contains only client identity. The worker instance factory
+            // supplies the immutable execution policy before the workflow initializes its state.
+            // Continue-as-new inputs already carry the original worker snapshot and are selected
+            // by the factory instead of being refreshed from current worker options.
+            input = _workerSettings with
+            {
+                InitialFireAndForgetRequest = input.InitialFireAndForgetRequest,
+            };
+        }
+
         InitializeInput(input);
         input = (AgentWorkflowInput)RequiredInput;
         _input = input;
@@ -124,6 +167,7 @@ internal class AgentWorkflow :
     [WorkflowUpdateValidator(nameof(RunAgentAsync))]
     public void ValidateRunAgent(RunRequest request)
     {
+        ThrowIfStartupFailed();
         if (IsShutdownRequested)
             throw new InvalidOperationException("Session has been shut down.");
         if (IsContinueAsNewPending)
@@ -237,6 +281,7 @@ internal class AgentWorkflow :
 
     private void ValidateFireAndForgetRequest(RunRequest request)
     {
+        ThrowIfStartupFailed();
         if (IsShutdownRequested)
             throw new InvalidOperationException("Session has been shut down.");
         if (IsContinueAsNewPending)
@@ -475,9 +520,6 @@ internal class AgentWorkflow :
         var preparedTools = new Dictionary<string, PreparedAgentTool>(
             StringComparer.OrdinalIgnoreCase);
 
-        // Note: do NOT snapshot _input.MaxToolCallsPerTurn here. The resolution handshake
-        // mutates _input mid-loop on proxy-started sessions, so we must re-read it each iteration
-        // (and again after the loop for the aborted-response log/message).
         try
         {
             if (!_memoryInitializationChecked)
@@ -490,7 +532,7 @@ internal class AgentWorkflow :
                     MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
                     PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
                 };
-                var initializerOptions = ApplyCurrentTurnCancellation(new ActivityOptions
+                var memoryInitializationOptions = ApplyCurrentTurnCancellation(new ActivityOptions
                 {
                     StartToCloseTimeout = TimeSpan.FromSeconds(30),
                     RetryPolicy = new RetryPolicy
@@ -499,10 +541,12 @@ internal class AgentWorkflow :
                         MaximumAttempts = 2,
                     },
                     Summary = AgentActivities.BuildActivitySummary(_input.AgentName),
+                    CancellationToken = stepActivityOptions.CancellationToken,
+                    CancellationType = stepActivityOptions.CancellationType,
                 });
                 var initializedMemory = await Workflow.ExecuteActivityAsync(
                     (AgentActivities activities) => activities.InitializeChatHistoryMemoryAsync(memoryInitInput),
-                    initializerOptions).ConfigureAwait(true);
+                    memoryInitializationOptions).ConfigureAwait(true);
                 _currentStateBag = StateBagMerge.ApplyTrustedDelta(
                     _currentStateBag,
                     initializedMemory.StateBagDelta);
@@ -540,11 +584,6 @@ internal class AgentWorkflow :
             {
                 ThrowIfCurrentTurnCancellationRequested();
 
-                // Proxy-started sessions have WorkerSettingsResolved=false.
-                // On the first step of the first turn, ask the activity to resolve worker-side
-                // settings (per-tool activity options) and return them.
-                var needsResolution = iteration == 0 && !_input!.WorkerSettingsResolved;
-
                 // The workflow is authoritative; every activity receives an explicit snapshot,
                 // including when no StateBag key changed since the preceding dispatch.
                 var bagForStep = GetStateBagForDispatch();
@@ -565,7 +604,6 @@ internal class AgentWorkflow :
                     SerializedStateBag = bagForStep,
                     SessionId = TemporalAgentSessionId.Parse(Workflow.Info.WorkflowId!),
                     MemoryScope = _memoryScope,
-                    NeedsWorkerSettingsResolution = needsResolution,
                     MaximumTransportPayloadSizeBytes = _input.MaximumTransportPayloadSizeBytes,
                     PayloadCodecExpansionAllowanceBytes = _input.PayloadCodecExpansionAllowanceBytes,
                 };
@@ -580,17 +618,6 @@ internal class AgentWorkflow :
                     (AgentActivities a) => a.RunDurableAgentStepAsync(stepInput),
                     stepActivityOptions).ConfigureAwait(true);
                 ThrowIfCurrentTurnCancellationRequested();
-
-            // Apply resolved worker-side settings once and carry the complete bundle forward
-            // through continue-as-new.
-            if (needsResolution && stepResult.ResolvedWorkerConfig is not null)
-            {
-                _input = _input! with
-                {
-                    CarriedStateBag = _currentStateBag,
-                    ResolvedWorkerConfig = stepResult.ResolvedWorkerConfig,
-                };
-            }
 
             if (stepResult.ApprovalRequiredToolNames is { Count: > 0 } markedTools)
             {

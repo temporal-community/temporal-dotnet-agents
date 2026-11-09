@@ -98,19 +98,18 @@ it. It is also the only provider-owned channel that survives a worker restart.
 > - Overriding `InvokingCoreAsync` replaces the merge step, so you must return the **full merged
 >   context** and stamp your own messages yourself.
 
-### It does not see the agent's registered tools
+### It can select registered tools, not invent executable tools
 
-The context handed to a provider carries `Messages` and `Instructions` only. The agent's durable
-tools are attached to the model call separately and are never seeded into `AIContext`. A provider
-cannot check whether `send_email` is registered before mentioning it.
-
-So `Tools` on the incoming context starts empty, and anything you ever find in it was put there by
-an earlier provider in the chain — which is the misconfiguration below, not a registered tool.
+Preparation seeds `AIContext.Tools` with registered durable tools. A provider can retain or filter
+those functions; the final selection is recorded and reused for the logical turn. To contribute a
+new executable function, register its durable declaration through a supported tool-source route.
+An untraceable function or incompatible schema fails before model dispatch. See
+[If your provider contributes tools](#if-your-provider-contributes-tools).
 
 ### Reach session state through `context.Session`
 
-`TemporalAgentContext.Current` is **not** available to a provider. It is established later in the
-step, and in the tool activity — not when providers run. Use the session you are handed:
+Use the session explicitly supplied to the provider rather than depending on ambient
+`TemporalAgentContext.Current`:
 
 ```csharp
 context.Session?.StateBag.SetValue("app.tenant", "acme", JsonSerializerOptions.Default);

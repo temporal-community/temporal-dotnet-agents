@@ -12,14 +12,14 @@ Demonstrates registering durable tools alongside a context provider using two ap
 
 ## Why durable dispatch matters for tools
 
-Without `IDurableToolSource` or explicit `DurableToolRegistrationSpec` entries, tools returned by
-a context provider are ignored by the durable-agent loop and a runtime warning identifies the
-provider. They are not silently executed inline. Register them through one of the two approaches
-above before relying on them.
+Without `IDurableToolSource` or explicit `DurableToolRegistrationSpec` entries, a managed provider
+cannot introduce an executable tool. Preparation rejects untraceable functions before model
+dispatch; they do not execute inline. Register through one of the two approaches above, then
+select the exact registered functions seeded into the provider context.
 
 With durable dispatch, each tool call becomes its own `InvokeAgentTool` activity: it appears
-in the workflow history, has its own retry/timeout policy, and completed tool calls are never
-re-executed on replay.
+in the workflow history, has per-tool timeouts, and uses the per-agent retry policy. The worker-level
+retry policy applies to model steps only. Completed tool calls are never re-executed on replay.
 
 ## When to use which approach
 
@@ -31,8 +31,8 @@ re-executed on replay.
 
 ## Non-idempotent write tools
 
-Tool activities use one attempt by default. Retries are an explicit agent-level opt-in and apply
-to every tool on the agent:
+Tool activities use one attempt by default. An explicit agent retry policy applies to every tool
+on the agent:
 
 ```csharp
 agent.AddContextProvider(
@@ -40,7 +40,7 @@ agent.AddContextProvider(
     durableTools:
     [
         new DurableToolRegistrationSpec(sendEmailTool),
-        new DurableToolRegistrationSpec(searchTool),  // read-only — default retry is fine
+        new DurableToolRegistrationSpec(searchTool),  // also one attempt by default
     ]);
 ```
 
@@ -52,8 +52,8 @@ After running the sample, open `http://localhost:8233` and inspect the two workf
 - `InvokeAgentTool:SearchAgent:web_search` — each web search as its own Temporal activity
 - `InvokeAgentTool:WeatherAgent:get_weather` — each weather lookup as its own Temporal activity
 
-Worker crashes during any tool call are safe: Temporal replays completed activities from history
-and retries only the failed one.
+Temporal replays completed activities from history. A tool attempt interrupted by a worker crash
+is retried only when the shared policy permits it; its external outcome may be uncertain.
 
 ## Prerequisites
 
@@ -67,5 +67,5 @@ dotnet user-secrets set "OPENAI_API_KEY" "sk-..." --project samples/MAF/DurableC
 ## Run
 
 ```bash
-dotnet run --project samples/MAF/DurableContextProvider/DurableContextProvider.csproj
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/DurableContextProvider/DurableContextProvider.csproj
 ```

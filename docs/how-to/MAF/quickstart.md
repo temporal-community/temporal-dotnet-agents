@@ -12,16 +12,20 @@ Once this works, [usage.md](./usage.md) is the reference for everything else.
 
 ## Before you start
 
-- A Temporal Service on `localhost:7233` — `temporal server start-dev`
-- An `OPENAI_API_KEY`, via `dotnet user-secrets` or the environment
-- The package:
+- .NET 10 SDK and a Temporal Service on `localhost:7233` (start command below)
+- An `OPENAI_API_KEY` environment variable
+- A console application with the library, provider adapter, and Generic Host packages:
 
 ```bash
+dotnet new console -n DurableWeather --framework net10.0
+cd DurableWeather
 dotnet add package TemporalCommunity.Extensions.Agents
+dotnet add package Microsoft.Extensions.AI.OpenAI
+dotnet add package Microsoft.Extensions.Hosting
 ```
 
-Search attributes are pre-registered by default (`EnableSearchAttributes`), and the dev server does
-**not** create them for you. Start it with them, or agent workflows fail to start:
+The library upserts search attributes by default (`EnableSearchAttributes`); the dev server does
+**not** register their definitions for you. In a separate terminal, start it with them:
 
 ```bash
 temporal server start-dev \
@@ -105,6 +109,17 @@ var session = await agent.CreateSessionAsync();
 
 var reply = await agent.RunAsync("What's the weather in Kingston?", session);
 Console.WriteLine(reply.Text);
+await host.StopAsync();
+```
+
+Place this application-defined service after the top-level statements in `Program.cs`. It uses
+fixed demonstration data, not a live weather API:
+
+```csharp
+public sealed class WeatherService
+{
+    public string GetForecast(string city) => $"{city}: sunny, 25 C (demo forecast).";
+}
 ```
 
 Reuse the session for later turns; it is backed by the same durable workflow and owns the
@@ -132,7 +147,10 @@ Console.WriteLine((await agent.RunAsync("Weather in Kingston?", session)).Text);
 ## Rules worth knowing on day one
 
 - **Tool activities use one attempt by default.** `TemporalAgentOptions.RetryPolicy` opts every tool on the
-  agent into the same retry policy, so only configure retries when all its tools are safe to retry.
+  agent into the same retry policy. The worker-level `DefaultRetryPolicy` applies to model and
+  context preparation only and does not enable tool retries. Memory-scope initialization uses a
+  fixed policy. Only configure
+  retries when all affected tools are safe to retry.
 - **One run at a time per session.** Overlapping `RunAsync` calls on the same session throw.
   Parallel conversations get a session each.
 - **A session belongs to its agent.** Passing one agent's session to another is rejected.

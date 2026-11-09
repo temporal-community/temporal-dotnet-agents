@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 using OpenAI;
 using TemporalCommunity.Extensions.Agents;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 // ── Step 1: Load configuration ───────────────────────────────────────────────

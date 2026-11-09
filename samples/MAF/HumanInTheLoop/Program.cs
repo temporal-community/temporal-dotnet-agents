@@ -23,7 +23,7 @@ using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using ChatRole = Microsoft.Extensions.AI.ChatRole;
 
 // ── Configuration ────────────────────────────────────────────────────────────
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 var apiKey = builder.Configuration.GetValue<string>("OPENAI_API_KEY")

@@ -8,7 +8,7 @@ using Temporalio.Client;
 using Temporalio.Common;
 using Temporalio.Extensions.Hosting;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 var apiKey = builder.Configuration.GetValue<string>("OPENAI_API_KEY");
 var apiBaseUrl = builder.Configuration.GetValue<string>("OPENAI_API_BASE_URL");
 var model = builder.Configuration.GetValue<string>("OPENAI_EMBEDDING_MODEL") ?? "text-embedding-3-small";

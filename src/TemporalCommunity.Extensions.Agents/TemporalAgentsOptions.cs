@@ -31,9 +31,8 @@ public sealed class TemporalAgentsOptions
     private readonly Dictionary<string, DurableAgentRegistration> _durableAgentRegistrations =
         new(StringComparer.OrdinalIgnoreCase);
 
-    // Proxy-only declarations (client-side processes). Stores the optional TTL; the proxy is wired
-    // by AddTemporalAgentProxies / TemporalAgentsRegistrar.
-    private readonly Dictionary<string, TimeSpan?> _proxyDeclarations =
+    // Proxy-only declarations (client-side processes). The worker owns all execution settings.
+    private readonly HashSet<string> _proxyDeclarations =
         new(StringComparer.OrdinalIgnoreCase);
 
     private bool _requiresRegisteredChatClient;
@@ -45,19 +44,22 @@ public sealed class TemporalAgentsOptions
     /// <summary>
     /// Gets or sets the worker-level default TTL for agent workflows. Agents that do not set
     /// <see cref="DurableAgentBuilder.TimeToLive"/> inherit this value. Defaults to 14 days.
-    /// Set to <see langword="null"/> to disable TTL by default.
+    /// Setting this to <see langword="null"/> currently retains the 14-day fallback used by
+    /// workflow initialization.
     /// </summary>
     public TimeSpan? DefaultTimeToLive { get; set; } = TimeSpan.FromDays(14);
 
     /// <summary>
-    /// Gets or sets the worker-level default activity start-to-close timeout used by the
-    /// <c>RunAgentStep</c> activity. Agents inherit this value when
+    /// Gets or sets the worker-level default activity start-to-close timeout used by model-step
+    /// and context-preparation activities. Memory-scope initialization uses a dedicated fixed
+    /// timeout. Agents inherit this value when
     /// <see cref="DurableAgentBuilder.ActivityTimeout"/> is unset. Defaults to 5 minutes.
     /// </summary>
     public TimeSpan DefaultActivityTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// Gets or sets the worker-level default heartbeat timeout for agent step activities.
+    /// Gets or sets the worker-level default heartbeat timeout for model-step and
+    /// context-preparation activities. Memory-scope initialization has no heartbeat timeout.
     /// Agents inherit this value when <see cref="DurableAgentBuilder.HeartbeatTimeout"/> is unset.
     /// Defaults to 2 minutes.
     /// </summary>
@@ -71,13 +73,16 @@ public sealed class TemporalAgentsOptions
     public TimeSpan DefaultApprovalTimeout { get; set; } = TimeSpan.FromDays(7);
 
     /// <summary>
-    /// Gets or sets the worker-level retry-policy override applied to model, tool, and policy
-    /// activities. Agents inherit this value when
-    /// <see cref="DurableAgentBuilder.RetryPolicy"/> is unset. When <see langword="null"/> (and no
-    /// per-agent policy is set), model calls use five attempts with a 2-second maximum backoff and
-    /// tool activities use one attempt. Setting this value opts all tools on each inheriting agent
-    /// into retries, so do so only when every tool is safe to repeat or uses downstream idempotency
-    /// keys. Per-tool retry counts above one are not supported.
+    /// Gets or sets the worker-level retry-policy override for model-step and context-preparation
+    /// activities. An agent's <see cref="DurableAgentBuilder.RetryPolicy"/> overrides it for that
+    /// agent's model and context-preparation activities and independently opts all of that
+    /// agent's tools and interceptors into the same retry policy. This worker-level setting does
+    /// not enable tool or interceptor retries. When both policies are <see langword="null"/>,
+    /// model and context-preparation activities use five attempts with a 2-second maximum backoff;
+    /// memory-scope initialization uses its own fixed policy, and tool/interceptor activities use
+    /// one attempt. Use the per-agent policy only when every
+    /// affected tool is safe to repeat or uses downstream idempotency keys. Per-tool retry counts
+    /// above one are not supported.
     /// </summary>
     public RetryPolicy? DefaultRetryPolicy { get; set; }
 
@@ -293,7 +298,7 @@ public sealed class TemporalAgentsOptions
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(configure);
 
-        if (_durableAgentRegistrations.ContainsKey(name) || _proxyDeclarations.ContainsKey(name))
+        if (_durableAgentRegistrations.ContainsKey(name) || _proxyDeclarations.Contains(name))
         {
             throw new InvalidOperationException(
                 $"An agent with name '{name}' has already been registered. Agent names must be unique " +
@@ -493,7 +498,8 @@ public sealed class TemporalAgentsOptions
 
     /// <summary>
     /// Declares a named agent proxy for client-only scenarios where the real agent
-    /// implementation runs in a separate worker process. No factory is required; call this from
+    /// implementation runs in a separate worker process. Execution settings are owned by that
+    /// worker. No factory is required; call this from
     /// <see cref="ServiceCollectionExtensions.AddTemporalAgentProxies"/> instead of
     /// <see cref="AddDurableAgent(string, Action{DurableAgentBuilder})"/>.
     /// </summary>
@@ -501,23 +507,19 @@ public sealed class TemporalAgentsOptions
     /// Case-insensitive agent name that must match the name used by the remote worker.
     /// Must be unique within this options instance.
     /// </param>
-    /// <param name="timeToLive">
-    /// Per-agent session TTL used when the proxy starts a new workflow. When null,
-    /// <see cref="DefaultTimeToLive"/> is used.
-    /// </param>
     /// <returns>This options instance, for fluent chaining.</returns>
-    public TemporalAgentsOptions AddAgentProxy(string name, TimeSpan? timeToLive = null)
+    public TemporalAgentsOptions AddAgentProxy(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        if (_durableAgentRegistrations.ContainsKey(name) || _proxyDeclarations.ContainsKey(name))
+        if (_durableAgentRegistrations.ContainsKey(name) || _proxyDeclarations.Contains(name))
         {
             throw new InvalidOperationException(
                 $"An agent with name '{name}' has already been registered. Agent names must be unique " +
                 "across AddDurableAgent and AddAgentProxy.");
         }
 
-        _proxyDeclarations.Add(name, timeToLive);
+        _proxyDeclarations.Add(name);
         return this;
     }
 
@@ -527,7 +529,7 @@ public sealed class TemporalAgentsOptions
     /// Returns the names of all registered agents (durable and proxy), in registration order.
     /// </summary>
     public IReadOnlyList<string> GetRegisteredAgentNames() =>
-        [.. _durableAgentRegistrations.Keys, .. _proxyDeclarations.Keys];
+        [.. _durableAgentRegistrations.Keys, .. _proxyDeclarations];
 
     /// <summary>
     /// Returns <see langword="true"/> if an agent with the given name is registered.
@@ -535,7 +537,7 @@ public sealed class TemporalAgentsOptions
     /// </summary>
     public bool IsAgentRegistered(string name) =>
         !string.IsNullOrEmpty(name)
-        && (_durableAgentRegistrations.ContainsKey(name) || _proxyDeclarations.ContainsKey(name));
+        && (_durableAgentRegistrations.ContainsKey(name) || _proxyDeclarations.Contains(name));
 
     /// <summary>
     /// Returns descriptors for all registered durable agents that have a description.
@@ -572,24 +574,6 @@ public sealed class TemporalAgentsOptions
     internal bool RequiresRegisteredChatClient => _requiresRegisteredChatClient;
 
     /// <summary>Gets the proxy-only declarations.</summary>
-    internal IReadOnlyDictionary<string, TimeSpan?> ProxyDeclarations => _proxyDeclarations;
+    internal IReadOnlyCollection<string> ProxyDeclarations => _proxyDeclarations;
 
-    /// <summary>
-    /// Gets the resolved TTL for a specific agent. Per-agent value (durable registration or proxy
-    /// declaration) wins; otherwise falls back to <see cref="DefaultTimeToLive"/>.
-    /// </summary>
-    internal TimeSpan? GetTimeToLive(string agentName)
-    {
-        if (_durableAgentRegistrations.TryGetValue(agentName, out var reg) && reg.TimeToLive.HasValue)
-        {
-            return reg.TimeToLive;
-        }
-
-        if (_proxyDeclarations.TryGetValue(agentName, out var proxyTtl) && proxyTtl.HasValue)
-        {
-            return proxyTtl;
-        }
-
-        return DefaultTimeToLive;
-    }
 }

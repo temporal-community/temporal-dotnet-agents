@@ -1,7 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
-using Temporalio.Workflows;
 
 namespace TemporalCommunity.Extensions.Agents.Workflows;
 
@@ -59,14 +58,6 @@ internal sealed class AgentStepResult
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ResponseId { get; init; }
-
-    /// <summary>
-    /// Worker-side settings bundle resolved from the agent's <c>DurableAgentRegistration</c>.
-    /// Only populated when <see cref="AgentStepInput.NeedsWorkerSettingsResolution"/> was
-    /// <see langword="true"/>; <see langword="null"/> on non-resolution steps.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public ProxyResolvedWorkerConfig? ResolvedWorkerConfig { get; init; }
 
     /// <summary>
     /// Names of registered functions carrying MAF's approval-required marker, including markers

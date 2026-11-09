@@ -137,29 +137,34 @@ public sealed class DurableAgentBuilder
     public TimeSpan? ApprovalTimeout { get; set; }
 
     /// <summary>
-    /// Gets or sets the per-agent activity start-to-close timeout used for the
-    /// <c>RunAgentStep</c> activity. When <see langword="null"/>, inherits the worker-level
+    /// Gets or sets the per-agent activity start-to-close timeout used for model and context
+    /// preparation activities. Memory-scope initialization uses its dedicated fixed policy.
+    /// When <see langword="null"/>, inherits the worker-level
     /// <c>TemporalAgentsOptions.DefaultActivityTimeout</c>.
     /// </summary>
     public TimeSpan? ActivityTimeout { get; set; }
 
     /// <summary>
-    /// Gets or sets the per-agent activity heartbeat timeout used for the <c>RunAgentStep</c>
-    /// activity. When <see langword="null"/>, inherits the worker-level
+    /// Gets or sets the per-agent activity heartbeat timeout used for model and context
+    /// preparation activities. Memory-scope initialization has no heartbeat timeout.
+    /// When <see langword="null"/>, inherits the worker-level
     /// <c>TemporalAgentsOptions.DefaultHeartbeatTimeout</c>.
     /// </summary>
     public TimeSpan? HeartbeatTimeout { get; set; }
 
     /// <summary>
-    /// Gets or sets the retry policy applied to this agent's <c>RunAgentStep</c> activity (the LLM
-    /// call). Per-tool retry policies are configured via
-    /// <see cref="AddTool(AIFunction, Action{DurableToolOptions}?)"/>.
-    /// When <see langword="null"/>, inherits the worker-level <c>TemporalAgentsOptions.DefaultRetryPolicy</c>.
+    /// Gets or sets the retry policy shared by this agent's model and context-preparation,
+    /// tool, and interceptor activities. When <see langword="null"/>, model and context-preparation
+    /// activities inherit the worker-level
+    /// <c>TemporalAgentsOptions.DefaultRetryPolicy</c>; tool and interceptor activities use one
+    /// attempt unless this per-agent policy is set.
     /// </summary>
     /// <remarks>
-    /// This policy applies to the LLM step only — it does not cascade to per-tool activity dispatches.
-    /// Configure tool retries individually via <see cref="DurableToolOptions"/> (typically
-    /// <see cref="DurableToolOptions.NoRetry"/> for non-idempotent write tools).
+    /// Without an agent or worker policy, model and context-preparation activities use a bounded
+    /// retry policy and tools and interceptors use one attempt. Memory-scope initialization uses
+    /// its own fixed retry policy. An explicit agent policy applies uniformly to all tools; enable
+    /// retries only when every tool tolerates re-execution.
+    /// Per-tool retry overrides are unsupported.
     /// </remarks>
     public RetryPolicy? RetryPolicy { get; set; }
 

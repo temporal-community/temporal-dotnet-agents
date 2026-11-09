@@ -20,11 +20,8 @@ public class WorkerModelContextBudgetTests
 {
     private const string AgentName = "BudgetAgent";
 
-    [Theory]
-    [InlineData(null)]
-    [InlineData(100000)]
-    [InlineData(1)]
-    public async Task SplitProxy_WorkerBudgetAppliesBeforeAndAfterResolution(int? frontendLimit)
+    [Fact]
+    public async Task SplitProxy_UsesOnlyWorkerContextBudget()
     {
         await using var environment = await TestEnvironmentHelper.StartLocalAsync();
         environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
@@ -36,13 +33,7 @@ public class WorkerModelContextBudgetTests
         {
             var frontend = Host.CreateApplicationBuilder();
             frontend.Services.AddSingleton<ITemporalClient>(environment.Client);
-            frontend.Services.AddTemporalAgentProxies(options =>
-            {
-                options.DefaultMaxModelContextTokens = frontendLimit;
-                options.DefaultModelOutputTokenReserve = 0;
-                options.EnableSearchAttributes = false;
-                options.AddAgentProxy(AgentName);
-            }, taskQueue: queue);
+            frontend.Services.AddTemporalAgentProxies(queue, AgentName);
             using var frontendHost = frontend.Build();
             var proxy = frontendHost.Services.GetTemporalAgentProxy(AgentName);
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(60));

@@ -9,7 +9,7 @@ protocol layers, down to the LLM inference span emitted by MEAI's application-co
 
 - Full span hierarchy from `durable_chat.send` through Temporal protocol spans to the MEAI
   `chat {model}` inference span
-- `conversation.id` on the client send span; the application-owned MEAI inference span uses
+- `gen_ai.conversation.id` on the client send span; the application-owned MEAI inference span uses
   GenAI attributes and may be correlated through the Temporal trace
 - Five core `ActivitySource` names must be registered with the tracer provider (the optional
   OpenAI SDK instrumentation adds its own source)
@@ -59,7 +59,7 @@ Notes on the names:
 
 | Attribute | Source |
 |---|---|
-| `conversation.id` | The session ID you pass to `SendAsync` |
+| `gen_ai.conversation.id` | The session ID you pass to `SendAsync` |
 | `temporal.ai.chat.requested_model` | `ChatOptions.ModelId` from the request, if set |
 
 ### On `chat {model}` (LLM inference span)
@@ -178,8 +178,7 @@ on the OpenTelemetry version):
 ```
 Activity.DisplayName: durable_chat.send
     Tags:
-        conversation.id: otel-demo-<guid>
-        gen_ai.request.model: gpt-4o-mini
+        gen_ai.conversation.id: otel-demo-<guid>
 
 Activity.DisplayName: UpdateWorkflow:Chat
     Tags:
@@ -195,14 +194,14 @@ Activity.DisplayName: RunActivity:TemporalCommunity.Extensions.AI.GetChatStep
 Activity.DisplayName: chat gpt-4o-mini
     Tags:
         gen_ai.operation.name: chat
-        conversation.id: otel-demo-<guid>
         gen_ai.request.model: gpt-4o-mini
         gen_ai.response.model: gpt-4o-mini-2024-07-18
         gen_ai.usage.input_tokens: 42
         gen_ai.usage.output_tokens: 18
 ```
 
-Filter by `conversation.id = otel-demo-<guid>` to see all spans for the session.
+Filter send spans by `gen_ai.conversation.id = otel-demo-<guid>`, then follow their Temporal
+traces to the inference spans. Do not assume every leaf span carries the application session ID.
 
 ## What's new in the Temporal SDK protocol spans (1.14.x)
 
@@ -248,7 +247,7 @@ risk.
    only. If you add an `EnrichWithHttpRequestMessage`/`EnrichWithHttpResponseMessage` callback that
    reads `Content`, you will exfiltrate the full prompt and assistant output to your tracing
    backend. Don't.
-2. **Treat `conversation.id` as a join key.** The sample uses random GUIDs, but real applications
+2. **Treat `gen_ai.conversation.id` on send spans as a join key.** The sample uses random GUIDs, but real applications
    often substitute customer or tenant IDs. Hash or salt them before they leave the process;
    assume your tracing backend's access scope is broader than your application database.
 3. **OTLP transport is plaintext unless you configure TLS.** Set

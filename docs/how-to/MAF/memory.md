@@ -73,12 +73,13 @@ temporal => temporal.UseChatHistoryMemory(memory =>
 
 `WithScopeInitializer` is prominent for a reason: it establishes the trusted storage and search
 scopes for the session. It runs in its own activity, before the first model call, only if the
-workflow has no recorded memory state. The activity has a 30-second start-to-close timeout, two
-maximum attempts, and a one-second initial retry interval; it has no heartbeat timeout and these
-settings are not configurable. A failed initialization surfaces as `DurableTurnFailedException`
-before model invocation or vector-store access, records no memory state, and is attempted again on
-the next turn. Invalid scope results are non-retryable. The initializer can execute twice if the
-first activity attempt fails before its result is recorded, so make it safe to repeat.
+workflow has no recorded memory state. The activity has a 30-second start-to-close timeout, at
+most two attempts, a one-second initial retry interval, and no heartbeat timeout; it is independent
+of worker model activity settings. A failed initialization surfaces as
+`DurableTurnFailedException` before model invocation or vector-store access, records no memory
+state, and can be attempted again on the next turn. Invalid scope results are non-retryable.
+The initializer can execute more than once if an activity attempt fails before its result is
+recorded, so make it repeatable and safe to retry.
 
 The initializer is optional. Without it, both storage and search use the current agent and Temporal
 session as scope. This is the recommended default for session-only recall. If a vector collection

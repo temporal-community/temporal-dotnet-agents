@@ -121,7 +121,7 @@ public class ToolInterceptorRegistrationTests
                 toolOptions => toolOptions.RequireApproval().SkipInterceptor());
         });
 
-        var config = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore(
+        var config = DefaultTemporalAgentClient.BuildWorkerAgentWorkflowInputCore(
             "ApprovalFloorAgent", options, "test-queue").ResolvedWorkerConfig!;
 
         Assert.Contains("protectedTool", config.RequiresApprovalTools!);
@@ -162,7 +162,7 @@ public class ToolInterceptorRegistrationTests
         });
 
         // Act: build the workflow input the same way the client does.
-        var input = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore(
+        var input = DefaultTemporalAgentClient.BuildWorkerAgentWorkflowInputCore(
             "MyAgent", options, "test-queue");
 
         var config = input.ResolvedWorkerConfig;

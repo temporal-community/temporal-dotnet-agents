@@ -23,17 +23,29 @@ bounded application or user scope.
 
 ## Run
 
-Start a Temporal service, then configure the OpenAI API key:
+From the repository root, start a Temporal service in a separate terminal with the required
+search attributes:
+
+```sh
+temporal server start-dev --namespace default \
+  --search-attribute AgentName=Keyword \
+  --search-attribute SessionCreatedAt=Datetime \
+  --search-attribute TurnCount=Int
+```
+
+Configure credentials, then select Development so Generic Host loads the project's user secrets.
+The copied `appsettings.json` supplies the OpenAI endpoint independently of the working directory:
 
 ```sh
 dotnet user-secrets set "OPENAI_API_KEY" "..." --project samples/MAF/ChatHistoryMemory
-dotnet run --project samples/MAF/ChatHistoryMemory/ChatHistoryMemory.csproj
+dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --project samples/MAF/ChatHistoryMemory
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/ChatHistoryMemory/ChatHistoryMemory.csproj
 ```
 
 For on-demand function-calling recall:
 
 ```sh
-dotnet run --project samples/MAF/ChatHistoryMemory/ChatHistoryMemory.csproj -- --on-demand
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/ChatHistoryMemory/ChatHistoryMemory.csproj -- --on-demand
 ```
 
 In the default mode, the provider searches before each model invocation. In on-demand mode, the

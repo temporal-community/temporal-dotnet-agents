@@ -24,7 +24,7 @@ using TemporalCommunity.Extensions.AI.Approvals;
 using TemporalCommunity.Extensions.AI.Tools;
 
 // ── Setup: Build the application host ────────────────────────────────────────
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 var apiKey          = builder.Configuration.GetValue<string>("OPENAI_API_KEY");

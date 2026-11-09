@@ -32,8 +32,8 @@ The callback receives a fresh `TemporalAgentOptions` and can set execution value
 and memory configuration. When omitted, Temporal settings use their defaults. The client-only
 counterpart is
 `AddTemporalAgentProxies(taskQueue, agentNames...)`, which registers keyed `AIAgent` proxies without
-registering the worker or agent implementation. `AddAgentProxy` is still available for client-only
-registrations that need per-agent proxy settings.
+registering the worker or agent implementation. Execution settings are owned by the worker and are
+applied when it creates the workflow instance; client proxies declare only agent names.
 
 The compact MAF path transfers `Description`, `ChatOptions`, `Tools`, and the ordered
 `AIContextProviders` from `ChatClientAgentOptions`. The unkeyed `IChatClient` resolves from the
@@ -643,19 +643,13 @@ Console.WriteLine(response.Messages[0].Text);
 ### Split-Process Registration
 
 When the Temporal worker runs in a separate process (for example, a dedicated worker binary next to an API server),
-use `AddTemporalAgentProxies` on the client process's `IServiceCollection`. No worker is registered — only the client
-infrastructure and the declared proxy singletons.
+register the Temporal client and call `AddTemporalAgentProxies` on the client process's
+`IServiceCollection`. No worker or agent implementation is registered in the client process.
 
 ```csharp
 // Client-only process (e.g. ASP.NET API server)
-builder.Services.AddTemporalAgentProxies(
-    configure: opts =>
-    {
-        opts.AddAgentProxy("SupportAgent");
-        opts.AddAgentProxy("BillingAgent");
-    },
-    taskQueue: "agents",
-    targetHost: "localhost:7233");
+builder.Services.AddTemporalClient("localhost:7233", "default");
+builder.Services.AddTemporalAgentProxies("agents", "SupportAgent", "BillingAgent");
 
 // ...
 
@@ -671,9 +665,9 @@ app.MapPost("/chat", async (string message, IServiceProvider services) =>
 });
 ```
 
-`AddTemporalAgentProxies` registers `ITemporalAgentClient` and the keyed `AIAgent` proxies only. When `targetHost` is
-provided it also registers an `ITemporalClient`. If the client is already registered elsewhere (e.g., via
-`AddTemporalClient`), omit `targetHost` and the existing registration is used.
+`AddTemporalAgentProxies` registers `ITemporalAgentClient` and the keyed `AIAgent` proxies only.
+It does not register an `ITemporalClient`; configure one separately with `AddTemporalClient` or
+register a connected client through the Temporal SDK.
 
 ### Multi-Turn Conversations via Proxy
 
@@ -746,15 +740,19 @@ next message to that session ID starts a fresh session lineage.
 
 ## Activity Timeouts
 
-Every agent turn — one call to `RunAsync` — executes inside a Temporal activity. Two timeouts govern that activity:
+One `RunAsync` turn can schedule several model-step and tool activities. These timeouts govern
+each activity attempt, not the end-to-end turn:
 
 | Option              | Default   | What it limits                                                                                           |
 |---------------------|-----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `ActivityTimeout`   | 5 minutes | Total wall-clock time for one turn, including tool calls and retries                                     |
-| `HeartbeatTimeout`  | 2 minutes | Maximum gap between heartbeats emitted while the model-step activity consumes provider updates |
+| `ActivityTimeout`   | 5 minutes | Wall-clock limit for one model or context-preparation attempt; retries and later activities have separate budgets |
+| `HeartbeatTimeout`  | 2 minutes | Maximum gap between heartbeats during model, context-preparation, or tool work |
 
-Both are non-nullable `TimeSpan` properties on `TemporalAgentsOptions` with the defaults shown above. Override either
-to tune for slow models or long tool-call chains.
+The worker-level properties are `DefaultActivityTimeout` and `DefaultHeartbeatTimeout`. Per-agent
+`ActivityTimeout` / `HeartbeatTimeout` override them for model and context-preparation work, and
+individual tools can override their own timeouts. Memory-scope initialization uses a separate
+30-second start-to-close timeout, at most two attempts, a one-second initial retry interval, and
+no heartbeat timeout. Neither setting is a whole-turn deadline.
 
 ```csharp
 builder.Services.AddTemporalClient("localhost:7233", "default");
@@ -763,7 +761,7 @@ builder.Services
     .AddHostedTemporalWorker("agents")
     .AddTemporalAgents(opts =>
     {
-        // Increase for slow models or long tool-call chains
+        // Increase for a slow model or tool activity attempt
         opts.DefaultActivityTimeout = TimeSpan.FromMinutes(10);
 
         // Increase for long-running model calls
@@ -870,7 +868,11 @@ preserved by reusing the workflow-generated session and request IDs.
 
 ## Human-in-the-Loop (HITL) Approval Gates
 
-Agent tools can pause mid-turn and wait for a human decision before proceeding. The backing `AgentWorkflow` exposes
+Prefer workflow-parked approval through `RequireApproval()` or a tool interceptor returning
+`PauseForApproval`: the durable wait survives worker restarts without pinning a tool activity.
+See [HITL Patterns](./hitl-patterns.md) for the complete registration and review flow.
+
+An in-tool wait is a separate, worker-resident path. The backing `AgentWorkflow` exposes
 the inherited `ResolveApprovalAsync` update, plus `RequestApprovalAsync` (called from inside a tool) and one
 `[WorkflowQuery]` handler, `GetPendingApproval`, for polling the current pending
 request without modifying workflow state.
@@ -904,8 +906,11 @@ public class DataDeletionTool
 }
 ```
 
-Because the tool runs inside a Temporal activity, the pause is fully durable. If the worker restarts while waiting for
-approval, the activity resumes from exactly the same point once a new worker picks it up.
+Heartbeats keep this activity alive, but do not checkpoint its stack or continuation. A worker
+crash loses the in-tool wait; if the retry policy permits another attempt, the entire tool runs
+again from its beginning, not from the approval call. Tools use one attempt by default. Never
+rely on this path to recover an uncertain external write; use downstream idempotency and
+reconciliation, or move approval before dispatch with the workflow-parked path.
 
 Set `ActivityTimeout` to a value that exceeds your expected review time:
 
@@ -1247,11 +1252,11 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 | `AddTools(params AIFunction[] tools)` | Bulk registration of concrete tools. |
 | `AddContextProvider(AIContextProvider provider, IEnumerable<DurableToolRegistrationSpec>? durableTools = null)` / `AddContextProvider(Func<IServiceProvider, AIContextProvider>)` | Wires a provider into the managed session pipeline. `InvokingAsync` prepares context once per logical turn and `InvokedAsync` runs at turn completion; activity retries may repeat either hook. See [Context Providers](context-providers.md) for tool limits. |
 | `TimeToLive`, `ApprovalTimeout`, `ActivityTimeout`, `HeartbeatTimeout` | Per-agent overrides. `null` inherits the worker-level default on `TemporalAgentsOptions`. |
-| `RetryPolicy` | Agent-level retry policy. Applies to the `RunDurableAgentStep` activity and all tool and interceptor activities for the agent; this is the only supported retry opt-in for tools. |
+| `RetryPolicy` | Agent-level retry policy. Applies to model and context-preparation activities and all tool and interceptor activities for the agent; this is the only supported retry opt-in for tools. Memory-scope initialization uses a separate fixed policy. |
 | `MaxEntryCount`, `HistoryReducerKey` | Per-agent continue-as-new bounds and keyed reducer. Inherit worker defaults when unset. |
 | `ContextReducerKey` | Per-agent MEAI context reducer key. Inherits `opts.DefaultContextReducerKey`; affects only the model request, not retained history. |
 | `MaxModelContextTokens`, `ModelOutputTokenReserve` | Optional per-agent estimated model-context limit and output reserve. Inherit worker defaults when unset. |
-| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per managed agent turn (default `20` when not set). No worker-level fallback. The value is resolved from the agent registration when the worker resolves the agent configuration. |
+| `MaxToolCallsPerTurn` | Cap on LLM-step iterations per managed agent turn (default `20` when not set). No worker-level fallback. The value is supplied from the worker registration before workflow initialization. |
 | `AddToolInterceptor(Func<IServiceProvider, IAgentToolInterceptor> factory)` | Registers a pre-tool lifecycle hook. The interceptor runs before each `InvokeAgentTool` activity and returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI`): `Proceed`, `PauseForApproval`, `Skip`, or `Block`. See `opts.DefaultToolInterceptor` for a worker-level default. |
 
 ### `DurableToolOptions` reference
@@ -1275,7 +1280,7 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 | `agent.ApprovalTimeout` | `opts.DefaultApprovalTimeout` |
 | `agent.ActivityTimeout` | `opts.DefaultActivityTimeout` |
 | `agent.HeartbeatTimeout` | `opts.DefaultHeartbeatTimeout` |
-| `agent.RetryPolicy` | `opts.DefaultRetryPolicy` |
+| `agent.RetryPolicy` | `opts.DefaultRetryPolicy` for model and context-preparation activities; memory-scope initialization uses a fixed policy |
 | `agent.MaxEntryCount` | `opts.DefaultMaxEntryCount` |
 | `agent.MaxModelContextTokens` | `opts.DefaultMaxModelContextTokens` |
 | `agent.ModelOutputTokenReserve` | `opts.DefaultModelOutputTokenReserve` |
@@ -1286,15 +1291,15 @@ For every scalar setting the rule is: **if you set it on the agent, it overrides
 
 Retry policy resolution for agent activities:
 
-1. A run-level policy, when the run path supports one, applies to the agent's activities.
-2. `agent.RetryPolicy` applies uniformly to the model step, tools, and interceptor.
-3. `opts.DefaultRetryPolicy` is the worker-level policy when the agent does not override it.
-4. With no explicit policy, model steps use the bounded model default and tools/interceptors use
-   one attempt rather than Temporal's unlimited server default.
+1. `agent.RetryPolicy` applies uniformly to the model step, tools, and interceptor.
+2. `opts.DefaultRetryPolicy` is the worker-level model/preparation policy when the agent does not
+   override it. It does not enable tool or interceptor retries.
+3. With no per-agent policy, tools/interceptors use one attempt rather than Temporal's unlimited
+   server default, regardless of the worker-level model policy.
 
-Agent- and run-level policies affect all tool activities on that path, not only model calls. If
-tools need different retry behavior, separate them across agents or make every affected tool
-idempotent. Full table in
+There is no run-level retry option. Setting `agent.RetryPolicy` affects all tools, not only model
+calls. If tools need different retry behavior, separate them across agents or make every affected
+tool idempotent. Full table in
 [Durable Agents](./durable-agents.md#retry-policy-hierarchy).
 
 ### Custom agent middleware
@@ -1338,10 +1343,10 @@ non-retryably, before the model is called. See
 For managed session workflows, `AIContextProvider.InvokingAsync` runs once before the model/tool
 loop and `InvokedAsync` runs once when that logical turn reaches a terminal result. Their activities
 can retry, so hook effects remain at-least-once; completed preparation output is replayed rather
-than recalled. The registered agent workflow invokes per-step callbacks. See
+than recalled. See
 [Context Providers](context-providers.md) for failure, cancellation, StateBag, and tool semantics.
 
-For the workflow-loop semantics (per-tool fan-out, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).
+For the workflow-loop semantics (serial tool dispatch, crash safety, continue-as-new) see [`docs/architecture/MAF/agent-sessions-and-workflow-loop.md`](../../architecture/MAF/agent-sessions-and-workflow-loop.md).
 For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientAgent` Compatibility](../../architecture/MAF/bounded-durable-agent-compatibility.md).
 
 ---

@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <UserSecretsId>temporal-agents-chat-history-memory-sample</UserSecretsId>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <IsPackable>false</IsPackable>
   </PropertyGroup>

@@ -36,6 +36,7 @@
   </Folder>
   <Folder Name="/samples/MAF/">
     <Project Path="samples/MAF/BasicAgent/BasicAgent.csproj" />
+    <Project Path="samples/MAF/ChatHistoryMemory/ChatHistoryMemory.csproj" />
     <Project Path="samples/MAF/WorkflowOrchestration/WorkflowOrchestration.csproj" />
     <Project Path="samples/MAF/EvaluatorOptimizer/EvaluatorOptimizer.csproj" />
     <Project Path="samples/MAF/MultiAgentRouting/MultiAgentRouting.csproj" />

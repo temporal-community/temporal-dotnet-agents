@@ -190,9 +190,8 @@ public class AddDurableAgentTests
     }
 
     [Fact]
-    public void BuildAgentWorkflowInput_ProxyOnly_UsesWorkerDefaults()
+    public void BuildWorkerAgentWorkflowInput_UsesWorkerDefaults()
     {
-        // Proxy-only: no AddDurableAgent call. Worker-level defaults flow through.
         var options = new TemporalAgentsOptions
         {
             DefaultTimeToLive = TimeSpan.FromHours(6),
@@ -202,11 +201,9 @@ public class AddDurableAgentTests
             DefaultMaxEntryCount = 250,
             EnableSearchAttributes = true,
         };
-        options.AddAgentProxy("Foo");
+        options.AddDurableAgent("Foo", agent => agent.ChatClient = _ => NewChatClient());
 
-        var input = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore("Foo", options, "tq");
-
-        Assert.NotNull(input);
+        var input = DefaultTemporalAgentClient.BuildWorkerAgentWorkflowInputCore("Foo", options, "tq");
         Assert.Equal("Foo", input.AgentName);
         Assert.Equal("tq", input.TaskQueue);
         Assert.Equal(TimeSpan.FromHours(6), input.TimeToLive);
@@ -215,48 +212,40 @@ public class AddDurableAgentTests
         Assert.Equal(TimeSpan.FromDays(2), input.ApprovalTimeout);
         Assert.Equal(250, input.MaxEntryCount);
         Assert.True(input.EnableSearchAttributes);
-        Assert.Null(input.DurableAgentToolActivityOptions);
+        Assert.NotNull(input.DurableAgentToolActivityOptions);
     }
 
     [Fact]
-    public void BuildAgentWorkflowInput_ProxyOnly_RespectsProxyDeclarationTtl()
+    public void BuildWorkerAgentWorkflowInput_NullDefaultTimeToLiveRetainsFourteenDayFallback()
     {
-        // Per-agent TTL on the proxy declaration wins over the worker default.
-        var options = new TemporalAgentsOptions
-        {
-            DefaultTimeToLive = TimeSpan.FromHours(6),
-        };
-        options.AddAgentProxy("Foo", timeToLive: TimeSpan.FromHours(2));
+        var options = new TemporalAgentsOptions { DefaultTimeToLive = null };
+        options.AddDurableAgent("Foo", agent => agent.ChatClient = _ => NewChatClient());
 
-        var input = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore("Foo", options, "tq");
-
-        Assert.Equal(TimeSpan.FromHours(2), input.TimeToLive);
-    }
-
-    [Fact]
-    public void BuildAgentWorkflowInput_ProxyOnly_NullDefaultTtl_FallsBackToFourteenDays()
-    {
-        // When neither the proxy declaration nor the worker default specify a TTL, fall back
-        // to the documented 14-day default — same rule as the durable-agent path.
-        var options = new TemporalAgentsOptions
-        {
-            DefaultTimeToLive = null,
-        };
-        options.AddAgentProxy("Foo");
-
-        var input = DefaultTemporalAgentClient.BuildAgentWorkflowInputCore("Foo", options, "tq");
+        var input = DefaultTemporalAgentClient.BuildWorkerAgentWorkflowInputCore("Foo", options, "tq");
 
         Assert.Equal(TimeSpan.FromDays(14), input.TimeToLive);
     }
 
     [Fact]
-    public void BuildAgentWorkflowInput_NotRegisteredAtAll_Throws()
+    public void BuildClientAgentWorkflowInput_UsesIdentityOnly()
+    {
+        var options = new TemporalAgentsOptions { DefaultTimeToLive = TimeSpan.FromHours(6) };
+        options.AddAgentProxy("Foo");
+
+        var input = DefaultTemporalAgentClient.BuildClientAgentWorkflowInputCore("Foo", options, "tq");
+        Assert.Equal("Foo", input.AgentName);
+        Assert.Equal("tq", input.TaskQueue);
+        Assert.Null(input.ResolvedWorkerConfig);
+    }
+
+    [Fact]
+    public void BuildClientAgentWorkflowInput_NotRegisteredAtAll_Throws()
     {
         // Neither durable nor proxy registered — surface the misconfiguration clearly.
         var options = new TemporalAgentsOptions();
 
         Assert.Throws<AgentNotRegisteredException>(() =>
-            DefaultTemporalAgentClient.BuildAgentWorkflowInputCore("Missing", options, "tq"));
+            DefaultTemporalAgentClient.BuildClientAgentWorkflowInputCore("Missing", options, "tq"));
     }
 
     // ── Internal stubs ──────────────────────────────────────────────────────

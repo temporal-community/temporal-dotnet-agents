@@ -63,6 +63,12 @@ internal sealed class AgentActivities(
         InitializeChatHistoryMemoryInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        return await InitializeChatHistoryMemoryCoreAsync(input).ConfigureAwait(false);
+    }
+
+    private async Task<InitializedChatHistoryMemory> InitializeChatHistoryMemoryCoreAsync(
+        InitializeChatHistoryMemoryInput input)
+    {
         var blueprint = ResolveBlueprint(input.AgentName);
         var registration = blueprint.Registration.ContextProviderFactories
             .Select(provider => provider.MemorySearch)
@@ -195,8 +201,7 @@ internal sealed class AgentActivities(
         var blueprint = ResolveBlueprint(input.AgentName);
         var registration = blueprint.Registration;
         var agentsOptions = blueprint.AgentsOptions;
-        // Every dispatch path reaches this boundary, including the first proxy-started step and
-        // jobs without a settings handshake. Frontend snapshots are not worker policy.
+        // Resolve model context against worker registration; the client payload is not worker policy.
         AgentModelContextBudget modelContextBudget;
         try
         {
@@ -271,24 +276,6 @@ internal sealed class AgentActivities(
         using var agentPipeline = pipelineLease;
         var agent = agentPipeline.Agent;
 
-        // When the workflow was started by a proxy-only client, resolve
-        // and return worker-side settings so the workflow can patch its input on the first turn.
-        Dictionary<string, ActivityOptions>? resolvedToolOpts = null;
-        if (input.NeedsWorkerSettingsResolution)
-        {
-            var effectiveActivityTimeout = registration.ActivityTimeout
-                ?? agentsOptions.DefaultActivityTimeout;
-            var effectiveHeartbeatTimeout = registration.HeartbeatTimeout
-                ?? agentsOptions.DefaultHeartbeatTimeout;
-            var effectiveRetryPolicy =
-                TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(registration.RetryPolicy);
-
-            resolvedToolOpts = DefaultTemporalAgentClient.BuildDurableAgentToolActivityOptions(
-                registration,
-                effectiveActivityTimeout,
-                effectiveHeartbeatTimeout,
-                effectiveRetryPolicy);
-        }
         IReadOnlyList<ChatMessage> messagesForLlm = PreparedMessageAttribution.Restore(
             input.AccumulatedMessages,
             input.AccumulatedMessageAttributions);
@@ -700,86 +687,6 @@ internal sealed class AgentActivities(
             var isFinal = toolCalls.Count == 0;
 
 
-            int? resolvedMaxToolCalls = input.NeedsWorkerSettingsResolution
-                ? registration.MaxToolCallsPerTurn
-                : null;
-
-
-            // Bundle resolved settings into ProxyResolvedWorkerConfig only when this was a
-            // resolution-request step (NeedsWorkerSettingsResolution). Non-resolution steps return
-            // null for the config; consumer forwarding properties handle the null safely.
-            ProxyResolvedWorkerConfig? resolvedConfig = null;
-            if (input.NeedsWorkerSettingsResolution)
-            {
-                // Feature L: build interceptor-related lists from tool registrations.
-                ActivityOptions? interceptorActivityOpts = null;
-                List<string>? interceptorSkippedTools = null;
-                List<string>? requiresApprovalTools = null;
-
-                // requiresApprovalTools is populated unconditionally — RequireApproval() is an
-                // absolute floor that must be enforced even when no tool interceptor is registered
-                // (BLOCK-2 fix). Only interceptorActivityOpts and the skip list need the interceptor guard.
-                foreach (var toolReg in registration.Tools)
-                {
-                    var toolOpts = toolReg.Options;
-                    if (toolOpts.RequireApprovalFlag)
-                    {
-                        (requiresApprovalTools ??= new List<string>()).Add(toolReg.Name);
-                    }
-
-                }
-
-                Dictionary<string, ActivityOptions>? perToolInterceptorOpts = null;
-
-                if (toolInterceptor is not null)
-                {
-                    var effectiveTimeout = registration.ActivityTimeout
-                        ?? agentsOptions.DefaultActivityTimeout;
-                    var effectiveHeartbeat = registration.HeartbeatTimeout
-                        ?? agentsOptions.DefaultHeartbeatTimeout;
-                    var effectiveRetry =
-                        TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForAgentTool(registration.RetryPolicy);
-
-                    interceptorActivityOpts = new ActivityOptions
-                    {
-                        StartToCloseTimeout = effectiveTimeout,
-                        HeartbeatTimeout = effectiveHeartbeat,
-                        RetryPolicy = effectiveRetry,
-                        // Summary is set per-tool at dispatch time: $"intercept:{toolName}"
-                    };
-
-                    foreach (var toolReg in registration.Tools)
-                    {
-                        if (toolReg.Options.SkipInterceptorFlag)
-                        {
-                            (interceptorSkippedTools ??= new List<string>()).Add(toolReg.Name);
-                        }
-
-                        // Wire per-tool interceptor timeout when set (F2 fix).
-                        if (toolReg.Options.InterceptorTimeout.HasValue)
-                        {
-                            perToolInterceptorOpts ??= new Dictionary<string, ActivityOptions>(StringComparer.OrdinalIgnoreCase);
-                            perToolInterceptorOpts[toolReg.Name] = new ActivityOptions
-                            {
-                                StartToCloseTimeout = toolReg.Options.InterceptorTimeout,
-                                HeartbeatTimeout = effectiveHeartbeat,
-                                RetryPolicy = effectiveRetry,
-                            };
-                        }
-                    }
-                }
-
-                resolvedConfig = new ProxyResolvedWorkerConfig
-                {
-                    MaxToolCallsPerTurn = resolvedMaxToolCalls ?? registration.MaxToolCallsPerTurn,
-                    ToolActivityOptions = resolvedToolOpts ?? new Dictionary<string, ActivityOptions>(),
-                    InterceptorActivityOptions = interceptorActivityOpts,
-                    InterceptorToolActivityOptions = perToolInterceptorOpts,
-                    InterceptorSkippedTools = interceptorSkippedTools,
-                    RequiresApprovalTools = requiresApprovalTools,
-                };
-            }
-
             var stepResult = new AgentStepResult
             {
                 IsFinal = isFinal,
@@ -789,7 +696,6 @@ internal sealed class AgentActivities(
                 StateBagDelta = stateBagDelta,
                 Usage = response.Usage,
                 ResponseId = response.ResponseId,
-                ResolvedWorkerConfig = resolvedConfig,
                 ApprovalRequiredToolNames = approvalRequiredToolNames,
             };
             try
@@ -882,10 +788,17 @@ internal sealed class AgentActivities(
     }
 
     [Activity("TemporalCommunity.Extensions.Agents.PrepareAgentTurn")]
-    public async Task<PreparedAgentTurn> PrepareAgentTurnAsync(PrepareAgentTurnInput input)
+    public Task<PreparedAgentTurn> PrepareAgentTurnAsync(PrepareAgentTurnInput input)
     {
         ArgumentNullException.ThrowIfNull(input);
+        var context = ActivityExecutionContext.Current;
+        return RunWithHeartbeatsAsync(
+            context,
+            () => PrepareAgentTurnCoreAsync(input));
+    }
 
+    private async Task<PreparedAgentTurn> PrepareAgentTurnCoreAsync(PrepareAgentTurnInput input)
+    {
         var context = ActivityExecutionContext.Current;
         var blueprint = ResolveBlueprint(input.AgentName);
         var registration = blueprint.Registration;

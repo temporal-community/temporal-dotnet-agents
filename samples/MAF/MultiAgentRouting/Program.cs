@@ -38,7 +38,7 @@ using var tracerProvider = Sdk.CreateTracerProviderBuilder()
     .Build();
 
 // ── Step 2: Build the application host ───────────────────────────────────────
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
 // ── Step 3: Load configuration ───────────────────────────────────────────────

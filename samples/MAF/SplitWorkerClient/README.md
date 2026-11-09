@@ -8,7 +8,7 @@ This sample demonstrates:
 - Worker process: hosts `AgentWorkflow`, `AgentActivities`, and the `IChatClient`
 - Client process: sends messages via `WorkflowUpdate` with no AI credentials required
 - Session reuse: reconnect to an existing session from its workflow ID using `TemporalAgentSessionId.Parse`
-- `AddTemporalAgentProxies()` for lightweight client-only registration
+- `AddTemporalClient()` plus `AddTemporalAgentProxies()` for client-only registration
 
 ## Architecture
 
@@ -19,7 +19,8 @@ This sample demonstrates:
 │  IChatClient (OpenAI)               │     │  No IChatClient, no worker          │
 │  AgentWorkflow (durable session)    │◄────│  AddTemporalAgentProxies()          │
 │  AgentActivities (AI inference)     │     │  GetTemporalAgentProxy("Assistant") │
-│  AddTemporalAgents()                │     │  proxy.RunAsync(...)                │
+│  AddTemporalAgents()                │     │  AddTemporalClient()                │
+│                                     │     │  proxy.RunAsync(...)                │
 │                                     │     │                                     │
 │  Task queue: "agents"               │     │  Task queue: "agents"               │
 └─────────────────────────────────────┘     └────────────────────────────────────┘
@@ -32,7 +33,7 @@ This sample demonstrates:
 
 - **Credential isolation.** Only the Worker needs an `OPENAI_API_KEY`. The Client connects only to Temporal and never touches the AI backend.
 - **Session reuse across client instances.** `TemporalAgentSessionId.Parse(session.ToString())` reconstructs a session handle from its workflow ID string, allowing a second client process (or restart) to continue an existing conversation.
-- **`AddTemporalAgentProxies()` for client-only registration.** Registers `ITemporalAgentClient` and named proxies without a worker, activities, or `IChatClient` — exactly what a lightweight caller needs.
+- **`AddTemporalAgentProxies()` for client-only registration.** Registers `ITemporalAgentClient` and named proxies without a worker, activities, or `IChatClient`. Register the Temporal connection separately with `AddTemporalClient()`.
 - **Task queue coupling.** Worker and Client must agree on the task queue name (`"agents"`). Mismatches result in the client's updates timing out while waiting for a worker to pick them up.
 
 ## Getting Started
@@ -56,7 +57,7 @@ Start the Worker first, then the Client in a separate terminal:
 
 ```bash
 # Terminal 1 — Worker
-dotnet run --project samples/MAF/SplitWorkerClient/Worker/Worker.csproj
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/SplitWorkerClient/Worker/Worker.csproj
 
 # Terminal 2 — Client
 dotnet run --project samples/MAF/SplitWorkerClient/Client/Client.csproj

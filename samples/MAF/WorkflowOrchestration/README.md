@@ -5,8 +5,9 @@ activity. The workflow generates a deterministic `TemporalAgentSessionId` and `R
 activity resolves the registered proxy and passes both values through to the session workflow.
 This keeps workflow code deterministic and makes retries reuse the same logical agent turn.
 
-The sample also demonstrates a fire-and-forget call through an activity with an explicit request
-ID. The model/tool loop remains owned by the registered agent's `AgentWorkflow`.
+The default run waits for the response. The activity also accepts a fire-and-forget option for
+application use, but the program does not exercise that branch. The model/tool loop remains owned
+by the registered agent's `AgentWorkflow`.
 
 ## Run
 
@@ -19,5 +20,5 @@ temporal server start-dev --namespace default --search-attribute AgentName=Keywo
 Configure `OPENAI_API_KEY` and `OPENAI_API_BASE_URL`, then run:
 
 ```bash
-dotnet run --project samples/MAF/WorkflowOrchestration/WorkflowOrchestration.csproj
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/WorkflowOrchestration/WorkflowOrchestration.csproj
 ```

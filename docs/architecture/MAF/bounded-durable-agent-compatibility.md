@@ -22,7 +22,7 @@ The extension builds a fresh `ChatClientAgent` inside each LLM-step activity fro
 | Input | Support | Required contract |
 | --- | --- | --- |
 | `IChatClient` registered through `DurableAgentBuilder.ChatClient` | Supported | The extension constructs the `ChatClientAgent` itself. |
-| Instructions/messages-only `AIContextProvider` | Supported | It runs once per LLM step. Keep session state in `AgentSession.StateBag`; make external effects safe to retry. |
+| Instructions/messages-only `AIContextProvider` | Supported | Preparation runs once per logical turn and terminal notification runs afterward; activity retries can repeat hooks. Keep session state in `AgentSession.StateBag`. |
 | Static provider tools declared through `IDurableToolSource` | Supported | The declarations are registered as Temporal tool activities. |
 | Static tools supplied through `AddContextProvider(provider, durableTools)` | Supported | Use this adapter path when the provider type cannot implement `IDurableToolSource`. |
 | Transparent `DelegatingAIAgent` middleware via `ConfigureAgentPipeline` | Supported with limits | It must pass the supplied `inner` agent to `base(inner)` and forward the exact supplied `TemporalAgentSession`. It may make retry-safe StateBag changes. Its fields are activity-attempt-local, and the wrapper must not implement `IDisposable` or `IAsyncDisposable`. |

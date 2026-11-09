@@ -38,11 +38,19 @@ The test suite is split into two projects:
 `StubAIAgent` is a concrete `AIAgent` that returns a fixed response without calling any LLM. It's the workhorse of the unit test suite:
 
 ```csharp
+using System.Text.Json;
+using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
+using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.Agents.Session;
+
 internal sealed class StubAIAgent(
     string? name,
     AgentResponse? fixedResponse = null,
     string? description = null) : AIAgent
 {
+    private readonly AgentResponse _fixedResponse = fixedResponse ?? new AgentResponse();
+
     public override string? Name { get; } = name;
     public override string? Description { get; } = description;
 
@@ -57,6 +65,25 @@ internal sealed class StubAIAgent(
         AgentRunOptions? options = null,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(_fixedResponse);
+
+    protected override ValueTask<JsonElement> SerializeSessionCoreAsync(
+        AgentSession session,
+        JsonSerializerOptions? jsonSerializerOptions = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This stub does not serialize sessions.");
+
+    protected override ValueTask<AgentSession> DeserializeSessionCoreAsync(
+        JsonElement serializedState,
+        JsonSerializerOptions? jsonSerializerOptions = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This stub does not deserialize sessions.");
+
+    protected override IAsyncEnumerable<AgentResponseUpdate> RunCoreStreamingAsync(
+        IEnumerable<ChatMessage> messages,
+        AgentSession? session = null,
+        AgentRunOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This stub supports only non-streaming runs.");
 }
 ```
 
@@ -65,13 +92,14 @@ internal sealed class StubAIAgent(
 ```csharp
 // StubAIAgent returns a fixed classification keyword — no LLM required.
 private static StubAIAgent ClassifierReturning(string keyword) =>
-    new("Classifier", new AgentResponse { Text = keyword });
+    new("Classifier", new AgentResponse(new ChatMessage(ChatRole.Assistant, keyword)));
 
 [Fact]
-public void StubAIAgent_ReturnsFixedResponse()
+public async Task StubAIAgent_ReturnsFixedResponse()
 {
     var agent = ClassifierReturning("ORDERS");
     Assert.Equal("Classifier", agent.Name);
+    Assert.Equal("ORDERS", (await agent.RunAsync("classify")).Text);
 }
 ```
 
@@ -97,6 +125,12 @@ internal sealed class CapturingChatClient : IChatClient
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This spy supports only non-streaming calls.");
 
     public void Dispose() { }
 }

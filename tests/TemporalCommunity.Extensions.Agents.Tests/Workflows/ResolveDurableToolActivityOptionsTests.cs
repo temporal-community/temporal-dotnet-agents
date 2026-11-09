@@ -91,7 +91,7 @@ public class ResolveDurableToolActivityOptionsTests
             TaskQueue = "tq",
             ActivityTimeout = TimeSpan.FromMinutes(5),
             HeartbeatTimeout = TimeSpan.FromMinutes(2),
-            ResolvedWorkerConfig = new ProxyResolvedWorkerConfig
+            ResolvedWorkerConfig = new AgentWorkerToolConfig
             {
                 MaxToolCallsPerTurn = 20,
                 ToolActivityOptions = new Dictionary<string, ActivityOptions>(StringComparer.Ordinal)

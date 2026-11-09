@@ -31,7 +31,7 @@ using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { Args = args, ContentRootPath = AppContext.BaseDirectory });
 builder.Logging.SetMinimumLevel(LogLevel.Warning);
 builder.Logging.AddFilter("SupportWorkflow", LogLevel.Information);          // workflow routing decisions
 builder.Logging.AddFilter("TemporalCommunity.Extensions.Agents", LogLevel.Information); // agent activity dispatch

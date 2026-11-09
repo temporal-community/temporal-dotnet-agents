@@ -419,7 +419,7 @@ public class DurableAgentContextProviderLifecycleTests
                 ActivityTimeout = TimeSpan.FromSeconds(15),
                 RetryPolicy = new Temporalio.Common.RetryPolicy { MaximumAttempts = 1 },
                 HistoryCompactionStrategy = DurableHistoryCompactionStrategy.TrimRecentTurns,
-                ResolvedWorkerConfig = new ProxyResolvedWorkerConfig
+                ResolvedWorkerConfig = new AgentWorkerToolConfig
                 {
                     MaxToolCallsPerTurn = 20,
                     ToolActivityOptions = new Dictionary<string, Temporalio.Workflows.ActivityOptions>(),
@@ -459,7 +459,9 @@ public class DurableAgentContextProviderLifecycleTests
             {
                 DataConverter = TemporalAgentDataConverter.Instance,
             };
-            options.AddWorkflow<AgentWorkflow>();
+            options.AddWorkflow(AgentWorkflowWorkerFactory.CreateDefinition(
+                host.Services.GetRequiredService<TemporalAgentsOptions>(),
+                taskQueue));
             var replayer = new WorkflowReplayer(options);
             var original = env.Client.GetWorkflowHandle<AgentWorkflow>(sessionId.WorkflowId, originalRunId);
             foreach (var handle in new[] { original, workflow })

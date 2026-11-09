@@ -393,26 +393,25 @@ declaration-plus-activation factory:
 (services, context) =>
 {
     var idempotencyKey = context.Metadata.IdempotencyKey;
-    var store = services.GetRequiredService<IIdempotencyStore>();
+    var billing = services.GetRequiredService<IBillingService>();
 
     return new DurableToolActivation<ApplicationTurnState>
     {
         Function = AIFunctionFactory.Create(
             async (string orderId) =>
             {
-                if (await store.TryGetResultAsync(idempotencyKey) is { } cached)
-                {
-                    return cached; // A prior attempt for this activity already applied the effect.
-                }
-
-                var result = await billing.ChargeAsync(orderId);
-                await store.RecordAsync(idempotencyKey, result);
-                return result;
+                return await billing.ChargeAsync(orderId, idempotencyKey);
             },
             name: "charge_order"),
     };
 }
 ```
+
+`IBillingService` is application code: its authoritative billing operation must atomically enforce
+the supplied key and return the original result on repeats. A local "check receipt, charge, record
+receipt" sequence is not sufficient: a crash after charging but before recording permits a second
+charge. If the downstream service cannot enforce the key, use an atomic effect-and-receipt
+transaction in the system that owns the effect, or reconcile uncertain outcomes before retrying.
 
 Managed session tools use the v2 logical-call algorithm:
 

@@ -99,7 +99,7 @@ dotnet user-secrets set "OPENAI_API_BASE_URL" "https://api.openai.com/v1" --proj
 ### Run
 
 ```bash
-dotnet run --project samples/MAF/HumanInTheLoop/HumanInTheLoop.csproj
+DOTNET_ENVIRONMENT=Development dotnet run --project samples/MAF/HumanInTheLoop/HumanInTheLoop.csproj
 ```
 
 ### Expected Output

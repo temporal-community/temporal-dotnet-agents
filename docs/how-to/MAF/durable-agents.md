@@ -1,6 +1,6 @@
 # Durable Agents
 
-Every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in its own `InvokeAgentTool` activity. A response's tool calls are dispatched serially in model order, so each call's result and StateBag write-back are applied before the next call starts. Tool activities use one attempt by default; retries are an explicit per-agent opt-in and apply uniformly to that agent's tools. A retry can repeat an external effect whose completion was uncertain, so use downstream idempotency and reconciliation for writes. There is no opt-in durability flag — this is the worker-hosted agent-definition path. Client-only processes use `AddTemporalAgentProxies` and `AddAgentProxy` to call an agent hosted elsewhere.
+Every agent registered with `AddDurableAgent` is a **durable agent**: each LLM call runs in a separate `RunDurableAgentStep` activity, and each tool call runs in its own `InvokeAgentTool` activity. A response's tool calls are dispatched serially in model order, so each call's result and StateBag write-back are applied before the next call starts. Tool activities use one attempt by default; only the per-agent retry policy opts all of that agent's tools into retries. Worker retry defaults also govern context preparation, not memory-scope initialization, tools, or interceptors. A retry can repeat an external effect whose completion was uncertain, so use downstream idempotency and reconciliation for writes. There is no opt-in durability flag — this is the worker-hosted agent-definition path. Client-only processes use `AddTemporalAgentProxies` and `AddAgentProxy` to call an agent hosted elsewhere.
 
 ### Activities the workflow may dispatch per turn
 
@@ -14,7 +14,7 @@ The following activities run as needed by the durable agent loop.
 ## When to use what
 
 - **Tools default to one activity attempt**, regardless of whether they read or write. This avoids an automatic re-execution after an ambiguous activity failure.
-- **Retries are opt-in through `agent.RetryPolicy`** and apply to every tool on that agent. Only enable them when every affected tool is safe to retry, usually through an application-level idempotency key.
+- **Retries are opt-in through `agent.RetryPolicy`** and apply to every tool on that agent. `opts.DefaultRetryPolicy` controls model-step retries only. Enable agent-level retries only when every affected tool is safe to retry, usually through an application-level idempotency key.
 
 ## Canonical example
 
@@ -84,17 +84,21 @@ opts => opts.RequireApproval()                      // absolute floor: always pa
 This is the canonical statement of retry inheritance for MAF agents; other pages link here rather
 than restating it.
 
-Model-step and tool activities use a bounded policy for model calls and one attempt for tools unless
-an explicit agent policy opts the tools into retries. Agent-level retry policy is shared; it is not
-a per-tool override.
+Model-step and context-preparation activities use the bounded model policy. Memory-scope
+initialization uses a dedicated fixed policy. Tool activities and interceptor activities use one
+attempt unless an explicit agent policy opts them into retries. The worker-level retry policy
+applies to model and context-preparation activities only; tool retries are not inherited from the
+worker.
 
 | Activity | Default | Explicit retry configuration |
 |---|---|---|
-| `RunDurableAgentStep` (LLM call) | Bounded model retry policy | Agent/run/worker policy |
-| `InvokeAgentTool` | One attempt | Agent/run/worker policy, applied uniformly to tools |
-| `RunToolInterceptor` | One attempt | Agent/worker policy |
+| `RunDurableAgentStep` (LLM call) | Five attempts, maximum backoff 2 seconds | Agent policy, then worker default |
+| Context preparation | Same timeout, heartbeat, and retry policy as model steps | Agent policy, then worker default |
+| Memory-scope initialization | 30-second start-to-close, two attempts, 1-second initial interval, no heartbeat | Fixed policy |
+| `InvokeAgentTool` | One attempt | Per-agent policy, applied uniformly to tools |
+| `RunToolInterceptor` | One attempt | Per-agent policy |
 
-Three consequences people get wrong:
+Important consequences:
 
 - **`agent.RetryPolicy` applies to tools too.** Setting it to tune a flaky model call also makes
   every registered tool retry with that policy. Do not opt in unless all tools on that agent can
@@ -102,9 +106,15 @@ Three consequences people get wrong:
 - **The default tool policy is not Temporal's server default.** Temporal interprets an omitted
   policy as unlimited retries; MAF supplies a one-attempt policy instead. Setting an explicit agent
   retry policy replaces that default for tool activities.
+- **Worker defaults do not opt tools into retries.** `opts.DefaultRetryPolicy` affects model-step
+  and context preparation, never memory-scope initialization, tools, or interceptors. There is no run-level
+  retry option on `TemporalAgentRunOptions`.
+- **Per-tool retries are not independent.** `WithMaxAttempts(2)` is rejected. `NoRetry()` is accepted
+  only when the agent policy uses one attempt; it cannot override an agent policy with multiple
+  or unlimited attempts.
 
 The model backstop caps backoff at 2 seconds so an interactive `RunAsync` returns its terminal
-failure promptly. Tools do not retry unless the agent explicitly opts in.
+failure promptly. Tools do not retry unless the agent policy explicitly opts in.
 
 Setting a per-agent `RetryPolicy` **replaces** the default policy for tool activities, so an
 explicit policy with `MaximumAttempts = 0` restores Temporal's unlimited retries.
@@ -124,9 +134,29 @@ not an audit log; verify an unknown effect with the downstream system before ret
 
 ## Split-deployment behavior
 
-In a split-deployment setup — where a client process uses `GetTemporalAgentProxy` without a full `AddDurableAgent` registration and the worker process hosts the agent via `AddDurableAgent` — the workflow starts without access to the worker's retry and timeout configuration. On the first `RunDurableAgentStep` call of each turn, the activity resolves the agent's retry policy and per-tool timeout options from the worker's registration and returns them as part of the step result.
+In a split deployment, register the Temporal client and client-only proxies with
+`AddTemporalClient` and `AddTemporalAgentProxies`, then host the agent on the worker. The proxy
+declares only the agent name and task queue. The worker's workflow instance factory supplies the
+registered agent's execution settings before workflow initialization; there is no settings lookup
+activity or first-step handshake.
 
-The worker's agent-level retry policy and per-tool timeouts are honored without duplicating them on the client side.
+If a proxy names an agent that is not registered on that worker, synchronous calls and
+fire-and-forget admission fail with an `AgentNotRegisteredException` application failure rather
+than repeatedly retrying workflow startup. Fire-and-forget waits only for the queueing update's
+outcome, not for the model or tools to finish.
+
+The worker owns session TTL, model and context-preparation activity timeouts, heartbeat and approval
+timeouts, retry policy, history bounds, and tool/interceptor policy. The same worker model activity
+options govern both model steps and context preparation, including heartbeats and retries.
+Memory-scope initialization keeps its dedicated fixed policy. Those settings are carried through
+Continue-as-New rather than refreshed each turn. Worker
+configuration must remain compatible with in-flight workflow histories during replay.
+
+`DefaultRetryPolicy` applies to model steps and context preparation, never enabling tool or
+interceptor retries. Memory-scope initialization uses its fixed policy. Tools and interceptors
+remain one attempt unless an explicit per-agent
+`RetryPolicy` opts them into retries; only use that setting when all affected operations are safe
+to repeat.
 
 ## Sample
 

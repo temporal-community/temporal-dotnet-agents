@@ -135,9 +135,11 @@ internal sealed class DefaultTemporalAgentClient(
 
         _logger.LogClientFireAndForget(sessionId.AgentName, sessionId.WorkflowId);
 
-        await client.StartUpdateWithStartWorkflowAsync(
+        // The update completes after queueing, not after the turn. Observe its outcome so
+        // admission rejections are not silently discarded.
+        await client.ExecuteUpdateWithStartWorkflowAsync(
             (AgentWorkflow wf) => wf.RunAgentFireAndForgetAsync(request),
-            new WorkflowStartUpdateWithStartOptions(startOp, WorkflowUpdateStage.Accepted)
+            new WorkflowUpdateWithStartOptions(startOp)
             {
                 Rpc = new RpcOptions { CancellationToken = cancellationToken },
             }).ConfigureAwait(false);
@@ -240,23 +242,40 @@ internal sealed class DefaultTemporalAgentClient(
     }
 
     /// <summary>
-    /// Constructs the <see cref="AgentWorkflowInput"/> for a session by resolving every per-agent
-    /// scalar via the inheritance rule: <c>effective = registration.X ?? options.DefaultX</c>.
-    /// When this process only declared the agent via <see cref="TemporalAgentsOptions.AddAgentProxy"/>
-    /// (split worker/client deployment), a minimal input is built from worker-level defaults plus
-    /// the proxy declaration's optional TTL — the actual workflow execution happens on the worker.
+    /// Constructs the client-owned portion of an <see cref="AgentWorkflowInput"/>. Execution
+    /// settings are supplied by the worker's workflow instance factory.
     /// </summary>
     /// <exception cref="AgentNotRegisteredException">
     /// Thrown when no durable-agent registration and no proxy declaration exist for
     /// <paramref name="agentName"/>.
     /// </exception>
-    internal AgentWorkflowInput BuildAgentWorkflowInput(string agentName) =>
-        BuildAgentWorkflowInputCore(agentName, options, taskQueue);
+    internal AgentWorkflowInput BuildAgentWorkflowInput(string agentName)
+        => BuildClientAgentWorkflowInputCore(agentName, options, taskQueue);
+
+    internal static AgentWorkflowInput BuildClientAgentWorkflowInputCore(
+        string agentName,
+        TemporalAgentsOptions options,
+        string taskQueue)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentName);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentException.ThrowIfNullOrWhiteSpace(taskQueue);
+        if (!options.IsAgentRegistered(agentName))
+        {
+            throw new AgentNotRegisteredException(agentName);
+        }
+
+        return new AgentWorkflowInput
+        {
+            AgentName = agentName,
+            TaskQueue = taskQueue,
+        };
+    }
 
     /// <summary>
-    /// Pure builder used by <see cref="BuildAgentWorkflowInput(string)"/> and unit tests.
+    /// Pure builder used by the worker workflow instance factory and unit tests.
     /// </summary>
-    internal static AgentWorkflowInput BuildAgentWorkflowInputCore(
+    internal static AgentWorkflowInput BuildWorkerAgentWorkflowInputCore(
         string agentName,
         TemporalAgentsOptions options,
         string taskQueue)
@@ -267,17 +286,6 @@ internal sealed class DefaultTemporalAgentClient(
 
         if (!options.DurableAgentRegistrations.TryGetValue(agentName, out var registration))
         {
-            // Proxy-only path: this process declared the agent via AddTemporalAgentProxies +
-            // AddAgentProxy("name", ttl) but does not host the durable agent itself (typical
-            // split worker/client deployment). The proxy still constructs an AgentWorkflowInput
-            // locally to start the workflow on the server; the workflow then runs in the worker
-            // process which has the full DurableAgentRegistration. Build a minimal input from
-            // worker-level defaults plus the proxy declaration's optional TTL.
-            if (options.ProxyDeclarations.TryGetValue(agentName, out var proxyTtl))
-            {
-                return BuildProxyOnlyAgentWorkflowInput(agentName, options, taskQueue, proxyTtl);
-            }
-
             throw new AgentNotRegisteredException(agentName);
         }
 
@@ -285,8 +293,8 @@ internal sealed class DefaultTemporalAgentClient(
         var perAgentActivityTimeout = registration.ActivityTimeout ?? options.DefaultActivityTimeout;
         var perAgentHeartbeatTimeout = registration.HeartbeatTimeout ?? options.DefaultHeartbeatTimeout;
         var perAgentApprovalTimeout = registration.ApprovalTimeout ?? options.DefaultApprovalTimeout;
-        // Model steps keep the bounded retry backstop. Tool activities instead make one attempt
-        // unless the agent explicitly opts in through its per-agent RetryPolicy.
+        // Worker defaults apply to model steps. Tools and interceptors opt into retries only
+        // through the per-agent policy so a worker-wide model setting cannot retry side effects.
         var configuredRetryPolicy = registration.RetryPolicy ?? options.DefaultRetryPolicy;
         var perAgentModelRetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
             configuredRetryPolicy);
@@ -370,9 +378,8 @@ internal sealed class DefaultTemporalAgentClient(
             //   from DI — surviving wire serialization, worker restarts, and replay correctly.
             HistoryReducerKey = perAgentHistoryReducerKey,
             EnableSearchAttributes = options.EnableSearchAttributes,
-            // Worker-side settings are baked in. A non-null bundle means this workflow does not
-            // need the proxy-start resolution handshake.
-            ResolvedWorkerConfig = new ProxyResolvedWorkerConfig
+            // The worker instance factory supplies these settings before workflow initialization.
+            ResolvedWorkerConfig = new AgentWorkerToolConfig
             {
                 MaxToolCallsPerTurn = registration.MaxToolCallsPerTurn,
                 ToolActivityOptions = toolActivityOptions,
@@ -381,47 +388,6 @@ internal sealed class DefaultTemporalAgentClient(
                 InterceptorSkippedTools = interceptorSkippedTools,
                 RequiresApprovalTools = requiresApprovalTools,
             },
-        };
-    }
-
-    /// <summary>
-    /// Builds an <see cref="AgentWorkflowInput"/> for a proxy-only declaration (this process
-    /// called <see cref="TemporalAgentsOptions.AddAgentProxy"/> but not
-    /// <see cref="TemporalAgentsOptions.AddDurableAgent"/>). The proxy client constructs the
-    /// input locally to start the workflow on the server; the actual workflow execution and
-    /// per-tool dispatch happen in the worker process which owns the
-    /// <see cref="DurableAgentRegistration"/>. Per-tool activity options are intentionally left
-    /// unresolved here and are supplied by the worker on its side.
-    /// </summary>
-    private static AgentWorkflowInput BuildProxyOnlyAgentWorkflowInput(
-        string agentName,
-        TemporalAgentsOptions options,
-        string taskQueue,
-        TimeSpan? proxyTtl)
-    {
-        var timeToLive = proxyTtl ?? options.DefaultTimeToLive ?? TimeSpan.FromDays(14);
-
-        return new AgentWorkflowInput
-        {
-            AgentName = agentName,
-            TaskQueue = taskQueue,
-            TimeToLive = timeToLive,
-            ActivityTimeout = options.DefaultActivityTimeout,
-            HeartbeatTimeout = options.DefaultHeartbeatTimeout,
-            ApprovalTimeout = options.DefaultApprovalTimeout,
-            // Bounded backstop (MaximumAttempts = 5) when unset — see DefaultRetryPolicy.
-            RetryPolicy = TemporalCommunity.Extensions.AI.Internal.DefaultRetryPolicy.ResolveForModel(
-                options.DefaultRetryPolicy),
-            MaxEntryCount = options.DefaultMaxEntryCount,
-            MaxModelContextTokens = options.DefaultMaxModelContextTokens,
-            ModelOutputTokenReserve = options.DefaultModelOutputTokenReserve,
-            HistoryReducerKey = options.DefaultHistoryReducerKey,
-            EnableSearchAttributes = options.EnableSearchAttributes,
-            // Proxy-only construction: leave ResolvedWorkerConfig null. The worker resolves
-            // settings (per-tool activity options and max iterations) from its
-            // own DurableAgentRegistration on the first step via the NeedsWorkerSettingsResolution
-            // handshake.
-            ResolvedWorkerConfig = null,
         };
     }
 
@@ -462,7 +428,7 @@ internal sealed class DefaultTemporalAgentClient(
                     "that policy applies to every tool on the agent.");
             }
 
-            if (perAgentRetryPolicy is { MaximumAttempts: > 1 })
+            if (perAgentRetryPolicy is { MaximumAttempts: not 1 })
             {
                 throw new InvalidOperationException(
                     $"Tool '{toolName}' disables retries while the agent has an explicit retry policy. " +
