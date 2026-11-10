@@ -14,7 +14,7 @@ The following activities run as needed by the durable agent loop.
 ## When to use what
 
 - **Tools default to one activity attempt**, regardless of whether they read or write. This avoids an automatic re-execution after an ambiguous activity failure.
-- **Retries are opt-in through `agent.RetryPolicy`** and apply to every tool on that agent. `opts.DefaultRetryPolicy` controls model-step retries only. Enable agent-level retries only when every affected tool is safe to retry, usually through an application-level idempotency key.
+- **Retries are opt-in through `agent.RetryPolicy`** and apply to every tool on that agent. `opts.DefaultRetryPolicy` controls model-step and context-preparation retries, not memory-scope initialization, tools, or interceptors. Enable agent-level retries only when every affected tool is safe to retry, usually through an application-level idempotency key.
 
 ## Canonical example
 

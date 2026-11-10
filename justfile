@@ -615,7 +615,7 @@ _sample-preflight:
         echo "ERROR: 'nc' (netcat) is required for the Temporal-server reachability probe."; \
         exit 127; \
     fi
-    @if [ -z "$${OPENAI_API_KEY:-}" ]; then \
+    @if [ -z "${OPENAI_API_KEY:-}" ]; then \
         if ! dotnet user-secrets list --project samples/MEAI/DurableChat 2>/dev/null | grep -q '^OPENAI_API_KEY = .'; then \
             echo "ERROR: OPENAI_API_KEY is not set."; \
             echo "  Set in your shell, or:  dotnet user-secrets set OPENAI_API_KEY sk-... --project samples/MEAI/DurableChat"; \
