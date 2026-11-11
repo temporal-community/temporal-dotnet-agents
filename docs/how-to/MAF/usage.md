@@ -570,6 +570,7 @@ Workflow code must not invoke an agent directly. Resolve the registered proxy in
 and generate the session and request IDs in workflow code. Temporal replays those IDs unchanged, so
 an activity retry uses the same session and request identity. For example, see
 [`WorkflowOrchestration`](../../../samples/MAF/WorkflowOrchestration/README.md).
+The terminal-outcome exception types are in `TemporalCommunity.Extensions.AI.Exceptions`.
 
 ```csharp
 [Workflow]
@@ -583,7 +584,18 @@ public sealed class ResearchWorkflow
         return await Workflow.ExecuteActivityAsync(
             (AgentInvocationActivities activities) => activities.RunAsync(
                 "ResearcherAgent", sessionId.WorkflowId, requestId, $"Research: {topic}"),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            });
     }
 }
 ```
@@ -592,6 +604,19 @@ The activity resolves the proxy from its scoped services, creates a
 `TemporalAgentSession` from the passed session ID, and supplies the stable request ID through
 `TemporalAgentRunOptions.RequestId`. The registered `AgentWorkflow` owns conversational history
 and carries it across its own Continue-as-New transitions.
+
+The outer activity's retry policy must distinguish transient invocation failures from retained
+terminal outcomes. A matching request ID replays a retained failure; retrying it does not start
+a fresh turn. The policy above stops on `DurableTurnFailedException` and
+`DurableTurnOutcomeTooLargeException` while keeping the normal retries for transport failures,
+session-busy responses, and lost activity completions. These are the simple CLR type names
+recorded by the default Temporal failure converter, not fully qualified names. Keep any existing
+transient retry limits or backoff when adding these exclusions.
+
+Do not regenerate the request ID on an activity retry: a new ID can repeat external effects.
+Inspect the retained turn outcome and reconcile uncertain tool effects before deliberately
+starting a new turn. This retry policy belongs to the calling activity; it does not change model
+or tool activity retry policies, or the exceptions reported to direct proxy callers.
 
 ---
 
@@ -838,6 +863,7 @@ session ID and request ID for each call in workflow code.
 ```csharp
 using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI.Exceptions;
 
 [Workflow]
 public class ResearchAndSummarizeWorkflow
@@ -845,16 +871,28 @@ public class ResearchAndSummarizeWorkflow
     [WorkflowRun]
     public async Task<string> RunAsync(string topic)
     {
+        var agentCallOptions = new ActivityOptions
+        {
+            StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            RetryPolicy = new()
+            {
+                NonRetryableErrorTypes =
+                [
+                    nameof(DurableTurnFailedException),
+                    nameof(DurableTurnOutcomeTooLargeException),
+                ],
+            },
+        };
         var researchSession = WorkflowAgents.NewAgentSessionId("ResearchAgent");
         var summarySession  = WorkflowAgents.NewAgentSessionId("SummaryAgent");
         var research = Workflow.ExecuteActivityAsync(
             (AgentInvocationActivities activities) => activities.RunAsync(
-                researchSession.WorkflowId, Workflow.NewGuid().ToString("N"), $"Research: {topic}"),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+                "ResearchAgent", researchSession.WorkflowId, Workflow.NewGuid().ToString("N"), $"Research: {topic}"),
+            agentCallOptions);
         var summary = Workflow.ExecuteActivityAsync(
             (AgentInvocationActivities activities) => activities.RunAsync(
-                summarySession.WorkflowId, Workflow.NewGuid().ToString("N"), $"Summarize: {topic}"),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+                "SummaryAgent", summarySession.WorkflowId, Workflow.NewGuid().ToString("N"), $"Summarize: {topic}"),
+            agentCallOptions);
         var results = await Workflow.WhenAllAsync([research, summary]);
         return $"Research: {results[0]}\n\nSummary: {results[1]}";
     }
@@ -862,7 +900,9 @@ public class ResearchAndSummarizeWorkflow
 ```
 
 Each proxy call starts or reuses its own registered `AgentWorkflow`; activity retry identity is
-preserved by reusing the workflow-generated session and request IDs.
+preserved by reusing the workflow-generated session and request IDs. Both activities share the
+[terminal-outcome exclusions](#invoking-agents-from-a-workflow), while transient invocation
+failures remain retryable.
 
 ---
 

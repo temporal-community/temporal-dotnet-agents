@@ -120,6 +120,15 @@ Phase 7 adds compiled MAF activity-to-proxy invocation and MEAI telemetry-source
 workflow-generated session/request identities remain aligned with proxy calls and the pinned MEAI
 inference source stays registered in the observability guide.
 
+The outer proxy-invocation examples in MAF usage, routing, dos-and-donts, prompt caching,
+agent orchestration, event-driven communication, durability, and library combinations are extracted
+directly from their Markdown fences into a checked-in file by `compile_agent_invocation_examples.py`.
+These blocks do not all qualify for the registration coverage scanner. Extraction keeps them
+verbatim without additional handwritten copies; the harness supplies only imports, containing
+types, and method parameters. This checks shared activity-option scope, the two terminal-outcome
+exception imports, and preserved retry limits/backoff without executing workflows or providers.
+The doc gate checks that the generated file matches the Markdown; `just build` needs no Python.
+
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
 
 ## Doc defects this harness carries corrections for

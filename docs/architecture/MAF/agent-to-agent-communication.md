@@ -10,6 +10,20 @@ registered agent's `AgentWorkflow`.
 A workflow can call one agent, inspect its durable result, and then call another:
 
 ```csharp
+using TemporalCommunity.Extensions.AI.Exceptions;
+
+var agentCallOptions = new ActivityOptions
+{
+    StartToCloseTimeout = TimeSpan.FromMinutes(35),
+    RetryPolicy = new()
+    {
+        NonRetryableErrorTypes =
+        [
+            nameof(DurableTurnFailedException),
+            nameof(DurableTurnOutcomeTooLargeException),
+        ],
+    },
+};
 var researcherSession = WorkflowAgents.NewAgentSessionId("Researcher");
 var outline = await Workflow.ExecuteActivityAsync(
     (AgentInvocationActivities activities) => activities.RunAsync(
@@ -17,7 +31,7 @@ var outline = await Workflow.ExecuteActivityAsync(
         researcherSession.WorkflowId,
         Workflow.NewGuid().ToString("N"),
         $"Research: {topic}"),
-    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+    agentCallOptions);
 
 var writerSession = WorkflowAgents.NewAgentSessionId("Writer");
 var draft = await Workflow.ExecuteActivityAsync(
@@ -26,7 +40,7 @@ var draft = await Workflow.ExecuteActivityAsync(
         writerSession.WorkflowId,
         Workflow.NewGuid().ToString("N"),
         $"Write using this outline:\n{outline}"),
-    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+    agentCallOptions);
 ```
 
 The activity receives the exact registered name, the workflow-generated session workflow ID, a
@@ -40,24 +54,41 @@ For independent calls, schedule separate activities and await them with
 `Workflow.WhenAllAsync`. Each task has a distinct session and request ID:
 
 ```csharp
+using TemporalCommunity.Extensions.AI.Exceptions;
+
+var agentCallOptions = new ActivityOptions
+{
+    StartToCloseTimeout = TimeSpan.FromMinutes(35),
+    RetryPolicy = new()
+    {
+        NonRetryableErrorTypes =
+        [
+            nameof(DurableTurnFailedException),
+            nameof(DurableTurnOutcomeTooLargeException),
+        ],
+    },
+};
 var researchSession = WorkflowAgents.NewAgentSessionId("Researcher");
 var summarySession = WorkflowAgents.NewAgentSessionId("Summarizer");
 
 var research = Workflow.ExecuteActivityAsync(
     (AgentInvocationActivities activities) => activities.RunAsync(
         "Researcher", researchSession.WorkflowId, Workflow.NewGuid().ToString("N"), topic),
-    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+    agentCallOptions);
 var summary = Workflow.ExecuteActivityAsync(
     (AgentInvocationActivities activities) => activities.RunAsync(
         "Summarizer", summarySession.WorkflowId, Workflow.NewGuid().ToString("N"), topic),
-    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+    agentCallOptions);
 
 var results = await Workflow.WhenAllAsync([research, summary]);
 ```
 
-Activity and agent-workflow failures are observed by the parent workflow; choose retry policies
-based on the effects performed by the activity and tools. Reusing the same session and request IDs
-on activity retries prevents accidental submission of a new logical turn.
+Activity and agent-workflow failures are observed by the parent workflow. Each example shares
+options only among its proxy-invocation activities. Exclude the two retained terminal-outcome
+exception types from every such activity's retry policy: retrying the same request ID retrieves
+the same failure, not a new turn. Transport failures, session-busy responses, and lost completions
+remain retryable. Reusing the same session and request IDs on activity retries prevents accidental
+submission of a new logical turn. See [the invocation retry contract](../../how-to/MAF/usage.md#invoking-agents-from-a-workflow).
 
 ## Communication from Agent Tools
 

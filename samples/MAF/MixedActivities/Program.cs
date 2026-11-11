@@ -123,6 +123,7 @@ foreach (var (docId, result, error) in results)
     if (error is not null)
     {
         Console.WriteLine($"  Error:    {error}");
+        Environment.ExitCode = 1;
     }
     else
     {
@@ -143,3 +144,5 @@ Console.WriteLine("    • NotifyReviewerAsync  — plain [Activity], no AI");
 // ── Step 9: Graceful shutdown ─────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
 Console.WriteLine("\nDone.");
+if (Environment.ExitCode == 0)
+    Console.WriteLine("MixedActivities sample complete.");

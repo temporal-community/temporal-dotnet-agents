@@ -13,6 +13,7 @@ using OpenAI;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
 using WorkflowOrchestration;
@@ -97,11 +98,14 @@ try
 catch (Exception ex)
 {
     Console.WriteLine($"Workflow failed: {ex.Message}\n");
+    Environment.ExitCode = 1;
 }
 
 // ── Step 9: Graceful shutdown ────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
 Console.WriteLine("Done.");
+if (Environment.ExitCode == 0)
+    Console.WriteLine("WorkflowOrchestration sample complete.");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WORKFLOW DEFINITION
@@ -137,7 +141,18 @@ public class WeatherOrchestrationWorkflow
         return await Workflow.ExecuteActivityAsync(
             (AgentInvocationActivities activities) => activities.RunAsync(
                 sessionId.WorkflowId, requestId, input.UserQuestion),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            });
     }
 }
 

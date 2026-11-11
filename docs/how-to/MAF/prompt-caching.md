@@ -217,9 +217,23 @@ Create a summarization step inside a workflow that condenses long histories befo
 result to a specialist. Invoke both registered agents through activities:
 
 ```csharp
+using TemporalCommunity.Extensions.AI.Exceptions;
+
 [WorkflowRun]
 public async Task<string> RunAsync(string question)
 {
+    var agentCallOptions = new ActivityOptions
+    {
+        StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        RetryPolicy = new()
+        {
+            NonRetryableErrorTypes =
+            [
+                nameof(DurableTurnFailedException),
+                nameof(DurableTurnOutcomeTooLargeException),
+            ],
+        },
+    };
     var researchSession = WorkflowAgents.NewAgentSessionId("Researcher");
     string lastResponse = string.Empty;
     for (var i = 0; i < 5; i++)
@@ -230,7 +244,7 @@ public async Task<string> RunAsync(string question)
                 researchSession.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 $"Research step {i}: {question}"),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+            agentCallOptions);
     }
 
     var summarySession = WorkflowAgents.NewAgentSessionId("Summarizer");
@@ -240,11 +254,13 @@ public async Task<string> RunAsync(string question)
             summarySession.WorkflowId,
             Workflow.NewGuid().ToString("N"),
             $"Summarize these findings concisely: {lastResponse}"),
-        new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+        agentCallOptions);
 }
 ```
 
-The summarizer sees only the final output, not the full 5-turn research history.
+The summarizer sees only the final output, not the full 5-turn research history. All six
+invocations use the same [terminal-outcome exclusions](./usage.md#invoking-agents-from-a-workflow);
+retrying a retained failure with the same request ID cannot start a fresh turn.
 
 ### 3. Use a Compatible Custom Context Projection
 

@@ -101,8 +101,11 @@ try
 catch (Exception ex)
 {
     Console.WriteLine($"Workflow failed: {ex.Message}\n");
+    Environment.ExitCode = 1;
 }
 
 // ── Step 8: Graceful shutdown ────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
 Console.WriteLine("Done.");
+if (Environment.ExitCode == 0)
+    Console.WriteLine("EvaluatorOptimizer sample complete.");

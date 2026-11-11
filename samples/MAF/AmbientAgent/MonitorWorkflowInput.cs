@@ -2,7 +2,7 @@ namespace AmbientAgent;
 
 /// <summary>
 /// Input for <see cref="MonitorWorkflow"/>. Supports continue-as-new by carrying
-/// the rolling buffer and total readings count forward.
+/// the rolling buffer, pending analysis readings, and total readings count forward.
 /// </summary>
 public record MonitorWorkflowInput
 {
@@ -21,6 +21,9 @@ public record MonitorWorkflowInput
     /// <summary>Total readings processed across all runs (carried forward).</summary>
     public int CarriedTotalReadings { get; init; }
 
-    /// <summary>Count of readings since the last analysis, carried from the previous run.</summary>
+    /// <summary>Legacy count of readings since analysis, retained for older continued runs.</summary>
     public int CarriedReadingsSinceLastAnalysis { get; init; }
+
+    /// <summary>Readings queued for analysis, carried forward from a previous run.</summary>
+    public List<HealthCheckData> CarriedPendingAnalysisReadings { get; init; } = [];
 }

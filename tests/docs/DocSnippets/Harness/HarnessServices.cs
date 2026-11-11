@@ -16,6 +16,7 @@ using Temporalio.Activities;
 using Temporalio.Testing;
 using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.AI.Tools;
 using TemporalCommunity.Extensions.Agents.Tools;
 
@@ -260,7 +261,18 @@ internal class AskWorkflow
                 session.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 question),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            });
     }
 }
 

@@ -103,16 +103,32 @@ await Workflow.ExecuteActivityAsync(...).ConfigureAwait(true);
 ### Do invoke registered agents through activities
 
 ```csharp
+using TemporalCommunity.Extensions.AI.Exceptions;
+
 var sessionId = WorkflowAgents.NewAgentSessionId("WeatherAgent");
 var requestId = Workflow.NewGuid().ToString("N");
 var result = await Workflow.ExecuteActivityAsync(
     (AgentInvocationActivities activities) => activities.RunAsync(
         "WeatherAgent", sessionId.WorkflowId, requestId, prompt),
-    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+    new ActivityOptions
+    {
+        StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        RetryPolicy = new()
+        {
+            NonRetryableErrorTypes =
+            [
+                nameof(DurableTurnFailedException),
+                nameof(DurableTurnOutcomeTooLargeException),
+            ],
+        },
+    });
 ```
 
 Workflow code must not invoke a registered proxy directly. The activity resolves it from scoped DI;
 workflow-generated session and request IDs make retries target the same logical agent turn.
+Exclude [retained terminal outcomes](./usage.md#invoking-agents-from-a-workflow) from the outer
+activity's retries: the same request ID returns the same failure, not a fresh turn. Transport
+failures, session-busy responses, and lost completions remain retryable.
 
 ---
 
@@ -340,6 +356,9 @@ opts.DefaultHeartbeatTimeout   = TimeSpan.FromMinutes(30);
 ### Do configure the activity that invokes the registered agent
 
 ```csharp
+using Temporalio.Common;
+using TemporalCommunity.Extensions.AI.Exceptions;
+
 await Workflow.ExecuteActivityAsync(
     (AgentInvocationActivities activities) => activities.RunAsync(
         "ResearcherAgent", sessionId.WorkflowId, requestId, prompt),
@@ -347,13 +366,23 @@ await Workflow.ExecuteActivityAsync(
     {
         StartToCloseTimeout = TimeSpan.FromMinutes(5),
         HeartbeatTimeout    = TimeSpan.FromMinutes(1),
-        RetryPolicy = new RetryPolicy { MaximumAttempts = 5, MaximumInterval = TimeSpan.FromSeconds(2) },
+        RetryPolicy = new RetryPolicy
+        {
+            MaximumAttempts = 5,
+            MaximumInterval = TimeSpan.FromSeconds(2),
+            NonRetryableErrorTypes =
+            [
+                nameof(DurableTurnFailedException),
+                nameof(DurableTurnOutcomeTooLargeException),
+            ],
+        },
     });
 ```
 
 **Why:** these options govern the parent workflow's invocation activity. The registered agent's
 model and tool activities use the agent worker configuration. Generate the session and request IDs
-in workflow code before scheduling the invocation activity.
+in workflow code before scheduling the invocation activity. Preserve retry limits and backoff
+while excluding retained terminal outcomes.
 
 ---
 

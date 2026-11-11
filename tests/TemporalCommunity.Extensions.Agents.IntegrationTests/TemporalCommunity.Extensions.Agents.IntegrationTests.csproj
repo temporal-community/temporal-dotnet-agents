@@ -28,6 +28,14 @@
   <ItemGroup>
     <ProjectReference Include="../../src/TemporalCommunity.Extensions.Agents/TemporalCommunity.Extensions.Agents.csproj" />
     <ProjectReference Include="../TemporalCommunity.Extensions.Tests.Shared/TemporalCommunity.Extensions.Tests.Shared.csproj" />
+    <ProjectReference Include="../../samples/MAF/PerToolActivities/PerToolActivities.csproj" />
+    <ProjectReference Include="../../samples/MAF/WorkflowOrchestration/WorkflowOrchestration.csproj" />
+    <ProjectReference Include="../../samples/MAF/EvaluatorOptimizer/EvaluatorOptimizer.csproj" />
+    <ProjectReference Include="../../samples/MAF/MultiAgentRouting/MultiAgentRouting.csproj" />
+    <ProjectReference Include="../../samples/MAF/WorkflowRouting/WorkflowRouting.csproj" />
+    <ProjectReference Include="../../samples/MAF/ConfigurableAgent/ConfigurableAgent.csproj" />
+    <ProjectReference Include="../../samples/MAF/MixedActivities/MixedActivities.csproj" />
+    <ProjectReference Include="../../samples/MAF/AmbientAgent/AmbientAgent.csproj" />
   </ItemGroup>
 
   <!-- RecordingTool remains in Agents.Tests.StepMode and is linked here. ScriptedChatClient

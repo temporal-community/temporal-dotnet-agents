@@ -1,4 +1,5 @@
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Workflows;
 
 namespace EvaluatorOptimizer;
@@ -54,7 +55,18 @@ public class EvaluatorOptimizerWorkflow
             draft = await Workflow.ExecuteActivityAsync(
                 (AgentInvocationActivities activities) => activities.RunAsync(
                     "Generator", genSession.WorkflowId, Workflow.NewGuid().ToString("N"), genPrompt),
-                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+                new ActivityOptions
+                {
+                    StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                    RetryPolicy = new()
+                    {
+                        NonRetryableErrorTypes =
+                        [
+                            nameof(DurableTurnFailedException),
+                            nameof(DurableTurnOutcomeTooLargeException),
+                        ],
+                    },
+                }).ConfigureAwait(true);
 
             // ── Evaluation turn ────────────────────────────────────────────
             var evaluationPrompt =
@@ -63,7 +75,18 @@ public class EvaluatorOptimizerWorkflow
             feedback = await Workflow.ExecuteActivityAsync(
                 (AgentInvocationActivities activities) => activities.RunAsync(
                     "Evaluator", evalSession.WorkflowId, Workflow.NewGuid().ToString("N"), evaluationPrompt),
-                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+                new ActivityOptions
+                {
+                    StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                    RetryPolicy = new()
+                    {
+                        NonRetryableErrorTypes =
+                        [
+                            nameof(DurableTurnFailedException),
+                            nameof(DurableTurnOutcomeTooLargeException),
+                        ],
+                    },
+                }).ConfigureAwait(true);
 
             if (feedback.Contains(ApprovalToken, StringComparison.OrdinalIgnoreCase))
             {

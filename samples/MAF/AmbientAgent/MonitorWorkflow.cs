@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
-using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI.Exceptions;
+using Temporalio.Common;
+using Temporalio.Workflows;
 
 namespace AmbientAgent;
 
@@ -14,49 +16,78 @@ public class MonitorWorkflow
 {
     // Queue<T> gives O(1) enqueue/dequeue vs. List<T>.RemoveAt(0)'s O(n).
     private readonly Queue<HealthCheckData> _buffer = new();
+    private readonly Queue<HealthCheckData> _pendingAnalysisReadings = new();
     private readonly Queue<string> _recentAnalyses = new();
 
     // Static readonly avoids allocating ActivityOptions on every loop iteration.
     private static readonly ActivityOptions AlertActivityOptions =
         new() { StartToCloseTimeout = TimeSpan.FromSeconds(30) };
+    private static readonly ActivityOptions AgentActivityOptions =
+        new()
+        {
+            StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            RetryPolicy = new RetryPolicy
+            {
+                NonRetryableErrorTypes =
+                [
+                    nameof(DurableTurnFailedException),
+                    nameof(DurableTurnOutcomeTooLargeException)
+                ]
+            }
+        };
 
     private int _totalReadings;
-    private int _readingsSinceLastAnalysis;
+    private int _legacyReadingsSinceLastAnalysis;
+    private bool _legacyInputInitialized;
+    private readonly bool _useFifoDrain;
     private bool _shutdownRequested;
-    private MonitorWorkflowInput _input = null!;
+    private readonly MonitorWorkflowInput _input;
 
-    [WorkflowRun]
-    public async Task RunAsync(MonitorWorkflowInput input)
+    [WorkflowInit]
+    public MonitorWorkflow(MonitorWorkflowInput input)
     {
         _input = input;
+        _useFifoDrain = Workflow.Patched("ambient-monitor-fifo-drain-v1");
+        if (!_useFifoDrain)
+            return;
 
         // Restore state carried forward from a previous run (continue-as-new).
         foreach (var reading in input.CarriedBuffer)
             _buffer.Enqueue(reading);
+        foreach (var reading in input.CarriedPendingAnalysisReadings)
+            _pendingAnalysisReadings.Enqueue(reading);
+        if (input.CarriedPendingAnalysisReadings.Count == 0
+            && input.CarriedReadingsSinceLastAnalysis > 0)
+        {
+            foreach (var reading in _buffer.TakeLast(input.CarriedReadingsSinceLastAnalysis))
+                _pendingAnalysisReadings.Enqueue(reading);
+        }
         _totalReadings = input.CarriedTotalReadings;
-        _readingsSinceLastAnalysis = input.CarriedReadingsSinceLastAnalysis;
+    }
 
-        while (!_shutdownRequested)
+    [WorkflowRun]
+    public async Task RunAsync(MonitorWorkflowInput input)
+    {
+        if (!_useFifoDrain)
+        {
+            await RunLegacyAsync(input).ConfigureAwait(true);
+            return;
+        }
+
+        while (true)
         {
             // Wait until we have enough new readings for an analysis pass, or shutdown.
             // Pass Workflow.CancellationToken so the wait is cancelled cleanly on shutdown.
-            var conditionMet = await Workflow.WaitConditionAsync(
+            await Workflow.WaitConditionAsync(
                 () => _shutdownRequested
-                      || _readingsSinceLastAnalysis >= input.AnalysisInterval
+                      || _pendingAnalysisReadings.Count >= input.AnalysisInterval
                       || Workflow.ContinueAsNewSuggested,
                 timeout: TimeSpan.FromHours(1),
                 cancellationToken: Workflow.CancellationToken)
                 .ConfigureAwait(true);
 
-            if (_shutdownRequested)
-                break;
-
-            // Defer continue-as-new when a full analysis batch is ready — otherwise
-            // the pending analysis would be silently dropped on the next run start.
-            if (Workflow.ContinueAsNewSuggested && _readingsSinceLastAnalysis < input.AnalysisInterval)
+            if (Workflow.ContinueAsNewSuggested && !_shutdownRequested)
             {
-                // Carry _readingsSinceLastAnalysis forward so the restored run does
-                // not re-count readings that were already counted before the transition.
                 throw Workflow.CreateContinueAsNewException(
                     (MonitorWorkflow wf) => wf.RunAsync(new MonitorWorkflowInput
                     {
@@ -65,31 +96,30 @@ public class MonitorWorkflow
                         MaxBufferSize = input.MaxBufferSize,
                         CarriedBuffer = _buffer.ToList(),
                         CarriedTotalReadings = _totalReadings,
-                        CarriedReadingsSinceLastAnalysis = _readingsSinceLastAnalysis
+                        CarriedReadingsSinceLastAnalysis = _pendingAnalysisReadings.Count,
+                        CarriedPendingAnalysisReadings = _pendingAnalysisReadings.ToList()
                     }));
             }
 
-            // On timeout (conditionMet == false), the interval check below would also
-            // be false — both guards point to the same "not enough readings yet" situation.
-            // The first guard handles the timeout path; the second makes the intent explicit
-            // for the non-timeout path where ContinueAsNewSuggested unblocked the wait but
-            // the interval has not been reached yet.
-            if (!conditionMet)
-                continue; // Timeout with no readings — loop back and wait again.
+            if (_pendingAnalysisReadings.Count < input.AnalysisInterval)
+            {
+                if (_shutdownRequested)
+                    break;
 
-            if (_readingsSinceLastAnalysis < input.AnalysisInterval)
                 continue;
+            }
 
             // ── Analyze recent readings via LLM ──────────────────────────────
-            _readingsSinceLastAnalysis = 0;
+            var batch = new List<HealthCheckData>(input.AnalysisInterval);
+            for (var i = 0; i < input.AnalysisInterval; i++)
+                batch.Add(_pendingAnalysisReadings.Dequeue());
 
-            // Analyze only the most recent AnalysisInterval readings, not the full buffer.
-            var summary = FormatReadingsForAnalysis(_buffer.TakeLast(input.AnalysisInterval));
+            var summary = FormatReadingsForAnalysis(batch);
             var sessionId = WorkflowAgents.NewAgentSessionId("AnalysisAgent");
             var analysisResult = await Workflow.ExecuteActivityAsync(
                 (AgentInvocationActivities activities) => activities.RunAsync(
                     "AnalysisAgent", sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), summary),
-                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+                AgentActivityOptions).ConfigureAwait(true);
             _recentAnalyses.Enqueue(analysisResult);
 
             // Keep only the last 10 analyses in memory.
@@ -106,7 +136,7 @@ public class MonitorWorkflow
                 var alert = new AnomalyAlert(
                     DetectedAt: Workflow.UtcNow,
                     Summary: analysisResult,
-                    RecentReadings: _buffer.TakeLast(input.AnalysisInterval).ToList());
+                    RecentReadings: batch);
 
                 await Workflow.ExecuteActivityAsync(
                     (AlertActivities a) => a.SignalAlertWorkflowAsync(input.AlertWorkflowId, alert),
@@ -119,13 +149,18 @@ public class MonitorWorkflow
     [WorkflowSignal("IngestHealthCheck")]
     public Task IngestHealthCheckAsync(HealthCheckData data)
     {
+        if (_useFifoDrain && _shutdownRequested)
+            return Task.CompletedTask;
+
         _buffer.Enqueue(data);
+        if (_useFifoDrain)
+            _pendingAnalysisReadings.Enqueue(data);
+        else
+            _legacyReadingsSinceLastAnalysis++;
         _totalReadings++;
-        _readingsSinceLastAnalysis++;
 
         // Enforce max buffer size — drop oldest readings.
-        // Guard against _input being null if a signal arrives before the first workflow task.
-        while (_input is not null && _buffer.Count > _input.MaxBufferSize)
+        while ((_useFifoDrain || _legacyInputInitialized) && _buffer.Count > _input.MaxBufferSize)
             _buffer.Dequeue();
 
         return Task.CompletedTask;
@@ -140,7 +175,72 @@ public class MonitorWorkflow
 
     [WorkflowQuery("GetStatus")]
     public MonitorStatus GetStatus() =>
-        new(_buffer.Count, _totalReadings, _recentAnalyses.ToList());
+        new(_buffer.Count, _totalReadings, _recentAnalyses.ToList(),
+            _useFifoDrain ? _pendingAnalysisReadings.Count : _legacyReadingsSinceLastAnalysis);
+
+    // Keep the original command and signal behavior for histories without the FIFO patch.
+    private async Task RunLegacyAsync(MonitorWorkflowInput input)
+    {
+        _legacyInputInitialized = true;
+        foreach (var reading in input.CarriedBuffer)
+            _buffer.Enqueue(reading);
+        _totalReadings = input.CarriedTotalReadings;
+        _legacyReadingsSinceLastAnalysis = input.CarriedReadingsSinceLastAnalysis;
+
+        while (!_shutdownRequested)
+        {
+            var conditionMet = await Workflow.WaitConditionAsync(
+                () => _shutdownRequested
+                      || _legacyReadingsSinceLastAnalysis >= input.AnalysisInterval
+                      || Workflow.ContinueAsNewSuggested,
+                timeout: TimeSpan.FromHours(1),
+                cancellationToken: Workflow.CancellationToken).ConfigureAwait(true);
+
+            if (_shutdownRequested)
+                break;
+
+            if (Workflow.ContinueAsNewSuggested && _legacyReadingsSinceLastAnalysis < input.AnalysisInterval)
+            {
+                throw Workflow.CreateContinueAsNewException(
+                    (MonitorWorkflow wf) => wf.RunAsync(new MonitorWorkflowInput
+                    {
+                        AlertWorkflowId = input.AlertWorkflowId,
+                        AnalysisInterval = input.AnalysisInterval,
+                        MaxBufferSize = input.MaxBufferSize,
+                        CarriedBuffer = _buffer.ToList(),
+                        CarriedTotalReadings = _totalReadings,
+                        CarriedReadingsSinceLastAnalysis = _legacyReadingsSinceLastAnalysis
+                    }));
+            }
+
+            if (!conditionMet || _legacyReadingsSinceLastAnalysis < input.AnalysisInterval)
+                continue;
+
+            _legacyReadingsSinceLastAnalysis = 0;
+            var summary = FormatReadingsForAnalysis(_buffer.TakeLast(input.AnalysisInterval));
+            var sessionId = WorkflowAgents.NewAgentSessionId("AnalysisAgent");
+            var analysisResult = await Workflow.ExecuteActivityAsync(
+                (AgentInvocationActivities activities) => activities.RunAsync(
+                    "AnalysisAgent", sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), summary),
+                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+            _recentAnalyses.Enqueue(analysisResult);
+            while (_recentAnalyses.Count > 10)
+                _recentAnalyses.Dequeue();
+
+            Workflow.Logger.LogInformation(
+                "Analysis complete ({TotalReadings} total readings): {Result}",
+                _totalReadings, analysisResult);
+
+            if (analysisResult.Contains("ANOMALY", StringComparison.OrdinalIgnoreCase))
+            {
+                var alert = new AnomalyAlert(
+                    Workflow.UtcNow, analysisResult, _buffer.TakeLast(input.AnalysisInterval).ToList());
+                await Workflow.ExecuteActivityAsync(
+                    (AlertActivities activities) => activities.SignalAlertWorkflowAsync(input.AlertWorkflowId, alert),
+                    AlertActivityOptions).ConfigureAwait(true);
+            }
+        }
+    }
 
     // agent.Instructions already tells the model how to respond, so the user message
     // here contains only the data to analyze — no duplicated format instructions.

@@ -143,6 +143,7 @@ foreach (var (id, question) in questions)
     catch (Exception ex)
     {
         Console.WriteLine($"\n── Workflow {workflowId} failed: {ex.Message}\n");
+        Environment.ExitCode = 1;
     }
 }
 
@@ -175,8 +176,11 @@ try
 catch (Exception ex)
 {
     Console.WriteLine($"\n── Dynamic workflow failed: {ex.Message}\n");
+    Environment.ExitCode = 1;
 }
 
 // ── Step 8: Graceful shutdown ────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
 Console.WriteLine("Done.");
+if (Environment.ExitCode == 0)
+    Console.WriteLine("WorkflowRouting sample complete.");

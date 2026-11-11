@@ -12,6 +12,8 @@ agent's `TemporalAIAgentProxy` and calls it outside workflow context. Generate t
 request ID in workflow code and pass both to the activity:
 
 ```csharp
+using TemporalCommunity.Extensions.AI.Exceptions;
+
 [Workflow]
 public sealed class ResearchWorkflow
 {
@@ -30,7 +32,15 @@ public sealed class ResearchWorkflow
             new ActivityOptions
             {
                 StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new RetryPolicy { MaximumAttempts = 3 },
+                RetryPolicy = new RetryPolicy
+                {
+                    MaximumAttempts = 3,
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
             });
     }
 }
@@ -42,6 +52,12 @@ IDs. If the activity retries after the proxy accepted the request, the stable re
 session workflow join or replay that same turn rather than submit a new one. An activity failure
 before acceptance can still cause the agent request to be attempted again; downstream side effects
 must use their own idempotency keys.
+
+A retained failed turn is terminal for that request ID, even when its original failure was
+transient. Exclude the two terminal-outcome exception names from the outer activity retry policy;
+otherwise it can keep retrieving the same failure instead of returning it to the caller.
+Transport and session-busy failures, and lost completions, remain retryable. The library's model
+and tool retry policies are separate from this caller-owned activity policy.
 
 Do not invoke `AIAgent.RunAsync` or resolve `TemporalAIAgentProxy` from workflow code. Direct
 workflow-context proxy invocation is rejected; the activity boundary is required.

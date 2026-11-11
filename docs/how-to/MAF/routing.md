@@ -13,12 +13,26 @@ descriptor-based dynamic routing.
 Use an initial agent call to classify the request, then route to a specialist with workflow logic:
 
 ```csharp
+using TemporalCommunity.Extensions.AI.Exceptions;
+
 [Workflow("CustomerServiceWorkflow")]
 public class CustomerServiceWorkflow
 {
     [WorkflowRun]
     public async Task<string> RunAsync(string userQuestion)
     {
+        var agentCallOptions = new ActivityOptions
+        {
+            StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            RetryPolicy = new()
+            {
+                NonRetryableErrorTypes =
+                [
+                    nameof(DurableTurnFailedException),
+                    nameof(DurableTurnOutcomeTooLargeException),
+                ],
+            },
+        };
         var classifierSession = WorkflowAgents.NewAgentSessionId("Classifier");
         var classification = (await Workflow.ExecuteActivityAsync(
             (RoutingActivities activities) => activities.RunAgentAsync(
@@ -26,7 +40,7 @@ public class CustomerServiceWorkflow
                 classifierSession.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 userQuestion),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }))
+            agentCallOptions))
             .Trim().ToUpperInvariant();
 
         var specialistName = classification switch
@@ -43,7 +57,7 @@ public class CustomerServiceWorkflow
                 specialistSession.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 userQuestion),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+            agentCallOptions);
     }
 }
 ```
@@ -102,9 +116,12 @@ Temporal may retry the activity, and a new identity on each attempt would submit
 logical turn.
 
 For independent agents, schedule one activity per agent and await them with
-`Workflow.WhenAllAsync`. Use a separate session for each independent conversation. The default
-activity retry policy applies to the activity; choose an explicit retry policy when its effects
-require different handling.
+`Workflow.WhenAllAsync`. Use a separate session for each independent conversation. Every activity
+awaiting a proxy call must exclude retained terminal outcomes as above, including the classifier
+and specialist calls in dynamic routing. A retry with the same request ID returns the same
+retained failure; transport failures, session-busy responses, and lost completions remain
+retryable. Registry lookup and name-validation activities do not await agent turns and do not
+need these exclusions. See [the invocation retry contract](./usage.md#invoking-agents-from-a-workflow).
 
 ## Rules
 

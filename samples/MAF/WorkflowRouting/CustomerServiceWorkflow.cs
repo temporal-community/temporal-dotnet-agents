@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI.Exceptions;
 
 namespace WorkflowRouting;
 
@@ -36,7 +37,18 @@ public class CustomerServiceWorkflow
                 classifierSessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 userQuestion),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            }).ConfigureAwait(true);
         var classification = classificationText.Trim().ToUpperInvariant();
 
         // ── Step 2: Route to the correct specialist ─────────────────────────
@@ -60,6 +72,17 @@ public class CustomerServiceWorkflow
                 specialistSessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 userQuestion),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            }).ConfigureAwait(true);
     }
 }

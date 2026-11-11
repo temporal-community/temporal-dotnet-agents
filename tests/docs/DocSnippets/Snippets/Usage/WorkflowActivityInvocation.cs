@@ -1,6 +1,7 @@
 // Compile-checked activity invocation example from docs/how-to/MAF/usage.md.
 using DocSnippets.Harness;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Workflows;
 
 namespace DocSnippets.Usage;
@@ -19,7 +20,18 @@ internal static class WorkflowSubagent
             return await Workflow.ExecuteActivityAsync(
                 (AgentInvocationActivities activities) => activities.RunAsync(
                     "ResearcherAgent", sessionId.WorkflowId, requestId, $"Research: {topic}"),
-                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+                new ActivityOptions
+                {
+                    StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                    RetryPolicy = new()
+                    {
+                        NonRetryableErrorTypes =
+                        [
+                            nameof(DurableTurnFailedException),
+                            nameof(DurableTurnOutcomeTooLargeException),
+                        ],
+                    },
+                });
         }
     }
     // END SNIPPET docs/how-to/MAF/usage.md#invoking-agents-from-a-workflow

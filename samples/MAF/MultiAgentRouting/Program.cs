@@ -154,6 +154,7 @@ foreach (var (sessionId, question) in routingExamples)
     catch (Exception ex)
     {
         Console.WriteLine($"Workflow failed: {ex.Message}");
+        Environment.ExitCode = 1;
     }
 }
 
@@ -179,6 +180,7 @@ try
 catch (Exception ex)
 {
     Console.WriteLine($"Parallel workflow failed: {ex.Message}\n");
+    Environment.ExitCode = 1;
     try { await host.StopAsync(); } catch (OperationCanceledException) { }
     return;
 }
@@ -194,3 +196,5 @@ for (var i = 0; i < parallelResults.Length; i++)
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
 tracerProvider?.ForceFlush();
 Console.WriteLine("\nDone.");
+if (Environment.ExitCode == 0)
+    Console.WriteLine("MultiAgentRouting sample complete.");

@@ -9,6 +9,7 @@
 // steps from event history without re-executing them.
 
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Activities;
 using Temporalio.Workflows;
 
@@ -54,7 +55,18 @@ public sealed class DocumentPipelineWorkflow
         var analysisText = await Workflow.ExecuteActivityAsync(
             (AgentInvocationActivities activities) => activities.RunAsync(
                 sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), prompt),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            }).ConfigureAwait(true);
 
         // Parse the category from the agent response for use in subsequent steps.
         var category = ParseCategory(analysisText);

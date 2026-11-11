@@ -6,4 +6,5 @@ namespace AmbientAgent;
 public record MonitorStatus(
     int BufferSize,
     int TotalReadings,
-    List<string> RecentAnalyses);
+    List<string> RecentAnalyses,
+    int PendingAnalysisReadings = 0);

@@ -163,23 +163,27 @@ for (int i = 1; i <= 20; i++)
     await Task.Delay(200);
 }
 
-// ── Step 10: Wait for analyses to complete ───────────────────────────────────
-Console.WriteLine("\nWaiting for LLM analyses to complete...\n");
-await Task.Delay(15_000); // Give the LLM time to process 4 analysis batches
+// ── Step 10: Drain monitor analyses and report final status ──────────────────
+Console.WriteLine("\nDraining complete analysis batches...\n");
+await monitorHandle.SignalAsync(wf => wf.ShutdownAsync());
+await monitorHandle.GetResultAsync();
 
-// ── Step 11: Query status from both workflows ────────────────────────────────
 Console.WriteLine("── Monitor Status ──────────────────────────────────────────");
 var status = await monitorHandle.QueryAsync(wf => wf.GetStatus());
 Console.WriteLine($"  Buffer size: {status.BufferSize}");
 Console.WriteLine($"  Total readings: {status.TotalReadings}");
 Console.WriteLine($"  Analyses performed: {status.RecentAnalyses.Count}");
+Console.WriteLine($"  Pending partial readings: {status.PendingAnalysisReadings}");
 foreach (var analysis in status.RecentAnalyses)
 {
     Console.WriteLine($"\n  Analysis: {analysis}");
 }
 
+// ── Step 11: Drain alert notifications ──────────────────────────────────────
 Console.WriteLine("\n── Alert Notifications ─────────────────────────────────────");
 var alertHandle = client.GetWorkflowHandle<AlertWorkflow>(alertWorkflowId);
+await alertHandle.SignalAsync(wf => wf.ShutdownAsync());
+await alertHandle.GetResultAsync();
 var notifications = await alertHandle.QueryAsync(wf => wf.GetNotifications());
 
 if (notifications.Count == 0)
@@ -194,11 +198,10 @@ else
     }
 }
 
-// ── Step 12: Signal shutdown and stop gracefully ─────────────────────────────
+// ── Step 12: Stop the worker after both workflows have drained ───────────────
 Console.WriteLine("\n── Shutting down ───────────────────────────────────────────");
-await monitorHandle.SignalAsync(wf => wf.ShutdownAsync());
-await alertHandle.SignalAsync(wf => wf.ShutdownAsync());
-Console.WriteLine("  Shutdown signals sent.");
 
-try { await host.StopAsync(); } catch (OperationCanceledException) { }
+await host.StopAsync();
+Console.WriteLine("All workflows drained.");
 Console.WriteLine("Done.");
+Console.WriteLine("AmbientAgent sample complete.");

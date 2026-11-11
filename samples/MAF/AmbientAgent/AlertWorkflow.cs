@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
-using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI.Exceptions;
+using Temporalio.Common;
+using Temporalio.Workflows;
 
 namespace AmbientAgent;
 
@@ -14,16 +16,33 @@ public class AlertWorkflow
 {
     private readonly List<AnomalyAlert> _pendingAlerts = [];
     private readonly List<string> _notifications = [];
+    private readonly bool _drainOnShutdown;
     private bool _shutdownRequested;
+    private static readonly ActivityOptions AgentActivityOptions =
+        new()
+        {
+            StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            RetryPolicy = new RetryPolicy
+            {
+                NonRetryableErrorTypes =
+                [
+                    nameof(DurableTurnFailedException),
+                    nameof(DurableTurnOutcomeTooLargeException)
+                ]
+            }
+        };
+
+    [WorkflowInit]
+    public AlertWorkflow() => _drainOnShutdown = Workflow.Patched("ambient-alert-drain-v1");
 
     [WorkflowRun]
     public async Task RunAsync()
     {
-        while (!_shutdownRequested)
+        while (true)
         {
             // Wait until we have alerts to process, or shutdown is requested.
             // Pass Workflow.CancellationToken so the wait is cancelled cleanly on shutdown.
-            var conditionMet = await Workflow.WaitConditionAsync(
+            await Workflow.WaitConditionAsync(
                 () => _shutdownRequested
                       || _pendingAlerts.Count > 0
                       || Workflow.ContinueAsNewSuggested,
@@ -31,10 +50,10 @@ public class AlertWorkflow
                 cancellationToken: Workflow.CancellationToken)
                 .ConfigureAwait(true);
 
-            if (_shutdownRequested)
+            if (_shutdownRequested && (!_drainOnShutdown || _pendingAlerts.Count == 0))
                 break;
 
-            if (Workflow.ContinueAsNewSuggested && _pendingAlerts.Count == 0)
+            if (Workflow.ContinueAsNewSuggested && _pendingAlerts.Count == 0 && !_shutdownRequested)
             {
                 // Notifications are ephemeral — no need to carry them forward.
                 throw Workflow.CreateContinueAsNewException(
@@ -61,7 +80,7 @@ public class AlertWorkflow
                 var notification = await Workflow.ExecuteActivityAsync(
                     (AgentInvocationActivities activities) => activities.RunAsync(
                         "AlertAgent", sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), prompt),
-                    new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+                    AgentActivityOptions).ConfigureAwait(true);
 
                 notification = string.IsNullOrEmpty(notification) ? "(no notification text)" : notification;
                 _notifications.Add(notification);
@@ -74,6 +93,9 @@ public class AlertWorkflow
     [WorkflowSignal("IngestAnomaly")]
     public Task IngestAnomalyAsync(AnomalyAlert alert)
     {
+        if (_drainOnShutdown && _shutdownRequested)
+            return Task.CompletedTask;
+
         _pendingAlerts.Add(alert);
         return Task.CompletedTask;
     }

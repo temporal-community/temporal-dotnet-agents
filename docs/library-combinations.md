@@ -140,6 +140,8 @@ var response = await proxy.RunAsync("Will it rain in Boston tomorrow?", session)
 ### Workflow orchestration usage
 
 ```csharp
+using TemporalCommunity.Extensions.AI.Exceptions;
+
 [Workflow]
 public class ResearchWorkflow
 {
@@ -153,13 +155,27 @@ public class ResearchWorkflow
                 session.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 $"Research: {topic}"),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            });
     }
 }
 ```
 
 The activity resolves the registered proxy and invokes it with the supplied session and request
-IDs. See the [workflow orchestration sample](../samples/MAF/WorkflowOrchestration/README.md).
+IDs. The outer activity excludes retained terminal outcomes because a retry with the same request
+ID returns the same failure; transport failures, session-busy responses, and lost completions
+remain retryable. See [the invocation retry contract](./how-to/MAF/usage.md#invoking-agents-from-a-workflow)
+and the [workflow orchestration sample](../samples/MAF/WorkflowOrchestration/README.md).
 
 ### What you get
 

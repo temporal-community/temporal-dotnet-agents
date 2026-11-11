@@ -303,10 +303,14 @@ _verify-doc-snippets:
     bash scripts/verify-doc-snippet-coverage.sh
     @quiet() { out=$(bash "$1" 2>&1) || { printf '%s\n' "$out"; exit 1; }; }; quiet scripts/verify-doc-snippet-fidelity.selftest.sh
     bash scripts/verify-doc-snippet-fidelity.sh
+    python3 tests/docs/DocSnippets/compile_agent_invocation_examples.py tests/docs/DocSnippets/Snippets/AgentInvocationExamples.cs --check
     python3 scripts/verify-copyable-doc-examples.py
 
+_verify-sample-canary-runner:
+    python3 scripts/test_sample_canary_result.py
+
 # Local build/unit/repository-check/package pipeline; excludes integration tests and credentialed sample canaries.
-ci: clean build test-unit _verify-sample-catalog _verify-doc-links _verify-doc-snippets pack
+ci: clean build test-unit _verify-sample-catalog _verify-doc-links _verify-doc-snippets _verify-sample-canary-runner pack
 
 # ---------------------------------------------------------------------------
 # Process hygiene — orphan cleanup + safe logging
@@ -763,8 +767,8 @@ _test-samples-meai: build _sample-preflight
     echo "----- MEAI Summary: $PASS pass / $FAIL fail / $HANG hang -----"
     [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
 
-# Run all non-interactive MAF samples end-to-end. Per-sample timeouts override
-# the 90s default where needed (ConfigurableAgent has multi-agent handoff).
+# Run all non-interactive MAF samples end-to-end. Per-sample wall-clock caps
+# are not proof of deadlock; completion markers are checked only after exit 0.
 # Skips HumanInTheLoop (interactive)
 # and SplitWorkerClient (two processes — run manually).
 _test-samples-maf: build _sample-preflight _sample-preflight-maf
@@ -789,20 +793,20 @@ _test-samples-maf: build _sample-preflight _sample-preflight-maf
     LOGDIR="artifacts/sample-runs/maf-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$LOGDIR"
     echo "Logs: $LOGDIR"
-    PASS=0; FAIL=0; HANG=0; UNCHECKED=""
+    PASS=0; FAIL=0; TIMEOUT=0
     for entry in \
         "BasicAgent:samples/MAF/BasicAgent:90:Shutdown update accepted by agent workflow.|Done." \
-        "WorkflowOrchestration:samples/MAF/WorkflowOrchestration:90:Orchestration workflow result:" \
-        "EvaluatorOptimizer:samples/MAF/EvaluatorOptimizer:120:Final Draft" \
-        "MultiAgentRouting:samples/MAF/MultiAgentRouting:90:Parallel responses:" \
-        "WorkflowRouting:samples/MAF/WorkflowRouting:120:Dynamic Routing" \
-        "AmbientAgent:samples/MAF/AmbientAgent:90:Monitor Status" \
-        "ConfigurableAgent:samples/MAF/ConfigurableAgent:150:[TriageAgent]|[EscalationAgent]" \
-        "PerToolActivities:samples/MAF/PerToolActivities:90:Scenario 4: Tool calls disabled" \
+        "WorkflowOrchestration:samples/MAF/WorkflowOrchestration:90:Orchestration workflow result:|WorkflowOrchestration sample complete." \
+        "EvaluatorOptimizer:samples/MAF/EvaluatorOptimizer:120:Final Draft|EvaluatorOptimizer sample complete." \
+        "MultiAgentRouting:samples/MAF/MultiAgentRouting:90:Parallel responses:|MultiAgentRouting sample complete." \
+        "WorkflowRouting:samples/MAF/WorkflowRouting:120:WorkflowRouting sample complete." \
+        "AmbientAgent:samples/MAF/AmbientAgent:90:Monitor Status|Done.|AmbientAgent sample complete." \
+        "ConfigurableAgent:samples/MAF/ConfigurableAgent:150:[triageagent/ta-|[escalationagent/ta-|ConfigurableAgent sample complete." \
+        "PerToolActivities:samples/MAF/PerToolActivities:90:Scenario 4: Tool calls disabled|PerToolActivities sample complete." \
         "ContextProviders:samples/MAF/ContextProviders:90:[TurnCounter] LLM call #1|[TurnCounter] LLM call #2" \
         "Middleware:samples/MAF/Middleware:90:[caller guard]|[model attempt]|[tool attempt]|First answer: Paris|Second answer: London|Middleware sample complete." \
         "ToolInterceptor:samples/MAF/ToolInterceptor:240:[Approval requested]" \
-        "MixedActivities:samples/MAF/MixedActivities:120:FetchDocumentAsync|StoreAnalysisAsync" \
+        "MixedActivities:samples/MAF/MixedActivities:120:FetchDocumentAsync|StoreAnalysisAsync|MixedActivities sample complete." \
         "DurableContextProvider:samples/MAF/DurableContextProvider:90:=== Approach A: IDurableToolSource ===|=== Approach B: DurableToolRegistrationSpec ===" \
         "McpTools:samples/MAF/McpTools:90:SKU-123 has 12 units available." ; do
         IFS=':' read -r name dir cap markers <<< "$entry"
@@ -812,39 +816,21 @@ _test-samples-maf: build _sample-preflight _sample-preflight-maf
             > "$LOGDIR/$name.log" 2>&1
         status=$?
         elapsed=$(($(date +%s)-start))
-        if [ $status -eq 124 ] || [ $status -eq 143 ] || [ $status -eq 137 ]; then
-            HANG=$((HANG+1)); printf "[%4ds] HANG  MAF/%s\n" "$elapsed" "$name"
-        elif [ $status -eq 0 ]; then
-            # Exit 0 only proves the process ended. Require the sample to have printed the
-            # application-owned markers that show its feature actually ran — three samples once
-            # shipped broken while passing this canary on exit code alone.
-            missing=""
-            if [ -n "${markers:-}" ]; then
-                while IFS= read -r marker; do
-                    [ -z "$marker" ] && continue
-                    grep -qF -- "$marker" "$LOGDIR/$name.log" || missing="${missing}|${marker}"
-                done <<< "$(printf '%s' "$markers" | tr '|' '\n')"
-            else
-                UNCHECKED="${UNCHECKED} MAF/$name"
-            fi
-            if [ -n "$missing" ]; then
-                FAIL=$((FAIL+1))
-                printf "[%4ds] FAIL  MAF/%s (ran, but missing marker(s))\n" "$elapsed" "$name"
-                printf '%s\n' "${missing#|}" | tr '|' '\n' | sed 's/^/            missing: /'
-            else
-                PASS=$((PASS+1)); printf "[%4ds] PASS  MAF/%s\n" "$elapsed" "$name"
-            fi
+        if python3 scripts/sample_canary_result.py "$status" "MAF/$name" "$markers" < "$LOGDIR/$name.log"; then
+            PASS=$((PASS+1)); printf "[%4ds] PASS  MAF/%s\n" "$elapsed" "$name"
         else
-            FAIL=$((FAIL+1)); printf "[%4ds] FAIL  MAF/%s (exit %d)\n" "$elapsed" "$name" "$status"
+            result=$?
+            if [ "$result" -eq 2 ]; then
+                TIMEOUT=$((TIMEOUT+1)); printf "[%4ds] TIMEOUT MAF/%s\n" "$elapsed" "$name"
+            else
+                FAIL=$((FAIL+1)); printf "[%4ds] FAIL  MAF/%s\n" "$elapsed" "$name"
+            fi
         fi
     done
     echo "Skipped (interactive):    MAF/HumanInTheLoop — run manually."
     echo "Skipped (two-process):    MAF/SplitWorkerClient — run Worker then Client."
-    if [ -n "$UNCHECKED" ]; then
-        echo "Exit-code only (no output markers asserted):$UNCHECKED"
-    fi
-    echo "----- MAF Summary: $PASS pass / $FAIL fail / $HANG hang -----"
-    [ "$FAIL" -eq 0 ] && [ "$HANG" -eq 0 ]
+    echo "----- MAF Summary: $PASS pass / $FAIL fail / $TIMEOUT timeout -----"
+    [ "$FAIL" -eq 0 ] && [ "$TIMEOUT" -eq 0 ]
 
 # Run the full sample canary (MEAI + MAF non-interactive).
 test-samples: _test-samples-meai _test-samples-maf

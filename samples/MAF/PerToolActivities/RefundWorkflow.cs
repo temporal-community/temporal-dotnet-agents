@@ -7,6 +7,7 @@
 
 using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Workflows;
 
 namespace PerToolActivities;
@@ -37,7 +38,18 @@ public sealed class RefundWorkflow
                 input.CustomerComplaint,
                 input.EnableToolCalls,
                 input.EnableToolNames),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            }).ConfigureAwait(true);
     }
 }
 

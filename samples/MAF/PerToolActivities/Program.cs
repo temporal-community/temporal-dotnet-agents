@@ -23,6 +23,8 @@ using OpenAI;
 using PerToolActivities;
 using Temporalio.Client;
 using TemporalCommunity.Extensions.Agents;
+using TemporalCommunity.Extensions.AI.Exceptions;
+using Temporalio.Exceptions;
 using Temporalio.Extensions.Hosting;
 
 // ── Step 1: Build the application host ───────────────────────────────────────
@@ -178,7 +180,8 @@ await RunScenarioAsync(
     client,
     taskQueue,
     workflowId: $"refund-retry-{Guid.NewGuid():N}",
-    complaint: "Refund my order ORD-001 for $19.99. Email confirmation to acme@example.com.");
+    complaint: "Refund my order ORD-001 for $19.99. Email confirmation to acme@example.com.",
+    expectFailure: true);
 
 var lookupDelta = orderService.LookupCalls - lookupBefore;
 var refundDelta = refundService.RefundCalls - refundBefore;
@@ -191,6 +194,11 @@ Console.WriteLine($"  Cumulative  → LookupCalls = {orderService.LookupCalls}, 
 if (lookupDelta == 1 && refundDelta == 0 && emailDelta == 0)
 {
     Console.WriteLine("  ✓ Default policy confirmed: lookup ran once; later tools were not dispatched after its failure.");
+}
+else
+{
+    Console.Error.WriteLine("Scenario 5 did not preserve the expected one-attempt tool-failure policy.");
+    Environment.ExitCode = 1;
 }
 Console.WriteLine();
 
@@ -206,6 +214,8 @@ Console.WriteLine();
 
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
 Console.WriteLine("Done.");
+if (Environment.ExitCode == 0)
+    Console.WriteLine("PerToolActivities sample complete.");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LOCAL HELPERS
@@ -217,7 +227,8 @@ static async Task RunScenarioAsync(
     string workflowId,
     string complaint,
     bool enableToolCalls = true,
-    IReadOnlyList<string>? enableToolNames = null)
+    IReadOnlyList<string>? enableToolNames = null,
+    bool expectFailure = false)
 {
     Console.WriteLine($"  Workflow:  {workflowId}");
     Console.WriteLine($"  Complaint: {complaint}");
@@ -238,10 +249,24 @@ static async Task RunScenarioAsync(
             });
 
         Console.WriteLine($"  Agent:     {result}");
+        if (expectFailure)
+        {
+            Console.Error.WriteLine("  Expected a terminal lookup failure, but the workflow succeeded.");
+            Environment.ExitCode = 1;
+        }
+    }
+    catch (WorkflowFailedException ex) when (expectFailure
+        && ex.InnerException is ActivityFailureException
+        {
+            InnerException: ApplicationFailureException { ErrorType: nameof(DurableTurnFailedException) } terminalFailure,
+        })
+    {
+        Console.WriteLine($"  Expected terminal turn failure: {terminalFailure.Message}");
     }
     catch (Exception ex)
     {
         Console.WriteLine($"  Workflow failed: {ex.Message}");
+        Environment.ExitCode = 1;
     }
 }
 

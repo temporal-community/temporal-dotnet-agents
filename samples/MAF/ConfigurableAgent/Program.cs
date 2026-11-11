@@ -27,6 +27,7 @@ using Temporalio.Client;
 using Temporalio.Activities;
 using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.Session;
+using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Extensions.Hosting;
 using Temporalio.Workflows;
 
@@ -157,6 +158,7 @@ try
 catch (Exception ex)
 {
     Console.WriteLine($"Workflow failed: {ex.Message}\n");
+    Environment.ExitCode = 1;
 }
 
 Console.WriteLine("─── Case 2: Delayed order + refund request ──────────────────");
@@ -169,11 +171,14 @@ try
 catch (Exception ex)
 {
     Console.WriteLine($"Workflow failed: {ex.Message}\n");
+    Environment.ExitCode = 1;
 }
 
 // ── Step 9: Graceful shutdown ────────────────────────────────────────────────
 try { await host.StopAsync(); } catch (OperationCanceledException) { }
 Console.WriteLine("Done.");
+if (Environment.ExitCode == 0)
+    Console.WriteLine("ConfigurableAgent sample complete.");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SUPPORT WORKFLOW
@@ -206,7 +211,18 @@ public class SupportWorkflow
                 triageSessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 customerMessage),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            }).ConfigureAwait(true);
 
         // ── Escalation detection ──────────────────────────────────────────────
         const string escalationMarker = "[ESCALATE:";
@@ -247,7 +263,18 @@ public class SupportWorkflow
                 escalationSessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 handoffMessage),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+            new ActivityOptions
+            {
+                StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                RetryPolicy = new()
+                {
+                    NonRetryableErrorTypes =
+                    [
+                        nameof(DurableTurnFailedException),
+                        nameof(DurableTurnOutcomeTooLargeException),
+                    ],
+                },
+            }).ConfigureAwait(true);
 
         Workflow.Logger.LogInformation("[EscalationAgent] Responded.");
 

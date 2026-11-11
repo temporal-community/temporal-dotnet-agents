@@ -46,6 +46,13 @@ This scenario shows the retry boundary, not exactly-once behavior. If a failed
 write activity may have completed an external effect, reconcile with the system
 of record before manually retrying.
 
+`RefundWorkflow` excludes `DurableTurnFailedException` and
+`DurableTurnOutcomeTooLargeException` from its outer invocation activity's retry policy.
+The failed turn's request ID is retained, so retrying the proxy would retrieve the same failure,
+not run the lookup again. Other invocation failures can still retry with the same IDs.
+Scenario 5 expects this terminal failure and verifies the tool counters; unexpected failures in
+any scenario produce a nonzero process exit code and no completion marker.
+
 ---
 
 ## Prerequisites
@@ -79,7 +86,7 @@ later call is not scheduled until the previous call completes.
 ## Expected Output (abridged)
 
 ```
-Worker started. Running per-tool activity scenarios...
+Worker started. Running serial tool activity scenarios...
 
 ─── Scenario 1: Happy path (all tools succeed) ──────────────
   Workflow:  refund-happy-...
@@ -102,9 +109,9 @@ Worker started. Running per-tool activity scenarios...
 ─── Scenario 5: Lookup failure (one attempt by default) ──────
   Workflow:  refund-retry-...
   Complaint: Refund my order ORD-001 for $19.99. Email confirmation to acme@example.com.
-  Workflow failed: ...
+  Expected terminal turn failure: Activity task failed
   This run    → LookupCalls = 1, RefundCalls = 0, SendCalls = 0
-  Cumulative  → LookupCalls = 3, RefundCalls = 2, SendCalls = 2
+  Cumulative  → LookupCalls = 3, RefundCalls = 1, SendCalls = 1
   ✓ Default policy confirmed: lookup ran once; later tools were not dispatched after its failure.
 
 ─── View the activity timeline ──────────────────────────────
@@ -112,6 +119,7 @@ Worker started. Running per-tool activity scenarios...
   ...
 
 Done.
+PerToolActivities sample complete.
 ```
 
 The exact wording of the agent's reply varies between runs — the model is

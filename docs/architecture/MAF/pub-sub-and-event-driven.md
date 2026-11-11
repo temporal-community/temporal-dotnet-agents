@@ -36,12 +36,26 @@ The workflow schedules one activity per agent. Each activity resolves the regist
 workflow-generated session and request IDs make an activity retry target the same logical turn.
 
 ```csharp
+using TemporalCommunity.Extensions.AI.Exceptions;
+
 [Workflow("EventDrivenFanOut")]
 public class EventDrivenFanOutWorkflow
 {
     [WorkflowRun]
     public async Task<string> RunAsync(string topic, string payload)
     {
+        var agentCallOptions = new ActivityOptions
+        {
+            StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            RetryPolicy = new()
+            {
+                NonRetryableErrorTypes =
+                [
+                    nameof(DurableTurnFailedException),
+                    nameof(DurableTurnOutcomeTooLargeException),
+                ],
+            },
+        };
         var summarySession = WorkflowAgents.NewAgentSessionId("SummarizerAgent");
         var taggingSession = WorkflowAgents.NewAgentSessionId("TaggerAgent");
         var moderationSession = WorkflowAgents.NewAgentSessionId("ModeratorAgent");
@@ -50,17 +64,17 @@ public class EventDrivenFanOutWorkflow
             (RoutingActivities a) => a.RunAgentAsync(
                 "SummarizerAgent", summarySession.WorkflowId,
                 Workflow.NewGuid().ToString("N"), payload),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+            agentCallOptions);
         var tags = Workflow.ExecuteActivityAsync(
             (RoutingActivities a) => a.RunAgentAsync(
                 "TaggerAgent", taggingSession.WorkflowId,
                 Workflow.NewGuid().ToString("N"), payload),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+            agentCallOptions);
         var moderation = Workflow.ExecuteActivityAsync(
             (RoutingActivities a) => a.RunAgentAsync(
                 "ModeratorAgent", moderationSession.WorkflowId,
                 Workflow.NewGuid().ToString("N"), payload),
-            new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) });
+            agentCallOptions);
 
         var results = await Workflow.WhenAllAsync([summary, tags, moderation]);
 
@@ -72,6 +86,10 @@ public class EventDrivenFanOutWorkflow
     }
 }
 ```
+
+All three activities exclude retained terminal outcomes: retrying the same request ID returns
+the same failure instead of starting another turn. Transport failures, session-busy responses,
+and lost completions remain retryable. See [the invocation retry contract](../../how-to/MAF/usage.md#invoking-agents-from-a-workflow).
 
 ### Registration
 
