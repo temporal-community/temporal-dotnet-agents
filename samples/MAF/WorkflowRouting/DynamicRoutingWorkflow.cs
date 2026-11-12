@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Temporalio.Workflows;
 using TemporalCommunity.Extensions.Agents;
-using TemporalCommunity.Extensions.AI.Exceptions;
 using static TemporalCommunity.Extensions.Agents.WorkflowAgents;
 
 namespace WorkflowRouting;
@@ -70,18 +69,7 @@ public class DynamicRoutingWorkflow
                 classifierSessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 routingPrompt),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            }).ConfigureAwait(true)).Trim();
+            AgentInvocationOptions.Default).ConfigureAwait(true)).Trim();
 
         // ── Step 3: Validate the LLM's choice via activity (cached on replay) ──
         // LLMs can hallucinate names. The activity confirms the agent exists,
@@ -107,17 +95,6 @@ public class DynamicRoutingWorkflow
                 sessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 userQuestion),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            }).ConfigureAwait(true);
+            AgentInvocationOptions.Default).ConfigureAwait(true);
     }
 }

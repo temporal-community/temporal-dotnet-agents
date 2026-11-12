@@ -20,6 +20,21 @@ namespace EvaluatorOptimizer;
 [Workflow("EvaluatorOptimizer.EvaluatorOptimizerWorkflow")]
 public class EvaluatorOptimizerWorkflow
 {
+    private static readonly ActivityOptions AgentActivityOptions = new()
+    {
+        StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
+        RetryPolicy = new()
+        {
+            MaximumAttempts = 3,
+            NonRetryableErrorTypes =
+            [
+                nameof(DurableTurnFailedException),
+                nameof(DurableTurnOutcomeTooLargeException),
+            ],
+        },
+    };
+
     private const string ApprovalToken = "APPROVED";
 
     /// <summary>
@@ -55,18 +70,7 @@ public class EvaluatorOptimizerWorkflow
             draft = await Workflow.ExecuteActivityAsync(
                 (AgentInvocationActivities activities) => activities.RunAsync(
                     "Generator", genSession.WorkflowId, Workflow.NewGuid().ToString("N"), genPrompt),
-                new ActivityOptions
-                {
-                    StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                    RetryPolicy = new()
-                    {
-                        NonRetryableErrorTypes =
-                        [
-                            nameof(DurableTurnFailedException),
-                            nameof(DurableTurnOutcomeTooLargeException),
-                        ],
-                    },
-                }).ConfigureAwait(true);
+                AgentActivityOptions).ConfigureAwait(true);
 
             // ── Evaluation turn ────────────────────────────────────────────
             var evaluationPrompt =
@@ -75,18 +79,7 @@ public class EvaluatorOptimizerWorkflow
             feedback = await Workflow.ExecuteActivityAsync(
                 (AgentInvocationActivities activities) => activities.RunAsync(
                     "Evaluator", evalSession.WorkflowId, Workflow.NewGuid().ToString("N"), evaluationPrompt),
-                new ActivityOptions
-                {
-                    StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                    RetryPolicy = new()
-                    {
-                        NonRetryableErrorTypes =
-                        [
-                            nameof(DurableTurnFailedException),
-                            nameof(DurableTurnOutcomeTooLargeException),
-                        ],
-                    },
-                }).ConfigureAwait(true);
+                AgentActivityOptions).ConfigureAwait(true);
 
             if (feedback.Contains(ApprovalToken, StringComparison.OrdinalIgnoreCase))
             {

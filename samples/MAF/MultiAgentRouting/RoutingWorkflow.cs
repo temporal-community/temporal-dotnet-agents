@@ -8,7 +8,6 @@
 //   separate activities that invoke their registered agent proxies.
 
 using TemporalCommunity.Extensions.Agents;
-using TemporalCommunity.Extensions.AI.Exceptions;
 using Temporalio.Workflows;
 
 namespace MultiAgentRouting;
@@ -49,18 +48,7 @@ public class RoutingWorkflow
                 sessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 userQuestion),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            }).ConfigureAwait(true);
+            AgentInvocationOptions.Default).ConfigureAwait(true);
     }
 }
 
@@ -85,48 +73,15 @@ public class ParallelAgentWorkflow
         var weather = Workflow.ExecuteActivityAsync(
             (RoutingActivities activities) => activities.RunAgentAsync(
                 "WeatherAgent", weatherSession.WorkflowId, Workflow.NewGuid().ToString("N"), userQuery),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            });
+            AgentInvocationOptions.Default);
         var billing = Workflow.ExecuteActivityAsync(
             (RoutingActivities activities) => activities.RunAgentAsync(
                 "BillingAgent", billingSession.WorkflowId, Workflow.NewGuid().ToString("N"), userQuery),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            });
+            AgentInvocationOptions.Default);
         var techSupport = Workflow.ExecuteActivityAsync(
             (RoutingActivities activities) => activities.RunAgentAsync(
                 "TechSupportAgent", techSupportSession.WorkflowId, Workflow.NewGuid().ToString("N"), userQuery),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            });
+            AgentInvocationOptions.Default);
 
         return await Workflow.WhenAllAsync([weather, billing, techSupport]).ConfigureAwait(true);
     }

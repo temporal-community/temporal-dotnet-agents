@@ -24,8 +24,10 @@ public class CustomerServiceWorkflow
         var agentCallOptions = new ActivityOptions
         {
             StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            ScheduleToCloseTimeout = TimeSpan.FromHours(2),
             RetryPolicy = new()
             {
+                MaximumAttempts = 3,
                 NonRetryableErrorTypes =
                 [
                     nameof(DurableTurnFailedException),
@@ -120,8 +122,8 @@ For independent agents, schedule one activity per agent and await them with
 awaiting a proxy call must exclude retained terminal outcomes as above, including the classifier
 and specialist calls in dynamic routing. A retry with the same request ID returns the same
 retained failure; transport failures, session-busy responses, and lost completions remain
-retryable. Registry lookup and name-validation activities do not await agent turns and do not
-need these exclusions. See [the invocation retry contract](./usage.md#invoking-agents-from-a-workflow).
+retryable within the per-invocation budget. Registry lookup and name-validation activities do not
+await agent turns and do not need these exclusions. See [the bounded invocation retry contract](./usage.md#invoking-agents-from-a-workflow).
 
 ## Rules
 

@@ -158,8 +158,10 @@ public class ResearchWorkflow
             new ActivityOptions
             {
                 StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                ScheduleToCloseTimeout = TimeSpan.FromHours(2),
                 RetryPolicy = new()
                 {
+                    MaximumAttempts = 3,
                     NonRetryableErrorTypes =
                     [
                         nameof(DurableTurnFailedException),
@@ -174,7 +176,7 @@ public class ResearchWorkflow
 The activity resolves the registered proxy and invokes it with the supplied session and request
 IDs. The outer activity excludes retained terminal outcomes because a retry with the same request
 ID returns the same failure; transport failures, session-busy responses, and lost completions
-remain retryable. See [the invocation retry contract](./how-to/MAF/usage.md#invoking-agents-from-a-workflow)
+remain retryable within the budget. See [the bounded invocation retry contract](./how-to/MAF/usage.md#invoking-agents-from-a-workflow)
 and the [workflow orchestration sample](../samples/MAF/WorkflowOrchestration/README.md).
 
 ### What you get

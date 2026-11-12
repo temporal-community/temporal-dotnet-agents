@@ -117,6 +117,21 @@ if (Environment.ExitCode == 0)
 [Workflow("WorkflowOrchestration.WeatherOrchestrationWorkflow")]
 public class WeatherOrchestrationWorkflow
 {
+    private static readonly ActivityOptions AgentActivityOptions = new()
+    {
+        StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
+        RetryPolicy = new()
+        {
+            MaximumAttempts = 3,
+            NonRetryableErrorTypes =
+            [
+                nameof(DurableTurnFailedException),
+                nameof(DurableTurnOutcomeTooLargeException),
+            ],
+        },
+    };
+
     /// <summary>
     /// Runs the orchestration: receives a question, calls the agent, returns the answer.
     /// </summary>
@@ -134,25 +149,19 @@ public class WeatherOrchestrationWorkflow
             await Workflow.ExecuteActivityAsync(
                 (AgentInvocationActivities activities) => activities.StartFireAndForgetAsync(
                     sessionId.WorkflowId, requestId, input.UserQuestion),
-                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(2) });
+                new ActivityOptions
+                {
+                    StartToCloseTimeout = TimeSpan.FromMinutes(2),
+                    ScheduleToCloseTimeout = TimeSpan.FromMinutes(10),
+                    RetryPolicy = new() { MaximumAttempts = 3 },
+                });
             return string.Empty;
         }
 
         return await Workflow.ExecuteActivityAsync(
             (AgentInvocationActivities activities) => activities.RunAsync(
                 sessionId.WorkflowId, requestId, input.UserQuestion),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            });
+            AgentActivityOptions);
     }
 }
 

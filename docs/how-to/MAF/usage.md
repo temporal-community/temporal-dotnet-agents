@@ -587,8 +587,10 @@ public sealed class ResearchWorkflow
             new ActivityOptions
             {
                 StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                ScheduleToCloseTimeout = TimeSpan.FromHours(2),
                 RetryPolicy = new()
                 {
+                    MaximumAttempts = 3,
                     NonRetryableErrorTypes =
                     [
                         nameof(DurableTurnFailedException),
@@ -612,6 +614,18 @@ a fresh turn. The policy above stops on `DurableTurnFailedException` and
 session-busy responses, and lost activity completions. These are the simple CLR type names
 recorded by the default Temporal failure converter, not fully qualified names. Keep any existing
 transient retry limits or backoff when adding these exclusions.
+
+The example bounds each invocation, not the total workflow: each attempt has 35 minutes,
+and a retry can recover a retained outcome using the same request ID. This is a sample budget,
+not a library-wide turn deadline; model/tool steps and approvals have their own timeouts.
+The two-hour schedule-to-close budget includes queueing, attempts, and backoff;
+it accommodates three 35-minute attempts plus queueing and backoff, but queueing can consume
+the budget before all attempts run. `MaximumAttempts = 3` includes the initial attempt. Tune
+these limits to the complete turn's expected duration and your application SLA. If an outer
+invocation times out, the separately running agent turn may still complete; reconcile its outcome
+before submitting a new request ID. The invocation wrapper does not
+heartbeat. Changing these activity options requires no workflow patch by itself; already
+scheduled activities retain their existing options.
 
 Do not regenerate the request ID on an activity retry: a new ID can repeat external effects.
 Inspect the retained turn outcome and reconcile uncertain tool effects before deliberately
@@ -874,8 +888,10 @@ public class ResearchAndSummarizeWorkflow
         var agentCallOptions = new ActivityOptions
         {
             StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            ScheduleToCloseTimeout = TimeSpan.FromHours(2),
             RetryPolicy = new()
             {
+                MaximumAttempts = 3,
                 NonRetryableErrorTypes =
                 [
                     nameof(DurableTurnFailedException),
@@ -901,8 +917,8 @@ public class ResearchAndSummarizeWorkflow
 
 Each proxy call starts or reuses its own registered `AgentWorkflow`; activity retry identity is
 preserved by reusing the workflow-generated session and request IDs. Both activities share the
-[terminal-outcome exclusions](#invoking-agents-from-a-workflow), while transient invocation
-failures remain retryable.
+[bounded invocation policy](#invoking-agents-from-a-workflow), while transient invocation
+failures remain retryable within that budget.
 
 ---
 

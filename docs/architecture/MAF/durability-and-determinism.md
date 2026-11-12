@@ -32,6 +32,7 @@ public sealed class ResearchWorkflow
             new ActivityOptions
             {
                 StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                ScheduleToCloseTimeout = TimeSpan.FromHours(2),
                 RetryPolicy = new RetryPolicy
                 {
                     MaximumAttempts = 3,
@@ -56,8 +57,9 @@ must use their own idempotency keys.
 A retained failed turn is terminal for that request ID, even when its original failure was
 transient. Exclude the two terminal-outcome exception names from the outer activity retry policy;
 otherwise it can keep retrieving the same failure instead of returning it to the caller.
-Transport and session-busy failures, and lost completions, remain retryable. The library's model
-and tool retry policies are separate from this caller-owned activity policy.
+Transport and session-busy failures, and lost completions, remain retryable within the
+[per-invocation budget](../../how-to/MAF/usage.md#invoking-agents-from-a-workflow). The library's
+model and tool retry policies are separate from this caller-owned activity policy.
 
 Do not invoke `AIAgent.RunAsync` or resolve `TemporalAIAgentProxy` from workflow code. Direct
 workflow-context proxy invocation is rejected; the activity boundary is required.

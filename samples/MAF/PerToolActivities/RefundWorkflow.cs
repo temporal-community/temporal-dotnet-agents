@@ -27,6 +27,21 @@ namespace PerToolActivities;
 [Workflow("PerToolActivities.RefundWorkflow")]
 public sealed class RefundWorkflow
 {
+    private static readonly ActivityOptions AgentActivityOptions = new()
+    {
+        StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
+        RetryPolicy = new()
+        {
+            MaximumAttempts = 3,
+            NonRetryableErrorTypes =
+            [
+                nameof(DurableTurnFailedException),
+                nameof(DurableTurnOutcomeTooLargeException),
+            ],
+        },
+    };
+
     [WorkflowRun]
     public async Task<string> RunAsync(RefundTurnInput input)
     {
@@ -38,18 +53,7 @@ public sealed class RefundWorkflow
                 input.CustomerComplaint,
                 input.EnableToolCalls,
                 input.EnableToolNames),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            }).ConfigureAwait(true);
+            AgentActivityOptions).ConfigureAwait(true);
     }
 }
 

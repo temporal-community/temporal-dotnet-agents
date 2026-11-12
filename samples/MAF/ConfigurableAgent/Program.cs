@@ -197,6 +197,21 @@ if (Environment.ExitCode == 0)
 [Workflow("ConfigurableAgent.SupportWorkflow")]
 public class SupportWorkflow
 {
+    private static readonly ActivityOptions AgentActivityOptions = new()
+    {
+        StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
+        RetryPolicy = new()
+        {
+            MaximumAttempts = 3,
+            NonRetryableErrorTypes =
+            [
+                nameof(DurableTurnFailedException),
+                nameof(DurableTurnOutcomeTooLargeException),
+            ],
+        },
+    };
+
     [WorkflowRun]
     public async Task<string> RunAsync(string customerMessage)
     {
@@ -211,18 +226,7 @@ public class SupportWorkflow
                 triageSessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 customerMessage),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            }).ConfigureAwait(true);
+            AgentActivityOptions).ConfigureAwait(true);
 
         // ── Escalation detection ──────────────────────────────────────────────
         const string escalationMarker = "[ESCALATE:";
@@ -263,18 +267,7 @@ public class SupportWorkflow
                 escalationSessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 handoffMessage),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            }).ConfigureAwait(true);
+            AgentActivityOptions).ConfigureAwait(true);
 
         Workflow.Logger.LogInformation("[EscalationAgent] Responded.");
 

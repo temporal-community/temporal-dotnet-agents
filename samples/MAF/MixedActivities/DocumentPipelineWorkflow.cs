@@ -26,6 +26,21 @@ namespace MixedActivities;
 [Workflow("MixedActivities.DocumentPipelineWorkflow")]
 public sealed class DocumentPipelineWorkflow
 {
+    private static readonly ActivityOptions AgentActivityOptions = new()
+    {
+        StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
+        RetryPolicy = new()
+        {
+            MaximumAttempts = 3,
+            NonRetryableErrorTypes =
+            [
+                nameof(DurableTurnFailedException),
+                nameof(DurableTurnOutcomeTooLargeException),
+            ],
+        },
+    };
+
     private static readonly ActivityOptions DefaultActivityOptions = new()
     {
         StartToCloseTimeout = TimeSpan.FromSeconds(30),
@@ -55,18 +70,7 @@ public sealed class DocumentPipelineWorkflow
         var analysisText = await Workflow.ExecuteActivityAsync(
             (AgentInvocationActivities activities) => activities.RunAsync(
                 sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), prompt),
-            new ActivityOptions
-            {
-                StartToCloseTimeout = TimeSpan.FromMinutes(35),
-                RetryPolicy = new()
-                {
-                    NonRetryableErrorTypes =
-                    [
-                        nameof(DurableTurnFailedException),
-                        nameof(DurableTurnOutcomeTooLargeException),
-                    ],
-                },
-            }).ConfigureAwait(true);
+            AgentActivityOptions).ConfigureAwait(true);
 
         // Parse the category from the agent response for use in subsequent steps.
         var category = ParseCategory(analysisText);

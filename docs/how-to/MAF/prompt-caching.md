@@ -225,8 +225,10 @@ public async Task<string> RunAsync(string question)
     var agentCallOptions = new ActivityOptions
     {
         StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
         RetryPolicy = new()
         {
+            MaximumAttempts = 3,
             NonRetryableErrorTypes =
             [
                 nameof(DurableTurnFailedException),
@@ -259,7 +261,7 @@ public async Task<string> RunAsync(string question)
 ```
 
 The summarizer sees only the final output, not the full 5-turn research history. All six
-invocations use the same [terminal-outcome exclusions](./usage.md#invoking-agents-from-a-workflow);
+invocations use the same [bounded invocation policy](./usage.md#invoking-agents-from-a-workflow);
 retrying a retained failure with the same request ID cannot start a fresh turn.
 
 ### 3. Use a Compatible Custom Context Projection

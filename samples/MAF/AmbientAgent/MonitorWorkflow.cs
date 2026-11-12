@@ -1,7 +1,5 @@
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.Agents;
-using TemporalCommunity.Extensions.AI.Exceptions;
-using Temporalio.Common;
 using Temporalio.Workflows;
 
 namespace AmbientAgent;
@@ -22,19 +20,6 @@ public class MonitorWorkflow
     // Static readonly avoids allocating ActivityOptions on every loop iteration.
     private static readonly ActivityOptions AlertActivityOptions =
         new() { StartToCloseTimeout = TimeSpan.FromSeconds(30) };
-    private static readonly ActivityOptions AgentActivityOptions =
-        new()
-        {
-            StartToCloseTimeout = TimeSpan.FromMinutes(35),
-            RetryPolicy = new RetryPolicy
-            {
-                NonRetryableErrorTypes =
-                [
-                    nameof(DurableTurnFailedException),
-                    nameof(DurableTurnOutcomeTooLargeException)
-                ]
-            }
-        };
 
     private int _totalReadings;
     private int _legacyReadingsSinceLastAnalysis;
@@ -119,7 +104,7 @@ public class MonitorWorkflow
             var analysisResult = await Workflow.ExecuteActivityAsync(
                 (AgentInvocationActivities activities) => activities.RunAsync(
                     "AnalysisAgent", sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), summary),
-                AgentActivityOptions).ConfigureAwait(true);
+                AgentInvocationOptions.Default).ConfigureAwait(true);
             _recentAnalyses.Enqueue(analysisResult);
 
             // Keep only the last 10 analyses in memory.
@@ -222,7 +207,7 @@ public class MonitorWorkflow
             var analysisResult = await Workflow.ExecuteActivityAsync(
                 (AgentInvocationActivities activities) => activities.RunAsync(
                     "AnalysisAgent", sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), summary),
-                new ActivityOptions { StartToCloseTimeout = TimeSpan.FromMinutes(35) }).ConfigureAwait(true);
+                AgentInvocationOptions.Default).ConfigureAwait(true);
             _recentAnalyses.Enqueue(analysisResult);
             while (_recentAnalyses.Count > 10)
                 _recentAnalyses.Dequeue();

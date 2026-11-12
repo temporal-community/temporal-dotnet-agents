@@ -18,6 +18,73 @@ namespace TemporalCommunity.Extensions.Agents.IntegrationTests;
 [Trait("Category", "Integration")]
 public sealed class AmbientAgentBatchDrainIntegrationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ShutdownDrainFailsAfterThreeRetryableInvocationFailures(bool alertWorkflow)
+    {
+        await using var environment = await TestEnvironmentHelper.StartLocalAsync();
+        var chatClient = new RecordingChatClient();
+        var failures = new FailAgentInvocations();
+        var queue = $"ambient-retry-bound-{Guid.NewGuid():N}";
+        var workflowId = $"ambient-retry-bound-{Guid.NewGuid():N}";
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(environment.Client);
+        builder.Services.AddChatClient(chatClient);
+        builder.Services
+            .AddHostedTemporalWorker(queue)
+            .ConfigureOptions(options => options.Interceptors = [failures])
+            .AddWorkflow<MonitorWorkflow>()
+            .AddWorkflow<AlertWorkflow>()
+            .AddScopedActivities<AmbientAgentInvocationActivities>();
+
+        using var host = builder.Build();
+        await host.StartAsync();
+        try
+        {
+            Task result;
+            if (alertWorkflow)
+            {
+                var handle = await environment.Client.StartWorkflowAsync(
+                    (AlertWorkflow workflow) => workflow.RunAsync(), new WorkflowOptions(workflowId, queue));
+                await handle.SignalAsync(workflow => workflow.IngestAnomalyAsync(Alert(1)));
+                await failures.FirstAttemptStarted.WaitAsync(TimeSpan.FromSeconds(15));
+                await handle.SignalAsync(workflow => workflow.ShutdownAsync());
+                result = handle.GetResultAsync();
+            }
+            else
+            {
+                var handle = await environment.Client.StartWorkflowAsync(
+                    (MonitorWorkflow workflow) => workflow.RunAsync(new MonitorWorkflowInput
+                    {
+                        AlertWorkflowId = "unused",
+                        AnalysisInterval = 1
+                    }), new WorkflowOptions(workflowId, queue));
+                await handle.SignalAsync(workflow => workflow.IngestHealthCheckAsync(Reading(1)));
+                await failures.FirstAttemptStarted.WaitAsync(TimeSpan.FromSeconds(15));
+                await handle.SignalAsync(workflow => workflow.ShutdownAsync());
+                result = handle.GetResultAsync();
+            }
+
+            failures.Release();
+            var failure = await Assert.ThrowsAsync<WorkflowFailedException>(
+                () => result.WaitAsync(TimeSpan.FromSeconds(15)));
+            var activity = Assert.IsType<ActivityFailureException>(failure.InnerException);
+            Assert.Equal(Temporalio.Api.Enums.V1.RetryState.MaximumAttemptsReached, activity.RetryState);
+            var application = Assert.IsType<ApplicationFailureException>(activity.InnerException);
+            Assert.Equal(nameof(InvalidOperationException), application.ErrorType);
+            Assert.Contains("Persistent retryable invocation failure", application.Message);
+            Assert.Equal(3, failures.Attempts);
+            Assert.Empty(chatClient.Calls);
+            await CaptureHistoryAsync(environment.Client, workflowId);
+        }
+        finally
+        {
+            failures.Release();
+            await host.StopAsync();
+        }
+    }
+
     [Fact]
     public async Task MonitorRestoresCarriedReadingsBeforeSignalsInTheFirstWorkflowTask()
     {
@@ -457,6 +524,34 @@ public sealed class AmbientAgentBatchDrainIntegrationTests
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
         public void Dispose() { }
+    }
+
+    private sealed class FailAgentInvocations : IWorkerInterceptor
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _attempts;
+
+        public Task FirstAttemptStarted => _started.Task;
+        public int Attempts => Volatile.Read(ref _attempts);
+        public void Release() => _release.TrySetResult();
+
+        public ActivityInboundInterceptor InterceptActivity(ActivityInboundInterceptor nextInterceptor) =>
+            new Inbound(nextInterceptor, this);
+
+        private sealed class Inbound(ActivityInboundInterceptor next, FailAgentInvocations owner)
+            : ActivityInboundInterceptor(next)
+        {
+            public override async Task<object?> ExecuteActivityAsync(ExecuteActivityInput input)
+            {
+                if (ActivityExecutionContext.Current.Info.ActivityType != "Run")
+                    return await base.ExecuteActivityAsync(input);
+                Interlocked.Increment(ref owner._attempts);
+                owner._started.TrySetResult();
+                await owner._release.Task;
+                throw new InvalidOperationException("Persistent retryable invocation failure.");
+            }
+        }
     }
 
     private sealed class HoldFirstAgentInvocationActivity : IWorkerInterceptor

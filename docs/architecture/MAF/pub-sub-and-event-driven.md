@@ -26,7 +26,7 @@ This gives you:
 | Wait for all subscribers to respond | Parallel proxy-invocation activities + `Workflow.WhenAllAsync` |
 | Wait for the first subscriber to respond | `Workflow.WhenAnyAsync(tasks)` |
 | Fan-out with aggregation | Parallel activities + result aggregation in workflow code |
-| At-least-once delivery to subscribers | Activity retry policy with stable session and request IDs |
+| Retried delivery to subscribers | Bounded activity retry policy with stable session and request IDs |
 
 ---
 
@@ -47,8 +47,10 @@ public class EventDrivenFanOutWorkflow
         var agentCallOptions = new ActivityOptions
         {
             StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            ScheduleToCloseTimeout = TimeSpan.FromHours(2),
             RetryPolicy = new()
             {
+                MaximumAttempts = 3,
                 NonRetryableErrorTypes =
                 [
                     nameof(DurableTurnFailedException),
@@ -89,7 +91,7 @@ public class EventDrivenFanOutWorkflow
 
 All three activities exclude retained terminal outcomes: retrying the same request ID returns
 the same failure instead of starting another turn. Transport failures, session-busy responses,
-and lost completions remain retryable. See [the invocation retry contract](../../how-to/MAF/usage.md#invoking-agents-from-a-workflow).
+and lost completions remain retryable within the budget. See [the bounded invocation retry contract](../../how-to/MAF/usage.md#invoking-agents-from-a-workflow).
 
 ### Registration
 

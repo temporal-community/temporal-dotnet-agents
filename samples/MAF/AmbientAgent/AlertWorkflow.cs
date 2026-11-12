@@ -1,7 +1,5 @@
 using Microsoft.Extensions.Logging;
 using TemporalCommunity.Extensions.Agents;
-using TemporalCommunity.Extensions.AI.Exceptions;
-using Temporalio.Common;
 using Temporalio.Workflows;
 
 namespace AmbientAgent;
@@ -18,19 +16,6 @@ public class AlertWorkflow
     private readonly List<string> _notifications = [];
     private readonly bool _drainOnShutdown;
     private bool _shutdownRequested;
-    private static readonly ActivityOptions AgentActivityOptions =
-        new()
-        {
-            StartToCloseTimeout = TimeSpan.FromMinutes(35),
-            RetryPolicy = new RetryPolicy
-            {
-                NonRetryableErrorTypes =
-                [
-                    nameof(DurableTurnFailedException),
-                    nameof(DurableTurnOutcomeTooLargeException)
-                ]
-            }
-        };
 
     [WorkflowInit]
     public AlertWorkflow() => _drainOnShutdown = Workflow.Patched("ambient-alert-drain-v1");
@@ -80,7 +65,7 @@ public class AlertWorkflow
                 var notification = await Workflow.ExecuteActivityAsync(
                     (AgentInvocationActivities activities) => activities.RunAsync(
                         "AlertAgent", sessionId.WorkflowId, Workflow.NewGuid().ToString("N"), prompt),
-                    AgentActivityOptions).ConfigureAwait(true);
+                    AgentInvocationOptions.Default).ConfigureAwait(true);
 
                 notification = string.IsNullOrEmpty(notification) ? "(no notification text)" : notification;
                 _notifications.Add(notification);

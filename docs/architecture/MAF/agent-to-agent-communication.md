@@ -15,8 +15,10 @@ using TemporalCommunity.Extensions.AI.Exceptions;
 var agentCallOptions = new ActivityOptions
 {
     StartToCloseTimeout = TimeSpan.FromMinutes(35),
+    ScheduleToCloseTimeout = TimeSpan.FromHours(2),
     RetryPolicy = new()
     {
+        MaximumAttempts = 3,
         NonRetryableErrorTypes =
         [
             nameof(DurableTurnFailedException),
@@ -59,8 +61,10 @@ using TemporalCommunity.Extensions.AI.Exceptions;
 var agentCallOptions = new ActivityOptions
 {
     StartToCloseTimeout = TimeSpan.FromMinutes(35),
+    ScheduleToCloseTimeout = TimeSpan.FromHours(2),
     RetryPolicy = new()
     {
+        MaximumAttempts = 3,
         NonRetryableErrorTypes =
         [
             nameof(DurableTurnFailedException),
@@ -87,8 +91,8 @@ Activity and agent-workflow failures are observed by the parent workflow. Each e
 options only among its proxy-invocation activities. Exclude the two retained terminal-outcome
 exception types from every such activity's retry policy: retrying the same request ID retrieves
 the same failure, not a new turn. Transport failures, session-busy responses, and lost completions
-remain retryable. Reusing the same session and request IDs on activity retries prevents accidental
-submission of a new logical turn. See [the invocation retry contract](../../how-to/MAF/usage.md#invoking-agents-from-a-workflow).
+remain retryable within the budget. Reusing the same session and request IDs on activity retries
+prevents accidental submission of a new logical turn. See [the bounded invocation retry contract](../../how-to/MAF/usage.md#invoking-agents-from-a-workflow).
 
 ## Communication from Agent Tools
 

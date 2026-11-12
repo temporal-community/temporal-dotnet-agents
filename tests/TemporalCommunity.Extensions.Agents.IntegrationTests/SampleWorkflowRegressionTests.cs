@@ -66,6 +66,10 @@ public sealed class SampleWorkflowRegressionTests(ITestOutputHelper output)
     public Task ActualRefundWorkflow_DoesNotRetryOversizedTerminalOutcomeExceptionTransport() =>
         RunSampleAsync("PerToolActivities", true, "too-large");
 
+    [Fact]
+    public Task ActualRefundWorkflow_StopsAfterThreeRetryableInvocationFailures() =>
+        RunSampleAsync("PerToolActivities", true, "always");
+
     private async Task RunSampleAsync(string sample, bool fail, string? fault = null, string? failedAgent = null)
     {
         await using var environment = await TestEnvironmentHelper.StartLocalAsync();
@@ -203,9 +207,17 @@ public sealed class SampleWorkflowRegressionTests(ITestOutputHelper output)
                 var failure = await Assert.ThrowsAsync<WorkflowFailedException>(Execute);
                 var activity = Assert.IsType<ActivityFailureException>(failure.InnerException);
                 var application = Assert.IsType<ApplicationFailureException>(activity.InnerException);
-                Assert.Equal(fault == "too-large"
-                    ? nameof(DurableTurnOutcomeTooLargeException)
-                    : nameof(DurableTurnFailedException), application.ErrorType);
+                Assert.Equal(fault switch
+                {
+                    "always" => nameof(InvalidOperationException),
+                    "too-large" => nameof(DurableTurnOutcomeTooLargeException),
+                    _ => nameof(DurableTurnFailedException),
+                }, application.ErrorType);
+                if (fault == "always")
+                {
+                    Assert.Contains("Persistent retryable invocation failure", application.Message);
+                    Assert.Equal(RetryState.MaximumAttemptsReached, activity.RetryState);
+                }
                 if (fault == "too-large")
                     Assert.Equal(131072, Assert.IsType<ApplicationFailureException>(application.InnerException).Message.Length);
                 await File.WriteAllTextAsync(Path.Combine(directory, "exception.txt"), failure.ToString());
@@ -216,10 +228,13 @@ public sealed class SampleWorkflowRegressionTests(ITestOutputHelper output)
             }
             if (sample == "PerToolActivities")
             {
-                Assert.Equal(fault == "too-large" ? 0 : 1, orders.LookupCalls);
-                Assert.Equal(fault == "too-large" ? 0 : fail ? 1 : 2,
+                Assert.Equal(fault is "too-large" or "always" ? 0 : 1, orders.LookupCalls);
+                Assert.Equal(fault is "too-large" or "always" ? 0 : fail ? 1 : 2,
                     ((ScriptedChatClient)models["RefundAgent"]).CallCount);
-                Assert.Equal(fault is "before" or "after" ? 2 : 1, interceptor.InvocationAttempts.Count);
+                Assert.Equal(fault == "always" ? 3 : fault is "before" or "after" ? 2 : 1,
+                    interceptor.InvocationAttempts.Count);
+                if (fault == "always")
+                    Assert.Equal([1, 2, 3], interceptor.InvocationAttempts.Select(attempt => attempt.Attempt));
                 Assert.Single(interceptor.InvocationAttempts.Select(attempt => attempt.ActivityId).Distinct());
             }
             if (failedAgent is not null)
@@ -234,7 +249,8 @@ public sealed class SampleWorkflowRegressionTests(ITestOutputHelper output)
                     var failedActivities = outer.Events.Where(e => e.ActivityTaskFailedEventAttributes is not null).ToArray();
                     Assert.NotEmpty(failedActivities);
                     Assert.All(failedActivities, e =>
-                        Assert.Equal(RetryState.NonRetryableFailure, e.ActivityTaskFailedEventAttributes.RetryState));
+                        Assert.Equal(fault == "always" ? RetryState.MaximumAttemptsReached : RetryState.NonRetryableFailure,
+                            e.ActivityTaskFailedEventAttributes.RetryState));
                 }
                 var sessions = new HashSet<string>();
                 foreach (var scheduled in outer.Events.Select(e => e.ActivityTaskScheduledEventAttributes).Where(a => a is not null))
@@ -252,7 +268,7 @@ public sealed class SampleWorkflowRegressionTests(ITestOutputHelper output)
                             sessions.Add(value);
                     }
                 }
-                foreach (var session in sessions.Where(_ => fault != "too-large"))
+                foreach (var session in sessions.Where(_ => fault is not ("too-large" or "always")))
                 {
                     var history = await client.GetWorkflowHandle(session).FetchHistoryAsync();
                     await File.WriteAllTextAsync(Path.Combine(directory, $"{session}.json"), history.ToJson());
@@ -302,6 +318,8 @@ public sealed class SampleWorkflowRegressionTests(ITestOutputHelper output)
                 if (activity.ActivityType != "Run")
                     return await base.ExecuteActivityAsync(input);
                 owner.InvocationAttempts.Enqueue((activity.ActivityId, activity.Attempt));
+                if (fault == "always")
+                    throw new InvalidOperationException("Persistent retryable invocation failure.");
                 if (fault == "too-large")
                     throw new DurableTurnOutcomeTooLargeException(
                         new DurableTurnOutcomeTooLargeDetails

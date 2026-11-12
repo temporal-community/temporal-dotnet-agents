@@ -23,8 +23,10 @@ public class ResearchAndSummarizeWorkflow
         var agentCallOptions = new ActivityOptions
         {
             StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            ScheduleToCloseTimeout = TimeSpan.FromHours(2),
             RetryPolicy = new()
             {
+                MaximumAttempts = 3,
                 NonRetryableErrorTypes =
                 [
                     nameof(DurableTurnFailedException),
@@ -60,8 +62,10 @@ public class CustomerServiceWorkflow
         var agentCallOptions = new ActivityOptions
         {
             StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            ScheduleToCloseTimeout = TimeSpan.FromHours(2),
             RetryPolicy = new()
             {
+                MaximumAttempts = 3,
                 NonRetryableErrorTypes =
                 [
                     nameof(DurableTurnFailedException),
@@ -143,8 +147,10 @@ var result = await Workflow.ExecuteActivityAsync(
     new ActivityOptions
     {
         StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
         RetryPolicy = new()
         {
+            MaximumAttempts = 3,
             NonRetryableErrorTypes =
             [
                 nameof(DurableTurnFailedException),
@@ -165,11 +171,11 @@ await Workflow.ExecuteActivityAsync(
         "ResearcherAgent", sessionId.WorkflowId, requestId, prompt),
     new ActivityOptions
     {
-        StartToCloseTimeout = TimeSpan.FromMinutes(5),
-        HeartbeatTimeout    = TimeSpan.FromMinutes(1),
+        StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
         RetryPolicy = new RetryPolicy
         {
-            MaximumAttempts = 5,
+            MaximumAttempts = 3,
             MaximumInterval = TimeSpan.FromSeconds(2),
             NonRetryableErrorTypes =
             [
@@ -191,8 +197,10 @@ public async Task<string> RunAsync(string question)
     var agentCallOptions = new ActivityOptions
     {
         StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
         RetryPolicy = new()
         {
+            MaximumAttempts = 3,
             NonRetryableErrorTypes =
             [
                 nameof(DurableTurnFailedException),
@@ -232,8 +240,10 @@ internal static async Task RunAsync(string topic)
 var agentCallOptions = new ActivityOptions
 {
     StartToCloseTimeout = TimeSpan.FromMinutes(35),
+    ScheduleToCloseTimeout = TimeSpan.FromHours(2),
     RetryPolicy = new()
     {
+        MaximumAttempts = 3,
         NonRetryableErrorTypes =
         [
             nameof(DurableTurnFailedException),
@@ -269,8 +279,10 @@ internal static async Task RunAsync(string topic)
 var agentCallOptions = new ActivityOptions
 {
     StartToCloseTimeout = TimeSpan.FromMinutes(35),
+    ScheduleToCloseTimeout = TimeSpan.FromHours(2),
     RetryPolicy = new()
     {
+        MaximumAttempts = 3,
         NonRetryableErrorTypes =
         [
             nameof(DurableTurnFailedException),
@@ -306,8 +318,10 @@ public class EventDrivenFanOutWorkflow
         var agentCallOptions = new ActivityOptions
         {
             StartToCloseTimeout = TimeSpan.FromMinutes(35),
+            ScheduleToCloseTimeout = TimeSpan.FromHours(2),
             RetryPolicy = new()
             {
+                MaximumAttempts = 3,
                 NonRetryableErrorTypes =
                 [
                     nameof(DurableTurnFailedException),
@@ -365,8 +379,10 @@ public class ResearchWorkflow
             new ActivityOptions
             {
                 StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                ScheduleToCloseTimeout = TimeSpan.FromHours(2),
                 RetryPolicy = new()
                 {
+                    MaximumAttempts = 3,
                     NonRetryableErrorTypes =
                     [
                         nameof(DurableTurnFailedException),
@@ -399,6 +415,7 @@ public sealed class ResearchWorkflow
             new ActivityOptions
             {
                 StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                ScheduleToCloseTimeout = TimeSpan.FromHours(2),
                 RetryPolicy = new RetryPolicy
                 {
                     MaximumAttempts = 3,

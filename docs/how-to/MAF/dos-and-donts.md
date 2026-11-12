@@ -113,8 +113,10 @@ var result = await Workflow.ExecuteActivityAsync(
     new ActivityOptions
     {
         StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
         RetryPolicy = new()
         {
+            MaximumAttempts = 3,
             NonRetryableErrorTypes =
             [
                 nameof(DurableTurnFailedException),
@@ -126,9 +128,9 @@ var result = await Workflow.ExecuteActivityAsync(
 
 Workflow code must not invoke a registered proxy directly. The activity resolves it from scoped DI;
 workflow-generated session and request IDs make retries target the same logical agent turn.
-Exclude [retained terminal outcomes](./usage.md#invoking-agents-from-a-workflow) from the outer
+Use the [bounded invocation policy](./usage.md#invoking-agents-from-a-workflow) and exclude retained terminal outcomes from the outer
 activity's retries: the same request ID returns the same failure, not a fresh turn. Transport
-failures, session-busy responses, and lost completions remain retryable.
+failures, session-busy responses, and lost completions remain retryable within the budget.
 
 ---
 
@@ -364,11 +366,11 @@ await Workflow.ExecuteActivityAsync(
         "ResearcherAgent", sessionId.WorkflowId, requestId, prompt),
     new ActivityOptions
     {
-        StartToCloseTimeout = TimeSpan.FromMinutes(5),
-        HeartbeatTimeout    = TimeSpan.FromMinutes(1),
+        StartToCloseTimeout = TimeSpan.FromMinutes(35),
+        ScheduleToCloseTimeout = TimeSpan.FromHours(2),
         RetryPolicy = new RetryPolicy
         {
-            MaximumAttempts = 5,
+            MaximumAttempts = 3,
             MaximumInterval = TimeSpan.FromSeconds(2),
             NonRetryableErrorTypes =
             [
@@ -381,7 +383,8 @@ await Workflow.ExecuteActivityAsync(
 
 **Why:** these options govern the parent workflow's invocation activity. The registered agent's
 model and tool activities use the agent worker configuration. Generate the session and request IDs
-in workflow code before scheduling the invocation activity. Preserve retry limits and backoff
+in workflow code before scheduling the invocation activity. The wrapper does not heartbeat. Tune
+the [per-invocation budget](./usage.md#invoking-agents-from-a-workflow) to your deadline and SLA
 while excluding retained terminal outcomes.
 
 ---

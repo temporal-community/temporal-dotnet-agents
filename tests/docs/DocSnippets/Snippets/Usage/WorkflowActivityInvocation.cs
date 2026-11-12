@@ -23,8 +23,10 @@ internal static class WorkflowSubagent
                 new ActivityOptions
                 {
                     StartToCloseTimeout = TimeSpan.FromMinutes(35),
+                    ScheduleToCloseTimeout = TimeSpan.FromHours(2),
                     RetryPolicy = new()
                     {
+                        MaximumAttempts = 3,
                         NonRetryableErrorTypes =
                         [
                             nameof(DurableTurnFailedException),
