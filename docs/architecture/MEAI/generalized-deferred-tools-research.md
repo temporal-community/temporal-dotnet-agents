@@ -55,16 +55,17 @@ choice until a package contract meets the adoption gates below.
 ## Test-only prototype findings
 
 The prototype is compiled only into `TemporalCommunity.Extensions.Tests.Shared` and the test
-projects. It is not referenced by production code and cannot enter a NuGet package.
+projects. It is not referenced by production code and cannot enter a NuGet package. The skipped
+workflow-level Continue-as-New/replay integration case has been removed; current automated
+coverage does not claim that workflow-level contract.
 
-The executable research establishes:
+The active state-machine unit tests exercise:
 
 - the default pending-input cap can be one and cap pressure is deterministic;
 - identical request/completion retries are idempotent while changed definitions or payloads
   conflict;
 - timeout and cancellation are terminal, so late completion cannot revive an invocation;
 - pending input and bounded resolution history can be snapshotted and restored;
-- a pending request survives a real Continue-as-New, and both resulting histories replay;
 - restored capacity continues to apply after Continue-as-New; and
 - authorization can be evaluated again immediately before each resumed effect attempt rather than
   serialized with the pending input.

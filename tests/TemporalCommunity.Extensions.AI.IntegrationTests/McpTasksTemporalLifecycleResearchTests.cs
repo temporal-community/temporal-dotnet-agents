@@ -71,95 +71,6 @@ public sealed class McpTasksTemporalLifecycleResearchTests
         Assert.Equal(0, invocationCount);
     }
 
-    [Fact(Skip = "Non-shipping research prototype test; tracked in backlog")]
-    public async Task WorkflowOwnedPolling_PreservesTaskIdentityAcrossPollRetry_AndReplays()
-    {
-        await using var environment = await TemporalServiceTestEnvironment.StartLocalAsync();
-        environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
-        var taskQueue = $"mcp-task-research-{Guid.NewGuid():N}";
-        var gate = new McpTaskResearchGate();
-        var tracker = new McpTaskResearchTracker { FailFirstPollAttempt = true };
-
-        Pipe clientToServer = new();
-        Pipe serverToClient = new();
-        var taskStore = new InMemoryMcpTaskStore { DefaultPollIntervalMs = 25 };
-        var mcpServices = new ServiceCollection();
-        mcpServices
-            .AddMcpServer()
-            .WithStreamServerTransport(
-                clientToServer.Reader.AsStream(),
-                serverToClient.Writer.AsStream())
-            .WithTools(
-            [
-                McpServerTool.Create(
-                    gate.RunReportAsync,
-                    new() { Name = "run_report" }),
-            ])
-            .WithTasks(
-                taskStore,
-                options => options.ExecutionModeSelector =
-                    static _ => McpTaskExecutionMode.Required);
-
-        await using var mcpServiceProvider = mcpServices.BuildServiceProvider();
-        var mcpServer = mcpServiceProvider.GetRequiredService<McpServer>();
-        _ = mcpServer.RunAsync();
-
-        await using var mcpClient = await McpClient.CreateAsync(
-            new StreamClientTransport(
-                clientToServer.Writer.AsStream(),
-                serverToClient.Reader.AsStream()));
-        Assert.Equal("2026-07-28", mcpClient.NegotiatedProtocolVersion);
-
-        var builder = Host.CreateApplicationBuilder();
-        builder.Services.AddSingleton(environment.Client);
-        builder.Services.AddSingleton(mcpClient);
-        builder.Services.AddSingleton(tracker);
-        builder.Services
-            .AddHostedTemporalWorker(taskQueue)
-            .AddWorkflow<McpTaskLifecycleResearchWorkflow>()
-            .AddScopedActivities<McpTaskLifecycleResearchActivities>();
-        using var host = builder.Build();
-        await host.StartAsync();
-
-        var handle = await environment.Client.StartWorkflowAsync(
-            (McpTaskLifecycleResearchWorkflow workflow) => workflow.RunAsync(),
-            new WorkflowOptions($"mcp-task-research-{Guid.NewGuid():N}", taskQueue));
-
-        await tracker.FirstPollAttempt.Task.WaitAsync(TimeSpan.FromSeconds(20));
-        gate.Complete("report ready");
-
-        var result = await handle.GetResultAsync();
-        Assert.Equal(McpTaskLifecycleState.Completed, result.State);
-        Assert.Equal("report ready", result.ResultText);
-        Assert.Equal(1, tracker.StartAttemptCount);
-        Assert.True(tracker.PollAttemptCount >= 2);
-        Assert.Single(tracker.ObservedTaskIds.Distinct(StringComparer.Ordinal));
-        Assert.Equal(result.TaskId, tracker.ObservedTaskIds[0]);
-
-        var scheduled = await WorkflowHistoryAssertions.CountAllScheduledByTypeAsync(handle);
-        Assert.Equal(1, scheduled[McpTaskLifecycleResearchActivities.StartActivityName]);
-        Assert.Equal(1, scheduled[McpTaskLifecycleResearchActivities.PollActivityName]);
-
-        var timerCount = 0;
-        await foreach (var historyEvent in handle.FetchHistoryEventsAsync())
-        {
-            if (historyEvent.TimerStartedEventAttributes is not null)
-            {
-                timerCount++;
-            }
-        }
-        Assert.True(timerCount >= 1);
-
-        var history = await handle.FetchHistoryAsync();
-        var replayerOptions = new WorkflowReplayerOptions();
-        replayerOptions.AddWorkflow<McpTaskLifecycleResearchWorkflow>();
-        var replayResult = await new WorkflowReplayer(replayerOptions)
-            .ReplayWorkflowAsync(history, throwOnReplayFailure: false);
-        Assert.Null(replayResult.ReplayFailure);
-
-        await host.StopAsync();
-    }
-
     [Fact]
     public async Task WorkflowOwnedCancellation_RequestsRemoteCancellation_AndObservesTerminalState()
     {
@@ -370,7 +281,6 @@ public sealed class McpTaskLifecycleResearchActivities(
     [Activity(StartActivityName)]
     public async Task<McpTaskStartResearchResult> StartAsync()
     {
-        Interlocked.Increment(ref tracker.StartAttemptCount);
         var started = await client.CallToolAsTaskAsync(
             new CallToolRequestParams { Name = "run_report" },
             ActivityExecutionContext.Current.CancellationToken);
@@ -399,14 +309,6 @@ public sealed class McpTaskLifecycleResearchActivities(
     [Activity(PollActivityName)]
     public async Task<McpTaskPollResearchResult> PollAsync(McpTaskPollResearchInput input)
     {
-        tracker.ObservedTaskIds.Add(input.TaskId);
-        var attempt = Interlocked.Increment(ref tracker.PollAttemptCount);
-        if (tracker.FailFirstPollAttempt && attempt == 1)
-        {
-            tracker.FirstPollAttempt.TrySetResult();
-            throw new InvalidOperationException("Injected poll-attempt failure.");
-        }
-
         var result = await client.GetTaskAsync(
             input.TaskId,
             ActivityExecutionContext.Current.CancellationToken);
@@ -464,13 +366,7 @@ public sealed class McpTaskLifecycleResearchActivities(
 
 public sealed class McpTaskResearchTracker
 {
-    public int StartAttemptCount;
-    public int PollAttemptCount;
     public int CancelAttemptCount;
-    public bool FailFirstPollAttempt { get; init; }
-    public TaskCompletionSource FirstPollAttempt { get; } =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public List<string> ObservedTaskIds { get; } = [];
 }
 
 public sealed class McpTaskResearchGate

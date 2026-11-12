@@ -22,49 +22,45 @@ ownership to Temporal or recover an interrupted tool body. The stable upstream e
 seam remains unresolved in `modelcontextprotocol/csharp-sdk#1820`.
 
 Task creation has no standardized idempotency key. A lost start response is consequently ambiguous:
-automatic activity retry can create a second remote Task. The prototypes set the start activity to
-one attempt and surface ambiguity; this is at-least-once behavior, not exactly once.
+automatic activity retry can create a second remote Task. Safe start requires avoiding blind retries
+or adding server-side idempotency; the test prototype does not establish either guarantee.
 
 `InputRequired` can represent elicitation or model sampling. It is intentionally rejected in this
 phase because it requires a separate authorization, cost, payload, timeout, and Continue-as-New
 contract. It is not equivalent to binary approval.
 
-## Executable prototypes
+## Prototype design recorded for this decision
 
-Both prototypes use a real MCP 2.2 client/server over in-process pipes and Temporal Service 1.31.2.
-They compile only into `TemporalCommunity.Extensions.AI.IntegrationTests`.
+The original research included in-parent polling and detached-child integration prototypes. The
+skipped polling/replay and detached-child tests have been removed from the current suite. Enabled
+coverage now checks ordinary-tool capability behavior and cooperative cancellation only; it does
+not validate successful Task completion, poll retry identity, workflow replay, or detached-child
+coordination.
 
 ### A: in-parent coordinator
 
-The workflow schedules a one-attempt start activity, records the returned Task ID, waits with
-Temporal timers, and schedules bounded poll activities. Cancellation is a separate activity and
-polling continues until a terminal state is observed.
+The retained test workflow schedules start, records the returned Task ID, waits with Temporal
+timers, and polls until a terminal state is observed. Its activities allow up to two attempts;
+cancellation is a separate activity.
 
-Verified:
+- The retained cancellation integration test checks the cancellation path to a terminal state and
+  that the MCP server observes cooperative cancellation.
+- The retained ordinary-tool test checks that `McpClientTool.InvokeAsync` fails before execution
+  when the server requires Tasks, so ordinary tool registration does not silently enable this
+  lifecycle.
 
-- a poll-activity retry retains the original Task ID and does not restart the Task;
-- completion and cancellation reach explicit terminal results;
-- the MCP server observes cooperative cancellation;
-- no activity remains open during the polling interval;
-- the completed workflow history replays; and
-- ordinary `McpClientTool.InvokeAsync` fails before execution when the server requires Tasks,
-  proving ordinary tool registration does not silently enable this lifecycle.
-
-### B: detached child executor
+### B: detached-child design (not in the current test suite)
 
 The parent starts an executor child with `ParentClosePolicy.Abandon`, immediately continues as new,
 and waits in its new run. The child owns start/timer/poll state and signals the stable parent workflow
 ID after reaching a terminal result.
 
-Verified:
+This design could isolate history better, but current tests do not validate its lifecycle. It also
+does not remove the ambiguous-start, remote-addressability, authorization, or server
+execution-ownership problems, so it remains an implementation candidate rather than a correctness
+solution.
 
-- parent Continue-as-New does not cancel the detached executor;
-- the completion signal reaches the new parent run;
-- the remote Task is created once;
-- first parent run, second parent run, and child histories replay independently; and
-- the child enforces a finite poll cap and rejects `InputRequired` as unsupported.
-
-## Comparison
+## Design comparison
 
 | Concern | A: parent coordinator | B: detached child |
 |---|---|---|
@@ -79,16 +75,13 @@ Verified:
 | `InputRequired` | Unsupported | Unsupported |
 | Public contract burden | High | Higher: child identity, parent signaling, close policy, and recovery |
 
-Prototype B provides materially better history isolation, but it does not remove the ambiguous-start,
-remote addressability, authorization, or server execution-ownership problems. A child workflow is
-therefore an implementation candidate, not a correctness solution by itself.
-
 ## Decision
 
 **Defer** a production integration.
 
-The prototypes prove that Temporal can durably coordinate a known MCP Task after its ID is recorded.
-They do not prove safe Task creation, production multi-node addressability, `InputRequired`, stable
+The research prototypes describe how Temporal could coordinate a known MCP Task after its ID is
+recorded; current automated coverage does not validate the full lifecycle. They do not prove safe
+Task creation, production multi-node addressability, `InputRequired`, stable
 execution ownership on the MCP server, or two compatible non-approval use cases. Application-owned
 workflows may use the demonstrated pattern when they can enforce server-side idempotency and Task
 addressability. The stock managed AI loops will not absorb this state machine yet.

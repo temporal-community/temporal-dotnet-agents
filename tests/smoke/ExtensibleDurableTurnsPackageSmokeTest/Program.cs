@@ -131,7 +131,7 @@ worker.AddDurableToolset("packed", tools => tools.AddDurableToolFactory<PackedRe
                         [context.RequestData.OperationId]))),
         };
     },
-    options => options.WithMaxAttempts(2).RequireApproval()));
+    options => options.Idempotent().WithMaxAttempts(2).RequireApproval()));
 using var workerHost = workerBuilder.Build();
 Assert(
     workerHost.Services.GetService<ITemporalClient>() is null,
@@ -153,6 +153,8 @@ try
         workflow => workflow.ResolveApprovalAsync(new DurableApprovalDecision
         {
             RequestId = pending.RequestId,
+            CallId = pending.CallId,
+            FunctionName = pending.FunctionName,
             Approved = true,
             Reason = "packed-consumer-approved",
         }));
@@ -214,6 +216,8 @@ try
         workflow => workflow.ResolveApprovalAsync(new DurableApprovalDecision
         {
             RequestId = deniedPending.RequestId,
+            CallId = deniedPending.CallId,
+            FunctionName = deniedPending.FunctionName,
             Approved = false,
             Reason = "packed-consumer-denied",
         }));

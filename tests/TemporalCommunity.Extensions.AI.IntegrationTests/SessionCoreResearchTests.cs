@@ -47,10 +47,6 @@ public class SessionCoreResearchTests
         });
     }
 
-    [Fact(Skip = "Unit 2.2: production redesigned session-core initialization/admission barrier is not implemented. Synthetic race below is research only.")]
-    public Task RedesignedSessionCore_UpdateWithStart_CannotReadUninitializedState() =>
-        UpdateDuringInitialization_ReproducesRaceAndDeterministicBarrier(false, "initialized");
-
     [Workflow]
     public class InitializationProbe
     {

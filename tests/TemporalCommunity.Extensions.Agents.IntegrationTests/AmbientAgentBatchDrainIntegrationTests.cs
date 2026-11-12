@@ -416,7 +416,17 @@ public sealed class AmbientAgentBatchDrainIntegrationTests
 
             Assert.Equal(readingCount, finalStatus.TotalReadings);
             Assert.Equal(5, finalStatus.BufferSize);
-            Assert.Equal(readingCount / 5 - (continueAsNew ? 1 : 0), finalStatus.RecentAnalyses.Count);
+            if (continueAsNew)
+            {
+                // The server can suggest continue-as-new before or after either batch; recent
+                // analyses are run-local and are intentionally not carried into the next run.
+                Assert.InRange(finalStatus.RecentAnalyses.Count, 0, readingCount / 5);
+            }
+            else
+            {
+                Assert.Equal(readingCount / 5, finalStatus.RecentAnalyses.Count);
+            }
+            Assert.All(finalStatus.RecentAnalyses, analysis => Assert.Equal("NORMAL: metrics stable.", analysis));
             Assert.Equal(readingCount % 5, finalStatus.PendingAnalysisReadings);
             Assert.Empty(notifications);
             Assert.Equal(readingCount / 5, chatClient.Calls.Count);
