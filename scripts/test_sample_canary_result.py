@@ -88,6 +88,19 @@ class SampleCanaryResultTests(unittest.TestCase):
         )
         self.assertEqual(1, missing_escalation.returncode)
 
+    def test_context_providers_gate_requires_all_turns_and_shutdown(self) -> None:
+        justfile = CHECKER.parent.parent / "justfile"
+        line = next(
+            line for line in justfile.read_text().splitlines()
+            if '"ContextProviders:samples/MAF/ContextProviders:' in line
+        )
+        entry = line.strip().removesuffix("\\").strip().strip('"')
+        markers = entry.split(":", 3)[3]
+        turns = "[TurnCounter] Turn #1\n[TurnCounter] Turn #2\n[TurnCounter] Turn #3\n"
+        self.assertEqual(0, self.run_checker(0, markers, turns + "Done.\n").returncode)
+        self.assertEqual(1, self.run_checker(0, markers, turns).returncode)
+        self.assertEqual(1, self.run_checker(0, markers, turns.replace("Turn #2", "Turn #1") + "Done.\n").returncode)
+
 
 if __name__ == "__main__":
     unittest.main()

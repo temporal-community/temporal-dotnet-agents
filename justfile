@@ -803,7 +803,7 @@ _test-samples-maf: build _sample-preflight _sample-preflight-maf
         "AmbientAgent:samples/MAF/AmbientAgent:90:Monitor Status|Done.|AmbientAgent sample complete." \
         "ConfigurableAgent:samples/MAF/ConfigurableAgent:150:[triageagent/ta-|[escalationagent/ta-|ConfigurableAgent sample complete." \
         "PerToolActivities:samples/MAF/PerToolActivities:90:Scenario 4: Tool calls disabled|PerToolActivities sample complete." \
-        "ContextProviders:samples/MAF/ContextProviders:90:[TurnCounter] LLM call #1|[TurnCounter] LLM call #2" \
+        "ContextProviders:samples/MAF/ContextProviders:90:[TurnCounter] Turn #1|[TurnCounter] Turn #2|[TurnCounter] Turn #3|Done." \
         "Middleware:samples/MAF/Middleware:90:[caller guard]|[model attempt]|[tool attempt]|First answer: Paris|Second answer: London|Middleware sample complete." \
         "ToolInterceptor:samples/MAF/ToolInterceptor:240:[Approval requested]" \
         "MixedActivities:samples/MAF/MixedActivities:120:FetchDocumentAsync|StoreAnalysisAsync|MixedActivities sample complete." \
