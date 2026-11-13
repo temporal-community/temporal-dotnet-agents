@@ -35,7 +35,7 @@ The same workflow also demonstrates all four per-turn selection states:
 
 Five scenarios run:
 
-1. **Happy path** — every tool succeeds on its first attempt.
+1. **Happy path** — an explicitly approved refund is looked up, applied, and emailed once each.
 2. **Subset** — only `lookup_order` is exposed and dispatchable.
 3. **Empty list** — no tools are exposed or dispatchable.
 4. **Disabled** — all model-returned tool calls are blocked before durable dispatch.
@@ -51,8 +51,10 @@ of record before manually retrying.
 `DurableTurnOutcomeTooLargeException` from its outer invocation activity's retry policy.
 The failed turn's request ID is retained, so retrying the proxy would retrieve the same failure,
 not run the lookup again. Other invocation failures can still retry with the same IDs.
-Scenario 5 expects this terminal failure and verifies the tool counters; unexpected failures in
-any scenario produce a nonzero process exit code and no completion marker.
+Each scenario checks its tool counters, including no writes in the lookup-only case and no tool
+calls when tools are disabled or the enabled-name list is empty. Scenario 5 expects the terminal
+failure above. Unexpected failures or counts produce a nonzero process exit code and no completion
+marker; model prose alone is not evidence that a refund or email tool executed.
 
 ---
 

@@ -59,9 +59,11 @@ builder.Services
             agent.Instructions =
                 "You are a system health analyst. You receive time-series health metrics " +
                 "(CPU%, Memory%, Temperature) and must assess whether the readings are normal or anomalous. " +
-                "Respond with 'NORMAL: <brief summary>' if all metrics are within acceptable ranges, " +
-                "or 'ANOMALY: <description of the concerning pattern>' if you detect spikes, " +
-                "sustained high usage, or temperature warnings. Be concise.";
+                "For this demo, a reading is anomalous if CPU or Memory is at least 90%, " +
+                "or Temperature is at least 85 degrees Celsius. Lower values are normal. " +
+                "Respond with 'NORMAL: <brief summary>' if every reading is normal, " +
+                "or 'ANOMALY: <description of the concerning pattern>' if any reading " +
+                "crosses a threshold. Be concise.";
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
             agent.TimeToLive = TimeSpan.FromHours(1);
         });
@@ -179,6 +181,20 @@ foreach (var analysis in status.RecentAnalyses)
     Console.WriteLine($"\n  Analysis: {analysis}");
 }
 
+string[] expectedAnalysisPrefixes = ["NORMAL:", "NORMAL:", "ANOMALY:", "NORMAL:"];
+if (status.TotalReadings != 20
+    || status.BufferSize != 20
+    || status.PendingAnalysisReadings != 0
+    || status.RecentAnalyses.Count != expectedAnalysisPrefixes.Length
+    || !status.RecentAnalyses.Zip(
+        expectedAnalysisPrefixes,
+        (analysis, prefix) => analysis.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).All(matches => matches))
+{
+    Console.Error.WriteLine(
+        "Expected all 20 readings to drain into four batches: NORMAL, NORMAL, ANOMALY, NORMAL.");
+    Environment.ExitCode = 1;
+}
+
 // ── Step 11: Drain alert notifications ──────────────────────────────────────
 Console.WriteLine("\n── Alert Notifications ─────────────────────────────────────");
 var alertHandle = client.GetWorkflowHandle<AlertWorkflow>(alertWorkflowId);
@@ -198,10 +214,19 @@ else
     }
 }
 
+if (notifications.Count != 1
+    || string.IsNullOrWhiteSpace(notifications[0])
+    || notifications[0] == "(no notification text)")
+{
+    Console.Error.WriteLine("Expected exactly one nonempty notification for the spike batch.");
+    Environment.ExitCode = 1;
+}
+
 // ── Step 12: Stop the worker after both workflows have drained ───────────────
 Console.WriteLine("\n── Shutting down ───────────────────────────────────────────");
 
 await host.StopAsync();
 Console.WriteLine("All workflows drained.");
 Console.WriteLine("Done.");
-Console.WriteLine("AmbientAgent sample complete.");
+if (Environment.ExitCode == 0)
+    Console.WriteLine("AmbientAgent sample complete.");

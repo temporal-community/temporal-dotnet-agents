@@ -83,7 +83,9 @@ builder.Services
                 "You are a customer refund specialist. Use lookup_order to verify the order, " +
                 "apply_refund to issue the refund, and send_email to confirm with the customer. " +
                 "Always look up the order before applying a refund. After applying the refund, " +
-                "send a single confirmation email and produce a brief final summary for the user.";
+                "send a single confirmation email and produce a brief final summary for the user. " +
+                "When a refund is explicitly already approved, process the requested amount " +
+                "regardless of the order's recorded delivery status.";
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
             agent.MaxToolCallsPerTurn = 10;
 
@@ -134,10 +136,11 @@ await RunScenarioAsync(
     client,
     taskQueue,
     workflowId: $"refund-happy-{Guid.NewGuid():N}",
-    complaint: "I never received my order ORD-002 and want a full $49.99 refund. " +
-               "Please email me at acme@example.com once it's processed.");
+    complaint: "The full $49.99 refund for order ORD-002 is already approved. " +
+               "Please process it and email me at acme@example.com once it's processed.");
 
-PrintToolStats(orderService, refundService, emailService);
+PrintToolStats(orderService, refundService, emailService,
+    expectedLookups: 1, expectedRefunds: 1, expectedEmails: 1);
 Console.WriteLine();
 
 // ── Step 6b: Per-turn tool-selection matrix ──────────────────────────────────
@@ -148,6 +151,8 @@ await RunScenarioAsync(
     workflowId: $"refund-subset-{Guid.NewGuid():N}",
     complaint: "Only look up the current status of order ORD-003. Do not refund or email.",
     enableToolNames: ["LOOKUP_ORDER"]);
+PrintToolStats(orderService, refundService, emailService,
+    expectedLookups: 2, expectedRefunds: 1, expectedEmails: 1);
 Console.WriteLine();
 
 Console.WriteLine("─── Scenario 3: Empty enabled-name list (no tools) ─────────");
@@ -157,6 +162,8 @@ await RunScenarioAsync(
     workflowId: $"refund-empty-{Guid.NewGuid():N}",
     complaint: "Explain that no operational tools are available for this turn.",
     enableToolNames: []);
+PrintToolStats(orderService, refundService, emailService,
+    expectedLookups: 2, expectedRefunds: 1, expectedEmails: 1);
 Console.WriteLine();
 
 Console.WriteLine("─── Scenario 4: Tool calls disabled ────────────────────────");
@@ -166,6 +173,8 @@ await RunScenarioAsync(
     workflowId: $"refund-disabled-{Guid.NewGuid():N}",
     complaint: "Explain that tool execution is disabled for this turn.",
     enableToolCalls: false);
+PrintToolStats(orderService, refundService, emailService,
+    expectedLookups: 2, expectedRefunds: 1, expectedEmails: 1);
 Console.WriteLine();
 
 // ── Step 6c: Scenario 5 — lookup failure ─────────────────────────────────────
@@ -270,8 +279,23 @@ static async Task RunScenarioAsync(
     }
 }
 
-static void PrintToolStats(OrderService orders, RefundService refunds, EmailService emails)
+static void PrintToolStats(
+    OrderService orders,
+    RefundService refunds,
+    EmailService emails,
+    int expectedLookups,
+    int expectedRefunds,
+    int expectedEmails)
 {
     Console.WriteLine($"  Final state → LookupCalls = {orders.LookupCalls}, " +
                       $"RefundCalls = {refunds.RefundCalls}, SendCalls = {emails.SendCalls}");
+    if (orders.LookupCalls != expectedLookups
+        || refunds.RefundCalls != expectedRefunds
+        || emails.SendCalls != expectedEmails)
+    {
+        Console.Error.WriteLine(
+            $"  Expected cumulative counts: LookupCalls = {expectedLookups}, " +
+            $"RefundCalls = {expectedRefunds}, SendCalls = {expectedEmails}.");
+        Environment.ExitCode = 1;
+    }
 }

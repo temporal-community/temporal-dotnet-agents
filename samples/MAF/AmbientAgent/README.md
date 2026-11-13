@@ -7,6 +7,12 @@ agent conversation state remains owned by the registered `AgentWorkflow`.
 
 The sample also demonstrates signals, queries, graceful shutdown, and workflow Continue-as-New.
 
+For this demo, CPU or memory at least 90%, or temperature at least 85 degrees Celsius, is anomalous.
+The driver sends 20 readings in four five-reading batches; only the third batch contains spikes.
+It checks for three normal analyses, one anomaly analysis, one nonempty alert notification, and no
+pending readings after shutdown. Unexpected counts or classifications produce a nonzero exit code
+and no completion marker. These illustrative thresholds are not a production monitoring policy.
+
 Health readings are queued FIFO for analysis in exact `AnalysisInterval` batches, even while an
 analysis activity is running. Each anomaly alert includes the exact batch that was analyzed.
 `MaxBufferSize` limits the rolling status history, not the pending-analysis queue; this sample
