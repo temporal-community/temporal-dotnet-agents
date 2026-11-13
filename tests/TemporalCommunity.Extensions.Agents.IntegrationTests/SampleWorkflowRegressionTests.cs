@@ -126,7 +126,8 @@ public sealed class SampleWorkflowRegressionTests(ITestOutputHelper output)
                 Register<WorkflowRouting.CustomerServiceWorkflow>();
                 Register<WorkflowRouting.DynamicRoutingWorkflow>();
                 worker.AddScopedActivities<WorkflowRouting.RoutingActivities>();
-                Model("Classifier", sample == "DynamicRouting" ? "OrdersAgent" : "ORDERS");
+                Model(sample == "DynamicRouting" ? "DynamicClassifier" : "Classifier",
+                    sample == "DynamicRouting" ? "OrdersAgent" : "ORDERS");
                 Model("OrdersAgent", "done");
                 break;
             case "ConfigurableAgent":
