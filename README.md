@@ -1,5 +1,14 @@
 # TemporalAgents
 
+> This repository is archived. Temporal's supported integration for Microsoft Agent Framework is
+> `Temporalio.MicrosoftAgentFramework`, developed in
+> [temporalio/ai-integrations](https://github.com/temporalio/ai-integrations) under
+> `dotnet/microsoft-agent-framework` (temporalio/ai-integrations#523), with samples in
+> [temporalio/samples-dotnet](https://github.com/temporalio/samples-dotnet) and a guide at
+> https://docs.temporal.io/develop/dotnet/integrations/microsoft-agent-framework. Several ideas from
+> this repository carried over and are credited there. The packages published from here stay on
+> NuGet as released and are not maintained.
+
 Temporal .NET SDK integrations for building durable AI applications. Two packages, two levels of abstraction:
 
 | Package | Description |
