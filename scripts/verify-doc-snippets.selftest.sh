@@ -162,7 +162,7 @@ embedding_snippet='// BEGIN SNIPPET docs/how-to/MEAI/embeddings.md#provider
 run_case meai-embedding-uncovered reject "$embedding_doc" '' '' 'docs/how-to/MEAI/embeddings.md'
 run_case meai-embedding-covered pass "$embedding_doc" "$embedding_snippet" '' 'docs/how-to/MEAI/embeddings.md'
 
-# MEAI usage and phase harness examples qualify without registration tokens.
+# MEAI usage and selected testing examples qualify without registration tokens.
 usage_doc='# Usage
 
 ## Send
@@ -235,22 +235,22 @@ maf_cancel_snippet='// BEGIN SNIPPET docs/how-to/MAF/usage.md#cancel-an-active-t
 run_case maf-cancel-uncovered reject "$maf_cancel_doc" '' '' 'docs/how-to/MAF/usage.md'
 run_case maf-cancel-covered pass "$maf_cancel_doc" "$maf_cancel_snippet" '' 'docs/how-to/MAF/usage.md'
 
-phase_doc='# Testing
+testing_doc='# Testing
 
-### Phase 0 timer harness
+### Testing workflow timers
 
 ```csharp
 await Workflow.DelayAsync(TimeSpan.FromDays(3));
 ```'
-phase_snippet='// BEGIN SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
-// END SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness'
-run_case meai-phase-uncovered reject "$phase_doc" '' '' 'docs/how-to/MEAI/testing.md'
-run_case meai-phase-covered pass "$phase_doc" "$phase_snippet" '' 'docs/how-to/MEAI/testing.md'
-run_case meai-phase-second-block-uncovered reject "$phase_doc
+testing_snippet='// BEGIN SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers
+// END SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers'
+run_case meai-testing-uncovered reject "$testing_doc" '' '' 'docs/how-to/MEAI/testing.md'
+run_case meai-testing-covered pass "$testing_doc" "$testing_snippet" '' 'docs/how-to/MEAI/testing.md'
+run_case meai-testing-second-block-uncovered reject "$testing_doc
 
 \`\`\`csharp
 var elapsed = Workflow.UtcNow;
-\`\`\`" "$phase_snippet" '' 'docs/how-to/MEAI/testing.md'
+\`\`\`" "$testing_snippet" '' 'docs/how-to/MEAI/testing.md'
 
 # `AddTool(` inside a non-csharp fence (a shell transcript, say) must not demand coverage.
 run_case non-csharp-fence pass '# Example

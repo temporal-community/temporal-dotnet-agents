@@ -137,8 +137,7 @@ the turn immediately.
 
 For newly executed non-final turns, durable conversation history stores only the corresponding
 terminal assistant sentinel. Later model calls therefore do not inherit successful tool results
-whose application state was discarded. Histories created by 0.12.0 remain replayable through a
-Temporal patch marker.
+whose application state was discarded.
 
 `RunDurableTurnAsync` must be called from a workflow Update and permits one managed turn per Update
 ID in the current workflow run. A second call fails the Update before another model/tool dispatch,

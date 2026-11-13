@@ -19,7 +19,7 @@ using DocSnippets.Harness;
 
 namespace DocSnippets.TestingAgents;
 
-// BEGIN SNIPPET docs/how-to/MAF/testing-agents.md#integrationtestfixture-pattern (lines 303-356)
+// BEGIN SNIPPET docs/how-to/MAF/testing-agents.md#integrationtestfixture-pattern (lines 348-394)
 public sealed class IntegrationTestFixture : IAsyncLifetime
 {
     private IHost? _host;
@@ -31,13 +31,8 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Use TestEnvironmentHelper instead of bare WorkflowEnvironment.StartLocalAsync()
-        // because EnableSearchAttributes defaults to true. TestEnvironmentHelper pre-registers the
-        // three custom search attributes (AgentName, SessionCreatedAt, TurnCount) that
-        // AgentWorkflow upserts when search attributes are enabled. Without them, the
-        // workflow fails at runtime with an opaque "unexpected workflow task failure".
-        // Bare WorkflowEnvironment.StartLocalAsync() is sufficient only when the test
-        // explicitly sets EnableSearchAttributes = false.
+        // Repository-only helper: pins the local server, registers search attributes,
+        // and configures TemporalAgentDataConverter.
         Environment = await TestEnvironmentHelper.StartLocalAsync();
 
         _host = BuildHost();
@@ -46,7 +41,7 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
         AgentProxy = _host.Services.GetTemporalAgentProxy("EchoAgent");
     }
 
-    public IHost BuildHost()
+    private IHost BuildHost()
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(Environment.Client);

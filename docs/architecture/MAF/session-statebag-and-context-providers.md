@@ -44,13 +44,13 @@ The managed workflow owns the two hooks; it does not let `ChatClientAgent` run t
 model step. Hook invocations can repeat on an activity retry, but completed activity results replay
 from history.
 
-### Phase 1 — `InvokingAsync` (logical-turn preparation)
+### Turn preparation (`InvokingAsync`)
 
 `PrepareAgentTurn` restores the session StateBag and seeds registered tools, messages, and
 instructions. Providers enrich or filter that context. The activity records the final selection
 and key-level StateBag delta; every model step in the turn reuses that prepared context.
 
-### Phase 2 — `InvokedAsync` (terminal turn notification)
+### Terminal turn notification (`InvokedAsync`)
 
 `CompleteAgentTurn` notifies providers after success, failure, or cancellation, with the terminal
 messages and exception as applicable. Factories may return a different provider instance than
@@ -446,7 +446,11 @@ Each provider reads only its own key — they are fully independent.
 
 1. **The StateBag is not a memory store.** It holds compact per-session state for compatible providers. It does not make an external provider's reads, writes, or history durable.
 
-2. **`stateInitializer` runs exactly once per session.** After the first turn, `GetOrInitializeState` finds the key in the bag and skips initialization. If the bag is lost (e.g., a bug in TemporalAgents serialization), initialization runs again — which is why `stateInitializer` must be idempotent.
+2. **Initialization is persisted per session, but activity execution is at-least-once.** Once the
+   initialized state is recorded in the workflow-owned StateBag, later turns reuse it instead of
+   initializing again. An activity may nevertheless execute more than once before its result is
+   recorded, so initializers must be repeatable and safe to retry; do not rely on exactly-once
+   execution.
 
 3. **An empty bag serializes to `null`.** `TemporalAgentSession.SerializeStateBag()` returns `null` when `StateBag.Count == 0`, avoiding unnecessary bytes in Temporal's event history on turns where no provider has written anything.
 
@@ -472,5 +476,3 @@ Each provider reads only its own key — they are fully independent.
 - `agent-framework/dotnet/src/Microsoft.Agents.AI.Mem0/Mem0Provider.cs`
 
 ---
-
-_Last updated: 2026-09-04_

@@ -152,7 +152,8 @@ Key benefits over in-memory agent frameworks:
 - Typed structured output with `RunStructuredAsync<T>` (markdown fence stripping + retry)
 - MCP tool integration through ordinary `AddTool`/`AddTools` registration; see the
   [MCP guide](../../docs/how-to/MAF/mcp-tools.md)
-- External memory with `AIContextProvider` and `AgentSessionStateBag` persistence
+- Retry-safe context providers with `AgentSessionStateBag` persistence, plus the dedicated scoped
+  chat-history memory adapter ([memory guide](../../docs/how-to/MAF/memory.md))
 - Completed request/response only; `RunStreamingAsync` is not supported
 - Pre-tool lifecycle hook via `IAgentToolInterceptor` — intercept, skip, block, or pause for approval before any tool executes; returns `DurableToolDecision` (from `TemporalCommunity.Extensions.AI.Tools`)
 - OpenTelemetry distributed tracing with a stable Temporal `agent.turn` parent and optional
@@ -195,7 +196,7 @@ Key options on `TemporalAgentsOptions` (accessed via the `AddTemporalAgents(opts
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `EnableSearchAttributes` | `bool` | `true` | Upsert `AgentName`, `SessionCreatedAt`, `TurnCount` on each workflow run |
-| `DefaultMaxEntryCount` | `int` | `1000` | Cap on `DurableSessionEntry` records (request + response pairs) before triggering continue-as-new |
+| `DefaultMaxEntryCount` | `int` | `1000` | Retained-history entry threshold that starts rollover handling; not a hard cap |
 | `DefaultHistoryReducerKey` | `string?` | `null` | Key of a history reducer registered in DI and executed as an activity at continue-as-new boundaries |
 | `DefaultContextReducerKey` | `string?` | `null` | Key of an MEAI `IChatReducer` that shapes isolated prior-turn model context without changing retained history |
 | `DefaultRetryPolicy` | `RetryPolicy?` | `null` | Override the default retry policy for model and context-preparation activities; memory-scope initialization uses a fixed policy |

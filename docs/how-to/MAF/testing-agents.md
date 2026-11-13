@@ -1,6 +1,6 @@
 # Testing Agents
 
-How to test TemporalAgents integrations — from fast unit tests with no server to full integration tests running against a real Temporal environment. The codebase ships with 623 unit tests and 109 integration tests; this guide walks through the patterns they use.
+How to test Temporal Agents applications, from unit tests without a Temporal server to integration tests against the SDK's local service. Examples that use internal test helpers are labeled as repository-only.
 
 ---
 
@@ -17,17 +17,16 @@ How to test TemporalAgents integrations — from fast unit tests with no server 
 
 The test suite is split into two projects:
 
-| Project | Count | Server Required | Purpose |
-|---------|-------|-----------------|---------|
-| `TemporalCommunity.Extensions.Agents.Tests` | 623 | No | Configuration, routing, DI registration, serialization |
-| `TemporalCommunity.Extensions.Agents.IntegrationTests` | 109 | Yes | Full agent execution, HITL, continue-as-new, history preservation |
+| Project | Server Required | Purpose |
+|---------|-----------------|---------|
+| `TemporalCommunity.Extensions.Agents.Tests` | No | Configuration, routing, DI registration, serialization, and workflow replay |
+| `TemporalCommunity.Extensions.Agents.IntegrationTests` | Yes | Agent execution, approval flows, continue-as-new, and worker behavior |
 
 **General principles:**
 
-- **Hand-written test doubles** over mocking frameworks — `StubAIAgent` and `CapturingChatClient` are preferred over FakeItEasy
+- **Hand-written test doubles** for agent and chat-client behavior; use FakeItEasy for broader interfaces when a hand-written implementation adds little
 - **xUnit** with `[Fact]` attributes and `Assert.*` assertions
 - **Exact exception types** — `Assert.Throws<T>` matches the exact type (`ArgumentNullException`, not `ArgumentException`)
-- **FakeItEasy** for interfaces that can't easily be stubbed (e.g., `ITemporalClient`)
 
 ---
 
@@ -141,22 +140,30 @@ internal sealed class CapturingChatClient : IChatClient
 
 ### Test custom middleware leaf preservation
 
-A custom `ConfigureAgentPipeline` wrapper should expose the factory's supplied inner agent through
-`DelegatingAIAgent`. Keep a test-visible reference in the wrapper and assert exact identity:
+A custom `ConfigureAgentPipeline` wrapper should preserve the factory's supplied inner agent through
+`DelegatingAIAgent`. Assert the wrapper's actual `InnerAgent`, rather than merely retaining the
+constructor argument in a separate property:
 
 ```csharp
-sealed class TestMiddleware(AIAgent inner) : DelegatingAIAgent(inner)
-{
-    internal AIAgent SuppliedInner { get; } = inner;
-}
+using Microsoft.Agents.AI;
+using TemporalCommunity.Extensions.Agents.Testing;
+using Xunit;
 
-[Fact]
-public void Middleware_PreservesSuppliedInnerAgent()
+public sealed class MiddlewareTests
 {
-    var inner = NoOpAgent.Instance;
-    var middleware = new TestMiddleware(inner);
+    private sealed class TestMiddleware(AIAgent inner) : DelegatingAIAgent(inner)
+    {
+        internal AIAgent ForwardedAgent => InnerAgent;
+    }
 
-    Assert.Same(inner, middleware.SuppliedInner);
+    [Fact]
+    public void Middleware_PreservesSuppliedInnerAgent()
+    {
+        var inner = NoOpAgent.Instance;
+        var middleware = new TestMiddleware(inner);
+
+        Assert.Same(inner, middleware.ForwardedAgent);
+    }
 }
 ```
 
@@ -165,84 +172,93 @@ library rejects factories that return an unrelated agent and opaque `AIAgent` su
 their forwarding target. A short-circuiting middleware is valid as long as its structural chain
 still preserves the supplied inner agent.
 
-Also test the actual construction contract: one validation construction at worker startup and one
-construction per LLM-step activity attempt, including every retry. Middleware factories receive a
-scoped service provider. Custom wrappers themselves must be non-disposable; inject disposable
-dependencies from the scope and let that scope own them. If the pipeline uses MAF's built-in
+`ConfigureAgentPipeline` is validated at worker startup. Live pipelines are built inside activity scopes, not cached per
+worker: provider preparation, each model-step attempt (including retries), turn completion, and
+the Temporal chat-history memory-search path each build their own pipeline. Middleware factories
+receive the activity's scoped service provider. Custom wrappers themselves must be non-disposable;
+inject disposable dependencies from the scope and let that scope own them. If the pipeline uses MAF's built-in
 `OpenTelemetryAgent`, verify that no new telemetry is emitted through that exact wrapper after the
-activity-owned pipeline is disposed. Cover success, provider failure, cancellation, and retry
-attempts: every live attempt owns a distinct wrapper and must dispose it exactly once. Also test
-startup/runtime topology rejection with a real `OpenTelemetryAgent`; successfully built wrappers
-must be disposed even when local validation rejects the chain. A wrapper hidden inside a partial
-chain when `AIAgentBuilder.Build()` itself throws cannot be recovered because MAF never returns
-that chain.
+activity-owned pipeline is disposed. Cover success, provider failure, cancellation, and retries on
+the activity paths your pipeline uses: each attempt should build a fresh pipeline. The library
+disposes its `OpenTelemetryAgent` wrappers; custom wrappers must remain non-disposable. Also test
+topology rejection with a real `OpenTelemetryAgent`; the library disposes it if validation rejects
+the completed chain. If an `AIAgentBuilder` factory throws while `Build()` is assembling a chain,
+MAF does not return the partial chain to the caller, so the library cannot discover wrappers
+already created inside it.
 
-For session-aware middleware, run the real activity path and assert all of the following: the
-middleware parameter is a `TemporalAgentSession`; it is reference-equal to
+For session-aware middleware, run the real activity path and assert that the middleware receives
+the `TemporalAgentSession` instance also exposed through
 `AIAgent.CurrentRunContext.Session` and `TemporalAgentContext.Current.CurrentSession` around
-`next`; a StateBag write appears in `AgentStepResult.UpdatedStateBag` and is restored on the next
-step; exceptions and cancellation restore the durable context to surrounding middleware; and
-passing a replacement session fails before the provider call. The chat-client leaf may observe
-MAF's transient `ChatClientAgentSession`; that type is intentionally hidden from outer middleware.
-Durable agent streaming is not public, and the internal activity consumes its stream to completion,
-so early consumer disposal is not part of this package's middleware contract.
+`next`. A StateBag mutation is returned in `AgentStepResult.StateBagDelta`; the workflow applies
+that delta before dispatching the next step. Also verify that exceptions and cancellation restore
+the durable context for surrounding middleware, and that replacing the session fails before the
+chat-client leaf runs. The leaf may observe MAF's transient `ChatClientAgentSession`; outer
+middleware continues to see the durable session. Streaming through the Temporal agent proxy is not
+supported; durable runs use `RunAsync` and return a completed response.
 
 ### Testing TemporalAgentsOptions Configuration
 
-The fluent `.AddTemporalAgents()` API registers workflows, activities, keyed proxies, and the agent client. Test it by building a `ServiceCollection` and inspecting the resulting `IServiceProvider`:
+The fluent `.AddTemporalAgents()` API registers workflows, activities, keyed proxies, and the agent
+client. This registration test uses FakeItEasy only to satisfy dependencies; it does not run a
+workflow. In application tests, use your preferred `ITemporalClient` and `IChatClient` doubles:
 
 ```csharp
-[Fact]
-public void AddTemporalAgents_RegistersKeyedAIAgentProxies()
+using FakeItEasy;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using TemporalCommunity.Extensions.Agents;
+using Temporalio.Client;
+using Temporalio.Extensions.Hosting;
+using Xunit;
+
+public sealed class TemporalAgentsOptionsTests
 {
-    var services = new ServiceCollection();
-    services.AddSingleton(A.Fake<ITemporalClient>());
+    [Fact]
+    public void AddTemporalAgents_RegistersKeyedAIAgentProxies()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
+        services.AddChatClient(A.Fake<IChatClient>());
 
-    services.AddChatClient(new StubChatClient());
+        services
+            .AddHostedTemporalWorker("test-queue")
+            .AddTemporalAgents(opts =>
+            {
+                opts.AddDurableAgent("AgentA", agent =>
+                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>());
+                opts.AddDurableAgent("AgentB", agent =>
+                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>());
+            });
 
-    services
-        .AddHostedTemporalWorker("test-queue")
-        .AddTemporalAgents(opts =>
-        {
-            opts.AddDurableAgent("AgentA", agent =>
-                agent.ChatClient = sp => sp.GetRequiredService<IChatClient>());
-            opts.AddDurableAgent("AgentB", agent =>
-                agent.ChatClient = sp => sp.GetRequiredService<IChatClient>());
-        });
+        using var sp = services.BuildServiceProvider();
 
-    var sp = services.BuildServiceProvider();
+        var proxyA = sp.GetTemporalAgentProxy("AgentA");
+        var proxyB = sp.GetTemporalAgentProxy("AgentB");
 
-    // Each agent is registered as a keyed singleton
-    var proxyA = sp.GetTemporalAgentProxy("AgentA");
-    var proxyB = sp.GetTemporalAgentProxy("AgentB");
+        Assert.NotNull(proxyA);
+        Assert.NotNull(proxyB);
+        Assert.Same(proxyA, sp.GetTemporalAgentProxy("AgentA"));
+    }
 
-    Assert.NotNull(proxyA);
-    Assert.NotNull(proxyB);
-    // TemporalAIAgentProxy is internal — this assertion only compiles because
-    // InternalsVisibleTo is configured in the test project's .csproj.
-    Assert.IsType<TemporalAIAgentProxy>(proxyA);
-}
-```
+    [Fact]
+    public void AddTemporalAgents_ThrowsOnNullConfigure()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton(A.Fake<ITemporalClient>());
 
-**Guard clause testing** — validate that null/empty config throws the right exception type:
+        var builder = services.AddHostedTemporalWorker("q");
 
-```csharp
-[Fact]
-public void AddTemporalAgents_ThrowsOnNullConfigure()
-{
-    var services = new ServiceCollection();
-    services.AddSingleton(A.Fake<ITemporalClient>());
-
-    var builder = services.AddHostedTemporalWorker("q");
-
-    Assert.Throws<ArgumentNullException>(
-        () => builder.AddTemporalAgents(null!));
+        Assert.Throws<ArgumentNullException>(
+            () => builder.AddTemporalAgents(null!));
+    }
 }
 ```
 
 ### Testing Routing Activities
 
-Routing activities (`GetAvailableAgents`, `ValidateAgent`) are plain C# methods — test them directly without a Temporal server:
+If your application defines routing activities such as `GetAvailableAgents` or `ValidateAgent`,
+their business logic is ordinary C# and can be tested directly without a Temporal server. These
+are application-defined examples, not APIs supplied by Temporal Agents:
 
 ```csharp
 [Fact]
@@ -272,29 +288,34 @@ public void ValidateAgent_UnknownName_ReturnsFallback()
 }
 ```
 
-### Testing StateBag Serialization
+### Testing internal StateBag serialization
 
-`AgentStepInput` and `AgentStepResult` carry an optional serialized StateBag (`SerializedStateBag` and `UpdatedStateBag` respectively). Verify round-trip fidelity:
+The following is a repository unit-test pattern: `AgentStepInput` and `AgentStepResult` are
+internal implementation types, not package APIs. `AgentStepInput.SerializedStateBag` carries the
+serialized session StateBag; `AgentStepResult.StateBagDelta` carries key-level changes from an
+activity. Use `AgentSessionStateBag.SetValue` and verify the restored value:
 
 ```csharp
 [Fact]
 public void AgentStepInput_WithStateBag_RoundTrips()
 {
     var bag = new AgentSessionStateBag();
-    bag["key1"] = "value1";
+    bag.SetValue("key1", "value1");
 
     var input = new AgentStepInput
     {
         AgentName           = "TestAgent",
-        Request             = request,
-        AccumulatedMessages = messages,
+        Request             = new RunRequest("hello"),
+        AccumulatedMessages = [],
         SerializedStateBag  = bag.Serialize(),
     };
 
     var json = JsonSerializer.Serialize(input);
     var deserialized = JsonSerializer.Deserialize<AgentStepInput>(json)!;
+    Assert.True(deserialized.SerializedStateBag.HasValue);
+    var restoredBag = AgentSessionStateBag.Deserialize(deserialized.SerializedStateBag.Value);
 
-    Assert.NotNull(deserialized.SerializedStateBag);
+    Assert.Equal("value1", restoredBag.GetValue<string>("key1"));
 }
 
 [Fact]
@@ -303,8 +324,8 @@ public void TemporalAgentSession_SerializeStateBag_EmptyBag_ReturnsNull()
     var session = new TemporalAgentSession(
         TemporalAgentSessionId.WithRandomKey("test"));
 
-    // SerializeStateBag() is an internal method — this test only compiles because
-    // InternalsVisibleTo is configured in the test project's .csproj.
+    // SerializeStateBag() is internal; the library grants its unit-test assembly access
+    // through InternalsVisibleTo in the library project file.
     // Empty bags serialize to null — no wasted payload.
     Assert.Null(session.SerializeStateBag());
 }
@@ -316,7 +337,11 @@ public void TemporalAgentSession_SerializeStateBag_EmptyBag_ReturnsNull()
 
 ### IntegrationTestFixture Pattern
 
-The `IntegrationTestFixture` manages a local Temporal test server and a hosted worker, shared across all tests in a class via `IClassFixture<>`:
+This fixture pattern is from the repository's integration tests. `TestEnvironmentHelper` is
+internal test-project code, not a package API; it pins and verifies the local server, registers the
+required search attributes, and configures the agent converter. For an application-owned fixture,
+use the SDK setup in [Configure a local Temporal server](./dos-and-donts.md#configure-a-local-temporal-server-for-agents-integration-tests).
+The fixture can be shared across tests in a class via `IClassFixture<>`:
 
 ```csharp
 public sealed class IntegrationTestFixture : IAsyncLifetime
@@ -330,13 +355,8 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        // Use TestEnvironmentHelper instead of bare WorkflowEnvironment.StartLocalAsync()
-        // because EnableSearchAttributes defaults to true. TestEnvironmentHelper pre-registers the
-        // three custom search attributes (AgentName, SessionCreatedAt, TurnCount) that
-        // AgentWorkflow upserts when search attributes are enabled. Without them, the
-        // workflow fails at runtime with an opaque "unexpected workflow task failure".
-        // Bare WorkflowEnvironment.StartLocalAsync() is sufficient only when the test
-        // explicitly sets EnableSearchAttributes = false.
+        // Repository-only helper: pins the local server, registers search attributes,
+        // and configures TemporalAgentDataConverter.
         Environment = await TestEnvironmentHelper.StartLocalAsync();
 
         _host = BuildHost();
@@ -345,7 +365,7 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
         AgentProxy = _host.Services.GetTemporalAgentProxy("EchoAgent");
     }
 
-    public IHost BuildHost()
+    private IHost BuildHost()
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddSingleton<ITemporalClient>(Environment.Client);
@@ -373,11 +393,11 @@ public sealed class IntegrationTestFixture : IAsyncLifetime
 }
 ```
 
-The `BuildHost()` method is public so tests that need isolated configuration (e.g., custom timeouts) can build their own host.
-
 ### Custom Test Agents
 
-All integration test agents extend `TestAgentBase`, which provides session management and a `CreateEchoResponse` helper:
+These are repository test doubles, not package types. `TestAgentBase` provides session management
+and a shared echo-response helper for some `AIAgent` fakes; `EchoAIAgent` is a standalone
+implementation, and the integration tests also use `IChatClient` doubles.
 
 | Agent | Behavior | Tests |
 |-------|----------|-------|
@@ -386,24 +406,20 @@ All integration test agents extend `TestAgentBase`, which provides session manag
 | `FailThenSucceedAIAgent` | First N calls throw, then succeed | Retry mechanism, error propagation |
 | `EmptyResponseAIAgent` | Returns empty `AgentResponse` | Edge-case response handling |
 
-**Example — `EchoAIAgent`:**
+**Example — shared echo-response helper:**
 
 ```csharp
-public class EchoAIAgent(string name) : TestAgentBase(name)
+protected static AgentResponse CreateEchoResponse(IEnumerable<ChatMessage> messages)
 {
-    protected override Task<AgentResponse> RunCoreAsync(
-        IEnumerable<ChatMessage> messages,
-        AgentSession? session = null,
-        AgentRunOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        var messageList = messages.ToList();
-        var turnCount = messageList.Count(m => m.Role == ChatRole.User);
-        var lastUserMessage = messageList.LastOrDefault(m => m.Role == ChatRole.User);
+    var userMessages = messages.Where(m => m.Role == ChatRole.User).ToList();
+    int turnCount = userMessages.Count;
+    string lastMessage = userMessages.LastOrDefault()?.Text ?? "(empty)";
 
-        return Task.FromResult(
-            CreateEchoResponse(turnCount, lastUserMessage?.Text ?? ""));
-    }
+    return new AgentResponse
+    {
+        Messages = [new ChatMessage(ChatRole.Assistant, $"Echo [{turnCount}]: {lastMessage}")],
+        CreatedAt = DateTimeOffset.UtcNow
+    };
 }
 ```
 
@@ -439,118 +455,91 @@ public class AgentIntegrationTests(IntegrationTestFixture fixture)
 
 ### HITL Approval Flow Tests
 
-Integration tests cover both the timeout path and the happy path:
-
-```csharp
-[Fact]
-public async Task RequestApproval_TimesOut_ReturnsRejectedDecision()
-{
-    // Configure a 2-second approval timeout
-    // ... (custom host with short ApprovalTimeout)
-
-    // Send update that triggers approval request
-    var handle = env.Client.GetWorkflowHandle<AgentWorkflow>(workflowId);
-    var decision = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalDecision>(
-        wf => wf.RequestApprovalAsync(new DurableApprovalRequest
-        {
-            RequestId   = Guid.NewGuid().ToString("N"),
-            Description = "Test action — Test details"
-        }));
-
-    Assert.False(decision.Approved); // Timed out → rejected
-}
-
-[Fact]
-public async Task ResolveApproval_BeforeTimeout_ReturnsAcceptedResult()
-{
-    // Configure a 5-minute approval timeout
-    // Start approval in background, then submit decision
-
-    var approvalDecision = new DurableApprovalDecision
-    {
-        RequestId = pending.RequestId,
-        CallId = pending.CallId,
-        FunctionName = pending.FunctionName,
-        Approved  = true,
-        Reason    = "Looks good"
-    };
-
-    var result = await handle.ExecuteUpdateAsync<AgentWorkflow, DurableApprovalResolutionResult>(
-        wf => wf.ResolveApprovalAsync(approvalDecision));
-
-    Assert.Equal(DurableApprovalResolutionStatus.Accepted, result.Status);
-}
-```
+The repository's [HITL approval integration tests](../../../tests/TemporalCommunity.Extensions.Agents.IntegrationTests/HITLApprovalTimeoutTests.cs)
+cover timeout and resolution against a local Temporal service. The timeout case asserts
+`ExpirationReason.Timeout`; the accepted case starts the approval update, resolves it with the
+request ID, and asserts `DurableApprovalResolutionStatus.Accepted`. These are repository test
+patterns, not a package-provided test fixture. For application-owned server setup, use the
+[SDK-based local test environment](./dos-and-donts.md#configure-a-local-temporal-server-for-agents-integration-tests).
 
 ### Continue-as-New Tests
 
-These tests verify that conversation history, turn counts, and timeouts survive continue-as-new transitions:
-
-```csharp
-[Fact]
-public async Task ContinueAsNew_HistoryCarriedForward_ConversationContinuesSeamlessly()
-{
-    // Use a custom WorkflowEnvironment with a low history count
-    // threshold (20 events) to trigger continue-as-new quickly.
-    // In the real test suite this would use TestEnvironmentHelper.StartLocalAsync()
-    // with extra args to pass a lower history threshold — shown bare here for clarity.
-    var env = await TestEnvironmentHelper.StartLocalAsync(/* extra args for low threshold */);
-
-    // Send enough turns to trigger continue-as-new
-    for (int i = 1; i <= 10; i++)
-    {
-        var response = await proxy.RunAsync($"Turn {i}", session);
-        Assert.Contains($"Echo [{i}]", response.Text);
-    }
-
-    // Conversation state is preserved seamlessly
-}
-
-[Fact]
-public async Task ContinueAsNew_RunIdChangesAfterSufficientHistory()
-{
-    var initialRunId = /* capture from describe */;
-
-    // Generate enough history to trigger continue-as-new
-    // ...
-
-    var currentRunId = /* describe again */;
-    Assert.NotEqual(initialRunId, currentRunId);
-}
-```
+Repository integration tests verify conversation history and idle-deadline behavior across
+continue-as-new, custom activity timeout propagation, and run-ID changes. They are not package
+helpers. See
+[ContinueAsNewTests.cs](../../../tests/TemporalCommunity.Extensions.Agents.IntegrationTests/ContinueAsNewTests.cs)
+for complete setup and assertions. In particular,
+`ContinueAsNew_RunIdChangesAfterSufficientHistory` captures the run ID before sending turns and
+polls `DescribeAsync` with a bounded timeout until it changes; the history-preservation test also
+checks the conversation after continue-as-new. `ContinueAsNew_RenewedIdleDeadlineSurvivesNewRunAndReplay`
+and `ContinueAsNew_CustomTimeoutsPropagate` cover the idle-deadline and timeout behavior. The tests
+lower the local service's event-history threshold through a repository-only helper.
+Application-owned tests can pass the corresponding dynamic-config arguments through
+`DevServerOptions.ExtraArgs` in the [SDK setup](./dos-and-donts.md#configure-a-local-temporal-server-for-agents-integration-tests).
 
 ### Custom Host Per Test
 
-When a test needs isolated configuration (different agents, timeouts, etc.), build a fresh host using the fixture's `WorkflowEnvironment`:
+When a test needs isolated configuration, build another host using the fixture's client and a
+distinct task queue. The repository's `AgentFactory_ResolvesServiceDependencies_AtActivityTime`
+test defines its own `IGreetingService`, `GreetingService`, and `GreetingChatClient` test doubles
+to prove a chat-client factory resolves its dependency during activity execution; those are not
+package APIs. The complete test and helper definitions are in
+[AgentIntegrationTests.cs](../../../tests/TemporalCommunity.Extensions.Agents.IntegrationTests/AgentIntegrationTests.cs):
 
 ```csharp
-[Fact]
-public async Task AgentFactory_ResolvesServiceDependencies_AtActivityTime()
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using TemporalCommunity.Extensions.Agents;
+using Temporalio.Client;
+using Temporalio.Extensions.Hosting;
+using Xunit;
+
+public sealed class CustomHostPerTest(IntegrationTestFixture fixture)
+    : IClassFixture<IntegrationTestFixture>
 {
-    var builder = Host.CreateApplicationBuilder();
-    builder.Services.AddSingleton<ITemporalClient>(fixture.Environment.Client);
-    builder.Services.AddSingleton<IMyCustomService, MyCustomService>();
+    [Fact]
+    public async Task AgentFactory_ResolvesServiceDependencies_AtActivityTime()
+    {
+        var taskQueue = $"factory-di-{Guid.NewGuid():N}";
+        var greeting = "Greetings from DI!";
 
-    builder.Services.AddChatClient(myChatClient);
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(fixture.Client);
+        builder.Services.AddSingleton<IGreetingService>(new GreetingService(greeting));
 
-    builder.Services
-        .AddHostedTemporalWorker("custom-queue-" + Guid.NewGuid())
-        .AddTemporalAgents(opts =>
-        {
-            opts.AddDurableAgent("FactoryAgent", agent =>
+        builder.Services
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
-                agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-                agent.AddTool("do_thing", sp => AIFunctionFactory.Create(
-                    sp.GetRequiredService<IMyCustomService>().DoThing,
-                    "do_thing"));
+                options.EnableSearchAttributes = false;
+                options.AddDurableAgent("DIAgent", agent =>
+                {
+                    agent.ChatClient = sp =>
+                    {
+                        var service = sp.GetRequiredService<IGreetingService>();
+                        return new GreetingChatClient(service);
+                    };
+                });
             });
-        });
 
-    using var host = builder.Build();
-    await host.StartAsync();
+        using var host = builder.Build();
+        await host.StartAsync();
 
-    var proxy = host.Services.GetTemporalAgentProxy("FactoryAgent");
-    // ... test with the custom agent
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("DIAgent");
+            var session = await proxy.CreateSessionAsync();
+            var response = await proxy.RunAsync("Hello", session);
+
+            Assert.NotNull(response);
+            Assert.NotEmpty(response.Messages);
+            Assert.Contains(greeting, response.Messages[0].Text);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
 }
 ```
 
@@ -558,11 +547,14 @@ public async Task AgentFactory_ResolvesServiceDependencies_AtActivityTime()
 
 ## Running Tests
 
+The `just` recipes below run this repository's test projects; package consumers should use their
+own test project and the SDK-based local environment linked above.
+
 ```bash
 # Unit tests only (fast, no server needed)
 just test-unit
 
-# Integration tests (embedded Temporal Server 1.31.2)
+# Integration tests (local Temporal server)
 just test-integration
 
 # Both suites
@@ -570,30 +562,28 @@ just test
 
 # Filter by test name
 dotnet test tests/TemporalCommunity.Extensions.Agents.Tests \
-  --filter "FullyQualifiedName~Router"
+  --filter "FullyQualifiedName~StateBag"
 
 # All tests with code coverage
 just coverage-report
 ```
 
-StateBag rollback performance can be measured locally without a Temporal server or model:
+Repository maintainers can measure the failed-turn StateBag snapshot restoration without a Temporal server or model:
 
 ```bash
 just benchmark-statebag
 ```
 
-This runs a short Release-mode BenchmarkDotNet matrix for empty, approximately 64 KB, and
-approximately 1 MB StateBags across different top-level key counts. Results include timing and
-managed allocations. They are intentionally separate from `just test`: benchmark results should
-be compared on the same machine rather than enforced as a cross-machine wall-clock threshold.
+This repository-only BenchmarkDotNet benchmark sets up empty, approximately 64 KB, and
+approximately 1 MB snapshots split across one or 64 top-level keys, then measures restoring the
+pre-turn `JsonElement` snapshot by assignment. It does not measure StateBag serialization or a
+deep copy. Results include timing and managed allocations and are informational, not cross-machine
+thresholds.
 
-The ordinary unit suite retains a broad one-second guard for a one-megabyte rollback to catch
-catastrophic algorithmic regressions without treating workstation-level timing noise as a precise
-performance contract.
-
-`AgentWorkflow` replay compatibility is checked without a running server by the ordinary unit
-suite. Its checked-in queued-Update/StateBag history is regenerated only when the workflow command
-sequence intentionally changes:
+The unit suite replays the checked-in `AgentWorkflow` histories without a running server. This
+checks those fixtures only; it is not a general historical-workflow compatibility guarantee.
+`just capture-histories` runs both libraries' capture tests to regenerate their fixtures after an
+intentional workflow-command change:
 
 ```bash
 just capture-histories
@@ -606,30 +596,29 @@ just capture-histories
 > `capture-histories` recipe is the intentional exception and runs both libraries' capture tests,
 > regenerating replay fixtures for MEAI and MAF.
 > A bare `dotnet test tests/TemporalCommunity.Extensions.Agents.IntegrationTests` carries no filter,
-> so it *includes* capture tests and leaves a working tree full of rewritten
-> `Compat/Histories/*.json` that looks like an unrelated diff. Recover with
-> `git checkout -- tests/*/Compat/Histories`. Regenerate deliberately, via the recipe above, only
-> when the workflow command sequence has intentionally changed. Note that this also regenerates
-> the MEAI replay fixtures.
+> so it includes capture tests and may rewrite checked-in history fixtures. Prefer
+> `just test-integration` for ordinary runs. After an unfiltered run, inspect
+> `git diff -- tests/TemporalCommunity.Extensions.Agents.IntegrationTests/Compat/Histories` and
+> preserve intentional changes; if discarding generated output, restore only individually reviewed
+> fixture paths. The explicit `capture-histories` recipe also regenerates MEAI fixtures.
 >
 > Any new ordinary test recipe that runs `dotnet test` against an integration project must carry
 > that exclusion — only the explicit history-capture recipes intentionally select the category.
 
-> **Integration tests** use `TestEnvironmentHelper.StartLocalAsync()`; no external server is
-> required. The helper pins Temporal CLI `v1.8.0` (embedded Temporal Server 1.31.2), verifies the
-> reported version through `GetSystemInfo`, and pre-registers the `AgentName`, `SessionCreatedAt`,
-> and `TurnCount` search attributes. Do not use bare `WorkflowEnvironment.StartLocalAsync()` in
-> repository tests because its downloaded server baseline can float.
+> Repository integration tests use the test-project-only `TestEnvironmentHelper.StartLocalAsync()`;
+> no external server is required. It wraps `TemporalServiceTestEnvironment`, pins Temporal CLI
+> `v1.8.0` (embedded Temporal Service 1.31.2), verifies the reported version through
+> `GetSystemInfo`, pre-registers the `AgentName`, `SessionCreatedAt`, and `TurnCount` search
+> attributes, and configures `TemporalAgentDataConverter`. For application-owned tests, use the
+> SDK-based setup in [Configure a local Temporal server](./dos-and-donts.md#configure-a-local-temporal-server-for-agents-integration-tests).
 
 ---
 
 ## References
 
-- `tests/TemporalCommunity.Extensions.Agents.Tests/` — 623 unit tests
-- `tests/TemporalCommunity.Extensions.Agents.IntegrationTests/` — 109 integration tests
+- `tests/TemporalCommunity.Extensions.Agents.Tests/` — unit tests and server-free history replay
+- `tests/TemporalCommunity.Extensions.Agents.IntegrationTests/` — embedded-server integration tests
 - [Durability & Determinism](../../architecture/MAF/durability-and-determinism.md) — why activity results are cached on replay
 - [Agent Sessions & Workflow Loop](../../architecture/MAF/agent-sessions-and-workflow-loop.md) — session lifecycle under test
 
 ---
-
-_Last updated: 2026-09-05_

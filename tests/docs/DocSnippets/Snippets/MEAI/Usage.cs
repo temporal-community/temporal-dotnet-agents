@@ -34,6 +34,11 @@ internal static class Usage
                 options.ModelOutputTokenReserve = 1024;
                 options.MaximumTransportPayloadSizeBytes = 1024 * 1024;
                 options.PayloadCodecExpansionAllowanceBytes = 0;
+                options.HistoryEventSoftLimit = 40_000;
+                options.HistoryEventReserveLimit = 45_000;
+                options.HistorySizeSoftLimitBytes = 40 * 1024 * 1024;
+                options.HistorySizeReserveLimitBytes = 45 * 1024 * 1024;
+                options.MaxConcurrentTurnJoiners = 32;
             })
             .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
         // END SNIPPET docs/how-to/MEAI/usage.md#built-in-managed-session

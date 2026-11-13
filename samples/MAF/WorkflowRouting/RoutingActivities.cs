@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using Temporalio.Activities;
 using TemporalCommunity.Extensions.Agents;
 using TemporalCommunity.Extensions.Agents.Session;
@@ -35,13 +37,17 @@ public class RoutingActivities(TemporalAgentsOptions options, IServiceProvider s
     }
 
     /// <summary>
-    /// Verifies that a specific agent is currently registered. Used as a safety check
-    /// before dispatching to an agent whose name came from LLM output.
+    /// Matches a model-selected name to a described durable agent and returns its registered
+    /// spelling. Uses the caller's registered fallback when there is no match.
     /// </summary>
     [Activity("WorkflowRouting.ValidateAgent")]
     public string ValidateAgent(string agentName, string fallback)
     {
-        return options.IsAgentRegistered(agentName) ? agentName : fallback;
+        var registeredName = options.GetAgentDescriptors()
+            .Select(descriptor => descriptor.Name)
+            .FirstOrDefault(name => string.Equals(
+                name, agentName, StringComparison.OrdinalIgnoreCase));
+        return registeredName ?? fallback;
     }
 
     [Activity("WorkflowRouting.RunAgent")]

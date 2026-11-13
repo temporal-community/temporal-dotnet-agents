@@ -19,20 +19,21 @@ How conversation history grows in TemporalAgents, how the framework manages it a
 
 ## Overview
 
-Every agent session in TemporalAgents maintains a conversation history — the full sequence of user messages, assistant responses, tool calls, and tool results. This history is:
+Each agent session retains conversation history containing user messages, assistant responses,
+tool calls, and tool results. This history is:
 
-1. **Stored in workflow state** (`AgentWorkflow._history`) as a `List<DurableSessionEntry>` populated with `AgentSessionRequest` / `AgentSessionResponse` instances (MAF subclasses of the shared `DurableSessionRequest` / `DurableSessionResponse` types in `TemporalCommunity.Extensions.AI`). Each entry's `Messages` is `IReadOnlyList<ChatMessage>` (MEAI type, stored directly).
-2. **Flattened into `AgentStepInput.AccumulatedMessages`** at the start of every turn by `AgentWorkflow.ExecuteDurableAgentTurnAsync`, then re-sent on each step of the per-LLM-call durable loop
-3. **Sent to the LLM** by `AgentActivities.RunDurableAgentStepAsync` via `IChatClient.GetResponseAsync`
-4. **Carried across continue-as-new boundaries** via `AgentWorkflowInput.CarriedHistory`
+1. **Retained as workflow state** in `DurableSessionEntry` records. MAF sessions use `AgentSessionRequest` and `AgentSessionResponse`, which extend the shared MEAI entry types; each entry stores MEAI `ChatMessage` instances.
+2. **Flattened and prepared at the start of a turn**, then sent to the model in durable activities. The accumulated message list is sent again for each model step in a tool loop.
+3. **Carried across continue-as-new boundaries** with the currently retained conversation history.
 
-This means that by default, the LLM sees the **complete conversation** on every turn. For long-running sessions, this can lead to significant token costs and eventually hit context window limits.
+By default, the model sees the complete retained conversation on every turn. Long-running sessions
+can therefore increase model input and eventually exceed a model's context window.
 
 ---
 
 ## How History Grows
 
-Each turn adds two entries to the history:
+Each successful turn appends a request and response entry:
 
 ```
 Turn 1:  [Request₁]  →  [Response₁]                    = 2 entries
@@ -41,31 +42,25 @@ Turn 3:  ... = 6 entries
 Turn N:  ... = 2N entries
 ```
 
-The flattened message list is serialized into each `RunDurableAgentStep` activity input as `AgentStepInput.AccumulatedMessages`, so the Temporal event payload grows with each turn (one entry per LLM step within the turn). The full history is rebuilt at the start of each turn and re-sent on every step:
+Most failed turns roll back their history changes. If a turn is interrupted after a tool was
+dispatched, the request and an `Interrupted` response are retained so the possible side effect is
+not hidden.
 
-```csharp
-// Inside AgentWorkflow.ExecuteDurableAgentTurnAsync, before the per-step loop:
-var accumulated = FlattenHistoryMessages();   // _history → flat List<ChatMessage>
+At the start of each turn, the workflow flattens the retained entries and prepares context. The
+resulting message list is serialized into each model-step activity input and sent again for every
+step, so Temporal event payloads also grow during a multi-step tool loop. Entries already contain
+MEAI `ChatMessage` instances; no per-message conversion is needed.
 
-// On each iteration:
-var stepInput = new AgentStepInput
-{
-    AgentName = _input.AgentName,
-    Request = runRequest,
-    AccumulatedMessages = accumulated,        // re-sent every step
-    SerializedStateBag = _currentStateBag,
-};
-```
-
-`entry.Messages` is `IReadOnlyList<ChatMessage>` (MEAI types stored directly), so no per-message conversion step is needed — each `msg` is already a `ChatMessage`.
-
-**Token cost grows quadratically** with turn count: turn N sends all N previous exchanges plus the new message. A 20-turn conversation sends ~40 messages to the LLM on the final turn.
+Without history reduction or model-context pruning, a fixed amount of new content per turn makes
+**cumulative model input grow quadratically**:
+turn N sends the N previous exchanges plus the new message, so a 20-turn conversation sends
+about 40 messages on its final turn.
 
 ---
 
 ## History Serialization Format
 
-History entries use a polymorphic JSON format with a `$type` discriminator at the entry layer. The MAF-specific subclasses use the discriminators `agent_request` / `agent_response`; the AI library's own concrete types (in mixed-library scenarios) use `ai_request` / `ai_response`. Library-created entries also carry distinct stable `entryId` values and a shared `turnId` for each request/response pair; both survive Continue-as-New. These identities are separate from `correlationId`, which is intended for observability. Within each entry's `messages`, individual `AIContent` items carry MEAI's own `$type` discriminator (e.g., `text`, `functionCall`, `functionResult`) emitted by `AIJsonUtilities.DefaultOptions`:
+History entries use a polymorphic JSON format with a `$type` discriminator at the entry layer. The MAF-specific subclasses use the discriminators `agent_request` / `agent_response`; the AI library's own concrete types (in mixed-library scenarios) use `ai_request` / `ai_response`. Library-created entries also carry distinct stable `entryId` values and a shared `turnId` for each request/response pair; both survive continue-as-new. These identities are separate from `correlationId`, which supports log/trace correlation and can also pair entries when a turn ID is unavailable. Within each entry's `messages`, built-in MEAI `AIContent` types use MEAI's `$type` discriminator (for example `text`, `functionCall`, and `functionResult`) from `AIJsonUtilities.DefaultOptions`:
 
 ```json
 [
@@ -103,87 +98,77 @@ History entries use a polymorphic JSON format with a `$type` discriminator at th
 ]
 ```
 
-The serialization captures all MEAI `AIContent` subtypes — `TextContent`, `FunctionCallContent`, `FunctionResultContent`, `DataContent`, `ErrorContent`, `UsageContent`, `TextReasoningContent`, `UriContent`, and more — directly via `AIJsonUtilities.DefaultOptions`'s polymorphic discriminator. New MEAI content types are picked up automatically; no per-type wrapper is needed. Token usage is preserved per-response for monitoring.
+The built-in content types supported by `AIJsonUtilities.DefaultOptions` are serialized directly;
+application-defined content types may need their own serialization configuration. A response entry
+can also carry provider-reported token usage.
 
 ---
 
 ## Continue-as-New: Automatic History Transfer
 
-Temporal workflows accumulate event history over time. When the history gets too large, `AgentWorkflow` transfers the conversation to a fresh workflow run via continue-as-new:
-
-```csharp
-// Inside AgentWorkflow.RunAsync
-if (Workflow.ContinueAsNewSuggested && !_shutdownRequested)
-{
-    var carriedHistory = _history.ToList();
-    var carriedStateBag = _currentStateBag;
-
-    throw Workflow.CreateContinueAsNewException(
-        (AgentWorkflow wf) => wf.RunAsync(new AgentWorkflowInput
-        {
-            AgentName = input.AgentName,
-            CarriedHistory = carriedHistory,
-            CarriedStateBag = carriedStateBag,
-            // ... other config propagated
-        }));
-}
-```
+Temporal workflows accumulate event history independently of the agent's conversation history.
+When continuing as new, the workflow starts a fresh run and carries the currently retained
+conversation history and session state forward.
 
 **What survives continue-as-new:**
-- Full conversation history (`CarriedHistory`)
-- StateBag state (`CarriedStateBag`) — including AIContextProvider state like Mem0 thread IDs
-- All configuration: TTL, activity timeouts, approval timeout
+- The currently retained conversation history (`CarriedHistory`), including any configured history
+  reduction
+- StateBag state (`CarriedStateBag`), such as compact provider scope identifiers
+- The workflow's execution settings and session idle deadline
 
 **What resets:**
 - Temporal event history (the Temporal-level history, not conversation history)
 - Run ID (changes to a new value)
-- Workflow timers
+- Timer commands are recreated in the new run; the carried session idle deadline is not restarted
 
-The conversation is seamless from the user's perspective — the workflow ID stays the same, and the next `RunAsync` call routes to the new run automatically.
+The workflow ID remains the same, so the session ID continues to address the workflow; the run ID
+changes.
+
+### Monitor Temporal event-history pressure
+
+Event-history limits are separate from retained conversation-entry and model-context limits. At an
+event-count or history-size soft threshold, new turns are rejected while the workflow prepares to
+continue as new. At the reserve threshold, pending approval waits expire so the active turn can
+finish with headroom.
+[`ITemporalAgentClient.GetHistoryBudgetAsync(sessionId)`](./usage.md#inspecting-workflow-history-budget)
+is a read-only query that reports the latest observed event count and size, their thresholds,
+admission/reserve and history-blocked status, retained entry count, and current/maximum duplicate
+turn joiners. Matching joiners beyond the bound are rejected with a typed pending error.
 
 ---
 
 ## Token Usage Monitoring
 
-Token counts are captured at two levels:
+Provider-reported token counts are available through spans, logs, and retained response entries:
 
-### Per-Turn: OTel Span Attributes
+### Per Model Step: OTel Span Attributes
 
-The `agent.turn` span includes token metrics from the LLM response:
+The `agent.turn` span is emitted for a model step and can include token metrics from that response:
 
 ```
 agent.turn
-  agent.input_tokens  = 1542
-  agent.output_tokens = 87
-  agent.total_tokens  = 1629
+  gen_ai.usage.input_tokens  = 1542
+  gen_ai.usage.output_tokens = 87
+  gen_ai.usage.total_tokens  = 1629
 ```
 
-These are only set when the underlying LLM provider reports usage data.
+These are set when the provider reports usage and no upstream MAF/MEAI OpenTelemetry middleware
+owns the canonical usage attributes. See [Observability](./observability.md#agentturn-client-kind).
 
-### Per-Turn: Structured Logs
+### Per Model Step: Structured Logs
 
-`AgentActivities` logs token counts on each turn:
+`AgentActivities` logs provider-reported token counts for each model step:
 
 ```
-Agent activity completed for 'WeatherAgent' (workflow: ta-weatheragent-abc123).
-  Input tokens: 1542, Output tokens: 87, Total tokens: 1629
+[WeatherAgent/ta-weatheragent-abc123] Agent activity completed
+  (Input tokens: 1542, Output tokens: 87, Total tokens: 1629)
 ```
 
 ### Per-Response: History State
 
-Token usage is stored on each response entry as `Microsoft.Extensions.AI.UsageDetails` (the MEAI type, used directly — no wrapper), making it available for retrospective analysis via the `GetHistory` workflow query. The query returns `IReadOnlyList<DurableSessionEntry>`; pattern-match on `DurableSessionResponse` (or its MAF subclass `AgentSessionResponse`) to access typed `Usage`:
-
-```csharp
-var handle = client.GetWorkflowHandle<AgentWorkflow>(workflowId);
-var history = await handle.QueryAsync(wf => wf.GetHistory());
-
-foreach (var entry in history.OfType<DurableSessionResponse>())
-{
-    Console.WriteLine($"Turn: {entry.Usage?.TotalTokenCount} tokens");
-}
-```
-
-The `OfType<DurableSessionResponse>()` filter matches both `DurableSessionResponse` and the MAF-specific `AgentSessionResponse` subclass (inheritance-based). Cast individual entries to `AgentSessionRequest` to access the MAF-only fields (`OrchestrationId`, `ResponseType`, `ResponseSchema`).
+Response entries store optional usage as `Microsoft.Extensions.AI.UsageDetails`. The public MAF
+client does not expose a full-history query; use the spans and logs above for provider-reported
+per-step usage.
 
 ### Aggregate: Search Attributes
 
@@ -199,7 +184,9 @@ AgentName = "ResearchAgent" AND TurnCount > 20
 
 ### 1. Use Short-Lived Sessions
 
-Set a low `timeToLive` so sessions expire before history grows too large:
+`TimeToLive` is an idle timeout, not a cap on the age or size of an active conversation. It renews
+as turns run, so a short value reclaims idle sessions but does not limit history growth during an
+active conversation:
 
 ```csharp
 opts.AddDurableAgent("MyAgent", agent =>
@@ -209,12 +196,15 @@ opts.AddDurableAgent("MyAgent", agent =>
 });
 ```
 
-After TTL expires, the next message starts a fresh session with empty history.
+After the idle timeout closes a session, a later send can start a new workflow run under the same
+workflow ID; that new run starts with empty conversation history.
 
 ### 2. Summarize History Before Sending
 
 Create a summarization step inside a workflow that condenses long histories before passing the
-result to a specialist. Invoke both registered agents through activities:
+result to a specialist. This example assumes the application has registered an
+`AgentInvocationActivities` activity that resolves the named agent proxy; that helper is
+application code, not a package API. Invoke both agents through activities:
 
 ```csharp
 using TemporalCommunity.Extensions.AI.Exceptions;
@@ -283,15 +273,26 @@ For tasks that don't need conversational context, use a fresh session per reques
 ```csharp
 // Each call starts fresh — no history accumulation
 var session = new TemporalAgentSessionId("AnalystAgent", Guid.NewGuid().ToString("N"));
-var response = await client.SendAsync(session, new RunRequest("Analyze this data: ..."));
+var response = await client.SendAsync(
+    session,
+    new RunRequest("Analyze this data: ...")
+    {
+        CorrelationId = Guid.NewGuid().ToString("N"),
+    });
 ```
 
 
 > **Note:** The `RunAgentAsync(string agentName, string message)` convenience overload is deprecated. Use `SendAsync(TemporalAgentSessionId, RunRequest)` directly.
 
-### 5b. Cap History at a Fixed Size with MaxEntryCount
+### 5. Reduce Retained History at Continue-as-New
 
-`TemporalAgentsOptions.DefaultMaxEntryCount` sets a hard cap on the number of history entries kept in the workflow. When the cap is reached, the workflow triggers continue-as-new, discarding the oldest entries:
+<a id="5b-cap-history-at-a-fixed-size-with-maxentrycount"></a>
+
+`TemporalAgentsOptions.DefaultMaxEntryCount` is the retained-history threshold that starts rollover
+handling, not a hard cap. When the count threshold requires reduction, a keyed history reducer must
+produce a valid smaller history before the workflow continues-as-new. Without one, the workflow
+enters `HistoryBlocked` until explicit recovery; it does not silently trim or discard old entries.
+The threshold-only setup below therefore needs a reducer before it reaches that threshold:
 
 ```csharp
 builder.Services.AddTemporalClient("localhost:7233", "default");
@@ -301,33 +302,33 @@ builder.Services
     .AddTemporalAgents(opts =>
     {
         opts.AddDurableAgent("Agent", a => a.ChatClient = sp => sp.GetRequiredService<IChatClient>());
-        opts.DefaultMaxEntryCount = 50;  // keep at most 50 entries across continue-as-new
+        opts.DefaultMaxEntryCount = 50;  // start history rollover handling at 50 entries
     });
 ```
 
 Pair the bound with a keyed history reducer to control which entries are retained at the boundary.
-Register the reducer in the worker's DI container, then configure its key:
+Register a deterministic reducer in the worker's DI container:
 
 ```csharp
-services.AddKeyedSingleton<Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
+builder.Services.AddKeyedSingleton<Func<IList<DurableSessionEntry>, IList<DurableSessionEntry>>>(
     "keep-recent-30",
     (_, _) => MyHistoryReducers.KeepRecentCompleteTurns);
-
-opts.DefaultMaxEntryCount = 50;
-opts.DefaultHistoryReducerKey = "keep-recent-30";
 ```
 
-At continue-as-new, the workflow dispatches a Temporal activity that resolves the keyed reducer and
-passes it the full history. The activity result becomes the initial history for the new run and is
-recorded in workflow history. Without a configured key, the library does not trim implicitly; a
-required reduction enters `HistoryBlocked` and preserves the last valid history. Inspect the
-history budget and use the explicit retry or one-time truncating recovery through
-`ITemporalAgentClient` as appropriate. A custom reducer must retain complete request/response
-turns, preserve ordering, and retain every protected current, approval, or interrupted turn; simple
-entry-count slicing can split a turn and will be rejected. Use the built-in explicit trim strategy
-when no application-specific projection is needed.
+Set `DefaultHistoryReducerKey = "keep-recent-30"` in the same `AddTemporalAgents` options callback
+as `DefaultMaxEntryCount`, or set `HistoryReducerKey` for one agent.
 
-### 5c. Bound the Estimated Model Context
+When a keyed reducer is configured and a reduction is needed, the workflow dispatches a Temporal
+activity that resolves it and passes the retained history. The activity result becomes the initial
+history for the new run and is recorded in workflow history. Without a configured reducer, a
+required reduction enters `HistoryBlocked` and preserves the last valid history; the library does
+not silently trim. `RetryHistoryCompactionAsync` retries the configured reducer, while
+`TrimBlockedHistoryAsync` is the separately authorized, one-time lossy recovery. A custom reducer
+must retain complete request/response turns, preserve ordering, and retain protected current,
+system/developer-instruction, approval, or interrupted content, as well as incomplete entries;
+simple entry-count slicing can split a turn and will be rejected.
+
+### 6. Bound the Estimated Model Context
 
 History-entry limits and model-context limits protect different resources. Configure an optional
 estimated input-token limit and reserve output tokens per agent or as worker defaults:
@@ -356,19 +357,19 @@ for a provider tokenizer. Register an `IDurableChatTokenEstimator` in worker DI 
 a model-specific estimate. This limit does not constrain Temporal payload sizes or the already
 recorded event history.
 
-### 5. Use ResponseFormat to Get Structured Output
+### 7. Request Structured Output When Needed
 
-Structured output (JSON) is typically more token-efficient than natural language:
+Use structured output when the caller needs machine-readable data. It is not inherently more
+token-efficient: the schema also contributes to model input, and output size depends on the task:
 
 ```csharp
 var report = await agent.RunStructuredAsync<WeatherReport>(messages, session);
 ```
 
-The LLM generates compact JSON instead of verbose prose, reducing output tokens.
+### 8. Filter Tools per Request
 
-### 6. Filter Tools per Request
-
-Disable unnecessary tools to reduce the system prompt size (each tool definition adds tokens):
+Disable unnecessary tools to reduce model input. Tool definitions consume context, though their
+token cost depends on the provider and tokenizer:
 
 ```csharp
 var options = new TemporalAgentRunOptions
@@ -384,10 +385,10 @@ var options = new TemporalAgentRunOptions
 
 For a detailed explanation of `AIContextProvider` and `AgentSessionStateBag`, see [Session StateBag & Context Providers](../../architecture/MAF/session-statebag-and-context-providers.md).
 
-Providers run in `AgentActivities.RunDurableAgentStepAsync`, not in workflow code. This makes
-retry-safe activity work possible, but it does not make provider-owned external persistence atomic
-or durable. Use providers for compatible auxiliary projections; do not use them as an external
-conversation-history store.
+Provider hooks run in retryable activities: `InvokingAsync` during turn preparation and
+`InvokedAsync` after a model response. A retry can run these hooks again, so external side effects
+must be idempotent; they are not committed atomically with workflow progress. Use providers for
+compatible auxiliary projections, not as an external conversation-history store.
 
 ---
 
@@ -410,19 +411,14 @@ Continue-as-New:
         Bag restored seamlessly in the next turn
 ```
 
-**Optimization detail:** Empty bags serialize to `null` (checked via `StateBag.Count == 0`), so sessions without providers incur zero serialization overhead.
+An empty bag contributes no serialized StateBag payload.
 
 ---
 
 ## References
 
-- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentWorkflow.cs` — history storage and continue-as-new
-- `src/TemporalCommunity.Extensions.Agents/Workflows/AgentActivities.cs` — history rebuild and token logging
-- `src/TemporalCommunity.Extensions.Agents/State/` — serialization types for conversation history
 - [Session StateBag & Context Providers](../../architecture/MAF/session-statebag-and-context-providers.md) — AIContextProvider deep dive
 - [Observability](./observability.md) — token usage monitoring via OTel spans
 - [Usage Guide](./usage.md) — structured output and tool filtering
 
 ---
-
-_Last updated: 2026-04-30_

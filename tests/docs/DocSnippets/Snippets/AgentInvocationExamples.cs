@@ -2,6 +2,8 @@
 using DocSnippets.Harness;
 using Microsoft.Extensions.DependencyInjection;
 using RoutingActivities = DocSnippets.Generated.AgentInvocations.Routing.RoutingActivities;
+using System.Linq;
+using System;
 using TemporalCommunity.Extensions.AI.Exceptions;
 using TemporalCommunity.Extensions.Agents.Session;
 using TemporalCommunity.Extensions.Agents;
@@ -111,8 +113,14 @@ public class RoutingActivities(TemporalAgentsOptions options, IServiceProvider s
             .ToArray();
 
     [Activity("WorkflowRouting.ValidateAgent")]
-    public string ValidateAgent(string agentName, string fallback) =>
-        options.IsAgentRegistered(agentName) ? agentName : fallback;
+    public string ValidateAgent(string agentName, string fallback)
+    {
+        var registeredName = options.GetAgentDescriptors()
+            .Select(descriptor => descriptor.Name)
+            .FirstOrDefault(name => string.Equals(
+                name, agentName, StringComparison.OrdinalIgnoreCase));
+        return registeredName ?? fallback;
+    }
 
     [Activity("WorkflowRouting.RunAgent")]
     public async Task<string> RunAgentAsync(

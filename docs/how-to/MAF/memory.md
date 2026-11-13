@@ -76,8 +76,9 @@ scopes for the session. It runs in its own activity, before the first model call
 workflow has no recorded memory state. The activity has a 30-second start-to-close timeout, at
 most two attempts, a one-second initial retry interval, and no heartbeat timeout; it is independent
 of worker model activity settings. A failed initialization surfaces as
-`DurableTurnFailedException` before model invocation or vector-store access, records no memory
-state, and can be attempted again on the next turn. Invalid scope results are non-retryable.
+`DurableTurnFailedException` before model invocation or the managed provider's search/storage
+hooks, records no workflow memory state, and can be attempted again on the next turn. The
+initializer itself may perform application-defined I/O. Invalid scope results are non-retryable.
 The initializer can execute more than once if an activity attempt fails before its result is
 recorded, so make it repeatable and safe to retry.
 
@@ -100,28 +101,25 @@ MAF options such as `SearchTime` (`BeforeAIInvoke` or `OnDemandFunctionCalling`)
 the library owns the provider state key, so configuring a different `StateKey` is rejected. Only
 `OnDemandFunctionCalling` registers a memory-search tool under MAF's configured function name;
 automatic `BeforeAIInvoke` recall does not reserve a tool name or collide with an application tool.
-`BeforeAIInvoke` is the sample's default: it searches automatically before model calls.
-`OnDemandFunctionCalling` instead exposes the stock `Search` function, whose call is dispatched as
-a Temporal tool activity using the initialized search scope. The runnable sample demonstrates both;
-pass `--on-demand` to select function-calling recall.
+`BeforeAIInvoke` is MAF's default and the sample's default: it searches automatically before model
+calls.
+`OnDemandFunctionCalling` instead exposes the configured search function (`Search` by default),
+whose call is dispatched as a Temporal tool activity using the initialized search scope. The
+runnable sample demonstrates both; pass `--on-demand` to select function-calling recall.
 
 Initialized provider state and its scope are stored in the workflow-owned session `StateBag`, then
 carried through retries, Continue-As-New, and replay. If the scope marker exists but provider state
 is missing, the workflow fails rather than silently re-running initialization. External vector
-storage is not transactional with Temporal: if a storage operation succeeds but its activity
-completion is uncertain, a retry can write another record. Use a vector-store strategy and retention
-policy that tolerate duplicate writes; Temporal cannot promise exactly-once external writes. The
-completion-retry acceptance test injects a failure after the memory completion hook returns and
-verifies that the next attempt accepts the same retained scope; it does not simulate a lost
-network-level completion.
+storage is not transactional with Temporal. MAF assigns a fresh record key when storing messages,
+so a retry after a write succeeds but before activity completion is recorded can create duplicates.
+Configure storage and retention to tolerate duplicate writes; the integration cannot make external
+writes exactly once.
 
 On-demand recall is a separate tool activity. Worker replacement can cause Temporal to reconstruct
 the stock search function from the retained provider state and scope on a new worker. If the search
 completes but the activity completion is not recorded, an explicitly configured agent tool retry
 can repeat the external read. Tool retries are opt-in and apply to every tool on that agent; enable
-them only when all tools are safe to repeat or use downstream idempotency. The focused retry
-integration test injects a failure after the search function returns and verifies the repeated read
-and final result; it does not simulate a network-level lost completion.
+them only when all tools are safe to repeat or use downstream idempotency.
 
 See the runnable [ChatHistoryMemory sample](../../../samples/MAF/ChatHistoryMemory/), which uses
 an in-memory vector store and deterministic demonstration embeddings. The in-memory store is

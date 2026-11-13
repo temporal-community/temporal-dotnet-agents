@@ -3,8 +3,8 @@
 One durable agent, registered and called, in a single file.
 
 `TemporalCommunity.Extensions.Agents` makes a Microsoft Agent Framework `AIAgent` durable with
-Temporal: every LLM call is its own activity, every tool call is its own activity, and a crashed
-worker resumes from event history instead of starting the conversation over.
+Temporal: each model step and tool call runs as an activity. Temporal replays workflow history and
+returns completed activity results; an unfinished activity may run again under its retry policy.
 
 Once this works, [usage.md](./usage.md) is the reference for everything else.
 
@@ -12,7 +12,7 @@ Once this works, [usage.md](./usage.md) is the reference for everything else.
 
 ## Before you start
 
-- .NET 10 SDK and a Temporal Service on `localhost:7233` (start command below)
+- .NET 10 SDK and Temporal Service 1.31.0 or newer on `localhost:7233` (start command below)
 - An `OPENAI_API_KEY` environment variable
 - A console application with the library, provider adapter, and Generic Host packages:
 
@@ -29,6 +29,7 @@ The library upserts search attributes by default (`EnableSearchAttributes`); the
 
 ```bash
 temporal server start-dev \
+  --namespace default \
   --search-attribute AgentName=Keyword \
   --search-attribute SessionCreatedAt=Datetime \
   --search-attribute TurnCount=Int
@@ -39,8 +40,9 @@ temporal server start-dev \
 ## 1. Register the agent on a worker
 
 Configure MAF behavior once in `ChatClientAgentOptions`; keep workflow and activity settings in
-`TemporalAgentOptions`. The chat client resolves from the activity's scoped service provider, and
-durable tools receive that same scope through `AIFunctionArguments.Services`.
+`TemporalAgentOptions`. The model-step activity resolves its `IChatClient` from its activity scope.
+Each tool invocation runs in a separate activity scope, exposed through
+`AIFunctionArguments.Services`.
 
 ```csharp
 using System.ClientModel;
@@ -60,7 +62,7 @@ var apiKey = builder.Configuration["OPENAI_API_KEY"]
     ?? throw new InvalidOperationException("OPENAI_API_KEY is not configured.");
 var openAiClient = new OpenAIClient(new ApiKeyCredential(apiKey));
 
-// Each model-requested invocation becomes its own durable tool activity. Resolve scoped
+// Each model-requested tool call becomes its own durable activity. Resolve scoped
 // dependencies through the IServiceProvider parameter rather than capturing them here.
 static string GetWeather(string city, IServiceProvider services) =>
     services.GetRequiredService<WeatherService>().GetForecast(city);
@@ -87,7 +89,11 @@ builder.Services
                     Tools = [weatherTool],
                 },
             },
-            temporal => temporal.TimeToLive = TimeSpan.FromHours(1)));
+            temporal =>
+            {
+                // Short demo TTL; the default is 14 days.
+                temporal.TimeToLive = TimeSpan.FromHours(1);
+            }));
 
 var host = builder.Build();
 await host.StartAsync();
@@ -122,14 +128,15 @@ public sealed class WeatherService
 }
 ```
 
-Reuse the session for later turns; it is backed by the same durable workflow and owns the
-conversation history. For ambiguous-response recovery, persist and reuse a caller-supplied
-`TemporalAgentRunOptions.RequestId`.
+The session token is local until the first `RunAsync` call starts its workflow. Reuse it for later
+turns to continue the same durable conversation history. For ambiguous-response recovery, persist
+a caller-supplied `TemporalAgentRunOptions.RequestId` before sending, then reuse it with the same
+request.
 
 ## 3. Split the client from the worker
 
-The client process needs only the task queue and agent name; it does not register a chat client,
-tools, or context providers:
+The caller process registers its Temporal client connection and an agent proxy using the worker's
+task queue and agent name. It does not register a chat client, tools, or context providers:
 
 ```csharp
 var builder = Host.CreateApplicationBuilder(args);
@@ -146,13 +153,15 @@ Console.WriteLine((await agent.RunAsync("Weather in Kingston?", session)).Text);
 
 ## Rules worth knowing on day one
 
-- **Tool activities use one attempt by default.** `TemporalAgentOptions.RetryPolicy` opts every tool on the
-  agent into the same retry policy. The worker-level `DefaultRetryPolicy` applies to model and
-  context preparation only and does not enable tool retries. Memory-scope initialization uses a
-  fixed policy. Only configure
-  retries when all affected tools are safe to retry.
-- **One run at a time per session.** Overlapping `RunAsync` calls on the same session throw.
-  Parallel conversations get a session each.
+- **Tool activities use one attempt by default.** `TemporalAgentOptions.RetryPolicy` opts every tool
+  and interceptor activity on the agent into the same retry policy. The worker-level
+  `DefaultRetryPolicy` applies to model and context preparation only and does not enable tool
+  retries. Memory-scope initialization uses a fixed policy. Configure retries only when every
+  affected tool and interceptor effect is safe to repeat.
+- **One distinct turn at a time per session.** A concurrent request with a different `RequestId`
+  is rejected as busy. An identical retry with the same ID and input may join the active turn,
+  subject to a bounded joiner limit; reusing an ID with different input conflicts. Use a separate
+  session for each parallel conversation.
 - **A session belongs to its agent.** Passing one agent's session to another is rejected.
 - `ChatClientAgentOptions.ChatOptions.ResponseFormat` can be set at registration. At run time,
   `ChatClientAgentRunOptions` supports only `ChatOptions.ResponseFormat`; custom history providers,

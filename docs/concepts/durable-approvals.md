@@ -34,9 +34,8 @@ MEAI uses its conversation ID; MAF uses `TemporalAgentSessionId`. The libraries 
 
 Only a matching pending decision is accepted. `ResolveApprovalAsync` returns `Accepted` when the
 decision is applied; unknown, mismatched, already-resolved, or conflicting decisions fail update
-validation before Temporal records an accepted update. The result/status enum also names those
-non-progressing cases for internal classification, but callers should handle the update failure
-rather than expect an accepted result for them.
+validation before Temporal records an accepted update. Handle the update failure for those cases;
+they do not produce an accepted result.
 
 The most recent 32 decisions are retained across Continue-As-New. A timeout resolves the request as rejected.
 If an update response is ambiguous, inspect the pending request and reconcile it with application-owned

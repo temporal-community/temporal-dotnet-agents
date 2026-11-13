@@ -12,7 +12,7 @@ internal static class TheDefaultPolicyRetries
         AIFunction[] reads,
         IReadOnlyDictionary<string, AIFunction> byName)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/mcp-tools.md#tool-retries-are-opt-in (lines 84-101)
+        // BEGIN SNIPPET docs/how-to/MAF/mcp-tools.md#tool-retries-are-opt-in (lines 106-114)
         agents.Agent(
             "InventoryAgent",
             new ChatClientAgentOptions

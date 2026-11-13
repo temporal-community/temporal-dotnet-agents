@@ -14,9 +14,9 @@ using TemporalCommunity.Extensions.AI.Tools;
 namespace TemporalCommunity.Extensions.Agents;
 
 /// <summary>
-/// Internal carrier for a tool registered on a <see cref="DurableAgentBuilder"/>. The factory is
-/// invoked while the immutable agent blueprint is first built from the worker's root provider;
-/// the resolved <see cref="AIFunction"/> is cached for the lifetime of the worker.
+/// Internal carrier for a tool registered on a <see cref="DurableAgentBuilder"/>. The immutable
+/// agent blueprint caches this registration; its factory resolves an <see cref="AIFunction"/>
+/// within the activity scope whenever an activity needs the tool.
 /// </summary>
 internal sealed record DurableToolRegistration(
     string Name,
@@ -45,13 +45,14 @@ internal sealed record DurableToolRegistration(
 /// <para>
 /// <b>Factory composition lifecycle.</b> Tool factories registered through
 /// <see cref="AddTool(string, Func{IServiceProvider, AIFunction}, Action{DurableToolOptions}?)"/>
-/// run once while the immutable worker blueprint is built and must resolve only worker-lifetime-safe
-/// services. In contrast, <see cref="ChatClient"/>,
-/// <see cref="AddContextProvider(Func{IServiceProvider, AIContextProvider})"/>,
-/// tool-interceptor factories are invoked from a fresh
-/// <see cref="IServiceScope"/> for every activity attempt. They may resolve scoped services;
-/// they must not retain per-session state in process fields because an activity can retry, move to
-/// another worker, or run concurrently with another session.
+/// are invoked with the activity scope's <see cref="IServiceProvider"/> whenever an activity
+/// resolves registered tools. The immutable worker blueprint caches the registration, not the
+/// returned <see cref="AIFunction"/>; resolution can happen in preparation, model-step, or tool-call
+/// activities and can repeat on retries. These factories may resolve scoped services. The
+/// <see cref="ChatClient"/>, <see cref="AddContextProvider(Func{IServiceProvider, AIContextProvider})"/>,
+/// and tool-interceptor factories are also invoked in the activity scopes that use them. Do not
+/// retain per-session state in process fields because an activity can retry, move to another worker,
+/// or run concurrently with another session.
 /// </para>
 /// </remarks>
 public sealed class DurableAgentBuilder
@@ -295,10 +296,9 @@ public sealed class DurableAgentBuilder
     }
 
     /// <summary>
-    /// Registers a tool produced by a factory. The factory is invoked once, at first activity
-    /// dispatch, and the resolved <see cref="AIFunction"/> is cached for the worker's lifetime.
-    /// This is <em>not</em> the same lifecycle as <see cref="ChatClient"/>, which is resolved
-    /// afresh from the activity attempt's scope on every LLM step.
+    /// Registers a tool produced by a factory. The factory is invoked with an activity-scoped
+    /// service provider whenever an activity resolves registered tools; the returned
+    /// <see cref="AIFunction"/> is not cached by the worker.
     /// </summary>
     /// <param name="name">
     /// The tool name. Must be non-null and non-whitespace, and unique within this agent. Required as
@@ -306,13 +306,10 @@ public sealed class DurableAgentBuilder
     /// without it, the duplicate check would be deferred to first dispatch when the factory runs.
     /// </param>
     /// <param name="factory">
-    /// Factory that produces the <see cref="AIFunction"/>. Receives the worker's root
-    /// <see cref="IServiceProvider"/> — any service you resolve inside this factory is held for
-    /// the worker's lifetime (singleton semantics), regardless of how it was registered in DI.
-    /// If you need per-call scoped resolution inside the tool body itself, resolve services via
-    /// <c>TemporalAgentContext.Current.GetService&lt;T&gt;()</c> at invocation time rather than
-    /// capturing them in the factory. That reads from the scope the <c>InvokeAgentTool</c> activity
-    /// opens for the call, so a scoped registration behaves as scoped.
+    /// Factory that produces the <see cref="AIFunction"/>. Receives the current activity's scoped
+    /// <see cref="IServiceProvider"/> and may resolve scoped dependencies. It can be invoked again
+    /// by another activity or retry, so do not retain its returned function or resolved services
+    /// beyond the factory-created function's activity.
     /// </param>
     /// <param name="configure">Optional configuration callback for per-tool activity overrides.</param>
     /// <returns>This builder, for fluent chaining.</returns>

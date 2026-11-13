@@ -46,10 +46,10 @@ var openAiClient = new OpenAIClient(
 // ── Step 3: Register the IChatClient in DI ───────────────────────────────────
 builder.Services.AddChatClient(openAiClient.GetChatClient(model).AsIChatClient());
 
-// ── Step 4: Register the worker, classifier, and three specialist agents ─────
+// ── Step 4: Register the worker, classifiers, and three specialist agents ────
 // Specialist agents carry a `Description` — DynamicRoutingWorkflow's classification
 // activity calls opts.GetAgentDescriptors() to discover them at runtime.
-// Classifier deliberately omits Description: it is not a routable specialist.
+// Both classifiers omit Description: neither is a routable specialist.
 builder.Services.AddTemporalClient(temporalAddress, "default");
 builder.Services
     .AddHostedTemporalWorker("workflow-routing")
@@ -64,6 +64,15 @@ builder.Services
                 "  TECH_SUPPORT — for technical issues, troubleshooting, bugs, or app problems\n" +
                 "  GENERAL      — for everything else (greetings, general info, company questions)\n\n" +
                 "Respond with the single category keyword only. No explanation, no punctuation.";
+            agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+        });
+
+        opts.AddDurableAgent("DynamicClassifier", agent =>
+        {
+            agent.Instructions =
+                "You are a customer service router. From the available agent names in the request, " +
+                "choose the best match for the user's question. Respond with exactly one name from " +
+                "the list, with no explanation or punctuation.";
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
         });
 

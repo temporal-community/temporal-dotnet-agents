@@ -9,7 +9,7 @@ internal static class WorkflowParkedApproval
 {
     internal static void Configure(TemporalAgentsOptions options, AIFunction sendEmail)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/hitl-patterns.md#workflow-parked-approval (lines 129-135)
+        // BEGIN SNIPPET docs/how-to/MAF/hitl-patterns.md#workflow-parked-approval (lines 128-133)
         options.AddDurableAgent("Operations", agent =>
         {
             agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();

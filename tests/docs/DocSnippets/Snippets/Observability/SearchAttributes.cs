@@ -11,8 +11,12 @@ internal static class SearchAttributes
 {
     internal static void Configure(HostApplicationBuilder builder)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/observability.md#search-attributes (lines 246-256)
-        builder.Services.AddTemporalClient("localhost:7233", "default");
+        // BEGIN SNIPPET docs/how-to/MAF/observability.md#search-attributes (lines 216-228)
+        builder.Services.AddTemporalClient(opts =>
+        {
+            opts.TargetHost = "localhost:7233";
+            opts.Namespace = "default";
+        });
 
         builder.Services
             .AddHostedTemporalWorker("agents")

@@ -11,12 +11,12 @@ internal static class BudgetTheApprovalAndActivityTimeoutsFirst
 {
     internal static void Configure(TemporalAgentsOptions opts, DurableAgentBuilder agent, AIFunction publishDraft)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/hitl-patterns.md#budget-the-approval-and-activity-timeouts-first (lines 151-159)
-        opts.DefaultActivityTimeout  = TimeSpan.FromMinutes(20);  // outer bound on the whole review
-        opts.DefaultApprovalTimeout  = TimeSpan.FromMinutes(15);  // must stay under ActivityTimeout
+        // BEGIN SNIPPET docs/how-to/MAF/hitl-patterns.md#budget-the-approval-and-activity-timeouts-first (lines 150-156)
+        opts.DefaultActivityTimeout  = TimeSpan.FromMinutes(20);  // default start-to-close budget for the tool
+        opts.DefaultApprovalTimeout  = TimeSpan.FromMinutes(15);  // leaves five minutes for other tool work
 
-        // Optional: change the inherited 2-minute heartbeat cadence.
-        opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);   // pump runs at a third of this
+        // Optional: change the inherited 2-minute heartbeat timeout.
+        opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);   // RequestApprovalAsync also heartbeats at ~1/3
 
         agent.AddTool(publishDraft);
         // END SNIPPET docs/how-to/MAF/hitl-patterns.md#budget-the-approval-and-activity-timeouts-first

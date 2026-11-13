@@ -96,8 +96,11 @@ public interface ITemporalAgentClient
     /// <summary>
     /// Resolves one matching pending agent-tool approval. Unknown, mismatched, already-resolved,
     /// or conflicting decisions fail update validation before Temporal records an accepted update.
-    /// Tool approvals require both <see cref="DurableApprovalDecision.CallId"/> and
-    /// <see cref="DurableApprovalDecision.FunctionName"/> from the pending request.
+    /// When the pending request has a non-null call ID, both
+    /// <see cref="DurableApprovalDecision.CallId"/> and
+    /// <see cref="DurableApprovalDecision.FunctionName"/> must match it. In-tool approvals may
+    /// have no call ID; in that case the decision must also omit it, and the function name may be
+    /// omitted or must match when supplied.
     /// After an ambiguous RPC result, reconcile with application-owned review state rather than
     /// retrying the decision blindly.
     /// </summary>

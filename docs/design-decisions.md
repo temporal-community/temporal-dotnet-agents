@@ -1,7 +1,7 @@
 # Design Decisions
 
-This document records the current boundaries of the two prerelease libraries. It intentionally
-describes shipped behavior, not retired versions or speculative compatibility layers.
+This document records the boundaries of the two libraries that shape their application-facing
+contracts and integration patterns.
 
 ## Keep two libraries
 
@@ -44,12 +44,12 @@ activity.
 
 ## Microsoft Agent Framework scope
 
-The Agents package currently builds durable `ChatClientAgent`-shaped registrations. It does not
-claim transparent support for arbitrary `AIAgent` subclasses such as A2A or graph agents.
-`AIContextProvider` instructions and messages are handled in the agent execution path; provider
-tools are not automatically durable and require an explicit agent-side durable registration path.
+Durability targets `ChatClientAgent`-shaped registrations; it does not automatically make arbitrary
+`AIAgent` subclasses, such as A2A or graph agents, durable. `AIContextProvider` instructions and
+messages are handled in the agent execution path; provider tools are not automatically durable and
+require an explicit agent-side durable registration path.
 
-The eventual Temporal Harness profile remains a planned follow-on, not an out-of-the-box promise.
+The Agents package does not provide a Temporal Harness profile.
 
 ## MAF durable agents reject in-process function invocation
 
@@ -82,9 +82,9 @@ positive. The supported configuration for code that genuinely needs in-process i
 separate decorated `IChatClient` for that non-durable work, with an undecorated client given to the
 durable agent.
 
-The MEAI library takes the opposite position for its own Pattern 1: a session with no durable tools
-registered may use `FunctionInvokingChatClient`, because the caller has explicitly chosen the
-in-process loop and no durability was promised. The divergence is intentional.
+In a managed MEAI session with no durable tools registered, `FunctionInvokingChatClient` is allowed:
+the caller has selected an in-process loop instead of activity-backed tool execution. This differs
+intentionally from the MAF durable-agent contract.
 
 ## Freeze persisted schema fingerprints
 

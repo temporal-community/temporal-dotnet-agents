@@ -64,7 +64,7 @@ fail() {
 
 # Emits one `key` line per qualifying fenced block: a ```csharp block whose body contains
 # `.Agent(`, `AddDurableAgent(`, or `AddTool(`, every MEAI usage/embeddings/scheduling/operations block, selected MEAI tool/HITL
-# examples, or phase harness examples.
+# examples, or selected MEAI testing examples.
 # Headings inside fences are skipped, matching the slugger in
 # verify-markdown-links.sh — `# comment` in a shell example is not a section heading.
 scan_docs() {
@@ -95,6 +95,9 @@ scan_docs() {
                 FILENAME == "docs/how-to/MEAI/usage.md" ||
                 FILENAME == "docs/how-to/MEAI/scheduling.md" ||
                 FILENAME == "docs/how-to/MEAI/operations.md" ||
+                (FILENAME == "docs/library-combinations.md" &&
+                 (heading == "replace-a-hand-rolled-chat-workflow" ||
+                  heading == "adopt-components-in-a-custom-workflow")) ||
                 (FILENAME == "docs/how-to/MEAI/observability.md" &&
                  (heading == "opentelemetry-setup" || heading == "w3c-propagator" ||
                   heading == "workflow-diagnostic" ||
@@ -112,13 +115,21 @@ scan_docs() {
                  (heading == "request-id-recovery" || heading == "inspecting-workflow-history-budget" ||
                   heading == "cancel-an-active-turn" ||
                   heading == "invoking-agents-from-a-workflow")) ||
+                (FILENAME == "docs/how-to/MAF/dos-and-donts.md" &&
+                 heading == "configure-a-local-temporal-server-for-agents-integration-tests") ||
+                (FILENAME == "docs/how-to/MAF/testing-agents.md" &&
+                 heading == "test-custom-middleware-leaf-preservation") ||
+                (FILENAME == "docs/how-to/MAF/observability.md" &&
+                 heading == "querying-via-listworkflowsasync") ||
                 (FILENAME == "docs/how-to/MEAI/custom-workflow-output.md" &&
                  heading == "package-managed-typed-turns" &&
                  body ~ /DurableToolWorkflowBase/) ||
                 (FILENAME == "docs/how-to/MEAI/payload-codecs.md" &&
                  heading == "configure-every-client-and-worker" &&
                  body ~ /applicationPayloadCodec/) ||
-                (FILENAME == "docs/how-to/MEAI/testing.md" && heading ~ /^phase-[0-9]+-/))) {
+                (FILENAME == "docs/how-to/MEAI/testing.md" &&
+                 (heading == "testing-workflow-timers" ||
+                  heading == "testing-activity-side-effects-across-retries")))) {
                 print FILENAME "#" (heading == "" ? "-no-heading-" : heading)
             }
             next
@@ -230,7 +241,7 @@ done < "$work/prose-keys.txt"
 # Allowlist keys contain a literal '#' themselves, so only WHOLE-LINE comments are stripped.
 : > "$work/allow-keys.txt"
 if [[ -f "$allowlist_file" ]]; then
-    grep -v '^[[:space:]]*#' "$allowlist_file" | awk 'NF' | sort > "$work/allow-keys.txt"
+    awk 'NF && $0 !~ /^[[:space:]]*#/' "$allowlist_file" | sort > "$work/allow-keys.txt"
 fi
 
 # ---------------------------------------------------------------------------

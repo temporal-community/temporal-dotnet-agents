@@ -12,7 +12,7 @@ internal static class BoundEstimatedModelContext
     {
         builder.Services.AddChatClient(chatClient);
 
-        // BEGIN SNIPPET docs/how-to/MAF/prompt-caching.md#5c-bound-the-estimated-model-context
+        // BEGIN SNIPPET docs/how-to/MAF/prompt-caching.md#6-bound-the-estimated-model-context
         builder.Services
             .AddHostedTemporalWorker("agents")
             .AddTemporalAgents(opts =>
@@ -24,6 +24,6 @@ internal static class BoundEstimatedModelContext
                     agent.ModelOutputTokenReserve = 1024;
                 });
             });
-        // END SNIPPET docs/how-to/MAF/prompt-caching.md#5c-bound-the-estimated-model-context
+        // END SNIPPET docs/how-to/MAF/prompt-caching.md#6-bound-the-estimated-model-context
     }
 }

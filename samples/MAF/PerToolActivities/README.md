@@ -5,7 +5,8 @@ This sample demonstrates **per-tool Temporal activities** in
 `RunDurableAgentStep` activity, and every model-requested tool call is its own
 `InvokeAgentTool` activity. Calls in one model response execute serially in model
 order. Tool activities get one attempt by default; the per-agent retry policy opts
-all tools on that agent into retries. The worker-level retry policy applies to model steps only.
+all tools on that agent into retries. The worker-level retry policy applies to model and
+context-preparation activities, not tools or interceptors.
 
 For the conceptual background, see
 [`docs/how-to/MAF/durable-agents.md`](../../../docs/how-to/MAF/durable-agents.md).

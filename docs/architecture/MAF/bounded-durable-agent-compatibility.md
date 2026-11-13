@@ -42,7 +42,7 @@ The extension builds a fresh `ChatClientAgent` inside each LLM-step activity fro
 | Tools dynamically returned by `AIContextProvider.InvokingAsync` | Disabled | The activity drops them and logs an error. Convert them into static durable declarations. |
 | Provider-owned history or external writes through a generic provider (for example direct `ChatHistoryMemoryProvider` registration) | Unsupported | Generic hooks run in retryable activities without a provider-history idempotency contract. The stock chat-history provider is supported only through the dedicated opt-in adapter in [Agent memory](../../how-to/MAF/memory.md). |
 | Providers that retain session data in process fields | Unsupported | Activity attempts can retry, move workers, and overlap sessions. Persist session state through `StateBag`. |
-| `HarnessAgent` and a full Harness profile | Deferred | A Temporal-native Harness profile is a future research track, not a compatibility promise for `HarnessAgent`. |
+| `HarnessAgent` and a full Harness profile | Unsupported | The Agents package does not provide a Temporal-native Harness integration. |
 
 ## Provider lifetime and StateBag
 
@@ -85,5 +85,3 @@ contract requires. The original durable StateBag is serialized after the chain c
 For a third-party provider, support is determined by behavior—not by its package name. It is directly compatible only when it contributes retry-safe instructions/messages and stores session state in the supplied `StateBag`. If it produces tools, declare static `DurableToolRegistrationSpec` entries. If it owns history, invokes tools itself, or depends on live process state, do not register it until a dedicated durable adapter exists.
 
 ---
-
-_Last updated: 2026-09-04_

@@ -11,12 +11,9 @@
     TreatWarningsAsErrors stays inherited from Directory.Build.props. A doc example that only
     compiles with a warning is still a doc example that will annoy a reader, so it is a failure.
 
-    xunit is referenced only so `[Fact]` and `IAsyncLifetime` resolve in the snippets copied out of
-    docs/how-to/MAF/testing-agents.md. Its analyzers still load transitively (via xunit.analyzers),
-    and they object to that verbatim code — a non-public class holding a [Fact], and a [Fact] with
-    parameters supplied by the harness instead of a fixture. Both objections are correct FOR A TEST
-    PROJECT and irrelevant here: nothing in this project is discovered or executed. Hence the two
-    targeted NoWarn entries rather than turning all analyzers off.
+    xunit is referenced so `[Fact]`, `IClassFixture<>`, and `IAsyncLifetime` resolve in testing
+    examples. This is not a test project, so the attributes are compile-time markers only; none of
+    the examples is discovered or executed.
   -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
@@ -24,8 +21,6 @@
     <!-- Everything here is internal; XML docs on a harness buy nothing. -->
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <RootNamespace>DocSnippets</RootNamespace>
-    <!-- xUnit1000: test classes must be public. xUnit1001: Fact methods cannot have parameters. -->
-    <NoWarn>$(NoWarn);xUnit1000;xUnit1001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -36,6 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="FakeItEasy" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />

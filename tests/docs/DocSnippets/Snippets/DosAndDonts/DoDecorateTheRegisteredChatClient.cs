@@ -1,8 +1,6 @@
 // HARNESS for docs/how-to/MAF/dos-and-donts.md
 // § "Do decorate the registered `IChatClient` when you need per-LLM-call visibility".
 //
-// The block opens with a bare `agent.ChatClient = ...` statement that has no enclosing lambda in
-// the doc, so the harness supplies `agent` as a parameter alongside `opts`.
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -19,16 +17,14 @@ namespace DocSnippets.DosAndDonts;
 
 internal static class DoDecorateTheRegisteredChatClient
 {
-    internal static void Configure(DurableAgentBuilder agent, TemporalAgentsOptions opts)
+    internal static void Configure(TemporalAgentsOptions opts)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/dos-and-donts.md#do-decorate-the-registered-ichatclient-when-you-need-per-llm-call-visibility (lines 335-344)
-        agent.ChatClient = sp => new AuditingChatClient(
-            sp.GetRequiredService<OpenAIClient>().GetChatClient("gpt-4o-mini").AsIChatClient(),
-            sp.GetRequiredService<ILogger<AuditingChatClient>>());
-
+        // BEGIN SNIPPET docs/how-to/MAF/dos-and-donts.md#do-decorate-the-registered-ichatclient-when-you-need-per-llm-call-visibility
         opts.AddDurableAgent("Assistant", agent =>
         {
-            agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+            agent.ChatClient = sp => new AuditingChatClient(
+                sp.GetRequiredService<OpenAIClient>().GetChatClient("gpt-4o-mini").AsIChatClient(),
+                sp.GetRequiredService<ILogger<AuditingChatClient>>());
         });
         // END SNIPPET docs/how-to/MAF/dos-and-donts.md#do-decorate-the-registered-ichatclient-when-you-need-per-llm-call-visibility
     }

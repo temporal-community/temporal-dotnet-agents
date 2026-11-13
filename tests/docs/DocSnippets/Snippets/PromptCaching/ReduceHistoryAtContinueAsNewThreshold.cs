@@ -1,4 +1,4 @@
-// HARNESS for docs/how-to/MAF/prompt-caching.md § "5b. Cap History at a Fixed Size with MaxEntryCount".
+// HARNESS for docs/how-to/MAF/prompt-caching.md § "5. Reduce Retained History at Continue-as-New".
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -7,11 +7,11 @@ using TemporalCommunity.Extensions.Agents;
 
 namespace DocSnippets.PromptCaching;
 
-internal static class CapHistoryAtAFixedSizeWithMaxEntryCount
+internal static class ReduceHistoryAtContinueAsNewThreshold
 {
     internal static void Configure(HostApplicationBuilder builder)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/prompt-caching.md#5b-cap-history-at-a-fixed-size-with-maxentrycount (lines 277-287)
+        // BEGIN SNIPPET docs/how-to/MAF/prompt-caching.md#5-reduce-retained-history-at-continue-as-new
         builder.Services.AddTemporalClient("localhost:7233", "default");
 
         builder.Services
@@ -19,8 +19,8 @@ internal static class CapHistoryAtAFixedSizeWithMaxEntryCount
             .AddTemporalAgents(opts =>
             {
                 opts.AddDurableAgent("Agent", a => a.ChatClient = sp => sp.GetRequiredService<IChatClient>());
-                opts.DefaultMaxEntryCount = 50;  // keep at most 50 entries across continue-as-new
+                opts.DefaultMaxEntryCount = 50;  // start history rollover handling at 50 entries
             });
-        // END SNIPPET docs/how-to/MAF/prompt-caching.md#5b-cap-history-at-a-fixed-size-with-maxentrycount
+        // END SNIPPET docs/how-to/MAF/prompt-caching.md#5-reduce-retained-history-at-continue-as-new
     }
 }

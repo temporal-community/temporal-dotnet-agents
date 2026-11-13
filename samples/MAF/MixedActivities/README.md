@@ -7,7 +7,7 @@ Shows how to mix plain `[Activity]`-decorated methods with a durable AI agent ca
 The demo processes three support documents through a four-step pipeline:
 
 1. `FetchDocumentAsync` — regular activity, pulls document text from an in-memory store
-2. `agent.RunAsync` — durable agent turn, AI classifies the document
+2. `AgentInvocationActivities.RunAsync` — scoped activity resolves the registered proxy and sends a durable agent turn
 3. `StoreAnalysisAsync` — regular activity, persists the analysis result
 4. `NotifyReviewerAsync` — regular activity, prints a simulated reviewer alert
 
@@ -23,7 +23,8 @@ Temporal treats both kinds of steps as durable. If the worker crashes between st
 ## Key Code Pointers
 
 - `DocumentActivities.cs` — three `[Activity]`-decorated methods with no AI involvement
-- `DocumentPipelineWorkflow.cs` — the mixing point: `Workflow.ExecuteActivityAsync` and `agent.RunAsync` interleaved in the same `[WorkflowRun]` method
+- `DocumentPipelineWorkflow.cs` — orchestrates each step through `Workflow.ExecuteActivityAsync`, including the scoped agent-invocation activity
+- `AgentInvocationActivities.cs` — resolves the registered proxy and supplies the stable session and request IDs from the workflow
 - `Program.cs` — `AddSingletonActivities<DocumentActivities>()` before `AddTemporalAgents(...)` on the same worker builder
 
 ## Getting Started

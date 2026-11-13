@@ -1,54 +1,83 @@
 // HARNESS for docs/how-to/MAF/testing-agents.md § "Custom Host Per Test".
 //
-// `fixture` and `myChatClient` come in as parameters — the doc shows the body of a test method on a
-// class that already has both. Everything inside the markers is verbatim, including the [Fact]
-// attribute, which is inert here: no test SDK is referenced and nothing in this project executes.
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Temporalio.Client;
-using Temporalio.Extensions.Hosting;
-using TemporalCommunity.Extensions.Agents;
-using Xunit;
+// The documentation uses application-owned greeting service/client doubles; these minimal stand-ins
+// exist only to compile the excerpt. The snippet is not discovered or executed.
+namespace DocSnippets.TestingAgents
+{
 using DocSnippets.Harness;
 
-namespace DocSnippets.TestingAgents;
-
-internal static class CustomHostPerTest
+internal interface IGreetingService
 {
-    internal static Task RunAsync(IntegrationTestFixture fixture, IChatClient myChatClient) =>
-        AgentFactory_ResolvesServiceDependencies_AtActivityTime(fixture, myChatClient);
+    string GetGreeting();
+}
 
-    // BEGIN SNIPPET docs/how-to/MAF/testing-agents.md#custom-host-per-test (lines 506-535)
+internal sealed class GreetingService(string greeting) : IGreetingService
+{
+    public string GetGreeting() => greeting;
+}
+
+internal sealed class GreetingChatClient(IGreetingService service) : HarnessChatClient
+{
+    public IGreetingService Service { get; } = service;
+}
+}
+
+namespace DocSnippets.TestingAgents
+{
+// BEGIN SNIPPET docs/how-to/MAF/testing-agents.md#custom-host-per-test (lines 558-611)
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using TemporalCommunity.Extensions.Agents;
+using Temporalio.Client;
+using Temporalio.Extensions.Hosting;
+using Xunit;
+
+public sealed class CustomHostPerTest(IntegrationTestFixture fixture)
+    : IClassFixture<IntegrationTestFixture>
+{
     [Fact]
-    public static async Task AgentFactory_ResolvesServiceDependencies_AtActivityTime(
-        IntegrationTestFixture fixture,
-        IChatClient myChatClient)
+    public async Task AgentFactory_ResolvesServiceDependencies_AtActivityTime()
     {
-        var builder = Host.CreateApplicationBuilder();
-        builder.Services.AddSingleton<ITemporalClient>(fixture.Environment.Client);
-        builder.Services.AddSingleton<IMyCustomService, MyCustomService>();
+        var taskQueue = $"factory-di-{Guid.NewGuid():N}";
+        var greeting = "Greetings from DI!";
 
-        builder.Services.AddChatClient(myChatClient);
+        var builder = Host.CreateApplicationBuilder();
+        builder.Services.AddSingleton<ITemporalClient>(fixture.Client);
+        builder.Services.AddSingleton<IGreetingService>(new GreetingService(greeting));
 
         builder.Services
-            .AddHostedTemporalWorker("custom-queue-" + Guid.NewGuid())
-            .AddTemporalAgents(opts =>
+            .AddHostedTemporalWorker(taskQueue)
+            .AddTemporalAgents(options =>
             {
-                opts.AddDurableAgent("FactoryAgent", agent =>
+                options.EnableSearchAttributes = false;
+                options.AddDurableAgent("DIAgent", agent =>
                 {
-                    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
-                    agent.AddTool("do_thing", sp => AIFunctionFactory.Create(
-                        sp.GetRequiredService<IMyCustomService>().DoThing,
-                        "do_thing"));
+                    agent.ChatClient = sp =>
+                    {
+                        var service = sp.GetRequiredService<IGreetingService>();
+                        return new GreetingChatClient(service);
+                    };
                 });
             });
 
         using var host = builder.Build();
         await host.StartAsync();
 
-        var proxy = host.Services.GetTemporalAgentProxy("FactoryAgent");
-        // ... test with the custom agent
+        try
+        {
+            var proxy = host.Services.GetTemporalAgentProxy("DIAgent");
+            var session = await proxy.CreateSessionAsync();
+            var response = await proxy.RunAsync("Hello", session);
+
+            Assert.NotNull(response);
+            Assert.NotEmpty(response.Messages);
+            Assert.Contains(greeting, response.Messages[0].Text);
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
     }
-    // END SNIPPET docs/how-to/MAF/testing-agents.md#custom-host-per-test
+}
+// END SNIPPET docs/how-to/MAF/testing-agents.md#custom-host-per-test
 }

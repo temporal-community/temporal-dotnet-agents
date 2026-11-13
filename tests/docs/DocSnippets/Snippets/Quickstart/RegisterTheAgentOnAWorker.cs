@@ -27,7 +27,7 @@ internal static class RegisterTheAgentOnAWorker
             ?? throw new InvalidOperationException("OPENAI_API_KEY is not configured.");
         var openAiClient = new OpenAIClient(new ApiKeyCredential(apiKey));
 
-        // Each model-requested invocation becomes its own durable tool activity. Resolve scoped
+        // Each model-requested tool call becomes its own durable activity. Resolve scoped
         // dependencies through the IServiceProvider parameter rather than capturing them here.
         static string GetWeather(string city, IServiceProvider services) =>
             services.GetRequiredService<WeatherService>().GetForecast(city);
@@ -54,7 +54,11 @@ internal static class RegisterTheAgentOnAWorker
                             Tools = [weatherTool],
                         },
                     },
-                    temporal => temporal.TimeToLive = TimeSpan.FromHours(1)));
+                    temporal =>
+                    {
+                        // Short demo TTL; the default is 14 days.
+                        temporal.TimeToLive = TimeSpan.FromHours(1);
+                    }));
 
         var host = builder.Build();
         await host.StartAsync();

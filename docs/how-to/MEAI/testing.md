@@ -18,8 +18,7 @@ just test-integration
 ```
 
 Integration tests use isolated embedded servers; provider calls should use deterministic doubles,
-not live API keys. The regression coverage below describes current contracts, not proof of
-exactly-once external effects.
+not live API keys. The tests verify expected outcomes, not exactly-once external effects.
 
 ## Inference telemetry verification
 
@@ -79,9 +78,7 @@ Custom workflows based on `DurableToolWorkflowBase<TRequestData, TTurnState>` mu
 remain defensive, but only a validator can reject a request before the Update is recorded. The
 `ExtensibleDurableTurns` sample and its compiled usage-guide snippet demonstrate this pairing.
 
-<a id="phase-0-research-and-harness"></a>
-
-## Pinned dependency contracts
+## Pinned dependency behavior
 
 `PinnedReducerContractTests` executes the pinned MEAI and Temporal SDK contracts:
 
@@ -176,20 +173,12 @@ and replays, controlled retries can duplicate an external effect, and worker res
 does not re-execute a completed activity. The timer's recorded duration is exactly three days;
 workflow-clock elapsed time includes task scheduling overhead and is not exactly the delay.
 
-On the idle local service, **ten validator rejections persist zero new events**, verified by
-comparing the full event-ID/type sequence before and after. Accepted updates grow both history
-count and byte size, and their history replays. This verifies a prerequisite, not a universal
-guarantee that rejection consumes no server CPU, RPC traffic, or workflow tasks alongside other
-work. Budget logic must use task-boundary snapshots, not query freshness or local rejection
+On the local service, validator rejections persist no new history events, while accepted updates
+are recorded and replayed. This does not imply rejected requests consume no server resources.
+Workflow history budgets use task-boundary snapshots, not query freshness or local rejection
 counters.
 
-`GetSystemInfo` reports **1.31.2** for the pinned local server. The SDK time-skipping server
-returns an **empty server version**; the harness reports that explicitly and does not claim it
-meets the production minimum. A versioned production-service experiment on that timer-only
-server is unavailable; transport, restart, retry, and validator-history prerequisites are
-verified on the version-checked local service instead.
-
-### Phase 0 timer harness
+### Testing workflow timers
 
 This compile-checked example uses the repository's shared test project (not a separately
 published NuGet package). For application tests, copy the pinned environment helper or reference
@@ -226,7 +215,7 @@ public class TimerExampleWorkflow
 }
 ```
 
-### Phase 0 controlled tool attempt
+### Testing activity side effects across retries
 
 The shared `ControlledActivityAttempt<T>` makes an effect observable before returning a result,
 without sleeping. Use separate attempts to model retries, and always release blocked attempts in
@@ -336,12 +325,8 @@ public class StubChatSessionClient : IDurableChatSessionClient
 {
     public Func<string, IEnumerable<ChatMessage>, ChatOptions?, string?, string?, string?, CancellationToken, Task<DurableSessionResponse>>
         SendAsyncHandler { get; set; } = (_, _, _, _, _, _, _) =>
-            Task.FromResult(new DurableSessionResponse
-            {
-                CorrelationId = "stub",
-                CreatedAt = DateTimeOffset.UtcNow,
-                Messages = [new ChatMessage(ChatRole.Assistant, "stub reply")],
-            });
+            Task.FromException<DurableSessionResponse>(
+                new NotSupportedException("Configure SendAsyncHandler in each test."));
 
     public Task<DurableSessionResponse> SendAsync(string conversationId, IEnumerable<ChatMessage> messages,
         ChatOptions? options = null, string? correlationId = null,
@@ -652,19 +637,15 @@ just test
 ```
 
 > The replay fixtures under `tests/TemporalCommunity.Extensions.AI.Tests/Compat/Histories/` are
-> produced by tests tagged
-> `Category=HistoryCapture`, which `File.WriteAllTextAsync` over the checked-in JSON rather than
-> asserting against it. The public `just test` and `just test-integration` recipes and diagnostic
-> helpers `_test-individual` and `_test-logged` pass `--filter "Category!=HistoryCapture"`.
-> `capture-histories` is the intentional exception and runs both libraries' history-capture tests,
-> regenerating replay fixtures for MEAI and MAF. When
-> running the library project directly, use the filter shown above; otherwise those capture tests
-> run. The symptom is a pile of unexplained fixture diffs; the fix is
-> `git checkout -- tests/*/Compat/Histories`. Regenerate both corpora on purpose with
-> `just capture-histories` only when a workflow's command sequence has genuinely changed.
->
-> Any new ordinary test recipe that runs `dotnet test` against an integration project must carry
-> that exclusion — only the explicit history-capture recipes intentionally select the category.
+> produced by tests tagged `Category=HistoryCapture`, which overwrite the checked-in JSON rather
+> than asserting against it. The `just test` and `just test-integration` recipes and diagnostic
+> helpers `_test-individual` and `_test-logged` exclude that category. `just capture-histories`
+> intentionally regenerates both MEAI and MAF fixture sets. When running a test project directly,
+> use `--filter "Category!=HistoryCapture"` unless you intend to capture histories. Review
+> generated fixture diffs before keeping them; restore only specific, inspected files that should
+> not change, for example:
+> `git restore -- tests/TemporalCommunity.Extensions.AI.Tests/Compat/Histories/typed-worker-owned-toolset-v1.json`.
+> Regenerate fixtures intentionally only when a workflow command sequence changes.
 
 Both test suites use an embedded Temporal Server 1.31.2 — no separate `temporal server start-dev`
 process is needed. AI integration tests use `TemporalServiceTestEnvironment.StartLocalAsync()`;

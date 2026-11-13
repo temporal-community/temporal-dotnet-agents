@@ -28,7 +28,9 @@ public abstract class DurableToolDecision
     /// Optional replacement argument dictionary. When set, the dispatch loop invokes the tool
     /// with these arguments instead of the LLM-supplied ones.
     /// Note: the LLM-supplied arguments are already in Temporal history from the LLM step
-    /// activity; this substitution affects only the tool-dispatch event.
+    /// result and interceptor activity input. The replacement is returned in the interceptor
+    /// activity result and then included in the tool-dispatch input; it does not redact the
+    /// original arguments from history.
     /// </param>
     /// <param name="metadata">Optional key/value metadata carried for audit purposes.</param>
     /// <returns>A <see cref="ProceedDecision"/> instance.</returns>

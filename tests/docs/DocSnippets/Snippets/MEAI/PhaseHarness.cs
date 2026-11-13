@@ -14,7 +14,7 @@ internal static class PhaseHarness
 {
     internal static async Task TimerAsync()
     {
-        // BEGIN SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
+        // BEGIN SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers
         await using var environment = await TemporalServiceTestEnvironment.StartTimeSkippingAsync();
         environment.Client.Options.DataConverter = DurableAIDataConverter.Instance;
         var queue = $"timer-example-{Guid.NewGuid():N}";
@@ -29,12 +29,12 @@ internal static class PhaseHarness
             var elapsed = await handle.GetResultAsync().WaitAsync(TimeSpan.FromSeconds(30));
             Assert.True(elapsed >= TimeSpan.FromDays(3));
         });
-        // END SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
+        // END SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers
     }
 
     internal static async Task ControlledToolAsync()
     {
-        // BEGIN SNIPPET docs/how-to/MEAI/testing.md#phase-0-controlled-tool-attempt
+        // BEGIN SNIPPET docs/how-to/MEAI/testing.md#testing-activity-side-effects-across-retries
         var attempt = new ControlledActivityAttempt<string>();
         var effects = 0;
         var tool = AIFunctionFactory.Create(
@@ -55,11 +55,11 @@ internal static class PhaseHarness
             if (!attempt.IsCompletionSupplied)
                 attempt.Complete("cleanup");
         }
-        // END SNIPPET docs/how-to/MEAI/testing.md#phase-0-controlled-tool-attempt
+        // END SNIPPET docs/how-to/MEAI/testing.md#testing-activity-side-effects-across-retries
     }
 }
 
-// BEGIN SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
+// BEGIN SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers
 [Workflow]
 public class TimerExampleWorkflow
 {
@@ -71,4 +71,4 @@ public class TimerExampleWorkflow
         return Workflow.UtcNow - started;
     }
 }
-// END SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
+// END SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers

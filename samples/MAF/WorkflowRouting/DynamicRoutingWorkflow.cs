@@ -13,7 +13,7 @@ namespace WorkflowRouting;
 /// <para>
 /// Unlike <see cref="CustomerServiceWorkflow"/> (which uses a hardcoded switch),
 /// this workflow queries the agent registry via an activity to discover what agents
-/// exist and what they do, then passes that information to the Classifier so it can
+/// exist and what they do, then passes that information to the DynamicClassifier so it can
 /// pick the best match from whatever agents are currently registered.
 /// </para>
 /// <para>
@@ -62,10 +62,10 @@ public class DynamicRoutingWorkflow
             $"User question: {userQuestion}\n\n" +
             $"Respond with the agent name only. No explanation, no punctuation.";
 
-        var classifierSessionId = WorkflowAgents.NewAgentSessionId("Classifier");
+        var classifierSessionId = WorkflowAgents.NewAgentSessionId("DynamicClassifier");
         var chosenAgent = (await Workflow.ExecuteActivityAsync(
             (RoutingActivities activities) => activities.RunAgentAsync(
-                "Classifier",
+                "DynamicClassifier",
                 classifierSessionId.WorkflowId,
                 Workflow.NewGuid().ToString("N"),
                 routingPrompt),

@@ -169,5 +169,3 @@ or NATS) externally and use `TemporalAgentContext.StartWorkflowAsync` from withi
 activity to trigger agent workflows in response to broker events.
 
 ---
-
-_Last updated: 2026-02-27_

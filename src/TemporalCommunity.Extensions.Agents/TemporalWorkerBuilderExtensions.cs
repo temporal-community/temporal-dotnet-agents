@@ -15,9 +15,10 @@ public static class TemporalWorkerBuilderExtensions
     /// </summary>
     /// <remarks>
     /// This method expects an <see cref="Temporalio.Client.ITemporalClient"/> to already be present in the
-    /// service container, either from using the
-    /// <c>AddHostedTemporalWorker(clientTargetHost, clientNamespace, taskQueue)</c> overload
-    /// or from a prior call to <c>services.AddTemporalClient(...)</c>.
+    /// service container, typically from a prior call to <c>services.AddTemporalClient(...)</c>.
+    /// The three-argument <c>AddHostedTemporalWorker(clientTargetHost, clientNamespace, taskQueue)</c>
+    /// overload does not register an <see cref="Temporalio.Client.ITemporalClient"/> in the service
+    /// container.
     /// </remarks>
     /// <param name="builder">The worker options builder returned by AddHostedTemporalWorker.</param>
     /// <param name="configure">Delegate to configure <see cref="TemporalAgentsOptions"/>.</param>

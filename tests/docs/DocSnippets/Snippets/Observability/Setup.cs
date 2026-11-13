@@ -3,8 +3,8 @@
 // The snippet's own `using` lines are hoisted above the file-scoped namespace (statements cannot
 // precede it); nothing else is altered.
 //
-// The doc now lists all five `using` lines the snippet needs, including `Microsoft.Agents.AI` for
-// the `pipeline.UseOpenTelemetry` AIAgentBuilder extension and `OpenTelemetry` for `Sdk`.
+// The doc lists the snippet's `using` directives, including `Microsoft.Agents.AI` for
+// `pipeline.UseOpenTelemetry` and `OpenTelemetry` for `Sdk`.
 using Microsoft.Agents.AI;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
@@ -21,7 +21,7 @@ internal static class Setup
 {
     internal static void Configure(HostApplicationBuilder builder)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/observability.md#setup (lines 47-84)
+        // BEGIN SNIPPET docs/how-to/MAF/observability.md#setup (lines 51-92)
         const string mafTelemetrySource = "MyCompany.MyAgent";
 
         // 1. Configure the OTel tracer provider with all relevant sources
@@ -39,10 +39,11 @@ internal static class Setup
         builder.Services.AddTemporalClient(opts =>
         {
             opts.TargetHost = "localhost:7233";
+            opts.Namespace = "default";
             opts.Interceptors = [new TracingInterceptor()];
         });
 
-        // 3. Register agents as usual
+        // 3. Register agents as usual. Register an IChatClient in DI for this agent.
         builder.Services
             .AddHostedTemporalWorker("agents")
             .AddTemporalAgents(opts =>

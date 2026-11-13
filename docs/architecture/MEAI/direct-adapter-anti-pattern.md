@@ -20,40 +20,24 @@ rejected. For the supported patterns, see [MEAI usage](../../how-to/MEAI/usage.m
      none of the machinery above; a constructor-injected `IChatClient` in a plain Activity handles
      the LLM call, and `AsDurable()` handles individual durable tool calls.
 
-Each is indexed below. The rest of this doc explains the *why* behind retiring direct-adapter
-construction — a pattern that used to sit alongside option 3 — in favor of the alternatives above.
+The rest of this document explains why the package does not expose a workflow-only durable client
+and how the supported alternatives avoid its determinism and lifecycle problems.
 
 ---
 
-## What was tried and rejected
+## No workflow-only adapter API
 
-Two shapes of "construct a durable adapter directly inside workflow code" were explored and both
-were retired before ever shipping as a recommended pattern:
-
-1. **`WorkflowOnlyChatClient.Instance` sentinels.**
-   `ChatClientBuilder` requires a real inner client instance at construction time, but a
-   `[WorkflowRun]` method has no DI container and no real `IChatClient` to
-   hand them — workflow code only needs to reach `Workflow.ExecuteActivityAsync`, never the actual
-   model. The sentinel types existed purely to satisfy that constructor requirement: a value with
-   no behavior of its own, whose only job was to be wrapped by `.UseDurableExecution()` so the
-   *outer* `DurableChatClient` could do the real dispatch.
-2. **A later-planned `DurableChatClient.CreateForWorkflow(...)` factory** that would have hidden
-   the sentinel behind a cleaner static-factory API surface. This was discussed and evaluated but
-   never implemented — grep for it in `src/` or `docs/` today and you will find nothing. It's
-   mentioned here only because the two reasons below were surfaced *while evaluating whether to
-   build it*, and the reasons apply equally to the sentinel-based version that did briefly exist.
-
-Both are gone.
+The package does not provide a `DurableChatClient` factory for use inside workflow code. A
+workflow can call `Workflow.ExecuteActivityAsync` directly, while the supported managed-session
+and workflow-base APIs provide the history and turn lifecycle when needed.
 
 ---
 
 ## Why it's an anti-pattern
 
-Three findings back this up: constructing the adapter added little real value (a), composing
-middleware around it opened a genuine determinism hole (b), and every round of independent review
-kept finding new problems rather than converging on "safe" (c). The Quick Answer's ban above covers
-both plain construction and middleware composition — (a) and (b) are what it's actually banning;
-(c) is the evidence that scrutinizing this surface further wasn't going to fix it.
+Two findings back this up: constructing the adapter adds little capability beyond a hand-written
+activity (a), and composing arbitrary middleware around it creates a determinism hazard (b). The
+Quick Answer's ban covers both construction and middleware composition.
 
 ### (a) Thin ergonomic benefit, not real capability
 
@@ -172,15 +156,6 @@ deterministic scheduler at all. `IChatReducer`'s interface contract
 "the reducer looks pure" is not something the compiler, `ChatClientBuilder`, or the library can
 verify or enforce.
 
-### (c) Repeated review rounds kept finding new hazards
-
-Every round of independent review of this surface — a DX-focused pass, an architecture-focused
-pass, and a separate external opinion — found a **new** hazard rather than converging on "this is
-now safe." That repeated pattern (three rounds, three new findings, no round ending in "done") was
-treated as evidence that the API shape itself was wrong, not that it needed one more targeted
-patch. A surface that keeps surfacing new determinism hazards under scrutiny is not a surface worth
-hardening further; it's a surface worth removing.
-
 ---
 
 ## Why `AIFunction.AsDurable()` is different and was kept
@@ -207,8 +182,8 @@ dispatch mechanism, no equivalent hazard.
 
 ## The supported patterns
 
-Full detail and code samples live in [MEAI usage — Which pattern should I use?](../../how-to/MEAI/usage.md#which-pattern-should-i-use);
-this section is a terse index so you don't have to leave this doc to find your way there.
+The [MEAI usage guide](../../how-to/MEAI/usage.md) has full details and code samples for these
+options; this section is a terse index.
 
 1. **Managed session** — `DurableChatSessionClient` / `AddDurableAI()`. Default choice when your
    unit of work is "a conversation" and the stock workflow's history/tool-dispatch/continue-as-new
@@ -224,7 +199,7 @@ this section is a terse index so you don't have to leave this doc to find your w
 
 ## References
 
-- [MEAI usage — Which pattern should I use?](../../how-to/MEAI/usage.md#which-pattern-should-i-use)
+- [MEAI usage guide](../../how-to/MEAI/usage.md)
 - [Durable chat pipeline architecture](durable-chat-pipeline.md)
 - [Tool functions how-to](../../how-to/MEAI/tool-functions.md)
 - `src/TemporalCommunity.Extensions.AI/DurableChatClient.cs`

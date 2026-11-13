@@ -9,12 +9,13 @@ design:
 > **Are you approving the tool call, or a step inside it?**
 
 If a person decides **whether this tool runs at all**, park the workflow. The tool never starts.
-The workflow records the request, stops, and waits — nothing is running anywhere, so a deploy or a
-crash during the review costs nothing, and the wait can last days.
+The workflow records the request and waits durably. No tool activity is running during the review,
+although Temporal still retains the workflow state and history; the configured wait can last days.
 
 If a person decides **something the tool discovered halfway through its own work** — "the migration
-found 400 rows to delete, continue?" — the tool has to be running in order to ask, so it stays
-running while it waits. That works, and it costs you everything in the paragraph above.
+found 400 rows to delete, continue?" — the tool activity stays in flight while it waits, using
+worker activity capacity and continuing to heartbeat. If the worker loses that activity, the
+workflow-side approval remains pending and needs a decision, cancellation, or expiry.
 
 **Start with workflow-parked.** Not just because it survives a deploy — three sharper reasons are
 in [What usually decides it](#what-usually-decides-it).
@@ -60,22 +61,24 @@ finishes. Workflow-parked approvals still stop before any tool activity starts.
 | `DefaultApprovalTimeout` | **7 days** |
 
 For workflow-parked those are fine — no activity is open, so a seven-day window is reasonable. For
-in-tool it is a trap: the tool activity dies after five minutes while the workflow holds the
-approval for another six days. Nothing validates the relationship at startup. Every in-tool
-approval must set `ActivityTimeout` and `ApprovalTimeout` together. The inherited heartbeat timeout
-already keeps the heartbeat pump active; change it only when you need a different cadence.
+in-tool it is a trap: the tool activity can time out after five minutes while the workflow holds the
+approval for up to seven days. Nothing validates these budgets at startup. Set `ApprovalTimeout`
+below the tool's effective start-to-close timeout, leaving time for work before and after the
+approval wait. The tool inherits the agent `ActivityTimeout`, then worker `DefaultActivityTimeout`,
+unless its `StartToCloseTimeout` is overridden with `WithTimeout()`. `HeartbeatTimeout` controls
+heartbeat expiry; it does not extend the activity's start-to-close limit.
 
 ### The differences that matter
 
 | | Workflow-parked | In-tool |
 |---|---|---|
 | What the human approves | Whether the tool runs | A step inside a running tool |
-| Running during the review | Nothing | The tool's activity, on one worker, doing no work |
-| Survives worker restart / deploy | **Yes** | **No** |
+| Running during the review | No tool activity | The tool activity remains in flight on a worker; heartbeat pumps continue |
+| Resumes after worker restart / deploy | **Yes** | **No** — the workflow keeps the pending approval, but the activity does not resume |
 | Sibling tools in the same turn | Held until all approvals settle | Run serially; later calls wait |
 | More than one approval per turn | Queued in call order | Processed one at a time |
 | Realistic review window | Hours to days | Minutes |
-| Extra configuration | None — defaults suit it | Activity and approval budgets must align; heartbeat cadence is optional |
+| Extra configuration | None — defaults suit it | Activity and approval budgets must align; heartbeat timeout is optional |
 | Who owns the `RequestId` | The workflow, after the interceptor returns | The tool, before it asks |
 | Declared by | `RequireApproval()`, or an interceptor's `PauseForApproval(...)` | `RequestApprovalAsync` in the tool body |
 
@@ -96,13 +99,15 @@ the weekend, and the 7-day default covers it with no configuration.
 Every force-push needs its own review, so the gate belongs on the tool and no interceptor is needed.
 
 **Support escalations sit in a queue overnight.** → **Workflow-parked** — and note that turns within
-one session are serialized. While an escalation waits, that session accepts no other turns. Scope
-your session to the *case*, not the user, or the user cannot keep chatting.
+one session are serialized. A distinct request while that turn is active is rejected as busy;
+matching retries can join only within the bounded joiner capacity. Scope your session to the *case*,
+not the user, or the user cannot keep chatting.
 
-**A migration tool discovers mid-run that it would delete 400 rows.** → **In-tool.** The
-approval-relevant fact does not exist until the tool has done the analysis; neither the tool
-registration nor the interceptor can show a number nobody has computed yet. Budget minutes, make it
-the only approval in the turn, and accept that a deploy ends the review.
+**A migration tool discovers mid-run that it would delete 400 rows.** → **In-tool** when that
+approval-relevant result is available only inside the tool's execution. If an interceptor can
+reliably perform the needed preflight instead, workflow-parked review remains an option. Budget
+enough time for the whole tool activity, make it the only approval in the turn, and account for
+worker loss leaving the workflow approval pending.
 
 **Not sure yet.** → **Workflow-parked.** It is the cheaper mistake: worst case you restructure a
 tool later, instead of shipping a stranded approval.
@@ -142,26 +147,31 @@ interceptor is also where you author what the reviewer sees, and the natural pla
 ### Budget the approval and activity timeouts first
 
 ```csharp
-opts.DefaultActivityTimeout  = TimeSpan.FromMinutes(20);  // outer bound on the whole review
-opts.DefaultApprovalTimeout  = TimeSpan.FromMinutes(15);  // must stay under ActivityTimeout
+opts.DefaultActivityTimeout  = TimeSpan.FromMinutes(20);  // default start-to-close budget for the tool
+opts.DefaultApprovalTimeout  = TimeSpan.FromMinutes(15);  // leaves five minutes for other tool work
 
-// Optional: change the inherited 2-minute heartbeat cadence.
-opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);   // pump runs at a third of this
+// Optional: change the inherited 2-minute heartbeat timeout.
+opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);   // RequestApprovalAsync also heartbeats at ~1/3
 
 agent.AddTool(publishDraft);
 ```
 
-**`ApprovalTimeout` must be smaller than `ActivityTimeout`.** Otherwise the activity dies first and
-leaves the workflow holding an approval nobody is waiting on.
+The approval wait and tool invocation share the tool activity's start-to-close budget. Keep
+`ApprovalTimeout` below the effective `StartToCloseTimeout` with room for work before and after the
+wait; it defaults from the agent's `ActivityTimeout` and worker's `DefaultActivityTimeout`, and a
+per-tool `WithTimeout()` can override it. The example's 20-minute activity budget is not a guarantee
+that 15 minutes is enough if the tool does substantial work outside the approval wait.
 
 Tool activities use one attempt by default. An explicit agent retry policy also applies to this
 tool, so only opt into retries when the activity and approval protocol are safe to repeat.
 
-**The heartbeat pump is on by default.** Every package-managed tool activity receives an effective
-heartbeat timeout (2 minutes unless overridden), and the package heartbeats at most once per second
-and no later than half that timeout for the whole invocation. Heartbeat details are empty; streamed
-assistant text and tool output are not included. The public options do not provide a supported way
-to disable this pump. The hazard to watch is `ActivityTimeout`, not a missing heartbeat.
+**Heartbeats are on by default.** Every package-managed tool activity receives an effective
+heartbeat timeout (2 minutes unless overridden). The activity wrapper sends empty heartbeats at
+intervals of `min(1 second, half the heartbeat timeout)` with a 1 ms minimum, or every second if no
+positive timeout is configured. With a positive timeout, `RequestApprovalAsync` also sends
+heartbeats at about one-third of it while waiting. Heartbeats do not include streamed assistant text
+or tool output, and there is no supported option to disable the package pumps. The activity's
+start-to-close timeout remains the overall limit.
 
 **Heartbeating is not durability.** The wait is resident on one worker for its entire duration. A
 deploy, crash, or scale-down ends it — heartbeats or not. A failed activity can still leave the
@@ -187,7 +197,9 @@ static async Task<string> PublishDraftAsync(string draft)
 ```
 
 Unlike workflow-parked, the tool owns the `RequestId` *before* the request exists — so it can write
-your reviews-table row and send a deep link, then ask. That is in-tool's one genuine convenience.
+your reviews-table row and send a deep link, then ask. That is in-tool's one genuine convenience;
+the example relies on the default one-attempt tool policy. If you enable agent-wide retries, use a
+persisted, idempotent request identity rather than generating a new ID on every attempt.
 `TemporalAgentContext` does not expose the originating model tool-call ID. Leave `CallId` unset, or
 set it only to an application-owned correlation value that the tool already knows; do not add a
 `callId` tool parameter and trust the model to supply it.
@@ -200,13 +212,15 @@ This is the part most teams underestimate, and it applies to both shapes.
 
 ### Finding pending approvals
 
-**There is no API that lists sessions awaiting review**, and no search attribute marks one — the
-library registers only `AgentName`, `SessionCreatedAt`, and `TurnCount`. `GetPendingApprovalAsync`
-answers for one session whose ID you already hold.
+**There is no `ITemporalAgentClient` API that lists sessions awaiting review**, and the built-in
+agent search attributes do not mark pending approvals. `GetPendingApprovalAsync` answers for one
+session whose ID you already hold.
 
-So your application owns the queue. Write the session ID and reviewer-safe details to your own store
-when the approval is raised — from the interceptor, which is already an activity and can do I/O —
-and have your reviewer console read that. The library answers "is *this* session waiting?", never
+So your application owns the queue. For workflow-parked approval, register an interceptor and write
+the session ID and reviewer-safe details from its activity. A bare `RequireApproval()` without an
+interceptor still parks the workflow but does not publish an application queue record. For in-tool
+approval, write the record from the tool before calling `RequestApprovalAsync`. Have your reviewer
+console read that application-owned record; the library answers "is *this* session waiting?", never
 "which sessions are waiting?".
 
 ### Driving the turn while it waits
@@ -216,9 +230,11 @@ until a human decides. There are two dispatch choices and one hard rule:
 
 - **Interactive review** — start the turn without awaiting, poll, resolve, then await.
 - **Queued dispatch** — `RunAgentFireAndForgetAsync` starts the turn with no caller attached, but
-  `ITemporalAgentClient` currently has no high-level API for retrieving that turn's eventual result
-  or session history. Use it only when your application publishes results through its own durable
-  store or callback. Do not assume the local `TemporalAgentSession` will be updated afterward.
+  supply and persist a `RequestId`, then use `GetTurnOutcomeAsync(sessionId, requestId)` to query
+  its pending or retained outcome, including response details when retained. Outcomes are bounded;
+  `Unavailable` does not prove the request was never accepted. The fire-and-forget proxy returns an
+  empty `AgentResponse` and does not update the local session; this API does not expose full session
+  history, so persist results separately if your application needs them beyond the retained outcome.
 - **Never** hold an inbound HTTP request open across a review window.
 
 ```csharp
@@ -266,10 +282,13 @@ while (!turn.IsCompleted)
 var response = await turn;
 ```
 
-Tool approvals require both `CallId` and `FunctionName` from the pending request. A decision with
-missing or mismatched call identity is rejected before acceptance.
+When the pending request has a tool-call `CallId`, the decision must match both `CallId` and
+`FunctionName`. In-tool requests may have no `CallId`; then `RequestId` is required, and
+`FunctionName` is optional but must match if supplied. Mismatched identity is rejected before
+acceptance.
 
-`GetPendingApprovalAsync` is a workflow query: it never blocks and adds no history, so poll freely.
+`GetPendingApprovalAsync` is a workflow query: it does not block or add workflow history. Poll at an
+interval appropriate to your application's load.
 
 Only a matching pending decision is accepted. Unknown, mismatched, already-resolved, or conflicting
 decisions fail update validation before Temporal records them. After an ambiguous RPC result, inspect
@@ -283,18 +302,19 @@ the update will return the original result. The result/status types are defined 
 |---|---|---|
 | `RequestId` | Generated by the workflow | You supply it |
 | `FunctionName`, `CallId` | Filled from the tool call | `FunctionName` is yours; `CallId` is `null` unless you supply an application-owned value |
-| `Description` | Interceptor's enriched description, else `"Approve invocation of tool '{name}'"` | Whatever you pass |
-| `ReviewData` | Interceptor metadata only | Whatever you pass |
-| `ExpiresAt` | Overwritten by the workflow to *now + `ApprovalTimeout`* — render a real countdown | Same |
+| `Description` | Interceptor's enriched description, then message, then `"Approve invocation of tool '{name}'"` | Whatever you pass |
+| `ReviewData` | Interceptor metadata only; otherwise `null` | Whatever you pass |
+| `ExpiresAt` | Workflow sets *now + `ApprovalTimeout`*; history reserve can expire it sooner | Same |
 
 **A bare `RequireApproval()` with no interceptor produces an approval screen that reads "Approve
 invocation of tool 'issue_refund'" and shows no amount.** Authoring the description and metadata is
 the work; it is the difference between a demo and a product.
 
-Reviewer projection is empty unless explicitly supplied. The combined description and metadata are
-limited to 64 metadata entries and 16 KiB of serialized JSON. Oversized requests fail with the
-non-retryable `DurableApprovalReviewProjectionTooLarge` error before the workflow accepts them,
-including requests made through the in-tool `RequestApprovalAsync` API.
+`ReviewData` is `null` unless explicitly supplied; the workflow-parked request still has its
+interceptor-derived or default description. The combined description and metadata are limited to 64
+metadata entries and 16 KiB of serialized JSON. Oversized requests fail with the non-retryable
+`DurableApprovalReviewProjectionTooLarge` error before the workflow accepts them, including requests
+made through the in-tool `RequestApprovalAsync` API.
 
 Raw model arguments are never copied into `ReviewData` automatically — that is a deliberate
 injection-surface decision. Treat `Description` as model-influenced and sanitize it for the reviewer.
@@ -306,7 +326,7 @@ narrates the outcome:
 
 | Workflow-parked outcome | Result content |
 |---|---|
-| Denied, or approval timed out | `[Denied] {reason}` — the timeout reason names the elapsed window |
+| Denied, timed out, or expired at the history reserve | `[Denied] {reason}` — timeout reasons name the elapsed window |
 | Blocked by an interceptor | `[Blocked] {message}` |
 
 The model is not told a human was involved unless your reason text says so. "Nobody looked at it"
@@ -321,12 +341,14 @@ above, the model receives `Not published: {reason}`, not the workflow-parked `[D
 
 If an in-tool activity ends mid-review, the tool is gone but the workflow-side approval is not.
 
-- **Ordinary turns still work.** The run validator never consults pending approvals.
+- **After the failed turn finishes, later non-approval turns can run.** Pending approval alone does
+  not block admission; a distinct request can still be rejected as busy while another turn is active.
 - **The next turn needing a human fails** with `DurableApprovalAlreadyPending`. The session keeps
   working right up until it next needs a human, then jams.
 - **It clears on its own — eventually.** The abandoned request resolves as a rejection when
-  `ApprovalTimeout` elapses. At the 7-day default that is not a recovery plan; at fifteen minutes it
-  may be.
+  `ApprovalTimeout` elapses or the workflow history reserve is reached. At the 7-day default that
+  is not a recovery plan; at fifteen minutes it may be. Inspect event-history pressure with
+  [`GetHistoryBudgetAsync`](./usage.md#inspecting-workflow-history-budget).
 - **It delays continue-as-new and shutdown** rather than being lost — both wait for in-flight
   handlers.
 
@@ -335,7 +357,7 @@ To recover immediately:
 ```csharp
 try
 {
-    // No-op when nothing is pending; ignores an already-resolved request.
+    // No-op when no approval is pending; a concurrent resolution may race this cancellation.
     await client.CancelPendingApprovalAsync(sessionId, "Reviewer went away.", cancellationToken);
 }
 catch (RpcException ex) when (ex.Code == RpcException.StatusCode.NotFound)
@@ -357,7 +379,7 @@ workflow-generated session and request IDs. There is no workflow-local agent exe
 ## Reference
 
 - `ApprovalTimeout` bounds the durable wait and resolves a timeout **as a rejection**, with a reason
-  naming the elapsed window.
+  naming the elapsed window. Reaching the workflow history reserve can reject it sooner.
 - Cancellation propagates as cancellation, never as a denial.
 - Approvals from one model response are raised **sequentially** in call order, each with its own full
   `ApprovalTimeout` — worst case for a batch is *N × ApprovalTimeout*, and no tool in the batch runs

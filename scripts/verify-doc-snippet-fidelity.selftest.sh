@@ -73,18 +73,18 @@ HARNESS_MATCHING='internal static class Example
 
 run_case exact-match pass "$DOC_ONE_BLOCK" "$HARNESS_MATCHING"
 
-MEAI_DOC='### Phase 0 timer harness
+MEAI_DOC='### Testing workflow timers
 
 ```csharp
 await Workflow.DelayAsync(TimeSpan.FromDays(3));
 ```'
-MEAI_HARNESS='// BEGIN SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
+MEAI_HARNESS='// BEGIN SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers
 await Workflow.DelayAsync(TimeSpan.FromDays(3));
-// END SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness'
-run_case meai-phase-exact-match pass "$MEAI_DOC" "$MEAI_HARNESS" '' 'docs/how-to/MEAI/testing.md'
-run_case meai-phase-drift reject "$MEAI_DOC" '// BEGIN SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness
+// END SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers'
+run_case meai-testing-exact-match pass "$MEAI_DOC" "$MEAI_HARNESS" '' 'docs/how-to/MEAI/testing.md'
+run_case meai-testing-drift reject "$MEAI_DOC" '// BEGIN SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers
 await Workflow.DelayAsync(TimeSpan.FromDays(4));
-// END SNIPPET docs/how-to/MEAI/testing.md#phase-0-timer-harness' '' 'docs/how-to/MEAI/testing.md'
+// END SNIPPET docs/how-to/MEAI/testing.md#testing-workflow-timers' '' 'docs/how-to/MEAI/testing.md'
 
 # The drift that motivated this gate: a doc line grows a trailing comment, the harness copy does not.
 run_case changed-harness-text reject '## Setup

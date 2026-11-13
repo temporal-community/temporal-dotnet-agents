@@ -10,7 +10,8 @@ internal static class ConnectAndRegister
 {
     internal static async Task ConfigureAsync(TemporalAgentsOptions options)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/mcp-tools.md#connect-and-register (lines 19-37)
+        // BEGIN SNIPPET docs/how-to/MAF/mcp-tools.md#connect-and-register (lines 20-37)
+        // Keep this process-level scope alive until after the worker host stops.
         await using var mcp = await McpClient.CreateAsync(new StdioClientTransport(new()
         {
             Name = "inventory",
@@ -26,7 +27,7 @@ internal static class ConnectAndRegister
             agent.AddTool(byName["lookup_inventory"]);
             agent.AddTool(
                 byName["delete_inventory"],
-                policy => policy.RequireApproval());
+                policy => policy.NoRetry().RequireApproval());
         });
         // END SNIPPET docs/how-to/MAF/mcp-tools.md#connect-and-register
     }

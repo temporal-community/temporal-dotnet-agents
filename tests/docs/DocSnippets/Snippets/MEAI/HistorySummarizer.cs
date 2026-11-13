@@ -35,6 +35,14 @@ internal static class HistorySummarizer
     {
         // BEGIN SNIPPET docs/how-to/MEAI/usage.md#retained-history-compaction-and-recovery
         var status = await sessionClient.GetHistoryBudgetAsync(conversationId);
+        Console.WriteLine(
+            $"History: {status.HistoryEventCount}/{status.HistoryEventSoftLimit} events " +
+            $"({status.HistoryEventReserveLimit} reserve); " +
+            $"{status.HistorySizeBytes}/{status.HistorySizeSoftLimitBytes} bytes " +
+            $"({status.HistorySizeReserveLimitBytes} reserve).");
+        Console.WriteLine(
+            $"Admission restricted: {status.IsAdmissionRestricted}; reserve reached: {status.IsReserveReached}; " +
+            $"joiners: {status.ConcurrentTurnJoiners}/{status.MaxConcurrentTurnJoiners}.");
         if (status.IsHistoryBlocked)
         {
             var recovery = await sessionClient.RetryHistoryCompactionAsync(

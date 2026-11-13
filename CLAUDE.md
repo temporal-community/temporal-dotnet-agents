@@ -5,8 +5,8 @@ Two Temporal .NET SDK integrations for durable AI applications:
 - `TemporalCommunity.Extensions.Agents` — durable agent sessions on Microsoft Agent Framework. Depends on the AI library. Library guide: [`docs/how-to/MAF/usage.md`](./docs/how-to/MAF/usage.md).
 - `TemporalCommunity.Extensions.AI` — makes a plain MEAI `IChatClient` durable, no Agent Framework. Library guide: [`docs/how-to/MEAI/usage.md`](./docs/how-to/MEAI/usage.md).
 
-Docs: how-to guides in `docs/how-to/{MAF,MEAI}/`, design docs in `docs/architecture/`, combining the
-libraries or adding plugins in [`docs/library-combinations.md`](./docs/library-combinations.md).
+Docs: how-to guides in `docs/how-to/{MAF,MEAI}/`, design docs in `docs/architecture/`, and
+combining the libraries in [`docs/library-combinations.md`](./docs/library-combinations.md).
 **Read before touching workflow code:** [`docs/architecture/MAF/durability-and-determinism.md`](./docs/architecture/MAF/durability-and-determinism.md).
 
 ## Basics
@@ -35,8 +35,7 @@ libraries or adding plugins in [`docs/library-combinations.md`](./docs/library-c
   `.AddDurableAI(...)` or `.AddTemporalAgents(...)`. Split MEAI deployments use
   `services.AddDurableAIClient(...)` and worker-builder `.AddDurableAIWorker(...)`.
   No plugin wrappers are shipped; add plugins through
-  `TemporalWorkerOptions.Plugins` / `TemporalClientConnectOptions.Plugins` (see
-  [`library-combinations.md`](./docs/library-combinations.md#using-temporal-sdk-plugins)).
+  `TemporalWorkerOptions.Plugins` / `TemporalClientConnectOptions.Plugins`.
 - `DurableAIDataConverter.Instance` must be on the Temporal client or `AIContent` subtypes lose
   `$type` and silently deserialize as the base type. Both libraries fail fast on
   a manual client with an incompatible converter. `AddTemporalClient(...)` swaps it in only while the

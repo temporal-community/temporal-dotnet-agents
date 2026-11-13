@@ -10,9 +10,9 @@ The lower-level
 interact with a registered agent:
 
 - **From outside a workflow** — external callers (ASP.NET, console, background service) resolve a
-  `TemporalAIAgentProxy` via `GetTemporalAgentProxy`.
+  registered `AIAgent` proxy via `GetTemporalAgentProxy`.
 - **From a regular workflow** — schedule an activity that resolves and invokes the registered
-  `TemporalAIAgentProxy`; pass a workflow-generated session ID and request ID so activity retries
+  agent proxy; pass a workflow-generated session ID and request ID so activity retries
   reuse the same agent turn.
 
 **New here? Start with the [Quickstart](./quickstart.md)** — one agent registered and called, in
@@ -37,9 +37,12 @@ applied when it creates the workflow instance; client proxies declare only agent
 
 The compact MAF path transfers `Description`, `ChatOptions`, `Tools`, and the ordered
 `AIContextProviders` from `ChatClientAgentOptions`. The unkeyed `IChatClient` resolves from the
-activity scope for each model call. `TemporalAgentOptions` holds Temporal-only values such as
-`TimeToLive`, `ActivityTimeout`, `HeartbeatTimeout`, `ApprovalTimeout`, retry settings, and history
-bounds. Custom `ChatHistoryProvider` and MAF options that would start a second tool loop or require
+activity scope for each model call. `TemporalAgentOptions` holds per-agent Temporal values such as
+`TimeToLive`, `ActivityTimeout`, `HeartbeatTimeout`, `ApprovalTimeout`, and retry settings, along
+with tool middleware and supported chat-history memory configuration. Per-agent history and model
+context bounds, reducer keys, and custom pipeline or interceptor factories remain on
+`AddDurableAgent`; worker-level defaults are configured on `TemporalAgentsOptions`. Custom
+`ChatHistoryProvider` and MAF options that would start a second tool loop or require
 non-durable per-call behavior are rejected.
 
 ### MAF-options worker example
@@ -90,7 +93,8 @@ For the common configuration, move the corresponding values as follows:
 | `AddTool(AIFunction)` | `ChatClientAgentOptions.ChatOptions.Tools` |
 | `AddContextProvider(provider)` | `ChatClientAgentOptions.AIContextProviders` |
 | `ChatClient = sp => sp.GetRequiredService<IChatClient>()` | `AddChatClient(...)` registration in DI |
-| `TimeToLive`, activity/approval timeouts, retry, history bounds | `Action<TemporalAgentOptions>` callback |
+| `TimeToLive`, activity/approval timeouts, retry policy, tool middleware, chat-history memory | `Action<TemporalAgentOptions>` callback |
+| Per-agent history bounds, reducer keys, model-context budget, pipeline, and interceptor factory | `AddDurableAgent` builder; use `TemporalAgentsOptions` defaults for worker-wide values where available |
 
 Use `AddDurableAgent` when you need builder-only integration points such as custom pipeline
 configuration or tool-interceptor factories. Both paths use workflow-owned history and the same
@@ -107,7 +111,7 @@ The compact registration path preserves these MAF inputs:
 | `ChatOptions` | Cloned and forwarded to model calls. `Instructions` becomes the registered agent instruction; the tool list is replaced by the durable tools below. |
 | `ChatOptions.Tools` | Only `AIFunction` instances are accepted. Each function is dispatched through a separate Temporal activity. |
 | `AIContextProviders` | Preserved in the configured order. |
-| Temporal configuration callback | Configures per-agent TTL, activity/heartbeat/approval timeouts, retry policy, history/context bounds, tool middleware, and supported memory settings. |
+| Temporal configuration callback | Configures per-agent TTL, activity/heartbeat/approval timeouts, retry policy, tool middleware, and supported chat-history memory. |
 
 `ChatClientAgentOptions.Id` and a custom `ChatHistoryProvider` are rejected. The workflow owns the
 session identity and all conversation history. `ChatOptions.ConversationId`, a continuation token,
@@ -162,12 +166,10 @@ AgentResponse response = await agentProxy.RunAsync("Hello, agent!", session);
 Console.WriteLine(response.Messages[0].Text);
 ```
 
-For a new session, the built-in client delivers the first call with Temporal Update-With-Start. The
-workflow waits deterministically for its typed input before processing that Update. Immediate
-fire-and-forget uses a validated Update-With-Start. Delayed starts carry their initial request in
-workflow input because the pinned SDK does not combine `WorkflowStartDelay` with Update-With-Start;
-if the session already exists, the request is delivered immediately. Callers do not need a separate
-start step.
+For a new session, the built-in client uses Temporal Update-With-Start to start the workflow if
+needed and deliver the first request. The workflow waits for its typed input before processing the
+Update, so callers do not need a separate start step. Fire-and-forget uses a validated
+Update-With-Start as well.
 
 If you author a custom workflow, keep Update validators synchronous. Validators cannot await workflow
 initialization; put checks that depend on initialized workflow input in the Update handler after a
@@ -181,7 +183,7 @@ session across calls routes all messages to the same `AgentWorkflow` instance, p
 For simple one-off requests where you don't need to manage sessions, create an explicit session with a well-known key or use a randomly-keyed session:
 
 ```csharp
-ITemporalAgentClient client = // resolved from DI
+var client = serviceProvider.GetRequiredService<ITemporalAgentClient>();
 
 // Explicit session — recommended pattern
 var session = new TemporalAgentSessionId("MyAgent", Guid.NewGuid().ToString("N"));
@@ -206,9 +208,9 @@ Console.WriteLine(r2.Messages[0].Text);  // ~2.1 million (context preserved)
 
 The workflow owns the authoritative `AgentSession.StateBag`. The proxy returns the committed bag
 and a monotonically increasing state revision as response metadata, then updates the session's
-local cache only when that revision is newer. A cached bag is never sent back as workflow input:
-serializing or resuming an old client session cannot overwrite workflow state. Callers cannot write
-StateBag in this release; use it for workflow/provider/tool-owned session data, not caller-supplied
+local cache only when that revision is newer. Mutations to the caller's local `StateBag` are not
+sent back as workflow input, so serializing or resuming an old client session cannot overwrite
+workflow state. Use it for workflow/provider/tool-owned session data, not caller-supplied
 authorization or tenant identity. Supply trusted identity through worker-side services or explicit
 request context instead.
 
@@ -300,8 +302,10 @@ namespace-not-found and unknown or absent error details propagate. Use the same 
 while the outcome remains retained, resubmitting the same input returns the recorded terminal result.
 
 Within one workflow run, a matching request ID and fingerprint joins an active turn or returns
-its recorded terminal outcome. A different request is rejected as `Busy`; reusing the ID with
-changed effect-bearing input is rejected as `Conflict`, before the update is accepted into history.
+its recorded terminal outcome. Matching requests can join only up to the configured concurrent
+joiner limit (32 by default); excess joiners receive a `DurableTurnPending` failure. A different
+request is rejected as `DurableTurnBusy`; reusing the ID with changed effect-bearing input is
+rejected as `DurableTurnConflict`, before the update is accepted into history.
 Up to 128 terminal outcomes / 1 MiB of serialized outcomes are retained by default and carried
 through Continue-as-New, along with the opaque session epoch and cumulative completed-turn count.
 An oversized outcome remains inside the deduplication window while its compact or minimal record
@@ -408,16 +412,17 @@ builder.Services
 
 With this configuration:
 
-- The `AgentWorkflow`'s `_history` retains every message ever exchanged in the
-  session — that is the durable, replay-safe source of truth and survives worker
-  restarts and continue-as-new transitions.
+- The workflow owns the durable, replay-safe retained history, which survives worker restarts and
+  continue-as-new transitions. A configured `HistoryReducerKey` can project older retained entries
+  during rollover.
 - The reducer receives only eligible prior turns. The active turn, system/developer
   instructions, approval turns, and interrupted turns are protected from reduction.
 - Reduction runs before budget fitting, so eligible prior context can be reduced before
   the worker considers trimming complete turns. Reducer output is validated for complete
   tool-call/result exchanges and checked against the final model-context budget. Invalid output or output that still exceeds
-  the configured limit fails before the provider is called.
-- Querying `_history` (e.g., for audit) still returns the full unreduced log.
+  the configured limit fails before the model client is called.
+- `GetHistory` returns retained workflow history; this `IChatReducer` does not change it. A
+  configured continue-as-new history reducer may project older retained entries.
 - `MaxModelContextTokens` optionally bounds estimated input plus `ModelOutputTokenReserve`.
   After reduction, the worker trims only complete eligible prior turns before context providers
   run, then validates the final messages, instructions, tools, and response schema after provider contributions. If
@@ -428,9 +433,8 @@ The default estimator is a deterministic provider-independent heuristic, not an 
 Register `IDurableChatTokenEstimator` in worker DI for model-specific estimates. In split or
 profiled deployments, the estimator and configured limit should match the worker-side model route.
 
-> **Design rationale:** Conversation history lives on the workflow itself, where
-> it is replay-safe via Temporal event history. Reducers shape only what is sent
-> to the LLM per turn — they never own conversation state.
+> **Design rationale:** The workflow owns retained conversation state. `IChatReducer` shapes only
+> model input; the separate `HistoryReducerKey` controls retained-history projection at rollover.
 
 > **Note:** `MessageCountingChatReducer` is provided by the MEAI library
 > (`Microsoft.Extensions.AI`). Any `IChatReducer` implementation works —
@@ -453,8 +457,10 @@ For notifications or background tasks where you don't need to wait for the agent
 ```csharp
 var options = new TemporalAgentRunOptions { IsFireAndForget = true };
 await agentProxy.RunAsync("Process this in the background.", session, options);
-// Returns immediately with an empty AgentResponse
+// Returns after the validated queueing update completes, with an empty AgentResponse.
 ```
+
+The update reports admission failures but does not wait for the turn to finish.
 
 ---
 
@@ -475,10 +481,10 @@ WeatherReport report = response.Result;
 
 ### Using `RunStructuredAsync<T>`
 
-Reach for this library's `RunStructuredAsync<T>` when the model wraps its JSON in markdown fences or
-adds prose — MAF's version throws on those — or when you want a corrective retry. It calls MAF's
-typed run underneath, so the generated schema still reaches the model, then strips fences and feeds
-any parse error back for self-correction. It returns `T` directly:
+Use this library's `RunStructuredAsync<T>` when model output may be wrapped in Markdown code fences
+or when you want a corrective retry. It calls MAF's typed run, so the generated schema still
+reaches the model, then strips fences and feeds parse errors back for self-correction. It returns
+`T` directly:
 
 ```csharp
 WeatherReport report = await agentProxy.RunStructuredAsync<WeatherReport>(
@@ -550,17 +556,17 @@ The selection contract is exact:
 | `true` | empty | none |
 | `true` | names | case-insensitive registered matches only |
 
-The workflow checks the same policy again when the model returns a function call. Unknown,
-blank, and excluded names receive a generic blocked result; they do not schedule an interceptor,
-approval, or tool activity. Mixed batches retain model-call order while allowed calls continue
-through normal durable dispatch.
+The workflow checks the policy again when the model returns a function call. A call naming a tool
+outside the prepared tool set fails as a non-retryable configuration error before dispatch. A
+registered tool excluded by this request receives a generic blocked result; it does not schedule an
+interceptor, approval, or tool activity. Mixed batches retain model-call order while allowed calls
+continue through normal durable dispatch.
 
 Tool selection is exposure control, not authorization. It reduces what the provider sees and
 what the workflow will dispatch for that run, but it does not establish the caller's identity or
 permission to perform an effect. Side-effecting tools must re-authorize against current,
-authoritative application data inside the tool activity. Tenant-visible blocked responses do not
-distinguish an unknown tool from a registered-but-excluded tool; requested names are available only
-in operator workflow logs, without arguments or registry contents.
+authoritative application data inside the tool activity. The generic blocked result does not
+disclose whether a registered tool was excluded.
 
 ---
 
@@ -636,12 +642,11 @@ or tool activity retry policies, or the exceptions reported to direct proxy call
 
 ## Invoking Agents from External Code (Proxy)
 
-Use `TemporalAIAgentProxy` to interact with a registered agent from outside a Temporal workflow —
+Use the registered `AIAgent` proxy to interact with an agent from outside a Temporal workflow —
 for example, from an ASP.NET handler, a background service, a console application, or an activity.
 The proxy communicates with the running `AgentWorkflow` via Temporal workflow updates.
 
-`TemporalAIAgentProxy` is `internal`; callers always reference it as `AIAgent` (MAF's base class). Resolution is always
-via `services.GetTemporalAgentProxy("Name")`.
+Resolve the proxy with `services.GetTemporalAgentProxy("Name")`.
 
 | Receiver | Where to use it | History owner |
 |---|---|---|
@@ -738,11 +743,14 @@ A `TemporalAgentSessionId` directly maps to a Temporal workflow ID:
 ta-{agentName (lowercase)}-{key}
 ```
 
-You can create sessions with explicit keys for deterministic session routing (e.g., one session per user ID):
+You can create sessions with explicit keys for deterministic session routing. Keys must be
+non-empty and cannot contain hyphens; hash or otherwise encode application identifiers that may
+contain them:
 
 ```csharp
-// Deterministic: always routes to the same workflow for a given userId
-var sessionId = new TemporalAgentSessionId("MyAgent", userId);
+var key = Convert.ToHexString(
+    System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(userId)));
+var sessionId = new TemporalAgentSessionId("MyAgent", key);
 var session = new TemporalAgentSession(sessionId);
 
 var response = await agentProxy.RunAsync("Hello!", session);
@@ -861,7 +869,7 @@ boundary.
 
 Routing belongs inside your workflow, where every decision is durable, visible in history, and replayed from cache on crash recovery. The library provides two patterns:
 
-- **Static routing** — a classifier agent runs inside the workflow and the result drives a switch statement with hardcoded agent names. Best for a fixed agent set.
+- **Static routing** — the workflow invokes a classifier through an activity, then uses a switch statement with hardcoded agent names. Best for a fixed agent set.
 - **Dynamic routing via activity** — the workflow discovers available agents by querying the descriptor registry inside an activity (whose result is cached in history). Best when the set of agents changes across deployments.
 
 Both patterns are covered in detail in [Routing Patterns](./routing.md), with complete working code in `samples/MAF/WorkflowRouting/`.
@@ -968,19 +976,28 @@ again from its beginning, not from the approval call. Tools use one attempt by d
 rely on this path to recover an uncertain external write; use downstream idempotency and
 reconciliation, or move approval before dispatch with the workflow-parked path.
 
-Set `ActivityTimeout` to a value that exceeds your expected review time:
+For an in-tool wait, set `ApprovalTimeout` below the activity's `ActivityTimeout` and configure a
+heartbeat timeout. The heartbeat pump keeps the activity alive while it waits, but a worker crash
+still loses the in-tool wait; retrying the tool starts it from the beginning. Keep these budgets
+short and aligned. For example:
 
 ```csharp
-opts.DefaultActivityTimeout = TimeSpan.FromHours(24);
+opts.DefaultActivityTimeout = TimeSpan.FromMinutes(20);
+opts.DefaultApprovalTimeout = TimeSpan.FromMinutes(15);
+opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);
 ```
+
+For review windows longer than minutes, prefer workflow-parked approval so no tool activity remains
+open while a human decides. See [HITL Patterns](./hitl-patterns.md).
 
 ### Checking for Pending Approvals (External System)
 
 Poll the workflow from a UI, monitoring tool, or approval service:
 
 ```csharp
-ITemporalAgentClient client = // resolved from DI
-var sessionId = new TemporalAgentSessionId("MyAgent", userId);
+var client = serviceProvider.GetRequiredService<ITemporalAgentClient>();
+// Replace this example with the typed session ID from your authenticated application mapping.
+var sessionId = new TemporalAgentSessionId("MyAgent", "user123");
 
 DurableApprovalRequest? pending = await client.GetPendingApprovalAsync(sessionId);
 
@@ -1025,29 +1042,30 @@ The history-budget query is read-only and adds no workflow history:
 
 ```csharp
 var status = await client.GetHistoryBudgetAsync(sessionId);
-Console.WriteLine($"History events: {status.HistoryEventCount}/{status.HistoryEventSoftLimit}");
-if (status.IsHistoryBlocked)
-{
-    var recovery = await client.RetryHistoryCompactionAsync(
-        sessionId,
-        operationId: Guid.NewGuid().ToString("N"));
-    if (recovery.IsBlocked)
-    {
-        await client.TrimBlockedHistoryAsync(
-            sessionId,
-            operationId: Guid.NewGuid().ToString("N"));
-    }
-}
+Console.WriteLine(
+    $"Events: {status.HistoryEventCount}; soft/reserve: " +
+    $"{status.HistoryEventSoftLimit}/{status.HistoryEventReserveLimit}");
+Console.WriteLine(
+    $"Size: {status.HistorySizeBytes} bytes; soft/reserve: " +
+    $"{status.HistorySizeSoftLimitBytes}/{status.HistorySizeReserveLimitBytes} bytes");
+Console.WriteLine(
+    $"Joiners: {status.ConcurrentTurnJoiners}/{status.MaxConcurrentTurnJoiners}; " +
+    $"admission restricted: {status.IsAdmissionRestricted}; reserve reached: {status.IsReserveReached}");
 ```
 
 <!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/Usage/HistoryBudget.cs. -->
 
 Agent history is retained workflow state, not an unlimited archive. `DefaultMaxEntryCount` (1000
-by default) triggers Continue-as-New. MAF sessions can configure a worker/per-agent
-`HistoryReducerKey` for a deterministic retained-history projection. There is no implicit suffix
-trim: if the trigger is reached without a reducer, or the reducer fails/returns no progress, the
-workflow retains its last valid history, closes new-turn admission, suspends idle expiry, and
-reports `IsHistoryBlocked` in the history-budget query.
+by default) starts retained-history rollover handling. MAF sessions can configure a
+worker/per-agent `HistoryReducerKey` for a deterministic retained-history projection. The current
+recovery path does not implicitly trim a suffix: if the count threshold is reached without a
+reducer, or the reducer fails/returns no progress, the workflow retains its last valid history,
+closes new-turn admission, suspends idle expiry, and reports `IsHistoryBlocked` in the
+history-budget query.
+The shared session-loop defaults are 40,000/45,000 events and 40/45 MiB for soft/reserve
+thresholds, with up to 32 matching joiners. Soft limits stop admitting new turns and begin rollover
+after active work drains; reserve limits expire pending approvals as denied to preserve headroom.
+The MAF registration options do not expose overrides for these shared session-loop budgets.
 Reducers must preserve complete request/response turns and ordering, including every protected
 current, approval, or interrupted turn; simple entry-count slicing is rejected.
 
@@ -1055,16 +1073,21 @@ While blocked, `RetryHistoryCompactionAsync` retries the configured keyed reduce
 recover a session with no reducer configured. `TrimBlockedHistoryAsync` is the separately
 authorized lossy fallback and records a truncation marker. Recovery accepts at most three retries
 per run and nine per incident across Continue-as-New, plus one explicit trim per incident.
-Operation IDs must be unique and persisted by the caller; duplicate, concurrent, and over-limit
+Call `RetryHistoryCompactionAsync` only when the worker is configured with a `HistoryReducerKey`;
+the status query does not report whether one is configured. Persist an operation ID before sending
+the update and reuse it after an ambiguous response. Do not automatically trim when a retry
+remains blocked: trimming discards retained history and requires separate application
+authorization. Duplicate, concurrent, and over-limit
 operations are rejected before acceptance. If protected history or Temporal headroom prevents
 recovery, the session remains blocked. The API does not authenticate the reviewer: authorize every
 recovery call against application-owned session access.
 
-### Workflow-Parked Approval (compute-free, multi-day waits)
+### Workflow-Parked Approval
 
-For long approval windows or cost-sensitive workloads where pinning an activity slot is undesirable, use the
-workflow-parked flavor: the turn loop itself parks, no activity is held open, and the workflow resumes only after
-`ResolveApprovalAsync` is called. Triggered two ways:
+For long approval windows or cost-sensitive workloads where pinning an activity slot is undesirable,
+use the workflow-parked flavor: the turn loop itself parks and no tool activity is held open. The
+workflow resumes when a decision is submitted, the approval times out, the turn is cancelled, or the
+history reserve expires the approval. Enable this mode with either:
 
 - `agent.AddTool(tool, opts => opts.RequireApproval())` — absolute floor; always parks before the tool runs.
 - `IAgentToolInterceptor` returning `DurableToolDecision.PauseForApproval(description)` — dynamic, interceptor-driven.
@@ -1148,10 +1171,12 @@ Every tool registered via `agent.AddTool(...)` is dispatched as a Temporal activ
 (`TemporalCommunity.Extensions.Agents.InvokeAgentTool`). Tool calls from one model response run
 serially in model order. Each tool activity gets one attempt by default. Retries are opted into via
 the agent-level retry policy and apply uniformly to that agent's tools; only enable them when all
-registered tools are safe to retry. See [Durable Agents](./durable-agents.md#retry-policy-hierarchy)
+registered tools are safe to retry. See [Durable Agents](./durable-agents.md#configure-retries-safely)
 for the activity policy details.
 
-`agent.MaxToolCallsPerTurn` (default `20` when not set) caps step-loop iterations per single managed agent turn. Configure it on the registered agent builder. When exceeded, the workflow returns a structured "iteration cap exceeded" assistant message rather than letting workflow history grow unbounded.
+`agent.MaxToolCallsPerTurn` (default `20` when not set) caps model/tool-loop iterations per managed
+agent turn. Configure it on the registered agent builder. When exceeded, the workflow returns an
+assistant message stating that the maximum tool-call iterations were exceeded.
 
 ```csharp
 builder.Services.AddTemporalClient("localhost:7233", "default");
@@ -1320,7 +1345,7 @@ SessionCreatedAt > "2026-03-01T00:00:00Z"
 | Property / Method | Purpose |
 |-------------------|---------|
 | `StartToCloseTimeout`, `HeartbeatTimeout` | Per-tool activity timeout overrides. `null` inherits the worker/agent timeout. |
-| `RetryPolicy` | Per-tool retry overrides are not supported. Tools use one attempt by default or the agent's explicit policy. |
+| `RetryPolicy`, `NoRetry()`, `WithMaxAttempts(...)` | Per-tool settings can only declare one attempt. Values above one, or an explicit one-attempt setting alongside an agent retry policy, are rejected; retry opt-in is agent-wide. |
 | `WithTimeout(TimeSpan t)` | Sets `StartToCloseTimeout`. |
 | `SkipInterceptor()` | Bypasses `IAgentToolInterceptor` for this specific tool. |
 | `WithInterceptorTimeout(TimeSpan t)` | Per-tool timeout for the interceptor activity. |
@@ -1356,7 +1381,7 @@ Retry policy resolution for agent activities:
 There is no run-level retry option. Setting `agent.RetryPolicy` affects all tools, not only model
 calls. If tools need different retry behavior, separate them across agents or make every affected
 tool idempotent. Full table in
-[Durable Agents](./durable-agents.md#retry-policy-hierarchy).
+[Durable Agents](./durable-agents.md#configure-retries-safely).
 
 ### Custom agent middleware
 
@@ -1409,7 +1434,6 @@ For the supported MAF agent/provider boundary, see [Bounded Durable `ChatClientA
 
 ## Where to go next
 
-- [Using Temporal SDK plugins](../../library-combinations.md#using-temporal-sdk-plugins) — registering your own Temporal worker or client plugins alongside this library
 **How-to guides**
 
 - [Durable Agents](durable-agents.md) — the canonical write-vs-read tool example and per-agent retry policy

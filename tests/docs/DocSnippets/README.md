@@ -4,15 +4,15 @@ A `net10.0` **library**. No `OutputType=Exe`, no entry point, no tests. Nothing 
 compiler is the assertion: if a documented registration example stops binding to a real overload,
 this project fails to build and `just build` — and therefore CI — goes red.
 
-The coverage gate includes MAF registration examples and every C# block in MEAI
+The coverage gate includes MAF registration examples and selected C# blocks in MEAI
 [`usage.md`](../../../docs/how-to/MEAI/usage.md) and
 [`embeddings.md`](../../../docs/how-to/MEAI/embeddings.md), plus
-[`testing.md`](../../../docs/how-to/MEAI/testing.md) examples under `Phase N` headings.
+[`testing.md`](../../../docs/how-to/MEAI/testing.md) examples selected by the coverage gate.
 The MEAI blocks compile verbatim with application configuration supplied as harness parameters.
 Dependencies
 use the repository pins (MEAI 10.10.0 and Temporalio 1.21.1). The shared test project supplies the
 pinned environment helper and controlled activity attempt; these are test infrastructure, not
-public library APIs. Redesign target tables intentionally have no fictional executable API.
+public library APIs.
 
 ## Why not just grep the docs
 
@@ -23,10 +23,8 @@ A regex cannot tell these two apart:
 1. `agent.AddTool(t, opts => opts.DefaultRetryPolicy = ...)`  <- wrong: opts is DurableToolOptions
 ```
 
-Same token, four lines apart, different lambda binding. The compiler separates them; nothing else
-in the repository does. When this harness was written, zero factory-first defects existed under
-`samples/` and nine existed under `docs/` — the only structural difference being that samples are
-compiled. This project closes that gap for the docs.
+Same token, four lines apart, different lambda binding. The compiler checks overload resolution and
+lambda binding in the context of the real dependency versions; text matching alone cannot.
 
 ## Layout
 
@@ -51,7 +49,7 @@ the heading still existing, not to a fenced block existing.
 
 Text between the markers stays verbatim, and `scripts/verify-doc-snippet-fidelity.sh` enforces it by
 comparing the marker body against the ```csharp block **under the keyed heading**, as an ordered
-sequence. Three properties matter, and an earlier, weaker version of this check had none of them:
+sequence. The check is:
 
 - **scoped** — a line that happens to appear elsewhere in the file is not a match
 - **ordered** — reordered lines are drift
@@ -71,10 +69,9 @@ rather than lingering.
 Anything else the harness has to add — a `using`, a `#pragma`, a type alias — goes outside the
 markers, with a comment saying why.
 
-Without this check, compilation only proves the *snippet* is valid, not that the *doc* is: a doc
-line that grows a trailing comment while the harness copy does not leaves the harness quietly
-asserting something the reader never sees. That exact drift happened once and is why the gate
-exists.
+Without this check, compilation can prove the harness copy is valid while a changed documentation
+example goes uncompiled. The scoped, ordered comparison keeps the example readers see aligned with
+the code the harness builds.
 
 ## Gates
 
@@ -95,31 +92,6 @@ copies this project, drops the name argument from a real `AddTool` call, and **r
 fail**. Without it, a harness whose files silently stopped being compiled would report success
 forever — the failure mode `verify-markdown-links.selftest.sh` exists to prevent.
 
-Phase 0 also requires a broken MEAI `DurableExecutionOptions.DefaultActivityTimeout` example to
-fail compilation, and adds coverage/fidelity rejection fixtures for missing, duplicate-heading,
-and drifted MEAI phase examples. Eight new markers cover usage registration/manual converters,
-session send/history, direct durable tools, and timer/controlled-tool harnesses. The embedding
-snippets compile-check an application-owned Temporal activity using MEAI.
-
-Phase 1.1 adds a compiled split-hosting example so the client-only and worker-only registration
-overloads stay aligned with the MEAI usage guide. Phase 1.2 adds a compiled keyed-profile example
-for worker-side registration validation. Phase 1.3 documents the session-pinned profile contract
-and carries that profile through Continue-as-New without serializing runtime provider or tool services.
-Phase 2.1 adds a compiled MAF request-ID example so caller-known retry identity stays aligned with
-the usage guide and `TemporalAgentRunOptions`. Phase 2.2 adds a compiled custom typed-turn validator
-example showing pre-acceptance `Busy`/`Conflict` rejection through `ValidateDurableTurnAdmission`.
-Phase 2.3 adds a compiled managed-session recovery example for `DurableChatRequestException.RequestId`.
-Phase 2.5 keeps the compiled MEAI registration example aligned with the per-payload transport
-budget and codec-expansion reserve. Phase 2.6 adds a compiled MAF history-budget query example
-so the read-only status API remains aligned with the usage guide. Phase 3.1 adds a compiled
-MEAI logical-operation identity example so invocation metadata, downstream idempotency guidance,
-and per-tool idempotency declarations remain aligned with the tool-functions guide.
-Phase 4.3b adds a compiled history-summarizer budget example so the keyed client profile and
-independent input/output budget settings stay aligned with the MEAI usage guide.
-Phase 7 adds compiled MAF activity-to-proxy invocation and MEAI telemetry-source examples so
-workflow-generated session/request identities remain aligned with proxy calls and the pinned MEAI
-inference source stays registered in the observability guide.
-
 The outer proxy-invocation examples in MAF usage, routing, dos-and-donts, prompt caching,
 agent orchestration, event-driven communication, durability, and library combinations are extracted
 directly from their Markdown fences into a checked-in file by `compile_agent_invocation_examples.py`.
@@ -130,21 +102,3 @@ exception imports, and preserved retry limits/backoff without executing workflow
 The doc gate checks that the generated file matches the Markdown; `just build` needs no Python.
 
 Deliberately-uncompiled blocks live in `scripts/doc-snippet-allowlist.txt`, one reason per entry.
-
-## Doc defects this harness carries corrections for
-
-**None — the list is empty.** Every snippet below the markers now matches its doc verbatim.
-
-That is the steady state, not the finished state. When this harness first ran it carried corrections
-for nine factory-first `AddTool` sites, a `DurableToolOptions.DefaultRetryPolicy` that never existed,
-a missing `.AsIChatClient()`, an unmentioned `[Experimental("MEAI001")]` suppression, two absent
-`using` directives, and an example type colliding with `Microsoft.Extensions.AI.LoggingChatClient`.
-All of those are fixed in the docs.
-
-When a new one appears, write the snippet in the **correct** form so this project stays green, name
-the defect in the file's header comment, and add a row here. Removing the row is the signal that the
-doc fix landed.
-
-Also worth knowing: the older defects were found by *compiling*, not by reading. Three of them —
-the missing `using` in the `TemporalAgentContext` example, the absent `.AsIChatClient()`, and the
-`MEAI001` suppression — are invisible to any regex and were only ever going to surface here.

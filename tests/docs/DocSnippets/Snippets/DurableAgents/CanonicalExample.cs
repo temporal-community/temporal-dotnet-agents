@@ -20,7 +20,7 @@ internal static class CanonicalExample
         string model,
         string taskQueue)
     {
-        // BEGIN SNIPPET docs/how-to/MAF/durable-agents.md#canonical-example (lines 21-60)
+        // BEGIN SNIPPET docs/how-to/MAF/durable-agents.md#canonical-example (lines 33-69)
         builder.Services.AddSingleton<OrderService>();
         builder.Services.AddSingleton<RefundService>();
         builder.Services.AddSingleton<EmailService>();

@@ -17,7 +17,7 @@ There are two places to intercept, plus a third mechanism people often arrive he
 
 | I want to see… | Use | Covered |
 |---|---|---|
-| Raw model transport — request, complete response, tokens, finish reason, provider payload | Decorate the `IChatClient` returned from `agent.ChatClient` | [below](#the-chat-client-layer) |
+| MEAI request/response, token usage, finish reason, or provider metadata | Decorate the `IChatClient` returned from `agent.ChatClient` | [below](#the-chat-client-layer) |
 | One event wrapping a model-step attempt, with the durable session in hand | `agent.ConfigureAgentPipeline` with a `DelegatingAIAgent` | [below](#the-agent-middleware-layer) |
 | Tool names, arguments, or policy before workflow dispatch and approval | `IAgentToolInterceptor` | [tool-interceptor.md](./tool-interceptor.md) |
 | Observe, short-circuit, or transform a tool result after required approval | `TemporalAgentOptions.ToolMiddleware` | [below](#tool-middleware) |
@@ -144,13 +144,14 @@ Registering the decorator as a DI **singleton** also works, and changes its life
 
 | Registration | Lifetime |
 |---|---|
-| Built in the `agent.ChatClient` factory (above) | **Attempt-local** — a new instance per activity attempt |
+| Constructed in the `agent.ChatClient` factory (above) | **Build-local** — each activity pipeline build gets the instance returned by that call; retries build again |
 | DI singleton | **Shared** — one instance across attempts, sessions, and concurrent activities on the worker |
 
-A singleton must therefore be thread-safe. But the important point applies to both: **neither is
-session-scoped.** An attempt-local instance is discarded when the attempt ends; a singleton is shared
-by conversations that have nothing to do with each other. Per-conversation state belongs in neither —
-see [Where state belongs](#where-state-belongs).
+The client factory runs for each activity that builds a live agent pipeline, including preparation
+and completion activities. It is not called by the startup pipeline dry-run. Returning a new
+decorator makes each build independent; returning a DI singleton keeps that shared lifetime. A
+shared instance must be thread-safe. **Neither lifetime is session-scoped.** Per-conversation state
+belongs in neither — see [Where state belongs](#where-state-belongs).
 
 No caller-side change is needed. Invoke the agent as usual:
 
@@ -274,7 +275,7 @@ root, MAF exposes no partially built wrappers, so the library cannot dispose wha
 persist retry-safe state in its `StateBag`, but must hand that same object to `next`:
 
 ```csharp
-sealed class AttemptCountingAgent(AIAgent inner) : DelegatingAIAgent(inner)
+sealed class SessionStepCountingAgent(AIAgent inner) : DelegatingAIAgent(inner)
 {
     protected override async Task<AgentResponse> RunCoreAsync(
         IEnumerable<ChatMessage> messages,
@@ -283,10 +284,17 @@ sealed class AttemptCountingAgent(AIAgent inner) : DelegatingAIAgent(inner)
         CancellationToken cancellationToken = default)
     {
         var durable = (TemporalAgentSession)session!;
-        // Read/write a JSON-serializable StateBag value here. The activity persists the bag.
-
-        return await base.RunCoreAsync(
+        var response = await base.RunCoreAsync(
             messages, durable, options, cancellationToken).ConfigureAwait(false);
+        var count = durable.StateBag.TryGetValue<string>("my.counter", out var current)
+            && int.TryParse(current, out var parsed)
+                ? parsed
+                : 0;
+        durable.StateBag.SetValue(
+            "my.counter",
+            (count + 1).ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+        return response;
     }
 }
 ```
@@ -353,13 +361,14 @@ Four consequences, all of which bite in production:
 
 - **Retries re-run your code.** A retried LLM step re-invokes the factory and the decorator. Any
   non-idempotent side effect — billing rows, audit writes, counters — will duplicate.
-- **If your decorator throws, the activity fails.** Temporal retries the model call, and you pay for
-  the tokens again.
+- **If your decorator throws, the activity fails.** If the activity retry policy permits another
+  attempt, the model call runs again and may incur another charge.
 - **Decorator instance state is never session-scoped.** Whether it is attempt-local or a shared
   singleton depends on how you registered it — and neither tracks a conversation. Attempts retry,
   land on other workers, and run concurrently with other sessions.
-- **There is no workflow-side interception point.** Nothing your decorator emits is recorded in
-  workflow history, and you cannot decorate from workflow context.
+- **There is no workflow-side interception point.** Logs and telemetry emitted by your decorator are
+  not workflow history; the model activity's returned result is recorded. You cannot decorate from
+  workflow context.
 
 The upside of the same boundary: because you are inside the activity, spans and logs you emit nest
 naturally in the existing trace context, under the `agent.turn` span. See
@@ -368,11 +377,12 @@ naturally in the existing trace context, under the `agent.turn` span. See
 ### Where state belongs
 
 If you need something to survive across LLM rounds or turns, do not put it in a decorator field.
-Use the session StateBag, reachable from inside the activity:
+Use the session StateBag, reachable from inside the activity. Its values must be
+JSON-serializable reference types:
 
 ```csharp
 var session = TemporalAgentContext.Current.CurrentSession;
-session.StateBag.SetValue("my.counter", value);
+session.StateBag.SetValue("my.counter", "1");
 ```
 
 The StateBag is carried across steps and turns, and survives continue-as-new when the workflow
@@ -384,15 +394,21 @@ while being shared with every other one on the worker.
 
 ## How it works
 
-`AddDurableAgent` caches only a **blueprint** — frozen configuration, no live DI instances, no
-constructed middleware, no chat client. Nothing composed is cached.
+`AddDurableAgent` retains a worker-owned registration blueprint, including the registered tool and
+context-provider registrations. It does not cache a built `IChatClient` or agent pipeline. Concrete
+tool/provider instances remain the instances supplied at registration, so treat them as shared
+across activity calls. Factories run when their registrations are resolved: tool factories are
+called both when an activity builds the model's tool declarations and when a tool activity resolves
+the function to invoke. Use the invocation's service scope for per-call dependencies rather than
+capturing them in a shared tool instance.
 
 Each `RunDurableAgentStep` activity attempt then:
 
 1. Opens a fresh DI scope and resolves `agent.ChatClient` from it, so scoped dependencies are legal
-   in your decorator.
+   in your decorator. The chat-client factory is also used by other activities that build an agent
+   pipeline, such as preparation and completion.
 2. Restores recorded provider context for managed sessions and resolves registered tool declarations
-   from the attempt's scope. Tool implementations resolve again in their own tool-activity scopes.
+   from the attempt's scope. A dispatched tool runs in a separate activity with its own scope.
 3. Builds a `ChatClientAgent` with `UseProvidedChatClientAsIs = true`, so MAF does **not** auto-inject
    `FunctionInvokingChatClient` — the workflow owns tool dispatch.
 4. Applies your `ConfigureAgentPipeline` middleware and the library's session boundary around it.
@@ -463,6 +479,6 @@ timeout, configured via `DurableToolOptions`. See [durable-agents.md](./durable-
 - [`tool-interceptor.md`](./tool-interceptor.md) — intercepting and gating tool calls.
 - [`durable-agents.md`](./durable-agents.md) — per-tool dispatch, retry, and timeout configuration.
 - `samples/MAF/MultiAgentRouting/Program.cs` — live `DefaultConfigureAgentPipeline` with OpenTelemetry.
-- `samples/MAF/BasicAgent/Program.cs` — canonical `agent.ChatClient = sp => ...` registration.
+- `samples/MAF/BasicAgent/Program.cs` — `AddChatClient` and the preferred `AddTemporalAgents(...).Agent(...)` registration.
 - `src/TemporalCommunity.Extensions.Agents/Workflows/AgentActivities.cs` — `RunDurableAgentStepAsync` and `BuildLiveAgentPipeline`, where the per-step `ChatOptions` is built and the agent is invoked.
 - [`Microsoft.Extensions.AI.DelegatingChatClient`](https://learn.microsoft.com/dotnet/api/microsoft.extensions.ai.delegatingchatclient) — base class for chat-client decorators.

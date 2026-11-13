@@ -182,8 +182,9 @@ shared fields (`MaxEntryCount`, `HistoryReducerKey`, `EnableSearchAttributes`, `
 2. **Waits** for incoming messages (via Update or Signal)
 3. **Dispatches** each message to an activity that runs the real AI agent
 4. **Accumulates** conversation history as workflow state
-5. **Continues-as-new** when the SDK suggests it *or* when `_history.Count` reaches
-   `MaxEntryCount` (default `1000`)
+5. **Starts rollover handling** when the SDK suggests continue-as-new *or* when `_history.Count`
+   reaches `MaxEntryCount` (default `1000`). At the count threshold, a valid history reduction is
+   required before continuing; otherwise the workflow enters `HistoryBlocked` for explicit recovery.
 6. **Shuts down** when the validated `RequestShutdown` update arrives or the TTL expires
 
 Steps 2, 4, 5, and 6 are implemented by the base class. Step 3 is the
@@ -461,9 +462,11 @@ appended it before calling `ExecuteTurnAsync` — so the flattened list is the f
 ### Continue-as-New: History Carryover
 
 Temporal workflows have a practical limit on event history size (typically ~50K events). Rollover
-fires when `Workflow.ContinueAsNewSuggested` becomes true, or when `_history.Count` reaches
-`MaxEntryCount` (default `1000`) — whichever comes first, and only while no turn holds the gate
-and no shutdown has been requested. The workflow then:
+handling begins when `Workflow.ContinueAsNewSuggested` becomes true, or when `_history.Count`
+reaches `MaxEntryCount` (default `1000`) — whichever comes first, and only while no turn holds the
+gate and no shutdown has been requested. A count-triggered transition requires a valid history
+reduction; without a configured strategy, the workflow enters `HistoryBlocked` instead of
+continuing with unchanged history. When reduction succeeds, the workflow then:
 
 1. **Reduces** the history (base does this). `HistoryReducerKey` set → dispatch the
    `ReduceHistoryByKey` activity and carry its validated result. With no keyed reducer, the base
@@ -916,22 +919,19 @@ The only implementable design within Temporal's public API is to put the dispatc
 │          Workflow.ExecuteActivityAsync(                                    │
 │            (AgentActivities a) => a.RunToolInterceptorAsync(...)))         │
 │        → Proceed / PauseForApproval / Skip / Block per call                │
-│        Approval waits are all resolved BEFORE any tool activity starts.    │
+│        Interceptor activities fan out in parallel.                         │
+│        Resolve every approval BEFORE any tool activity starts.             │
 │                                                                            │
-│     ④ Workflow.WhenAllAsync(                                               │
-│          dispatched.Select(d =>                                            │
-│            Workflow.ExecuteActivityAsync(                                  │
-│              (AgentActivities a) =>                                        │
-│                a.InvokeAgentToolAsync(new InvokeAgentToolInput {           │
-│                  AgentName, ToolName = tc.Name,                            │
-│                  Arguments = tc.Arguments, CallId = tc.CallId,             │
-│                  SerializedStateBag = bag }),                              │
-│              ResolveDurableToolActivityOptions(tc.Name))))                 │
+│     ④ Process decisions in model-call order; buffer calls that may run.    │
+│        Approval waits are sequential because only one may be pending.      │
 │                                                                            │
-│     ⑤ Merge tool StateBag write-backs in TOOL-CALL INDEX order             │
-│        (later index wins)                                                │
-│        accumulated.Add(toolResultMessage);  // FunctionResultContent items │
-│        // loop back to ①                                                   │
+│     ⑤ Dispatch buffered tool activities serially in model-call order:      │
+│        foreach call:                                                       │
+│          await Workflow.ExecuteActivityAsync(                              │
+│            (AgentActivities a) => a.InvokeAgentToolAsync(...))             │
+│          merge its StateBag delta before the next call                     │
+│                                                                            │
+│        Assemble FunctionResultContent in original call order, then loop.   │
 │                                                                            │
 │   Loop exhausted → append a synthetic assistant "iterations exceeded"      │
 │   message and return the assembled AgentResponse (no throw).               │
@@ -939,17 +939,20 @@ The only implementable design within Temporal's public API is to put the dispatc
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Note ⑤: the merge is ordered by **tool-call index**, never by activity completion order. Two tools
-writing the same StateBag key must produce the same winner on replay, and completion order is not
-replay-stable.
+Interceptors for a batch run concurrently, and their StateBag deltas are merged in tool-call index
+order before approval handling. Tool activities then run serially in model-call order; each tool's
+StateBag delta is merged immediately, so a later tool sees the preceding tool's committed state.
+This keeps effect order and state visibility explicit rather than depending on activity completion
+order.
 
 The mental model: **the workflow owns the tool-dispatch loop.** The activity runs the model call
 through `agent.RunAsync` with `UseProvidedChatClientAsIs = true` and
 `ChatOptions.Tools` populated from the agent's per-agent registry. The model returns
 `FunctionCallContent` items; nothing executes them inside the activity. The workflow reads those
-items back, policy-checks them, fans out one `InvokeAgentTool` activity per surviving call, awaits
-them via `Workflow.WhenAllAsync`, builds `FunctionResultContent` messages from the results, and
-loops.
+items back, policy-checks them, resolves all required approvals before any tool starts, then awaits
+one `InvokeAgentTool` activity at a time in model order. The workflow merges each result and StateBag
+delta before dispatching the next tool, assembles `FunctionResultContent` in the original call
+order, and loops.
 
 ### The activities on `AgentActivities`
 

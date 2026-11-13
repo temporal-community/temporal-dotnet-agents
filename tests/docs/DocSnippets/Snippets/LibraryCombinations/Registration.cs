@@ -1,4 +1,5 @@
 // HARNESS for docs/library-combinations.md § "Registration".
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -18,15 +19,18 @@ internal static class Registration
 
         builder.Services
             .AddHostedTemporalWorker("agents")
-            .AddTemporalAgents(opts =>
-            {
-                opts.AddDurableAgent("WeatherAgent", agent =>
-                {
-                    agent.Description  = "Handles weather queries and forecasts.";
-                    agent.Instructions = "You are a weather specialist.";
-                    agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-                });
-            });
+            .AddTemporalAgents(agents =>
+                agents.Agent(
+                    "WeatherAgent",
+                    new ChatClientAgentOptions
+                    {
+                        Description = "Handles weather queries and forecasts.",
+                        ChatOptions = new ChatOptions
+                        {
+                            Instructions = "You are a weather specialist.",
+                        },
+                    },
+                    temporal => temporal.TimeToLive = TimeSpan.FromHours(24)));
         // END SNIPPET docs/library-combinations.md#registration
     }
 }

@@ -1,102 +1,18 @@
 # Using TemporalCommunity.Extensions.AI
 
-`TemporalCommunity.Extensions.AI` makes a MEAI `IChatClient` durable with Temporal. It offers a
-few genuinely different ways to do this, and this doc is the deeper
-how-to reference for all of them:
+`TemporalCommunity.Extensions.AI` makes a MEAI `IChatClient` durable with Temporal. Choose the
+integration that matches who should own conversation state and workflow code:
 
-- **Built-in managed session** — a stock Temporal workflow owns an entire multi-turn conversation
-  (history, tool dispatch, continue-as-new). You call `SendAsync`/`GetHistoryAsync`.
-- **Custom workflow with the package's session machinery** — you own the `[Workflow]` class, but
-  subclass `DurableChatWorkflowBase<TOutput>` or `DurableToolWorkflowBase<TRequestData, TTurnState>`
-  to keep the built-in history, HITL, and continue-as-new plumbing while controlling your own turn
-  activity or returning domain-specific per-turn output. This is the recommended starting point for
-  "I own a custom workflow and want durable LLM calls in it" — see
-  [custom workflow output](custom-workflow-output.md) and the runnable
-  `samples/MEAI/CustomWorkflow` sample.
-- **Custom workflow, no session machinery** — you own the workflow *and* want none of the session
-  machinery above. Write a small hand-rolled Activity (constructor-injected `IChatClient`, one
-  `[Activity]` method) for the LLM call — no durable-adapter ceremony required. For a standalone
-  tool call inside that same workflow, `AIFunction.AsDurable()` remains available as the one
-  low-level primitive that makes a single tool invocation durable.
-
-## Durable-chat redesign target contracts
-
-**Implementation status:** Phases 0–6 are implemented. The current API supports request identity, active-turn admission,
-bounded terminal outcomes, epoch-aware idle deadlines, per-payload transport guards, bounded turn
-joiners, event-history thresholds, validated session shutdown, stable logical tool-operation keys,
-validated tool dispatch, call-bound approval decisions, and bounded review projections. In
-particular, `correlationId` is not an idempotency key and current Continue-as-New can trim history.
-
-| Boundary | Selected target contract |
-|---|---|
-| Identity | The application session ID is distinct from provider `ChatOptions.ConversationId`. A new lineage gets an opaque epoch, carried across Continue-as-New (CAN). An optional expected-epoch mismatch is a typed rejection before effects. |
-| Admission | One active turn. Matching request ID and effect-bearing fingerprint joins it or returns its terminal result; another request gets `Busy`; changed input under the same ID gets `Conflict`. Success, failure, and cancellation are terminal ledger outcomes. |
-| Deduplication | Bound terminal entry count and serialized bytes; never evict pending requests. Cap pending joiners (`Pending` beyond the cap). Neither a ledger nor a single activity attempt guarantees exactly-once external effects. |
-| Payload transport | Measure complete payloads with the configured Temporal payload converter; reserve an explicit codec-expansion allowance. Guard workflow/update inputs and results, query results, activity inputs, and CAN input. The default per-payload budget is 1 MiB. |
-| Approval and CAN | Close admission before draining; defer CAN until admitted handlers and the active turn finish. Approvals have finite deadlines. Session shutdown uses the validated `RequestShutdown` update; unknown, mismatched, and already-resolved approval decisions are rejected before admission. |
-| Event history | Use `Workflow.CurrentHistoryLength` and `CurrentHistorySize` (bytes, updated at workflow-task boundaries). Defaults are 40,000/45,000 events and 40/45 MiB soft/reserve thresholds; use `GetHistoryBudgetAsync` to inspect current usage. At the soft threshold, reject new turns while allowing completion and recovery work. Near reserve exhaustion, expire approvals as `Expired(HistoryBudget)`. A finite timer does not bound request volume. |
-| Failure and cancellation | With no dispatched tool effect, roll back the turn. After an effect, retain a bounded interrupted-turn record: completed call/result pairs, `unknown` for uncertain effects, `not executed` for undispatched calls, and a redacted bounded terminal marker. Drop partial assistant text and project protocol-valid model messages. |
-| Retained history | `GetHistory` is retained state, not an archive. Library-created request/response entries have distinct stable `EntryId`s and share a `TurnId`, preserved across Continue-as-New. Compaction markers store a bounded contiguous replaced range and a summary DTO; truncation markers use a separate discriminator and record removed ranges. Opt-in complete-turn trimming and a library-selected-prefix summarizer are separate from `IChatReducer`, which only shapes eligible ephemeral model context. |
-| Model budget | Optional input-token limit plus output reserve, with a replaceable heuristic estimator counting instructions, tool declarations, output schema, context, active turn, and reserve. This is independent of Temporal payload limits. Protected content or reducer output that cannot fit gives `ContextBudgetExceeded`; unconfigured provider overflow maps to a typed non-retryable outcome. Summarization has its own budget. |
-| Tool safety | Reuse per-tool policies; unknown/effectful tools default to one attempt. Supply stable logical operation keys (epoch, request/turn, distinct call), enforced downstream for idempotency. Timeout/cancellation may mean `unknown`. Guard result and failure-detail bytes inside the activity before returning. |
-| Telemetry | Configure MEAI `OpenTelemetryChatClient` on the worker-owned `IChatClient` for inference spans/GenAI metrics; the library owns durable/tool telemetry. `InferenceTelemetryMode` can require one visible wrapper or explicitly trust an opaque application-owned chain. Content capture affects telemetry and package-owned exception detail in activity logs, not persistence or model input. |
-
-When a send result is ambiguous, `GetTerminalTurnOutcomeAsync(conversationId, requestId)` reads the
-bounded terminal ledger through a workflow query, without adding an update event. It returns the
-retained response or bounded failure details, or `null` if the request has no retained terminal
-outcome. Matching retries are rejected before acceptance once admission is restricted or blocked;
-use the query to resolve the outcome instead. The ledger may evict old outcomes at its configured
-count or byte bound.
-`FailureNonRetryable` is nullable: `null` means no failure classification is retained (including
-compact outcomes and successful turns). A retryable classification does not make external tool
-effects safe to repeat; reconcile with the system of record.
-
-Phase 0 introduced no numeric ledger, joiner, token, event-reserve, or recovery limits; later units
-now define and test those boundaries explicitly rather than relying on provider or service payload
-caps. The default terminal-outcome ledger is bounded to 128 outcomes and 1 MiB; tool activities
-default to one attempt unless an idempotent retry policy is explicitly selected. New histories must
-replay deterministically; this redesign does not require old-history patching or backward
-compatibility.
-
-### Retained-history identities
-
-Each library-created request and response receives a distinct stable `EntryId`; both share a
-`TurnId`. These identifiers are workflow-generated and survive history snapshots and
-Continue-as-New. They are separate from `CorrelationId`, which remains an observability field.
-Compaction markers describe a contiguous replaced range using endpoint IDs and counts rather than
-an unbounded source-ID array. A `DurableSessionSummary` carries the summary result, and explicit
-truncation uses the distinct `truncation-marker` discriminator so removed content is not confused
-with replacement text.
-
-```csharp
-// Inspect the stable identities associated with retained request/response pairs.
-var history = await sessionClient.GetHistoryAsync("customer-42");
-foreach (var turn in history
-    .OfType<DurableSessionRequest>()
-    .Where(request => request.EntryId is not null && request.TurnId is not null))
-{
-    var response = history
-        .OfType<DurableSessionResponse>()
-        .FirstOrDefault(entry => entry.TurnId == turn.TurnId);
-    Console.WriteLine($"{turn.TurnId}: {turn.EntryId} -> {response?.EntryId}");
-}
-```
-
-<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/MEAI/RetainedHistoryIdentity.cs. -->
-
-### Pinned reducer prerequisites
-
-Contract tests execute the repository-pinned MEAI **10.10.0** and Temporalio **1.21.1**, not a
-floating source checkout. `IChatReducer`, `MessageCountingChatReducer`, and
-`SummarizingChatReducer` are experimental (`MEAI001`).
-
-The counting reducer retains the first system message and recent non-system messages, excluding
-entire messages containing function calls/results. It is not a complete-turn compactor.
-The summarizer excludes tool/approval exchanges from summarizer input, mutates the last dropped
-input message with `__summary__`, and returns a new **unmarked assistant summary**. Reusing the
-original input can recognize that marker; persisting only returned messages cannot rely on it as
-an incremental-compaction marker. Do not run this reducer directly over retained workflow state.
-See [Phase 0 research and harness](testing.md#phase-0-research-and-harness) for reproducible checks.
+- **Managed sessions:** use `DurableChatSessionClient` for a multi-turn conversation with
+  package-managed history, tool dispatch, and continue-as-new; see
+  [managed sessions](#built-in-managed-session).
+- **Custom workflows with session features:** derive from
+  `DurableChatWorkflowBase<TOutput>` or `DurableToolWorkflowBase<TRequestData, TTurnState>` when
+  your workflow needs custom orchestration but should retain the package's session lifecycle; see
+  [custom workflow output](custom-workflow-output.md).
+- **Custom workflows without session features:** call `IChatClient` from your own activity, and
+  use `AIFunction.AsDurable()` when an individual tool call also needs activity durability; see
+  [Durable tool calls](#durable-tool-calls-with-aifunctionasdurable).
 
 ## Built-in managed session
 
@@ -108,9 +24,8 @@ For capacity isolation, [the operating guide](operations.md) shows optional `Mod
 and per-tool `TaskQueue` routing. Defaults remain on the workflow queue; routing is frozen for
 the session, not chosen per turn.
 
-Register a `ChatClient`, a durable tool, and the worker in one place. This is close to the
-package README's quick start but shows a couple of production-shaped defaults (bounded activity
-timeout, session TTL, tool-call cap, and a per-tool override) together in one block:
+Register a `ChatClient`, a durable tool, and the worker in one place. This quick start shows
+activity and model limits, Temporal history budgets, and a per-tool override:
 
 ```csharp
 builder.Services.AddTemporalClient("localhost:7233", "default");
@@ -132,6 +47,11 @@ builder.Services
         options.ModelOutputTokenReserve = 1024;
         options.MaximumTransportPayloadSizeBytes = 1024 * 1024;
         options.PayloadCodecExpansionAllowanceBytes = 0;
+        options.HistoryEventSoftLimit = 40_000;
+        options.HistoryEventReserveLimit = 45_000;
+        options.HistorySizeSoftLimitBytes = 40 * 1024 * 1024;
+        options.HistorySizeReserveLimitBytes = 45 * 1024 * 1024;
+        options.MaxConcurrentTurnJoiners = 32;
     })
     .AddDurableTool(weatherTool, tool => tool.WithTimeout(TimeSpan.FromSeconds(30)));
 ```
@@ -148,10 +68,11 @@ interrupted history. If the protected request still cannot fit, it fails with
 `DurableContextBudgetExceededException` rather than silently dropping content. In split hosting,
 configure matching limits for client and worker so the workflow input and activity policy agree.
 
-`AddTemporalClient` auto-wires `DurableAIDataConverter.Instance` so durable AI payloads round-trip
-correctly. `AddDurableAI()` validates the registered client can preserve those payloads before the
-worker starts — a manually connected client (`TemporalClient.ConnectAsync`) with an incompatible
-converter fails fast at startup instead of corrupting data silently later; see
+The durable AI registration configures DI-created clients from `AddTemporalClient(...)` to use
+`DurableAIDataConverter.Instance` when the converter is still the SDK default. `AddTemporalClient`
+alone does not install it; manually connected clients (`TemporalClient.ConnectAsync`) must be
+configured with a compatible converter. `AddDurableAI()` validates the registered client before the
+worker starts; see
 [worker setup](#worker-setup-with-a-manual-client) below if you connect manually.
 
 - ❌ Don't call `UseFunctionInvocation()` on the `IChatClient` used by a managed session.
@@ -241,9 +162,10 @@ same task queue. The client-only registration can be added before or after `AddT
 missing client is reported when `DurableChatSessionClient` is resolved.
 
 The client freezes session policies such as lifetime, iteration caps, context and transport
-budgets into the workflow start input. Configure those on `AddDurableAIClient`; worker-only
-settings cannot override an already-started session's frozen input. Provider implementations,
-credentials, and activity-local services remain worker-owned.
+budgets, event-history thresholds, and the concurrent joiner limit into the workflow start input.
+Configure those on `AddDurableAIClient`; worker-only settings cannot override an already-started
+session's frozen input. Provider implementations, credentials, and activity-local services remain
+worker-owned.
 
 `AddDurableAIClient` validates the client process's task queue and validates its converter when
 `DurableChatSessionClient` is resolved; it cannot inspect a remote worker's provider registrations
@@ -292,15 +214,16 @@ history. Use the expected-epoch precondition to detect that restart.
 
 ### Sharing a worker with non-AI workflows
 
-Temporal configures a data converter per client or worker, not per workflow. Calling
-`AddDurableAI()` therefore applies `DurableAIDataConverter.Instance` to every workflow and activity
-served by that worker's client, including ordinary application workflows registered on the same
-worker.
+Temporal configures a data converter per client or worker, not per workflow. When the registered
+client still uses the SDK default converter, `AddDurableAI()` configures
+`DurableAIDataConverter.Instance` for every workflow and activity served by that worker's client,
+including ordinary application workflows registered on the same worker. A custom converter is
+preserved and must be compatible with every payload exchanged through that client.
 
 Every client that starts, signals, queries, or reads results from those workflows must use a
-compatible converter. This matters most if you connect a client manually instead of using
-`AddTemporalClient` (which applies the converter automatically), because DI option configuration
-cannot reach a client built outside DI:
+compatible converter. The durable AI registration configures a DI-created client registered with
+`AddTemporalClient(...)` only when its converter is still the SDK default; `AddTemporalClient(...)`
+alone does not install the converter. A manually connected client bypasses that DI configuration:
 
 ```csharp
 var options = ClientEnvConfig.LoadClientConnectOptions();
@@ -420,14 +343,35 @@ history; inspect the history-recovery status and adjust the payload or codec bud
 These per-payload checks cannot prove that the codec's actual encoded bytes, aggregate Temporal
 request envelopes, or service/deployment limits will fit. Prior Temporal events are not erased.
 
+### Event-history budgets and concurrent requests
+
+The history values in the managed-session configuration example are the defaults: 40,000 events
+and 40 MiB trigger soft admission restriction; 45,000 events and 45 MiB are reserved for active
+turns to finish. At the soft threshold, new turns are rejected as `DurableHistoryBudgetBlocked`
+and the workflow prepares to continue as new after admitted work drains. A matching duplicate of
+the active request may still join, up to `MaxConcurrentTurnJoiners` (default 32); further matching
+requests fail before acceptance with non-retryable `DurableTurnPending`. The query below reports
+the current joined-caller count but does not identify individual pending requests.
+
+At either reserve threshold, an unresolved approval expires as a denial with
+`DurableApprovalExpirationReason.HistoryBudget`, allowing the active turn to finish. Event and
+byte thresholds are checked independently; each soft limit must be positive and below its reserve.
+In split hosting, configure these values on the client-side `AddDurableAIClient` registration
+because they are frozen into the workflow start input.
+
+`GetHistoryBudgetAsync` returns event count and size, their configured thresholds, admission and
+reserve flags, joiner counts, retained-entry count, and history-recovery state. The values reflect
+the latest workflow-task boundary and can be stale between tasks.
+
 ### Retained-history compaction and recovery
 
 `GetHistoryAsync` returns the session's current retained history, not an archive. `MaxEntryCount`
-defaults to 1000 entries and triggers Continue-as-New. Unlike context-only `IChatReducer`s, the
-retained-history strategy can replace old complete turns with a summary or a truncation marker.
-No strategy is selected by default: if history reaches its trigger without a configured keyed
-history reducer or compaction strategy, the workflow preserves the last valid history, closes new
-turn admission, and enters queryable `HistoryBlocked` rather than silently deleting entries.
+defaults to 1000 entries and starts retained-history rollover handling. Unlike context-only
+`IChatReducer`s, the retained-history strategy can replace old complete turns with a summary or a
+truncation marker. No strategy is selected by default: if history reaches its count threshold
+without a configured keyed history reducer or compaction strategy, the workflow preserves the last
+valid history, closes new-turn admission, and enters queryable `HistoryBlocked` rather than
+silently deleting entries.
 
 Select one explicit strategy when registering the worker:
 
@@ -469,8 +413,22 @@ run until resolved, cancelled with their turn, or expired by their finite approv
 history reserve. As with normal compaction, an elapsed idle deadline or `RequestShutdown` does
 not abandon admitted handlers: shutdown waits for that drain and then completes without restarting.
 
+During a normal Continue-as-New transition, new sends may fail before acceptance with
+`DurableTurnContinueAsNewPending`; retry that explicit rejection with bounded backoff. A network
+timeout is ambiguous and may follow an accepted turn. Already-admitted turns finish before the
+transition. `ShutdownAsync` also stops admission and waits for admitted turns, including those
+paused for approval.
+
 ```csharp
 var status = await sessionClient.GetHistoryBudgetAsync(conversationId);
+Console.WriteLine(
+    $"History: {status.HistoryEventCount}/{status.HistoryEventSoftLimit} events " +
+    $"({status.HistoryEventReserveLimit} reserve); " +
+    $"{status.HistorySizeBytes}/{status.HistorySizeSoftLimitBytes} bytes " +
+    $"({status.HistorySizeReserveLimitBytes} reserve).");
+Console.WriteLine(
+    $"Admission restricted: {status.IsAdmissionRestricted}; reserve reached: {status.IsReserveReached}; " +
+    $"joiners: {status.ConcurrentTurnJoiners}/{status.MaxConcurrentTurnJoiners}.");
 if (status.IsHistoryBlocked)
 {
     var recovery = await sessionClient.RetryHistoryCompactionAsync(
@@ -492,6 +450,8 @@ Temporal signals or updates outside this API are not; accepted raw signals are r
 no workflow signal handler exists. Restrict direct workflow access and apply appropriate
 application/deployment access controls.
 
+## Send and manage turns
+
 ### Send a turn and read history
 
 ```csharp
@@ -508,6 +468,27 @@ Console.WriteLine(response.Text);
 
 var history = await sessionClient.GetHistoryAsync("customer-42");
 ```
+
+### Request identity, admission, and retries
+
+Persist a caller-supplied `requestId` before sending when recovery across a client crash matters.
+`correlationId` is for observability, and the Temporal workflow-update ID is a separate transport
+identity. If the client generated the request ID, `DurableChatRequestException.RequestId` exposes
+it after a failed submission. The workflow fingerprints messages, model options, the pinned client
+profile, and recorded tool authority. A matching ID and fingerprint joins an active turn; a
+different ID while a turn is active is rejected as `Busy`, and changed input under the same ID is
+rejected as `Conflict`.
+
+The terminal-outcome ledger is bounded by `MaxTerminalOutcomeCount` (default 128) and
+`MaxTerminalOutcomeBytes` (default 1 MiB); pending requests are not evicted. Eviction or an
+oversized outcome ends retention for that request, so a later retry can execute again. While
+admission is open, a matching retry returns a retained terminal outcome, including across
+Continue-as-New. If admission is restricted by the history budget, the retry may be rejected before
+the terminal ledger is checked; use `GetTerminalTurnOutcomeAsync(conversationId, requestId)` to
+resolve an ambiguous send instead. That query returns retained terminal outcomes only; `null` is
+not a per-request pending status and may also mean the outcome is no longer retained. This ledger
+does not guarantee exactly-once external effects; make effectful tools idempotent and reconcile
+uncertain outcomes with the system of record.
 
 ### Send schema-bound structured output
 
@@ -557,24 +538,6 @@ supported for durable sessions — there is no `GetStreamingResponseAsync` equiv
 registration and dispatch contract, and [HITL patterns](hitl-patterns.md) for pausing a turn on
 tool approval.
 
-`requestId` is the logical identity for a turn; `correlationId` is only for observability, and
-Temporal's workflow-update ID is a separate transport identity. Persist a caller-supplied request ID
-before calling `SendAsync` when you need recovery across a client crash. If the library generated
-the ID and the submission fails, `DurableChatRequestException.RequestId` exposes it for recovery.
-The workflow records a canonical fingerprint covering messages, model options, the pinned profile,
-and recorded tool authority. While a turn is active, the same request ID and fingerprint joins it;
-another request ID is rejected as `Busy`, while changed input under the same ID is rejected as
-`Conflict`. A matching retry after completion returns its recorded success or failure while the
-outcome remains in the bounded ledger, including across Continue-as-New.
-
-The ledger defaults to 128 outcomes and 1 MiB of serialized terminal outcomes; configure
-`MaxTerminalOutcomeCount` and `MaxTerminalOutcomeBytes` on `DurableExecutionOptions` to change those
-bounds. Pending turns are never evicted. When a bound is reached, the oldest terminal outcome is
-evicted; an individual outcome larger than the byte limit is not retained. Eviction ends the
-deduplication window for that request ID, so a later retry can execute again. This ledger does not
-make external tool effects exactly-once. Make effectful tools idempotent with an
-application-level business-operation ID when duplicate external effects must be suppressed.
-
 #### Cancel an active turn
 
 Turn cancellation is a separate workflow update; cancelling the `SendAsync` RPC wait does not
@@ -595,31 +558,23 @@ if (cancellation.Status == DurableTurnCancellationStatus.CancellationRequested)
 }
 ```
 
-`CancelTurnAsync` targets only the matching active request. A cancellation race can return
-`AlreadyCompleted`; if the request has already completed or does not match the active turn, update
-validation rejects it before acceptance. Observe the original `turn` task for its terminal outcome.
-The update requests cancellation of an active model, interceptor, or tool activity and interrupts
-a pending approval wait. Temporal waits for an active activity's cancellation to complete before
-the turn terminates; activity code and downstream operations must cooperate, so it may not stop
-immediately. No later activity is scheduled. Cancellation does not roll back external effects: a
-dispatched effect may have completed even if its result was lost, so use downstream idempotency and
-reconcile authoritative state. The cancellation token passed to either RPC controls only that RPC
-wait; use `CancelTurnAsync` to request turn cancellation.
+### Cancellation and interrupted turns
 
-If a turn fails after a tool activity was dispatched, `GetHistoryAsync` retains the request and a
-`DurableSessionResponse` with `CompletionReason == Interrupted`. Its tool-call/result messages
-preserve known completed results, use an explicit unknown result for dispatched calls whose
-outcome cannot be confirmed, and mark undispatched calls as not executed. Partial assistant prose
-is omitted. The interruption response is capped at 64 KiB; if necessary, tool arguments and
-results are replaced with bounded placeholders while preserving call/result grammar. Before each
-tool batch is dispatched, the workflow reserves space for all call identities and worst-case
-bounded results across the turn. A batch that would exceed this budget fails with
-`DurableInterruptionRecordBudgetExceeded` before any of its calls run; previously dispatched
-calls retain their completed or uncertain outcomes. Large call IDs and multi-batch turns can
-therefore hit this limit even when an individual model response fits the transport budget. This is model
-context for later turns, not proof of an external effect; reconcile with the system of record
-before retrying an effectful operation. A failure before any tool dispatch continues to roll back
-the request and response.
+`CancelTurnAsync` targets only the matching active request. A cancellation race can return
+`AlreadyCompleted`; a request that no longer matches is rejected before acceptance. Observe the
+original send task for its terminal outcome. The update cancels active model, interceptor, or tool
+activities and interrupts pending approval. Temporal waits for activity cancellation; activity code
+and downstream operations must cooperate. Cancellation tokens passed to the RPCs cancel only those
+RPC waits, and cancellation does not undo external effects.
+
+If failure or cancellation occurs after a tool activity is dispatched, retained history records an
+`Interrupted` response: confirmed results, `unknown` outcomes for dispatched calls whose effects
+cannot be confirmed, and `not executed` for undispatched calls. Partial assistant text is omitted.
+The record is capped at 64 KiB, preserving tool-call/result grammar with bounded placeholders when
+needed. Before dispatching each tool batch, the workflow reserves space for all call identities and
+bounded results; if the next batch cannot fit, it fails with
+`DurableInterruptionRecordBudgetExceeded` before dispatching that batch. A turn that fails before
+tool dispatch leaves no request/response pair. Reconcile uncertain effects before retrying them.
 
 #### Inspect interrupted history
 
@@ -661,6 +616,30 @@ catch (DurableChatRequestException exception)
 }
 ```
 
+### Retained-history identities
+
+Each library-created request and response has its own stable `EntryId`; both share a `TurnId`.
+The identifiers distinguish retained session entries from observability correlation IDs and are
+preserved when the workflow continues as new.
+
+```csharp
+// Inspect the stable identities associated with retained request/response pairs.
+var history = await sessionClient.GetHistoryAsync("customer-42");
+foreach (var turn in history
+    .OfType<DurableSessionRequest>()
+    .Where(request => request.EntryId is not null && request.TurnId is not null))
+{
+    var response = history
+        .OfType<DurableSessionResponse>()
+        .FirstOrDefault(entry => entry.TurnId == turn.TurnId);
+    Console.WriteLine($"{turn.TurnId}: {turn.EntryId} -> {response?.EntryId}");
+}
+```
+
+<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/MEAI/RetainedHistoryIdentity.cs. -->
+
+## Custom workflows
+
 ### Custom typed-turn admission
 
 Custom workflows using `DurableToolWorkflowBase` should pair the turn update with a synchronous
@@ -695,26 +674,6 @@ See [custom workflow output](custom-workflow-output.md) and the runnable
 [`ExtensibleDurableTurns` sample](../../../samples/MEAI/ExtensibleDurableTurns/README.md) for the
 complete typed-turn contract.
 
-Session history is retained workflow state, not an unlimited archive. `MaxEntryCount` defaults to
-1000 entries and triggers Continue-as-New. Configure `DefaultHistoryCompactionStrategy` or a keyed
-history reducer to choose how eligible old turns are projected. There is no implicit suffix trim:
-without an explicit strategy, a required reduction blocks new turns and exposes the retained state
-for recovery. The limit counts session entries, not tokens or serialized bytes, and older entries
-may no longer be available from `GetHistoryAsync` after an explicit compaction.
-
-While a run is preparing to Continue-as-New, it stops admitting new turns: once the history
-reduction for that boundary has run, a new `SendAsync` can be rejected with `Session is continuing
-as new. Retry the turn.` A turn rejected with that message did not start; retry with bounded backoff
-until the transition completes and the next run accepts it. Do not treat a network timeout as this
-explicit rejection: an ambiguously completed update may already have applied its turn.
-Turns admitted before the boundary still finish, and history is reduced again if they changed it.
-`ShutdownAsync` likewise rejects new turns, but the workflow completes only after admitted turns
-finish, so expect shutdown to take as long as any in-flight turn, including one paused for approval.
-The history budget covers the library's validated update operations, not arbitrary Temporal
-signals sent directly by other clients. Temporal records an accepted signal even when the workflow
-has no matching handler; restrict direct workflow access and use application/deployment access
-controls rather than relying on the absence of a signal handler to bound history.
-
 ### Per-request overrides with `ChatOptions`
 
 `TemporalChatOptionsExtensions` writes per-request settings onto `ChatOptions.AdditionalProperties`.
@@ -739,7 +698,7 @@ For custom workflows using `DurableChatClient`, client resolution order is: per-
 Temporal-owned key before the call reaches the provider; see
 [Chat options boundaries](../../architecture/MEAI/durable-chat-pipeline.md#chat-options-boundaries).
 
-## Durable tool calls with `AIFunction.AsDurable()`
+### Durable tool calls with `AIFunction.AsDurable()`
 
 > **Most applications that own a custom workflow and want durable LLM calls should start with
 > [custom workflow output](custom-workflow-output.md) instead.** `DurableChatWorkflowBase<TOutput>`
@@ -807,45 +766,8 @@ A few contract points worth knowing up front:
   (for long tool-invocation loops), and retry policy via standard `ActivityOptions` — no
   `ChatOptions` extension-method translation layer to reason about.
 
-## Which pattern should I use?
-
-| | Built-in managed session | Custom workflow, package session machinery | Custom workflow, no session machinery |
-|---|---|---|---|
-| Who owns the workflow class | The stock `DurableChatWorkflow` | Your own `[Workflow]`, subclassing `DurableChatWorkflowBase<TOutput>` / `DurableToolWorkflowBase<TRequestData, TTurnState>` | Your own `[Workflow]`, from scratch |
-| History, continue-as-new, HITL | Handled for you | Inherited from the base class | Not provided — you build it yourself if you need it |
-| Entry point | `DurableChatSessionClient.SendAsync` | `WorkflowHandle.ExecuteUpdateAsync` against your own `[WorkflowUpdate]` | `Workflow.ExecuteActivityAsync` against your own hand-written Activity, plus `AIFunction.AsDurable()` for tool calls |
-| Sample-backed | Yes (`samples/MEAI/DurableChat`) | Yes (`samples/MEAI/CustomWorkflow`) | Yes (`samples/MEAI/DirectAdapters`) |
-| Multiple LLM calls with custom control flow between them | No | Yes — you write `ExecuteTurnAsync` / the tool loop | Yes — that's the point |
-| Best for | A standalone multi-turn chat/agent surface where the stock loop's behavior is exactly what you want | Owning a custom workflow but still wanting the package's history/HITL/continue-as-new machinery, plus typed per-turn output or custom turn orchestration | A workflow that needs one or two individual durable LLM/tool calls and nothing else — no session machinery at all |
-
-Concrete signals:
-
-- **Use the managed session** if your unit of work is "a conversation" and you don't need
-  orchestration logic around individual LLM calls — the stock workflow's history management, tool
-  dispatch, and continue-as-new policy already do what you need.
-- **Use `DurableChatWorkflowBase<TOutput>` or `DurableToolWorkflowBase<TRequestData, TTurnState>`**
-  — the **primary recommendation for anyone who owns a custom workflow and wants durable LLM
-  calls** — if you want the managed session's history/HITL/continue-as-new plumbing but need to
-  return domain-specific per-turn output, schedule your own turn activity, or reuse the package's
-  typed tool loop. Backed by the runnable `samples/MEAI/CustomWorkflow` sample. See
-  [custom workflow output](custom-workflow-output.md).
-- **Write a hand-rolled Activity, plus `AIFunction.AsDurable()` for tool calls,** only when you
-  deliberately want *none* of the session machinery above — a workflow you're already writing from
-  scratch that needs to make one or a few individual LLM/tool calls durable, with no built-in
-  history, turn tracking, or HITL support. This is a narrower-scope, lower-level approach than the
-  two options above. Backed by the runnable `samples/MEAI/DirectAdapters` sample.
-
-These are separate APIs: registering a custom workflow does not change the managed-session tool
-contract, and a managed session's registered tools are not visible to a from-scratch workflow
-(which uses `AIFunction.AsDurable()` against the same worker-side registry instead).
-
-For the design reasoning behind recommending pattern 3 over constructing a durable chat
-adapter directly inside workflow code, see
-[the direct-adapter anti-pattern record](../../architecture/MEAI/direct-adapter-anti-pattern.md).
-
 ## Where to go next
 
-- [Using Temporal SDK plugins](../../library-combinations.md#using-temporal-sdk-plugins) — registering your own Temporal worker or client plugins alongside this library
 **How-to guides**
 
 - [Tool functions](tool-functions.md) — the three durable tool registration levels

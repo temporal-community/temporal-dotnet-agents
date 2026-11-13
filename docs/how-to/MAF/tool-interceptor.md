@@ -1,6 +1,6 @@
 # Tool Interceptor (`IAgentToolInterceptor`)
 
-A pre-tool lifecycle hook that runs as a Temporal activity before each `InvokeAgentTool` dispatch. Use it to apply policy, enrich approval context, score risk, scrub PII from arguments, or short-circuit tool execution — all without modifying individual tool implementations.
+A pre-tool lifecycle hook that runs as a Temporal activity before eligible `InvokeAgentTool` dispatches. Use it to apply policy, enrich approval context, score risk, transform tool arguments, or short-circuit tool execution — all without modifying individual tool implementations.
 
 > **Looking to intercept the *model* call instead** — logging prompts and responses, token usage, or wrapping the agent run? That is a different layer: see [Intercepting LLM Calls](./llm-call-interception.md).
 
@@ -24,7 +24,7 @@ A pre-tool lifecycle hook that runs as a Temporal activity before each `InvokeAg
 
 ## What it is
 
-When an agent turn produces tool calls, the workflow dispatches a `RunToolInterceptor` activity for each one — in parallel, before dispatching any `InvokeAgentTool` activity. The tool activities themselves then run serially in model order. The interceptor runs as a proper Temporal activity, so it can do I/O: database lookups, external API calls, risk scoring services. Its result is recorded in workflow history. On replay, the activity is not re-executed.
+When an agent turn produces tool calls and an interceptor is registered, the workflow dispatches a `RunToolInterceptor` activity for each tool that has not opted out. These activities run in parallel before any `InvokeAgentTool` activity; tool activities then run serially in model order. The interceptor runs as a Temporal activity, so it can do I/O such as database lookups, external API calls, and risk scoring. Its result is recorded in workflow history and reused during replay rather than re-executing a completed activity.
 
 This is different from the in-tool HITL path (`TemporalAgentContext.Current.RequestApprovalAsync`), which fires after a tool has already started. The interceptor fires before the tool activity is dispatched at all.
 
@@ -46,7 +46,7 @@ public interface IAgentToolInterceptor : IDurableToolInterceptor<AgentToolContex
 }
 ```
 
-`BeforeToolCallAsync` is called once per tool call per turn. Return a `DurableToolDecision` to control what happens next.
+When configured and not skipped for a tool, `BeforeToolCallAsync` runs once per `RunToolInterceptor` activity attempt. Activity retries can therefore call it again. Return a `DurableToolDecision` to control what happens next.
 
 > **Library split:** `DurableToolDecision`, `DurableToolContext`, and `IDurableToolInterceptor<TContext>` are
 > defined in `TemporalCommunity.Extensions.AI.Tools`. `IAgentToolInterceptor` and `AgentToolContext` live in
@@ -56,7 +56,13 @@ The interface has exactly one method, `BeforeToolCallAsync`. Interception is a p
 a tool's result cannot be inspected or rewritten here. Use
 [`TemporalAgentOptions.ToolMiddleware`](llm-call-interception.md#tool-middleware) for a MAF-shaped
 callback inside the tool activity, after required approval, including short-circuit and result
-transformation. It cannot change the approved call. Both activities can retry their own effects.
+transformation. It cannot change the approved call. Tool activities use one attempt by default;
+an agent-level retry policy opts all tools and interceptor activities into retries. Lost activity
+completion can still repeat effects. Exceptions from `BeforeToolCallAsync` other than cancellation
+are logged and converted to `Block`, not retried as callback failures. If a scheduled interceptor
+activity cannot produce an interceptor—for example, because a worker's registration differs or a
+factory returns `null`—it logs a warning and defaults to `Proceed`; keep interceptor registration
+consistent across workers. `RequireApproval()` is enforced separately by the workflow.
 
 ---
 
@@ -71,8 +77,9 @@ public class DurableToolContext
     public string? CallId { get; init; }
     public string? SessionId { get; init; }
 
-    // Declared on the type, but NOT populated by either library's interception path today.
-    // They read null in an interceptor; do not branch on them.
+    // The MAF interception path does not populate these.
+    // The managed MEAI path populates ConversationId, CorrelationId, and TurnNumber when supplied.
+    // Metadata is not populated by either current interception path.
     public string? ConversationId { get; init; }
     public string? CorrelationId { get; init; }
     public int? TurnNumber { get; init; }
@@ -84,6 +91,7 @@ public sealed class AgentToolContext : DurableToolContext
 {
     public required string AgentName { get; init; }
     public AgentSessionStateBag? StateBag { get; init; }
+    public bool RequiresApproval { get; init; }
 }
 ```
 
@@ -91,9 +99,11 @@ public sealed class AgentToolContext : DurableToolContext
 |---|---|
 | `AgentName` | The registered agent name. |
 | `ToolName` | The tool name as registered on the agent. |
-| `Arguments` | The argument dictionary the LLM emitted in its `FunctionCallContent`. |
+| `Arguments` | A copy of the arguments the LLM emitted in its `FunctionCallContent`; empty for a parameterless call. |
 | `CallId` | LLM-assigned call identifier. `null` for models that do not emit call IDs. |
-| `StateBag` | Snapshot immediately before tool dispatch. Successful interceptor write-backs are merged into workflow-owned state before the next activity. Keep mutations retry-safe; a failed or cancelled turn restores the pre-turn StateBag, but cannot undo external effects. `null` when no state has accumulated. |
+| `SessionId` | The Temporal workflow ID for the managed agent session. |
+| `RequiresApproval` | `true` when the tool was registered with `RequireApproval()`; the workflow enforces this independently of the interceptor. |
+| `StateBag` | Each interceptor receives its own deserialized copy of the same session snapshot, taken before the batch runs; mutations do not flow between interceptors. Successful changes are merged into workflow state before approval or tool dispatch, in tool-call order; later calls win on key conflicts. A null bag has no state to mutate or seed. Failed or cancelled turns restore the pre-turn bag, but cannot undo external effects. |
 
 ---
 
@@ -116,8 +126,8 @@ return DurableToolDecision.Proceed(
 Optional parameters:
 
 - `enrichedDescription` — human-readable context injected into `DurableApprovalRequest.Description` when the tool has `RequireApproval()` set (the `Proceed` decision is overridden to `PauseForApproval` by the Rule 2 floor, using this description for the reviewer).
-- `modifiedArguments` — replacement argument dictionary. The turn loop passes these to `InvokeAgentToolInput` instead of the original LLM-supplied arguments. The LLM's original arguments are already in Temporal history from `RunDurableAgentStep`; this substitution only affects the tool dispatch event. Use this for PII scrubbing (see [PII argument scrubbing](#pii-argument-scrubbing)).
-- `metadata` — arbitrary key/value pairs stored in Temporal history for audit purposes.
+- `modifiedArguments` — replacement argument dictionary used for tool dispatch instead of the original LLM-supplied arguments. The replacement is recorded in the interceptor activity result and the tool-dispatch input; it does not remove the original arguments from history. See [PII argument scrubbing](#pii-argument-scrubbing).
+- `metadata` — key/value pairs carried in Temporal history and, when approval is requested, exposed as reviewer `ReviewData`. Metadata is limited to 64 entries; the serialized description-and-metadata projection is limited to 16 KiB.
 
 ### `PauseForApproval`
 
@@ -125,11 +135,10 @@ Park the turn loop and wait for a human to approve before the tool runs.
 
 ```csharp
 return DurableToolDecision.PauseForApproval(
-    $"Tool '{context.ToolName}' requested on agent '{context.AgentName}'. " +
-    $"Arguments: {JsonSerializer.Serialize(context.Arguments)}");
+    $"Review the requested '{context.ToolName}' action for agent '{context.AgentName}'.");
 ```
 
-The `description` string is shown to the reviewer via `DurableApprovalRequest.Description`. The external system polls `GetPendingApprovalAsync` and calls retry-safe `ResolveApprovalAsync` to unblock the workflow — the same API used by the in-tool HITL path.
+The `description` string is shown to the reviewer via `DurableApprovalRequest.Description`; `metadata`, if supplied, becomes reviewer `ReviewData`. The serialized projection is limited to 16 KiB, and metadata to 64 entries. Include only reviewer-safe information. The external system polls `GetPendingApprovalAsync` and calls retry-safe `ResolveApprovalAsync` to unblock the workflow — the same API used by the in-tool HITL path.
 
 If approved, the tool proceeds. If rejected, the tool is skipped and the agent receives a synthetic rejection result.
 
@@ -164,7 +173,7 @@ Use this for guardrail violations, compliance policy failures, or any case where
 
 ## RequireApproval — the configuration-time floor
 
-`DurableToolOptions.RequireApproval()` is an absolute floor set at registration time. Even if the interceptor returns `Proceed`, the tool still waits for human approval before dispatching.
+`DurableToolOptions.RequireApproval()` is an absolute floor set at registration time. Every outcome except `Block`—including `Proceed` and `Skip`—waits for human approval before dispatching the tool. The floor still applies when no interceptor is registered or the tool uses `SkipInterceptor()`.
 
 ```csharp
 agent.AddTool(
@@ -175,7 +184,7 @@ agent.AddTool(
     opts => opts.RequireApproval());
 ```
 
-When both `RequireApproval()` and an interceptor are active, the interceptor's `EnrichedDescription` (from a `Proceed` decision) is used as the approval request description. This lets the interceptor contribute context — for example, a risk score or entity summary — to the reviewer's approval UI even when the gate itself is unconditional.
+When both `RequireApproval()` and an interceptor are active, the interceptor's `EnrichedDescription` (from a `Proceed` decision) is used as the approval request description. This lets the interceptor contribute bounded, reviewer-safe context — for example, a risk score or entity summary — even when the gate itself is unconditional. `Block` is never overridden.
 
 ---
 
@@ -230,7 +239,7 @@ agent.AddTool(
     opts => opts.SkipInterceptor());
 ```
 
-When `SkipInterceptor()` is set, the `RunToolInterceptor` activity is not dispatched for that tool. The tool proceeds directly to `InvokeAgentTool`.
+When `SkipInterceptor()` is set, the `RunToolInterceptor` activity is not dispatched for that tool. The tool proceeds directly to `InvokeAgentTool`, unless `RequireApproval()` independently parks it for approval.
 
 Use this for read-only, low-risk tools where the interceptor overhead (an extra activity round-trip per tool call) buys nothing. Avoid it for write tools or any tool that handles sensitive data.
 
@@ -257,8 +266,11 @@ agent.AddTool(
 
 ## Batch fan-out and approval behavior
 
-All `RunToolInterceptor` activities for a turn fan out in parallel. Tool dispatch waits until every
-interceptor result is recorded. For the resulting batch-safety guarantee, timeout implications, and
+For tools with an interceptor configured and not opted out, all `RunToolInterceptor` activities
+for a turn fan out in parallel. Tool dispatch waits until every interceptor result is recorded.
+If any decision requests approval, the workflow resolves those approval waits before dispatching
+tool activities; the activities then run serially in model order.
+For the resulting batch-safety guarantee, timeout implications, and
 the difference from approval requested inside a running tool, see
 [Human-in-the-loop patterns](./hitl-patterns.md#what-usually-decides-it).
 
@@ -361,7 +373,12 @@ public class PiiScrubbingInterceptor(IPiiVault vault) : IAgentToolInterceptor
 }
 ```
 
-The tool receives the token instead of the raw SSN. `ModifiedArguments` affects only the `ActivityScheduled(InvokeAgentTool)` event. The LLM's original arguments appear in two earlier events: `ActivityCompleted(RunDurableAgentStep)` (the LLM step result) and `ActivityScheduled(RunToolInterceptor)` (the interceptor's input). This library does not provide a path that removes those event-history payloads; apply your Temporal data-protection controls where that is required.
+The tool receives the token instead of the raw SSN. The LLM's original arguments remain in
+`ActivityCompleted(RunDurableAgentStep)` (the model-step result) and
+`ActivityScheduled(RunToolInterceptor)` (the interceptor input). The replacement arguments are
+recorded in `ActivityCompleted(RunToolInterceptor)` and forwarded in
+`ActivityScheduled(InvokeAgentTool)`. This does not remove the original arguments from history;
+apply your Temporal data-protection controls where that is required.
 
 ---
 
@@ -373,5 +390,3 @@ The tool receives the token instead of the raw SSN. `ModifiedArguments` affects 
 - [`samples/MAF/ToolInterceptor/`](../../../samples/MAF/ToolInterceptor/) — runnable sample: all four decision paths + `RequireApproval()` in a refund-agent scenario
 
 ---
-
-_Last updated: 2026-09-09_

@@ -6,4 +6,3 @@
 # silence drift — re-syncing the snippet is almost always the right fix.
 
 docs/how-to/MAF/usage.md#inheritance--per-agent-vs-worker-level	Prose claim, not a fenced block: the doc writes `opts.RetryPolicy = ...` with `...` standing in for a policy value, which does not compile. The harness substitutes a real argument.
-docs/how-to/MAF/testing-agents.md#custom-host-per-test	The doc's [Fact] closes over `fixture` and `myChatClient` from surrounding prose. A compile-only harness has no such scope, so they become method parameters — which is also why xUnit1001 is in this project's NoWarn.

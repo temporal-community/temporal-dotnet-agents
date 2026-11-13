@@ -1,13 +1,13 @@
 # Library Combinations Guide
 
-This project ships two libraries — `TemporalCommunity.Extensions.AI` and `TemporalCommunity.Extensions.Agents` — and the choices you make at registration time determine which Temporal primitives back your AI calls, what operational features are available, and what constraints you inherit. There are two supported combinations. One pairing — MAF + `Extensions.AI` — is an anti-pattern to avoid.
+Choose the integration that matches the AI abstraction in your application:
+`IChatClient` apps use `TemporalCommunity.Extensions.AI`, while Microsoft Agent Framework
+(`AIAgent`) apps use `TemporalCommunity.Extensions.Agents`. Both make AI work durable with
+Temporal, but each has its own registration, session, and tool contracts.
 
-The combinations in this guide are tested with Microsoft.Extensions.AI 10.10.0 and
-Microsoft.Agents.AI 1.23.0. Both combinations require Temporal Service 1.31.0 or newer; repository
-integration tests pin Temporal CLI `v1.8.0`, whose embedded server is 1.31.2.
-Both packages expose their supported public surface from `lib/net10.0` and
-`lib/netstandard2.1`; the packed-package gate compiles and runs the extensible typed-turn surface
-through both asset selections.
+If you're unsure, start with the stack your app already uses. Avoid combining MAF with
+`TemporalCommunity.Extensions.AI`; use `TemporalCommunity.Extensions.Agents` for MAF. Both
+integrations require Temporal Service 1.31.0 or newer.
 
 ---
 
@@ -23,14 +23,13 @@ assumptions from the other package's samples.
 |---|---|---|
 | **Stack** | MEAI + `Extensions.AI` | MAF + `Extensions.Agents` |
 | **Entry point** | `DurableChatSessionClient` | `ITemporalAgentClient` / `TemporalAIAgentProxy` |
-| **Registration** | `AddDurableAI()` | `AddTemporalAgents()` |
+| **Registration** | `AddDurableAI()` | `AddTemporalAgents(...).Agent(...)` |
 | **NuGet package** | `TemporalCommunity.Extensions.AI` | `TemporalCommunity.Extensions.Agents` |
 | **Named agents** | No | Yes |
 | **Temporal UI search attributes** | No | Yes — `AgentName`, `SessionCreatedAt`, `TurnCount` (enabled by default) |
 | **StateBag / AIContextProvider** | No | Yes |
 | **HITL** | Yes | Yes |
 | **Embeddings** | Yes | Yes — inject `IEmbeddingGenerator` into tool classes via DI |
-| **Recommended** | Yes | Yes |
 
 ---
 
@@ -73,25 +72,24 @@ var response = await sessionClient.SendAsync(
 
 ### What you get
 
-- Crash recovery for every LLM call — if the worker restarts mid-activity, Temporal retries and returns the result from history on replay.
-- Full conversation history stored in workflow state, surviving restarts and `ContinueAsNew` transitions.
-- Managed tool-call durability through one implicit `AddDurableTool()`/`AddDurableTools()` group or ordered named
-  `AddDurableToolset(...)` groups. The worker owns schemas and implementations, the client remains
-  thin, and each tool invocation becomes its own activity with its own retry policy.
-- Embedding generation through an application-owned Temporal activity.
-- HITL approval gates via `DurableApprovalRequest` / `DurableApprovalDecision`.
-- `DurableAIDataConverter` auto-wired when using the managed registration overloads (`AddTemporalClient` + `AddDurableAI`, or the 3-arg `AddHostedTemporalWorker` overload). It applies to every workflow sharing that worker client, including ordinary workflows. Manual `TemporalClient.ConnectAsync` callers that exchange those payloads must set `DataConverter = DurableAIDataConverter.Instance` explicitly; see [the shared-worker guidance](how-to/MEAI/usage.md#sharing-a-worker-with-non-ai-workflows).
-- Custom workflow output — subclass `DurableChatWorkflowBase<TOutput>` to return domain-specific types from workflow Update handlers. The session loop, history, HITL, and continue-as-new are all inherited. See [custom-workflow-output.md](how-to/MEAI/custom-workflow-output.md).
-- Extensible typed turns — subclass `DurableToolWorkflowBase<TRequestData, TTurnState>` to retain
-  package-owned per-tool activities while supplying typed request data and sequential turn state.
-- Managed model/tool capacity isolation — optional frozen `ModelTaskQueue` and per-tool
-  `TaskQueue` routes. See the [operating guide](how-to/MEAI/operations.md); separate queues do not
-  themselves guarantee priority and do not change MAF or direct-adapter routing.
-- MCP client tools are ordinary `AIFunction` registrations; choose trusted dynamic discovery or
-  reviewed pinned schemas as described in the [MEAI MCP guide](how-to/MEAI/mcp-tools.md).
-- An ordinary MCP server tool can start or join an application workflow without another library
-  adapter. See the [workflow-backed MCP server guide](how-to/MCP/workflow-tool-server.md) for the
-  authentication, tenant identity, retry, cancellation, and retention boundaries.
+- **Managed conversations** — `DurableChatSessionClient` starts workflows that own conversation
+  history and continue-as-new behavior.
+- **Worker-owned tools** — register an implicit tool group or named `AddDurableToolset(...)`
+  groups; each invocation runs as its own activity. Split clients need no provider or tool
+  implementations. See [Tool Functions](how-to/MEAI/tool-functions.md).
+- **Custom durable turns** — build a custom workflow with
+  `DurableChatWorkflowBase<TOutput>` or `DurableToolWorkflowBase<TRequestData, TTurnState>` to
+  control output or turn state while retaining package-owned execution. See
+  [Custom Workflow Output](how-to/MEAI/custom-workflow-output.md).
+- **Direct adapters and extensions** — use application-owned activities for embeddings, optional
+  model/tool queue routing, or ordinary MCP tools. See [Embeddings](how-to/MEAI/embeddings.md),
+  [Operations](how-to/MEAI/operations.md), and the [MCP guides](how-to/MEAI/mcp-tools.md)
+  and [workflow-backed MCP server guide](how-to/MCP/workflow-tool-server.md).
+
+The `AddDurableAI()` registration configures the default client to use `DurableAIDataConverter`;
+`AddTemporalClient()` alone does not. The converter applies to every workflow sharing that client.
+See [shared-worker guidance](how-to/MEAI/usage.md#sharing-a-worker-with-non-ai-workflows) for
+custom-client requirements.
 
 ### Limitations
 
@@ -116,16 +114,29 @@ builder.Services.AddTemporalClient("localhost:7233", "default");
 
 builder.Services
     .AddHostedTemporalWorker("agents")
-    .AddTemporalAgents(opts =>
-    {
-        opts.AddDurableAgent("WeatherAgent", agent =>
-        {
-            agent.Description  = "Handles weather queries and forecasts.";
-            agent.Instructions = "You are a weather specialist.";
-            agent.ChatClient   = sp => sp.GetRequiredService<IChatClient>();
-        });
-    });
+    .AddTemporalAgents(agents =>
+        agents.Agent(
+            "WeatherAgent",
+            new ChatClientAgentOptions
+            {
+                Description = "Handles weather queries and forecasts.",
+                ChatOptions = new ChatOptions
+                {
+                    Instructions = "You are a weather specialist.",
+                },
+            },
+            temporal => temporal.TimeToLive = TimeSpan.FromHours(24)));
 ```
+
+Use `Agent` for the standard `ChatClientAgentOptions` path. `AddDurableAgent` exposes advanced
+builder configuration, including per-tool timeouts, scoped context-provider factories, and
+per-agent pipeline or tool-interceptor setup. See the
+[MAF registration guidance](how-to/MAF/usage.md#registration) for the differences and a complete
+comparison.
+
+For a separate MAF caller process, register `AddTemporalAgentProxies(...)` and `AddAgentProxy(...)`
+there instead of hosting the agent implementation. See [MAF usage](how-to/MAF/usage.md#quick-one-shot-call)
+for both topologies.
 
 ### External caller usage
 
@@ -181,15 +192,17 @@ and the [workflow orchestration sample](../samples/MAF/WorkflowOrchestration/REA
 
 ### What you get
 
-On top of everything in Combination 1:
-
-- **Named agents** — each `AIAgent` is registered under a name; the Temporal workflow ID encodes the agent name and session key (`ta-weatheragent-{key}`).
-- **Temporal UI search attributes** — `AgentWorkflow` upserts `AgentName`, `SessionCreatedAt`, and `TurnCount` on every run by default, enabling queries like `AgentName = "BillingAgent" AND TurnCount > 10` in the Web UI.
-- **StateBag / `AIContextProvider`** — `AgentSessionStateBag` state is serialized and carried across turns, restarts, and `ContinueAsNew` transitions.
-- **`TemporalAgentContext.Current`** inside tools — direct access to the current session and HITL helpers without building a workflow handle manually.
-- **Structured output** — `RunStructuredAsync<T>` deserializes the agent's response into a typed object, tolerating code fences and retrying on failure.
-- **Scheduling** — built-in primitives for recurring and deferred agent runs.
-- **Completed responses** — `RunAsync` is supported; `RunStreamingAsync` is intentionally rejected.
+- **Named agent sessions** — each registered `AIAgent` runs in its own `AgentWorkflow`, which owns
+  conversation history and `AgentSessionStateBag`. Ordered `AIContextProvider`s run as part of
+  durable turns; see [Context Providers](how-to/MAF/context-providers.md).
+- **Durable model and tool execution** — model steps and serial tool calls run as Temporal
+  activities. Tools use one attempt by default; an agent retry policy affects every tool on that
+  agent. See [Durable Agents](how-to/MAF/durable-agents.md).
+- **MAF interaction features** — use workflow-parked approvals and typed structured responses.
+  See [HITL Patterns](how-to/MAF/hitl-patterns.md) and
+  [Structured Output](how-to/MAF/structured-output.md).
+- **Temporal search attributes** — enabled by default for agent name, session creation time, and
+  turn count, provided those attributes are registered in the namespace.
 
 ### Limitations
 
@@ -220,107 +233,51 @@ before encountering these libraries. They can adopt `TemporalCommunity.Extension
 rather than wholesale. For managed tools, move the functions to `AddDurableTools()` rather than
 an inline `UseFunctionInvocation()` loop.
 
-Incremental adoption paths:
+### Replace a hand-rolled chat workflow
 
-- **Replace the custom workflow** — swap the hand-rolled workflow and activities for `DurableChatWorkflow` + `DurableChatActivities` by registering `AddDurableAI()` and updating the external entry point to `DurableChatSessionClient`.
-- **Adopt specific components** — keep the custom workflow and add `DurableAIDataConverter` individually. For durable embeddings, call an application-owned Temporal activity that uses MEAI's `IEmbeddingGenerator`; see the [embeddings guide](how-to/MEAI/embeddings.md).
-
----
-
-## Using Temporal SDK plugins
-
-Advanced, and not a registration path. Start from whichever canonical call your combination
-above prescribes — `AddDurableAI()` or `AddTemporalAgents()`. Neither library exposes plugin
-wrappers; register your own plugins through the SDK's own options.
-
-**Worker plugins** go on the worker options:
+Register the managed session worker and resolve its client from DI. `IChatClient` and tool
+implementations are worker-side; callers submit turns through `DurableChatSessionClient`.
+`AddTemporalClient()` registers the SDK client, and `AddDurableAI()` configures its default
+converter for durable AI payloads; `AddTemporalClient()` alone does not install that converter.
 
 ```csharp
+// Application-owned: HostApplicationBuilder builder and innerChatClient.
+builder.Services.AddChatClient(innerChatClient);
 builder.Services.AddTemporalClient("localhost:7233", "default");
+builder.Services.AddHostedTemporalWorker("durable-chat").AddDurableAI();
 
-builder.Services
-    .AddHostedTemporalWorker("orders-worker")
-    .AddDurableAI()                                  // or .AddTemporalAgents(...)
-    .ConfigureOptions(options =>
-    {
-        var plugins = options.Plugins?.ToList() ?? [];
-        plugins.Add(new MyWorkerPlugin());
-        options.Plugins = plugins;
-    });
+using var host = builder.Build();
+await host.StartAsync();
+var sessionClient = host.Services.GetRequiredService<DurableChatSessionClient>();
+var response = await sessionClient.SendAsync(
+    "customer-42",
+    [new ChatMessage(ChatRole.User, "Summarize my latest order.")]);
 ```
 
-**Client plugins go somewhere else, and where depends on who owns the client.** With the
-canonical setup above the client comes from `AddTemporalClient(...)`, so configure its options
-directly — `TemporalWorkerServiceOptions.ClientOptions` is null on that topology, and a client
-plugin added there would be silently dropped:
+<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/LibraryCombinations/AdoptingManagedSession.cs. -->
+
+### Adopt components in a custom workflow
+
+Keep the custom workflow and register the client and worker with the Temporal SDK hosting
+extensions. In this example, the workflow exchanges only `string` and `float[]`; MEAI embedding
+types stay inside the application-owned activity, so no durable AI converter is needed. If a custom
+workflow exchanges MEAI payloads, configure a compatible converter explicitly:
+`AddTemporalClient()` alone does not install `DurableAIDataConverter`. See the
+[durable embeddings guide](how-to/MEAI/embeddings.md) for activity timeout, retry, and payload
+guidance.
 
 ```csharp
+// Application-owned: HostApplicationBuilder builder, taskQueue, and generator.
+// EmbeddingWorkflow and EmbeddingActivities are application-defined types.
+builder.Services.AddTemporalClient("localhost:7233", "default");
+builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(generator);
 builder.Services
-    .AddTemporalClient("localhost:7233", "default")
-    .Configure(options =>
-    {
-        var plugins = options.Plugins?.ToList() ?? [];
-        plugins.Add(new MyClientPlugin());
-        options.Plugins = plugins;
-    });
+    .AddHostedTemporalWorker(taskQueue)
+    .AddWorkflow<EmbeddingWorkflow>()
+    .AddSingletonActivities<EmbeddingActivities>();
 ```
 
-Only when the worker creates its own client — the three-argument
-`AddHostedTemporalWorker(address, namespace, taskQueue)` overload — is `ClientOptions` populated,
-and client plugins belong on `options.ClientOptions.Plugins` instead.
-
-**One caveat on this topology: `ITemporalClientPlugin.ConnectAsync` never runs.** `AddTemporalClient`
-builds the client with `TemporalClient.CreateLazy`, which bypasses the plugin connect chain — so
-`ConfigureClient` fires and `ConnectAsync` does not, even after the first real RPC. This is Temporal
-SDK behaviour, not something these libraries introduce; it reproduces against a bare
-`AddTemporalClient` with no library registration at all. If your plugin needs to wrap the
-connection itself rather than configure the client, register it where the worker owns the client,
-or construct the client yourself. Integration tests pin the current behaviour, so a future SDK
-change here will surface as a test failure rather than a surprise.
-
-**Temporal's plugin surface is experimental.** `ITemporalWorkerPlugin` and `ITemporalClientPlugin`
-both carry an explicit "may change in the future" warning from the SDK. Neither library exposes it
-in its public API, so nothing you write against these packages depends on it — but both do
-implement `ITemporalClientPlugin` internally, for the worker-owned-client topology only. If the
-SDK changes that interface, the libraries change with it; your code does not have to.
-
-**Your plugins are never dropped, in either registration order.** The libraries do not modify
-worker plugin collections. On the canonical `AddTemporalClient` topology they also leave the
-client plugin collection untouched and configure the data converter separately. Only the
-worker-owned-client path appends an internal converter plugin, preserving any consumer plugins
-already present. Integration tests pin both registration orders, including that two consumer
-plugins sharing a `Name` are both kept — deduplicating your plugins is your decision, not the
-library's. What order does *not* guarantee is callback order: plugins run in list order, which can
-matter if two of them touch the same option.
-
-**The data converter is applied for you, by one of two mechanisms.** On the canonical
-`AddTemporalClient` topology each library configures the converter directly through
-`IConfigureOptions<TemporalClientConnectOptions>` — no plugin is involved. Only when the worker
-owns its client does the library add its converter as a plugin, and it refuses to add a second
-copy of it. Either way, registering both libraries selects the MAF converter, which is a superset,
-and a data converter you set yourself is left alone.
-
----
-
-## Which Combination Should I Use?
-
-```
-Do you use Microsoft.Agents.AI (AIAgent, ChatClientAgent)?
-│
-├── No  → Combination 1 — plain IChatClient + AddDurableAI()
-│
-└── Yes → Combination 2 — AIAgent + AddTemporalAgents()
-```
-
-In short:
-
-- No `Microsoft.Agents.AI` in your project — use Combination 1.
-- `Microsoft.Agents.AI` in your project — use Combination 2.
-
-For MAF deployments, choose the registration role separately: use `AddDurableAgent` on the worker
-that hosts an agent implementation; use `AddTemporalAgentProxies` plus `AddAgentProxy` only in a
-client process that calls an already-hosted agent. See [MAF usage](how-to/MAF/usage.md#quick-one-shot-call)
-for the two topologies.
+<!-- The executable form of this example is compiled from tests/docs/DocSnippets/Snippets/LibraryCombinations/AdoptingComponents.cs. -->
 
 ---
 

@@ -125,8 +125,3 @@ Prompts and session history persist in Temporal payloads. Keep identifiers opaqu
 prompts, customer identifiers or secrets in schedule/workflow IDs, search attributes, or metric
 labels. Content-capture opt-out does not encrypt persisted payloads; use a
 [payload codec](payload-codecs.md) when required.
-
-`ScheduledChatSampleTests` executes real server schedules for `Skip`, `BufferOne`, repeated
-backfills, and a submission failure **after** success but before acknowledgment. It checks model
-invocation counts and retained results, then replays trigger and session histories. The sample
-deletes its schedule and shuts down its session on completion.

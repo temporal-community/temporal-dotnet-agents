@@ -25,8 +25,8 @@ These rules apply to any code inside a `[Workflow]` class — including `[Workfl
 
 ```csharp
 // WRONG — non-deterministic on replay
-var now = DateTime.UtcNow;
-var now = DateTimeOffset.Now;
+var utcNow = DateTime.UtcNow;
+var localNow = DateTimeOffset.Now;
 
 // CORRECT
 var now = Workflow.UtcNow;
@@ -38,8 +38,8 @@ var now = Workflow.UtcNow;
 
 ```csharp
 // WRONG — different value on each replay
-var id = Guid.NewGuid();
-var n = new Random().Next();
+var randomId = Guid.NewGuid();
+var randomNumber = new Random().Next();
 
 // CORRECT
 var id = Workflow.NewGuid();
@@ -104,6 +104,9 @@ await Workflow.ExecuteActivityAsync(...).ConfigureAwait(true);
 
 ```csharp
 using TemporalCommunity.Extensions.AI.Exceptions;
+using TemporalCommunity.Extensions.Agents;
+using Temporalio.Common;
+using Temporalio.Workflows;
 
 var sessionId = WorkflowAgents.NewAgentSessionId("WeatherAgent");
 var requestId = Workflow.NewGuid().ToString("N");
@@ -157,7 +160,7 @@ builder.Services
 ```csharp
 // WRONG — building twice creates separate DI containers
 var host1 = builder.Build();
-var host2 = builder.Build(); // throws or creates a broken second container
+var host2 = builder.Build(); // throws InvalidOperationException
 
 // CORRECT
 var host = builder.Build();
@@ -187,10 +190,10 @@ They do not, and the difference decides where a scoped service such as a `DbCont
 
 | Slot | Provider the factory receives | How often it runs |
 |---|---|---|
-| `agent.ChatClient` | the activity attempt's **scope** | once per `RunDurableAgentStep` attempt |
-| `agent.AddContextProvider(factory)` | the activity attempt's **scope** | once per `RunDurableAgentStep` attempt |
-| `agent.AddTool(name, factory)` | the worker's **root** provider | **once per worker lifetime** — the result is cached on the agent blueprint |
-| `agent.ConfigureAgentPipeline` | **none — it is not a DI factory** | once per attempt, plus one dry build at worker startup |
+| `agent.ChatClient` | the activity attempt's **scope** | for each model-step, preparation, or completion activity attempt |
+| `agent.AddContextProvider(factory)` | the activity attempt's **scope** | preparation and completion activity attempts; a retry may resolve it again |
+| `agent.AddTool(name, factory)` | the activity attempt's **scope** | when registered tools are resolved for preparation, each model step, and each tool-call activity |
+| `agent.ConfigureAgentPipeline` | **none — it is not a DI factory** | for each live pipeline build, plus one dry validation build at worker startup |
 
 `ConfigureAgentPipeline` is the odd one out: its type is `Action<AIAgentBuilder>`, so the callback
 never sees an `IServiceProvider`. The attempt's scope reaches the pipeline one level down — the
@@ -198,11 +201,10 @@ library calls `builder.Build(scopedServices)`, and MAF hands that provider to an
 you registered that accepts one. Middleware you construct eagerly inside the callback gets nothing
 from DI.
 
-**Why:** the tool row is the trap. A tool is an `AIFunction` — a stateless delegate wrapper — so the
-library resolves it once and reuses it, which means anything you resolve inside a tool factory is
-held for the worker's life with singleton semantics *regardless of how it was registered in DI*.
-Resolving a `DbContext` there creates a captive dependency that outlives every scope it was meant
-to belong to.
+**Why:** the tool factory runs in activity scopes, not at worker startup. Dependencies resolved
+there are scoped to that activity attempt; do not retain them in static or other long-lived state.
+The function is resolved again in the tool-call activity that invokes it, so any captured scoped
+service remains within that activity's scope.
 
 Resolve per-invocation state inside the tool body instead. Capture `IServiceScopeFactory` — itself
 a singleton, so capturing it is correct — and open a scope per call:
@@ -222,7 +224,7 @@ agent.AddTool("do_thing", sp =>
 });
 ```
 
-This works on every execution path, which matters more than it looks.
+This keeps per-call dependencies inside the tool-call activity's scope.
 
 ### Use `TemporalAgentContext.Current` inside registered agent tool activities
 
@@ -262,7 +264,7 @@ call accumulates nothing.
 ### Don't run two turns over the same session at once
 
 ```csharp
-// WRONG — concurrent updates target the same session and are serialized by its workflow
+// WRONG — overlapping calls on the same session object fail fast
 var session = await agent.CreateSessionAsync();
 await Task.WhenAll(
     agent.RunAsync("Question A", session),
@@ -276,8 +278,10 @@ await Task.WhenAll(
     agent.RunAsync("Question B", b));
 ```
 
-**Why:** concurrent turns for one session have no application-defined ordering. Use a distinct
-session for independent conversations and sequence turns that belong to one conversation.
+**Why:** `TemporalAgentSession` rejects overlapping `RunAsync` calls on the same session object
+with `InvalidOperationException`; it does not queue them for the workflow to serialize. Use a
+distinct session for each independent conversation and sequence turns that belong to one
+conversation.
 
 ### Do pass a TemporalAgentSession, not any AgentSession
 
@@ -336,10 +340,16 @@ it does not serialize the agent session into its own input.
 
 ```csharp
 opts.DefaultActivityTimeout = TimeSpan.FromMinutes(10); // for fast models
-opts.DefaultActivityTimeout = TimeSpan.FromHours(24);   // for HITL approval
+opts.DefaultActivityTimeout = TimeSpan.FromMinutes(20); // in-tool approval activity
+opts.DefaultApprovalTimeout = TimeSpan.FromMinutes(15); // shorter than the activity timeout
+opts.DefaultHeartbeatTimeout = TimeSpan.FromMinutes(1);
 ```
 
-The default (5 minutes) is reasonable for most LLM calls, but HITL approval flows need much longer timeouts to accommodate human review time.
+The default (5 minutes) is reasonable for many model calls. For **in-tool** approval, configure
+`ActivityTimeout` and `ApprovalTimeout` together so the activity outlives the approval wait; the
+heartbeat pump remains active during that wait. Workflow-parked approval runs no tool activity while
+waiting and does not need a long activity timeout. Prefer it for review windows longer than minutes;
+see [HITL Patterns](./hitl-patterns.md).
 
 ### Do set HeartbeatTimeout shorter than ActivityTimeout
 
@@ -412,13 +422,11 @@ builder.AddSource(
 The `agent.turn` span is emitted per LLM-step activity, not per whole turn — a turn with two tool rounds produces three of them. It carries Temporal-owned correlation, not provider-semantic request/response detail. To see token counts, finish reason, and the exact payloads for each round, decorate the `IChatClient` your agent factory returns:
 
 ```csharp
-agent.ChatClient = sp => new AuditingChatClient(
-    sp.GetRequiredService<OpenAIClient>().GetChatClient("gpt-4o-mini").AsIChatClient(),
-    sp.GetRequiredService<ILogger<AuditingChatClient>>());
-
 opts.AddDurableAgent("Assistant", agent =>
 {
-    agent.ChatClient = sp => sp.GetRequiredService<IChatClient>();
+    agent.ChatClient = sp => new AuditingChatClient(
+        sp.GetRequiredService<OpenAIClient>().GetChatClient("gpt-4o-mini").AsIChatClient(),
+        sp.GetRequiredService<ILogger<AuditingChatClient>>());
 });
 ```
 
@@ -465,24 +473,46 @@ Assert.Throws<ArgumentException>(() => Foo(""));
 
 **Why:** xUnit's `Assert.Throws<T>` matches the **exact** type, not subtypes. `ArgumentNullException` inherits from `ArgumentException`, but `Assert.Throws<ArgumentException>` will fail if `ArgumentNullException` is thrown.
 
-### Do use TestEnvironmentHelper.StartLocalAsync() for Agents integration tests
+### Configure a local Temporal server for Agents integration tests
 
 ```csharp
-// TemporalCommunity.Extensions.Agents integration tests
-var env = await TestEnvironmentHelper.StartLocalAsync();
+using TemporalCommunity.Extensions.Agents;
+using Temporalio.Testing;
+
+internal static class AgentTestEnvironment
+{
+    internal static async Task<WorkflowEnvironment> StartLocalAsync()
+    {
+        var environment = await WorkflowEnvironment.StartLocalAsync(new()
+        {
+            DevServerOptions = new()
+            {
+                DownloadVersion = "v1.8.0",
+                ExtraArgs =
+                [
+                    "--search-attribute", "AgentName=Keyword",
+                    "--search-attribute", "SessionCreatedAt=Datetime",
+                    "--search-attribute", "TurnCount=Int",
+                ],
+            },
+        });
+        environment.Client.Options.DataConverter = TemporalAgentDataConverter.Instance;
+        return environment;
+    }
+}
 ```
 
-`AgentWorkflow` calls `UpsertTypedSearchAttributes` only when `EnableSearchAttributes = true`. If search attributes are enabled in your test fixture, the three custom attributes (`AgentName`, `SessionCreatedAt`, `TurnCount`) must be pre-registered when the embedded server starts — otherwise the workflow fails with an opaque "unexpected workflow task failure". `TestEnvironmentHelper.StartLocalAsync()` passes the required `--search-attribute` CLI args to `WorkflowEnvironment.StartLocalAsync()` automatically.
+The repository's `TestEnvironmentHelper` and `TemporalServiceTestEnvironment` are test-project
+helpers, not package APIs. `AgentWorkflow` upserts `AgentName` (Keyword), `SessionCreatedAt`
+(Datetime), and `TurnCount` (Int) when `EnableSearchAttributes` is enabled, which is the default.
+The example configures the SDK's local dev server with those attributes, pins Temporal CLI `v1.8.0`
+(Temporal Service 1.31.2), and sets the required agent data converter. For an external test service,
+pre-register the same attributes in its namespace, use Temporal Service 1.31.0 or later, and set
+`TemporalAgentDataConverter.Instance` on the client. If a test explicitly disables
+`EnableSearchAttributes`, it does not need these custom attributes.
 
-Because `EnableSearchAttributes` defaults to `true`, use `TestEnvironmentHelper` for standard Agents integration tests. Bare `WorkflowEnvironment.StartLocalAsync()` is sufficient only when the test explicitly disables search attributes. It is always appropriate for `TemporalCommunity.Extensions.AI` integration tests, which use `DurableChatWorkflow` and never require custom search attributes:
-
-```csharp
-// TemporalCommunity.Extensions.AI integration tests only — no custom search attributes needed
-var env = await WorkflowEnvironment.StartLocalAsync();
-```
-
-Both approaches start an in-process Temporal server — no external process or Docker needed. See
-[Testing Agents](./testing-agents.md) for the full fixture pattern.
+This starts Temporal's local test server; no external Temporal deployment or Docker is required.
+See [Testing Agents](./testing-agents.md) for a full fixture pattern.
 
 ### Do validate eagerly with string.IsNullOrEmpty + InvalidOperationException
 
@@ -534,7 +564,7 @@ All samples load secrets from `dotnet user-secrets`, which stores values in `~/.
 
 ```xml
 <!-- CORRECT -->
-<PackageReference Include="Temporalio" Version="1.11.1" />
+<PackageReference Include="Temporalio" Version="1.21.1" />
 
 <!-- WRONG — requires Rust toolchain to build from source -->
 <ProjectReference Include="path/to/sdk-dotnet/src/Temporalio/Temporalio.csproj" />
@@ -605,5 +635,3 @@ agent with its own session and request ID, then await the activities with `Workf
 - [Durable Agents](./durable-agents.md) — serial tool dispatch, one-attempt default, agent-level retry opt-in, iteration cap
 
 ---
-
-_Last updated: 2026-05-05_

@@ -149,10 +149,3 @@ carry documented correlation fields under the existing capture policy. Temporal 
 metrics and application/provider exporters have their own dimensions and privacy configuration;
 review them separately. See [observability](observability.md) and
 [payload codecs](payload-codecs.md).
-
-## Acceptance coverage
-
-Real worker pools verify default and separate routing, worker-owned and caller-owned tool policy,
-unchanged routing after configuration changes and continue-as-new, scheduled queue names and
-actual executing queues, cancellation on unpolled queues, and new-history replay. Unit tests cover
-queue validation, serialization/snapshot behavior and manifest fingerprint integrity.

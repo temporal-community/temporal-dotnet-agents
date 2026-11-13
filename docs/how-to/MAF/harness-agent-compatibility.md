@@ -1,144 +1,82 @@
 # MAF `HarnessAgent` compatibility
 
-**Short answer: you cannot use `HarnessAgent` with this library.** Of the two slots you might try,
-one rejects it at compile time and the other compiles but is rejected at worker startup.
+`HarnessAgent` is not a drop-in for a Temporal-managed agent. The repository references
+`Microsoft.Agents.AI` 1.23.0; `HarnessAgent` comes from the separate
+`Microsoft.Agents.AI.Harness` package and builds its own `ChatClientAgent` from an `IChatClient`.
+Adding that package does not change the managed agent's registration contract.
 
-`HarnessAgent` ships in **`Microsoft.Agents.AI.Harness`**, a package separate from the
-`Microsoft.Agents.AI` this library depends on. This library does not reference the Harness package.
+## Why it cannot be used directly
 
-The API-level compatibility analysis below was verified against `Microsoft.Agents.AI.Harness`
-1.17.0 and `Microsoft.Agents.AI` 1.17.0. The repository now pins core MAF 1.23.0; the separate
-Harness package and the code samples below have not been revalidated against that newer release.
-Treat this page as the recorded 1.17.0 investigation, not a current compatibility guarantee.
-Re-run the sample compilation and behavioral checks before relying on it with a different Harness
-version.
+### The `ChatClient` slot requires an `IChatClient`
 
----
-
-## What `HarnessAgent` is
-
-A `DelegatingAIAgent` that wraps a `ChatClientAgent`, assembling an opinionated pipeline from one
-caller-supplied `IChatClient`. Its single constructor is
-`HarnessAgent(IChatClient, HarnessAgentOptions, ILoggerFactory, IServiceProvider)`.
-
-Its chat-client pipeline, innermost first:
-
-1. **`FunctionInvokingChatClient`** — automatic in-process tool invocation
-2. `MessageInjectingChatClient`
-3. `PerServiceCallChatHistoryPersistingChatClient`
-4. `AIContextProviderChatClient` with a `CompactionProvider` (only when both
-   `MaxContextWindowTokens` and `MaxOutputTokens` are set)
-
-Plus context providers (`TodoProvider`, `AgentModeProvider`, `FileMemoryProvider`,
-`AgentSkillsProvider` on by default; `FileAccessProvider` and `BackgroundAgentsProvider` opt-in) and
-agent decorators (`ToolApprovalAgent`, `OpenTelemetryAgent` on by default; `LoopAgent` when
-evaluators are supplied).
-
----
-
-## Why it cannot be plugged in
-
-### The `ChatClient` slot rejects it
-
-`DurableAgentBuilder.ChatClient` is a `Func<IServiceProvider, IChatClient>`. `HarnessAgent` is an
-`AIAgent`, not an `IChatClient`:
+`DurableAgentBuilder.ChatClient` is a `Func<IServiceProvider, IChatClient>`, but `HarnessAgent` is an
+`AIAgent`:
 
 ```csharp
-// Does NOT compile — AIAgent is not assignable to Func<IServiceProvider, IChatClient>.
-agent.ChatClient = sp => new HarnessAgent(innerChatClient, options);
+// Does not compile: HarnessAgent is not an IChatClient.
+agent.ChatClient = _ => new HarnessAgent(innerChatClient, options);
 ```
 
-### The pipeline slot compiles, then fails at startup
+### The pipeline must wrap the supplied agent
 
-`ConfigureAgentPipeline` is an `Action<AIAgentBuilder>`, and `AIAgentBuilder.Use(Func<AIAgent,
-AIAgent>)` accepts a factory that ignores the inner agent it is handed. So this **does** compile:
+`ConfigureAgentPipeline` can add transparent `DelegatingAIAgent` wrappers around the agent created
+by the library. This compiles, but the factory discards that supplied agent and constructs an
+unrelated `HarnessAgent` with its own inner `ChatClientAgent`:
 
 ```csharp
-// Compiles. Rejected when the worker starts.
-agent.ConfigureAgentPipeline = b => b.Use(_ => new HarnessAgent(chatClient, harnessOptions));
+// Compiles, then fails worker startup validation.
+agent.ConfigureAgentPipeline = builder =>
+    builder.Use(_ => new HarnessAgent(chatClient, harnessOptions));
 ```
 
-`HarnessAgent`'s only constructor takes an `IChatClient` and builds its own `ChatClientAgent`
-underneath, so there is no way to hand it the library's inner agent to delegate to — the factory can
-only discard it. Every configured pipeline is dry-built during startup validation, and a factory
-that does not preserve the library-created inner agent is rejected with
-`DurableConfigurationException`:
+Startup validation rejects a pipeline that does not preserve the library-created inner agent.
+Transparent wrappers such as MAF's `OpenTelemetryAgent` can compose when they delegate the supplied
+inner agent; the pipeline lease also owns and disposes that wrapper.
 
-> Agent '{name}' has a ConfigureAgentPipeline factory that removed or hid the library-created inner
-> agent. Every custom wrapper must derive from DelegatingAIAgent and pass the factory's supplied
-> inner agent to its base constructor. […]
+## The tool loop belongs to Temporal
 
-MAF decorators that *are* transparent `DelegatingAIAgent` wrappers do compose here —
-`OpenTelemetryAgent` is supported and its disposal is handled by the pipeline lease.
+MAF 1.23.0's `HarnessAgent` includes `FunctionInvokingChatClient` in its chat-client pipeline. The
+Temporal Agents integration separately rejects that middleware when it appears in the registered
+chat-client chain; the Harness pipeline example above is rejected because it replaces the
+library-created agent. Managed tool calls must reach the workflow, which dispatches each registered
+tool as a separate Temporal activity. An in-process loop bypasses those per-tool activity, retry,
+timeout, approval, and history boundaries.
 
-### And its tool loop is the thing this library replaces
+## Reusing context providers
 
-Even setting the type system aside, `FunctionInvokingChatClient` sits at the bottom of
-`HarnessAgent`'s chat pipeline and runs the **entire tool-call loop in process**. This library
-rejects that client anywhere in a chat chain, throwing `DurableFunctionInvocationConflictException`
-— see [design-decisions.md](../../design-decisions.md).
+Many MAF context providers are available independently of `HarnessAgent`, but using one directly
+does not make the full Harness profile durable. Providers may contribute instructions and messages;
+provider-supplied tools are not automatically executable. Managed agents can use registered durable
+tools selected from the exact function instances seeded into the provider context, through
+`IDurableToolSource` or `AddContextProvider(provider, durableTools)`. See
+[Context providers](./context-providers.md) for the supported selection and registration patterns.
 
-The rejection is the whole point of the library. Each tool call is dispatched as its own
-`InvokeAgentTool` Temporal activity in model order. Tool activities use one attempt by default, and
-an explicit agent retry policy applies uniformly to all of them. Collapse dispatch into one
-in-process loop and a crash mid-loop loses the individual activity boundaries and tool visibility
-in workflow history.
+Review providers individually for history ownership, external side effects, and process-local state.
+The [bounded durable `ChatClientAgent` contract](../../architecture/MAF/bounded-durable-agent-compatibility.md)
+describes the integration boundary.
 
----
+## Background agents need workflow orchestration
 
-## The individual providers
+`BackgroundAgentsProvider` starts subagent runs as process-local tasks. Its serialized session state
+does not include the in-flight `Task<AgentResponse>` or subagent `AgentSession` references; after
+the managed workflow restores the session for another model-step activity, those references are
+unavailable. When the provider refreshes task status, a running task with no runtime reference is
+marked `Lost`. The child work is not a Temporal activity or workflow. For parallel work, orchestrate
+registered agents from the workflow instead; see
+[Routing patterns](./routing.md#retry-identity-and-parallel-calls).
 
-The context providers listed above ship in **core `Microsoft.Agents.AI`**, which this library
-already references — you do not need the Harness package to reach them. `HarnessAgent` enables them;
-it does not own them.
+## Use durable approval for managed tools
 
-Registering one directly with `agent.AddContextProvider(...)` is supported *only* when it meets the
-[bounded durable `ChatClientAgent` contract](../../architecture/MAF/bounded-durable-agent-compatibility.md).
-**All six fail it**, because each exposes tools dynamically through `AIContext.Tools`, which this
-library never dispatches — `TodoProvider`, `AgentModeProvider`, `FileMemoryProvider`, and
-`FileAccessProvider` each publish their own tool set, `AgentSkillsProvider` publishes `load_skill`,
-`read_skill_resource`, and `run_skill_script`, and `BackgroundAgentsProvider` publishes six. See
-[context-providers.md](./context-providers.md) for the supported pattern and
-the three ways to give a provider's tools durable execution.
-
-### `BackgroundAgentsProvider` can never work
-
-It keeps in-flight work in `BackgroundAgentRuntimeState`, which MAF documents as holding
-"non-serializable runtime references" — its `Task<AgentResponse>` and `AgentSession` properties are
-`[JsonIgnore]`d precisely because they cannot be serialized.
-
-MAF handles that loss deliberately rather than crashing: after deserialization it builds a fresh
-empty runtime state and marks every previously-running task `BackgroundTaskStatus.Lost`. That is
-survivable in a long-lived process. It is not survivable here, because `AgentWorkflow`
-continues-as-new every time history reaches `MaxEntryCount` — so in a durable session the provider
-would quietly mark in-flight delegated work `Lost` at each transition, losing it without an error.
-
-For fan-out, schedule one activity per registered agent proxy and await the activity tasks with
-`Workflow.WhenAllAsync`. Generate a distinct session and request ID for each call in workflow code.
-See [Routing Patterns](./routing.md#retry-identity-and-parallel-calls).
-
-### `ToolApprovalAgent` — use this library's approval instead
-
-`ToolApprovalAgent` mediates approval at the *agent boundary*: it surfaces
-`ToolApprovalRequestContent` to the caller and reads `ToolApprovalResponseContent` back out of
-caller messages. In this library the workflow gates tool dispatch before any activity is scheduled,
-so there is no caller round-trip at that boundary to carry the exchange.
-
-Its state is not the obstacle — `ToolApprovalState` persists in the session's
-`AgentSessionStateBag`, and outer pipeline middleware here receives the real, restored
-`TemporalAgentSession`. (`null` is passed only at the innermost boundary, to the library-created
-`ChatClientAgent`, which needs its own transient `ChatClientAgentSession`.) The mismatch is in where
-the approval conversation happens, not in whether state survives.
-
-Use `RequireApproval()`, an `IAgentToolInterceptor` returning `PauseForApproval(...)`, or in-tool
-`RequestApprovalAsync`. See [hitl-patterns.md](./hitl-patterns.md).
-
-> Composing `ToolApprovalAgent` as pipeline middleware is untested in this repository.
-
----
+MAF's `ToolApprovalAgent` exchanges `ToolApprovalRequestContent` and
+`ToolApprovalResponseContent` with the caller and stores approval bookkeeping in the agent session.
+Managed tools follow a different path: the workflow receives `FunctionCallContent` and controls
+whether to dispatch the tool activity. Use `RequireApproval()`, an `IAgentToolInterceptor` returning
+`DurableToolDecision.PauseForApproval(...)`, or
+`TemporalAgentContext.Current.RequestApprovalAsync(...)` for that workflow-owned approval flow.
+See [Human-in-the-loop patterns](./hitl-patterns.md).
 
 ## See also
 
-- [context-providers.md](./context-providers.md) — the supported provider pattern
-- [hitl-patterns.md](./hitl-patterns.md) — durable approval
-- [usage.md](./usage.md) — full agent registration API
+- [Context providers](./context-providers.md) — registering providers and their durable tools
+- [Human-in-the-loop patterns](./hitl-patterns.md) — durable approval
+- [Usage](./usage.md) — agent registration

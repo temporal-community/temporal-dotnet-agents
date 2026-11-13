@@ -1,11 +1,30 @@
 # Changelog
 
-## [Unreleased]
+## [Unreleased] (target: 0.16.0)
 
-- A tool that reaches for `TemporalAgentContext.Current` where no agent context can exist now gets
-  an error naming the execution path — workflow-local sub-agent or scheduled job — the offending
-  workflow ID, and the supported alternative. Both paths also state that `RequireApproval()` and an
-  interceptor's `PauseForApproval()` degrade to `Block` there, so the suggested remedy is accurate.
+### Breaking changes and upgrade expectations
+
+- The former MAF `TemporalAIAgent` API, scheduled-agent jobs, and library Skills
+  registrations/sample have been removed. Register workers with `AddTemporalAgents` using `Agent` or
+  `AddDurableAgent`; callers use `GetTemporalAgentProxy` or `ITemporalAgentClient` (client-only hosts
+  use `AddTemporalAgentProxies`). MAF `RunStreamingAsync` is not supported.
+- MAF history and StateBag are scoped to a `TemporalAgentSession`; the registered workflow owns
+  their authoritative state. Pass a session belonging to the registered agent, and do not run
+  concurrent turns through the same session. Serialized session snapshots may contain conversation
+  history and should be handled as conversation data.
+- MAF tool and interceptor activities use one attempt by default. The worker's
+  `DefaultRetryPolicy` applies to model and context-preparation activities; an agent-level
+  `RetryPolicy` opts all that agent's tools and interceptors into retries, so configure it only
+  when each affected operation is safe to repeat.
+- MEAI managed sessions reject caller-supplied `ChatOptions.Tools` and inline
+  `UseFunctionInvocation()` loops; register durable tools on the worker instead. This release does
+  not promise replay compatibility for workflow histories created by earlier workflow definitions.
+
+### Features and fixes
+
+- A tool that accesses `TemporalAgentContext.Current` outside a matching registered agent session
+  now gets an error that identifies a non-agent workflow ID or the mismatched agent and points to
+  the managed-session path.
 
 - Fixed the approval auto-denial reason, which reported every sub-hour window as "0 hours". It now
   renders seconds, minutes, hours, or days to match the configured `ApprovalTimeout`.
@@ -13,18 +32,6 @@
 - The sample canary now asserts application-produced output markers per sample instead of trusting
   the exit code alone. Samples without markers are listed in the run summary rather than counted as
   silently verified.
-
-- Moved conversation history and the StateBag from the `TemporalAIAgent` instance onto
-  `TemporalAgentSession`. One agent instance now drives any number of independent conversations
-  without their state colliding, and a session carries its own state wherever it goes.
-
-- Added session validation to `TemporalAIAgent.RunAsync`: the session must be a
-  `TemporalAgentSession`, must belong to the agent running it (matched by name), and may not have a
-  second run started while one is in flight. Distinct sessions on one agent still run in parallel.
-
-- A serialized session now contains the conversation transcript alongside its ID and StateBag.
-  Anywhere sessions are persisted therefore holds conversation content; there is no redaction hook.
-  Payload grows roughly 750 bytes per turn and history is uncompacted.
 
 - `FunctionInvokingChatClient` is now rejected unconditionally in a durable agent's chat client. It
   executes tools in-process, which bypasses per-tool `InvokeAgentTool` activities and silently
@@ -34,8 +41,8 @@
 
 - Enforced minimum `MaxEntryCount` of 4 across `DurableExecutionOptions` and `TemporalAgentsOptions`.
   Values below 4 cannot satisfy both the documented half-window carry policy and the complete-turn
-  invariant. The validation rejects undersized configurations at worker startup with actionable error
-  messages; migration notes are documented in baseline defects and configuration entry points.
+  invariant. The validation rejects undersized configurations at worker startup with actionable
+  error messages.
 
 - Reduced approval authority to typed, one-call decisions. Removed the raw-workflow-ID session
   control interface and permanent cross-session approval store, and added an explicitly registered
@@ -64,12 +71,11 @@
 - Expanded the clean packed-package consumer to prove thin-client/worker-owned toolsets, approval
   and denial, activity retry, fresh scoped dependencies, and both shipped target assets.
 - MAF per-run tool selection is now atomic across provider exposure and workflow dispatch for
-  `AgentWorkflow`, `AgentJobWorkflow`, and containing workflows that call `TemporalAIAgent`.
+  `AgentWorkflow` and containing workflows that invoke a registered agent.
   Disabled, empty, subset, malformed, unknown, mixed, and repeated blocked calls fail closed without
   scheduling interceptor, approval, or tool activities, and tenant-visible blocked results do not
   reveal whether a name was unknown or excluded.
-- The MAF `PerToolActivities` sample now demonstrates all/subset/empty/disabled per-turn selection,
-  with corrected-version replay fixtures and a concrete pre-release drain/cutover/rollback runbook.
+- The MAF `PerToolActivities` sample demonstrates all/subset/empty/disabled per-turn tool selection.
 - The `AmbientAgent` sample now uses unique workflow IDs on every execution so repeated local
   canary runs cannot attach to completed workflows from an earlier run.
 - The MEAI `ExtensibleDurableTurns` sample now demonstrates ordinary functions wrapped by existing
